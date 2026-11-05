@@ -13,7 +13,10 @@ data class PenBinding(
     val double: String = "none",
 ) {
     companion object {
-        val tools = setOf("pen", "highlighter", "eraser", "pan", "select", "lasso")
+        val tools = setOf("pen", "highlighter", "eraser", "pan", "select", "lasso", "screenshot")
+        /** Tools that cannot be borrowed: releasing a hold would switch away and drop the capture and its menu. */
+        val selectOnly = setOf("screenshot")
+        fun holds(binding: PenBinding) = binding.mode == PenBindingMode.HOLD && binding.action in tools && binding.action !in selectOnly
         /** One-shot actions, the same ids the finger-tap gestures dispatch. */
         val commands = setOf("undo", "redo", "toggle_previous", "toggle_eraser", "toggle_pan")
         val actions = tools + commands + "none"
@@ -58,7 +61,7 @@ class ProPenButtons(initialTool: String, private val doublePressMs: () -> Long =
                     run(binding.double, commands)
                     continue
                 }
-                if (binding.action in PenBinding.tools && binding.mode == PenBindingMode.HOLD) {
+                if (PenBinding.holds(binding)) {
                     holds[mask] = binding.action
                     firstPress[mask] = FirstPress(at, null)
                 } else {
@@ -68,7 +71,7 @@ class ProPenButtons(initialTool: String, private val doublePressMs: () -> Long =
             }
             when (binding.action) {
                 in PenBinding.commands -> commands.add(binding.action)
-                in PenBinding.tools -> if (binding.mode == PenBindingMode.HOLD) holds[mask] = binding.action else select(binding.action)
+                in PenBinding.tools -> if (PenBinding.holds(binding)) holds[mask] = binding.action else select(binding.action)
             }
         }
         return PenButtonResult(holds.values.lastOrNull() ?: baseTool, commands)
@@ -109,7 +112,7 @@ class ProPenButtons(initialTool: String, private val doublePressMs: () -> Long =
         firstPress.clear()
         activeHolds.forEach { mask ->
             val binding = bindings[mask]
-            if (rawMask and mask != 0 && binding?.mode == PenBindingMode.HOLD && binding.action in PenBinding.tools) {
+            if (rawMask and mask != 0 && binding != null && PenBinding.holds(binding)) {
                 holds[mask] = binding.action
             }
         }

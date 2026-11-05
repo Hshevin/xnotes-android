@@ -29,7 +29,7 @@ fun PenShortcutSettings(shortcuts: List<PenShortcut>, doublePressMs: Int, onDoub
         "none" to R.string.none, "pen" to R.string.tool_pen,
         "highlighter" to R.string.tool_highlighter, "eraser" to R.string.tool_eraser,
         "pan" to R.string.tool_pan, "select" to R.string.tool_select,
-        "lasso" to R.string.tool_lasso, "undo" to R.string.undo, "redo" to R.string.redo,
+        "lasso" to R.string.tool_lasso, "screenshot" to R.string.tool_screenshot, "undo" to R.string.undo, "redo" to R.string.redo,
         "toggle_previous" to R.string.toggle_previous, "toggle_eraser" to R.string.toggle_eraser,
         "toggle_pan" to R.string.toggle_pan,
     ).map { (id, label) -> id to stringResource(label) }
@@ -139,9 +139,11 @@ private fun BindingFields(actions: List<Pair<String, String>>, binding: PenBindi
             Text(stringResource(R.string.pen_single_press), Modifier.widthIn(min = 56.dp), color = dim, fontSize = TextSize.label)
             OptionDropdown(actions, binding.action, Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) { action ->
                 onChange(binding.copy(action = action,
-                    mode = if (action in PenBinding.commands) PenBindingMode.SELECT else binding.mode))
+                    mode = if (action in PenBinding.commands || action in PenBinding.selectOnly) PenBindingMode.SELECT else binding.mode))
             }
-            if (binding.action in PenBinding.tools) {
+            if (binding.action in PenBinding.selectOnly) {
+                Text(stringResource(R.string.pro_pen_select), color = dim, fontSize = TextSize.label)
+            } else if (binding.action in PenBinding.tools) {
                 OptionDropdown(listOf("HOLD" to stringResource(R.string.pro_pen_hold), "SELECT" to stringResource(R.string.pro_pen_select)), binding.mode.name,
                     Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) {
                     onChange(binding.copy(mode = PenBindingMode.valueOf(it)))

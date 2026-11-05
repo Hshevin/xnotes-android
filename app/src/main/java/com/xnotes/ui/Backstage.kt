@@ -524,8 +524,9 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
             Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll)) {
                 Command(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 folderTree()
-                nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
+                Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.colors.isNotEmpty()) {
                     SidebarLabel(stringResource(R.string.toolbar_colours))
                     nav.colors.forEach { (color, name) ->
@@ -552,7 +553,6 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                     nav.onSelectView(BackstageView.TRASH)
                 }
             }
-            Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
             Command(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
             Command(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
         }
@@ -578,8 +578,9 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
             Spacer(Modifier.height(Space.s12))
             Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
-                nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
+                RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
                 nav.pins.forEachIndexed { i, pin ->
                     key(pin.uri) {
@@ -594,7 +595,6 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 }
             }
             if (nav.trashCount >= 0) RailItem(XnotesIcons.trash, stringResource(R.string.trash), selected = nav.view == BackstageView.TRASH) { nav.onSelectView(BackstageView.TRASH) }
-            RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
             RailItem(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
             RailItem(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
         }

@@ -129,6 +129,19 @@ class ProPenButtonsTest {
         assertEquals(listOf("toggle_previous"), press(p, b, 1100).commands)
     }
 
+    @Test fun screenshotIsPickedAndNeverBorrowed() {
+        val p = ProPenButtons("pen")
+        val select = mapOf(0x20 to PenBinding("screenshot", PenBindingMode.SELECT))
+        assertEquals("screenshot", p.update(0x20, select).tool)
+        // Releasing a borrowed screenshot tool would drop the capture and its menu, so a stored hold picks it.
+        assertEquals("screenshot", p.update(0, select).tool)
+        p.select("pen")
+        val hold = mapOf(0x40 to PenBinding("screenshot", PenBindingMode.HOLD))
+        assertEquals("screenshot", p.update(0x40, hold).tool)
+        assertEquals("screenshot", p.update(0, hold).tool)
+        assertTrue(PenShortcut.valid(listOf(PenShortcut("Shot", listOf(PenTrigger(PenTrigger.Kind.KEY, 600, "", 0)), PenBinding("pen", double = "screenshot")))))
+    }
+
     @Test fun unknownBitsAndUnboundButtonsHaveNoAction() {
         val p = ProPenButtons("pen")
         assertEquals(PenButtonResult("pen"), p.update(0x100, bindings))
