@@ -8,6 +8,8 @@
 
 最新本地覆盖更新：[Release 90 ARM64 APK](build/xnotes/XNotes-0.9.7-movinkpad-release90-arm64.apk)，沿用正式包名与签名，包含主分支 AI 多供应商更新；图层和按键录入仍为独立测试分支。验证与设备验收边界见 [Release 90 记录](docs/movinkpad/release-2026-11-02.md#release-90主分支覆盖更新2026-11-05)，尚未发布到 GitHub。
 
+分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
+
 ## 主要功能
 
 - **手写笔记**：使用分页笔记或无限画布，混排手写、文字和图片。

@@ -1,5 +1,7 @@
 # MovinkPad preview development
 
+- 分支测试包后续更新沿用各自包名与签名，递增 `branchTestVersion`。ARM64 交付与 x86_64 模拟器构建除输出目录外，还需用 `--project-cache-dir` 隔离 Gradle 项目状态，避免切换构建目录后 DEX 增量缓存残留旧路径。
+
 - 2026-11-05 用户随后授权将当前主分支打包为正式覆盖更新 Release 90，沿用 `com.xnotes.movinkpad` 和历史签名，递增 versionCode；只本地交付，不安装、不推送、不发布 GitHub Release。图层和按键录入分支保持独立。
 
 - 2026-11-05 用户要求拉取远端主分支与新增功能分支，分别本地打包独立测试 APK；旧 AI/分屏专用测试包不再维护，可清理旧测试产物。各分支使用独立工作树、构建目录及 `com.xnotes.movinkpad.branchtest.<id>` 包名，保留原签名，不覆盖正式版；交付时报告包名和源码提交。保留用户未提交修改，不将不同功能分支擅自互相合并。本次不包含设备安装、推送或 GitHub Release。
