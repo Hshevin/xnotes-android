@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="layers_title">Layers</string>
+    <string name="layers_default">Layer %1$d</string>
+    <string name="layers_scope">Write and erase on the selected layer. The page background stays separate.</string>
+    <string name="layers_hide">Hide</string>
+    <string name="layers_show">Show</string>
+    <string name="layers_lock">Lock</string>
+    <string name="layers_unlock">Unlock</string>
+    <string name="layers_rename">Rename</string>
+    <string name="layers_up">Move up</string>
+    <string name="layers_down">Move down</string>
+    <string name="layers_delete">Delete</string>
+    <string name="layers_add">Add layer</string>
+    <string name="layers_close">Close</string>
+    <string name="layers_move_selection">Move selection here</string>
+    <string name="layers_save">Save</string>
+    <string name="layers_cancel">Cancel</string>
+    <string name="layers_delete_confirm">Delete this layer and its contents? You can undo this change.</string>
+    <string name="layers_not_writable">Select a visible, unlocked layer to edit.</string>
+    <string name="layers_drag">Drag to reorder layers</string>
+    <string name="layers_drag_hint">Drag a preview or name to reorder; double-tap a name to rename.</string>
+    <string name="layers_actions">Layer actions</string>
+    <string name="layers_preview_failed">Preview unavailable</string>
+    <string name="layers_preview_mode">Thumbnail display</string>
+    <string name="layers_preview_none">Do not show</string>
+    <string name="layers_preview_content">Note content area</string>
+    <string name="layers_preview_page">Entire page</string>
+</resources>

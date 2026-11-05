@@ -80,7 +80,7 @@ object SelectionMath {
             // Skip pages out of reach before touching their items; the slack covers ink painted past the edge.
             if (!pr.outset(OFF_PAGE_SLACK).intersects(reach)) continue
             val local = Ring(ring.map { toPage(i, it) })
-            for (item in pages[i].items) {
+            for (item in pages[i].editableItems) {
                 if (!item.locked && local.meets(item)) out.add(Selected(i, item))
             }
         }

@@ -1331,6 +1331,9 @@ class CanvasState(
     fun inkRenderer(page: Page?, renderer: Renderer): Renderer =
         if (page != null && lightBlackInk(page)) com.xnotes.core.pal.NightInkRenderer(renderer) else renderer
 
+    /** Live content composed at the active user layer. */
+    var paintLayerPreview: ((Page, Renderer) -> Unit)? = null
+
     /** Paint one item, faint if the playback fades it. */
     fun paintItem(item: CanvasItem, target: Renderer, page: Page) {
         val r = inkRenderer(page, target)
@@ -1347,9 +1350,10 @@ class CanvasState(
      * are the fills under it, which the view then paints live beneath it.
      */
     private fun cacheItems(page: Page): InkItems {
-        val n = PageLayers.underText(page.items)
-        val under = if (flowLifted) emptyList() else page.items.subList(0, n).filter { !isLiftedItem(it) }
-        val over = page.items.subList(n, page.items.size).filter { !isLiftedItem(it) && !it.isHighlighterInk() }
+        val visible = page.visibleItems
+        val n = PageLayers.underText(visible)
+        val under = if (flowLifted) emptyList() else visible.subList(0, n).filter { !isLiftedItem(it) }
+        val over = visible.subList(n, visible.size).filter { !isLiftedItem(it) && !it.isHighlighterInk() }
         return InkItems(under, over)
     }
 
@@ -1560,6 +1564,7 @@ class CanvasState(
 
     /** Append a single just-committed stroke into an existing cache (cheap), else rebuild. */
     fun appendToCache(page: Page, item: CanvasItem) {
+        if (page.layers.entries.size > 1) { repairInkRegions(listOf(page to item.paintBounds())); return }
         if (item.isHighlighterInk()) return // composited live over the page, never cached
         appendToSharpInk(page, item) // keep the sharp viewport crisp without a full re-render
         if (pendingSharp) pendingSharpEdits.add(page to item.paintBounds().outset(SHARP_EDIT_PAD))
@@ -1611,13 +1616,14 @@ class CanvasState(
     /** Repaint [page]'s cached ink where it meets [region]: the fills under its typed text, the text, then the rest. */
     private fun paintInk(page: Page, target: Renderer, region: Rect) {
         val r = inkRenderer(page, target)
-        val n = PageLayers.underText(page.items)
+        val visible = page.visibleItems
+        val n = PageLayers.underText(visible)
         val f = fade
         if (!flowLifted) {
-            InkFade.paint(page.items.subList(0, n), r, f, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
+            InkFade.paint(visible.subList(0, n), r, f, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
             paintFlow?.invoke(page, r, region)
         }
-        InkFade.paint(page.items.subList(n, page.items.size), r, f, {
+        InkFade.paint(visible.subList(n, visible.size), r, f, {
             !isLiftedItem(it) && !it.isHighlighterInk() && it.paintBounds().intersects(region)
         }) { it.paint(r) }
     }
@@ -1629,14 +1635,16 @@ class CanvasState(
     fun paintUnderText(page: Page, target: Renderer, region: Rect) {
         val r = inkRenderer(page, target)
         if (!flowLifted) return
-        val n = PageLayers.underText(page.items)
-        InkFade.paint(page.items.subList(0, n), r, fade, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
+        val visible = page.visibleItems
+        val n = PageLayers.underText(visible)
+        InkFade.paint(visible.subList(0, n), r, fade, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
     }
 
     /** True when [item] is one of the fills under [page]'s typed text. */
     fun isUnderText(page: Page, item: CanvasItem): Boolean {
-        val n = PageLayers.underText(page.items)
-        for (i in 0 until n) if (page.items[i] === item) return true
+        val visible = page.visibleItems
+        val n = PageLayers.underText(visible)
+        for (i in 0 until n) if (visible[i] === item) return true
         return false
     }
 

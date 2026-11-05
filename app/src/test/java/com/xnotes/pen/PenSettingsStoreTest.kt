@@ -13,9 +13,9 @@ class PenSettingsStoreTest {
 
     @Test fun bindingsSurviveNewStoreInstance() {
         val path = File(tmp.root, "settings.json")
-        val value = PenBindingsJson.write(mapOf(4 to PenBinding("undo", PenBindingMode.SELECT)))
+        val value = JSONObject().put("pen_shortcuts", PenBindingsJson.write(listOf(PenShortcut("Button", listOf(PenTrigger(PenTrigger.Kind.MOTION, 4, "", 0)), PenBinding("undo", PenBindingMode.SELECT)))))
         assertTrue(JsonStore(path).writeChecked(value))
-        assertEquals("undo", PenBindingsJson.read(JsonStore(path).read())[4]?.action)
+        assertEquals("undo", PenBindingsJson.read(JsonStore(path).read()?.optJSONArray("pen_shortcuts")).single().binding.action)
     }
 
     @Test fun replacementFailureDoesNotDeletePreviousDestination() {

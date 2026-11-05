@@ -84,4 +84,16 @@ class WorkspaceToolbarTest {
         assertTrue(ToolbarItem.INSERT_SPACE in items(layout.forDocumentControls(false, setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF))))
     }
 
+
+    @Test fun layersAppearOncePerDocumentInEveryWorkspaceCombination() {
+        val layout = workspaceToolbarLayout(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)
+        for (first in ToolbarDocument.entries) for (second in ToolbarDocument.entries) {
+            val workspace = setOf(first, second)
+            assertFalse(ToolbarItem.LAYERS in items(layout.forDocumentControls(false, workspace)))
+            for (doc in workspace) {
+                val bar = documentToolbarLayout(layout, doc == ToolbarDocument.CANVAS, doc == ToolbarDocument.PDF, workspace)
+                assertEquals(1, items(bar).count { it == ToolbarItem.LAYERS })
+            }
+        }
+    }
 }

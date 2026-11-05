@@ -13,6 +13,7 @@ enum class ToolbarItem(val id: String) {
     HOME("home"),
     TITLE("title"),
     SIDEBAR("sidebar"),
+    LAYERS("layers"),
     PEN("pen"),
     DASHED("dashed"),
     CALLIGRAPHY("calligraphy"),
@@ -154,6 +155,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         private val INSERT_AFTER = mapOf(
             ToolbarItem.TEXT_BOX to ToolbarItem.TEXT,
             ToolbarItem.VIEW to ToolbarItem.STYLES,
+            ToolbarItem.LAYERS to ToolbarItem.STYLES,
             ToolbarItem.MARGINS to ToolbarItem.STYLES,
             ToolbarItem.WAND to ToolbarItem.LASSO,
             ToolbarItem.TAPE to ToolbarItem.WAND,
@@ -174,7 +176,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.WAND,
             ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT,
             ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
-            ToolbarItem.STYLES, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
+            ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
         )
 
@@ -195,7 +197,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
+            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.LAYERS, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
             listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
             listOf(ToolbarItem.FULLSCREEN),
         )
@@ -212,7 +214,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.STYLES, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP),
+            listOf(ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP),
             listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
         )
 
@@ -274,7 +276,7 @@ private val ToolbarItem.scope: ToolbarScope get() = when (this) {
     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FULLSCREEN, ToolbarItem.COLORS -> ToolbarScope.COMMON
     ToolbarItem.INSERT_SPACE -> ToolbarScope.PAGED_TOOL
     ToolbarItem.MARKUP -> ToolbarScope.PDF_TOOL
-    ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES -> ToolbarScope.ALL_VIEW
+    ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES, ToolbarItem.LAYERS -> ToolbarScope.ALL_VIEW
     ToolbarItem.SIDEBAR, ToolbarItem.PAGE_NAV, ToolbarItem.MARGINS, ToolbarItem.VIEW -> ToolbarScope.PAGED_VIEW
     ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> ToolbarScope.CANVAS_VIEW
 }

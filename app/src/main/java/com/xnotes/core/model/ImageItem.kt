@@ -34,6 +34,7 @@ class ImageItem(
 
     override val kind = KIND
     override val resizable = true
+    override var layerId: String? = null
     override var locked = false
     override var group: Int? = null
     override var sync: SyncMark? = null

@@ -250,6 +250,7 @@ class InteractionController(
     private val toolConfigs: MutableMap<Tool, ToolConfig> =
         Tool.entries.associateWith { ToolDefaults.configFor(it) }.toMutableMap()
 
+    val layerGestureIdle: Boolean get() = mode == PointerMode.IDLE
     private var mode = PointerMode.IDLE
 
     // DRAW
@@ -544,6 +545,18 @@ class InteractionController(
     var frontInk: FrontInk? = null
 
     init {
+        state.paintLayerPreview = { page, r ->
+            for (sel in selection) {
+                if (state.document.pages.getOrNull(sel.pageIndex) !== page || sel.item in followed) continue
+                r.withSave { r.translate(moveOffset.x, moveOffset.y); state.paintItem(sel.item, r, page) }
+            }
+
+            if (strokePageIndex?.let { state.document.pages.getOrNull(it) } === page)
+                liveStroke?.let { state.paintLiveStroke(r, it, page) }
+            if (shapePageIndex?.let { state.document.pages.getOrNull(it) } === page) pendingShape?.paint(r)
+            if (tapePageIndex?.let { state.document.pages.getOrNull(it) } === page) pendingTape?.paint(r)
+            if (state.document.pages.getOrNull(connectorPage) === page) connectorDraft?.connector?.paint(r)
+        }
         state.isLiftedItem = { item ->
             item === editingText || item === editingLabel || item in followed || frontInk?.holding(item) == true ||
                 selection.any { it.item === item } || item in insertSpace.lifted
@@ -551,7 +564,7 @@ class InteractionController(
         // A selected fill under the typed text stays under the ink, moving with the drag.
         state.paintLiftedUnderText = { page, r ->
             for (sel in selection) {
-                if (sel.item in followed || state.document.pages.getOrNull(sel.pageIndex) !== page) continue
+                if (page.layers.entries.size > 1 || sel.item in followed || state.document.pages.getOrNull(sel.pageIndex) !== page) continue
                 if (!state.isUnderText(page, sel.item)) continue
                 r.withSave {
                     r.translate(moveOffset.x, moveOffset.y)
@@ -561,6 +574,8 @@ class InteractionController(
             }
         }
     }
+
+    fun layerSelection(page: Page): List<CanvasItem> = selection.filter { state.document.pages.getOrNull(it.pageIndex) === page }.map { it.item }
 
     val hasSelection: Boolean get() = selection.isNotEmpty()
 
@@ -613,7 +628,7 @@ class InteractionController(
     fun setAllTapePeeled(peeled: Boolean) {
         for (page in state.document.pages) {
             var dirty: Rect? = null
-            for (item in page.items) {
+            for (item in page.editableItems) {
                 if (item !is TapeItem || item.peeled == peeled) continue
                 item.peeled = peeled
                 dirty = dirty?.union(item.paintBounds()) ?: item.paintBounds()
@@ -912,6 +927,8 @@ class InteractionController(
         if (polygonDraft != null && effectiveTool != Tool.PAN && !(effectiveTool == Tool.SHAPE && shapeConfig.placesCorners)) {
             finishPolygonDraft()
         }
+        if (effectiveTool != Tool.PAN && effectiveTool != Tool.SCREENSHOT &&
+            state.pageIndexAtContent(content)?.let { !state.document.pages[it].layers.writable } == true) return
         when {
             effectiveTool == Tool.PAN -> beginPan(vx, vy, fromPenButton = buttonHeld && penButtonTool == Tool.PAN)
             effectiveTool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType), effectiveTool, e.eventTime, Pt(vx, vy))
@@ -1183,6 +1200,7 @@ class InteractionController(
 
     private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool, timeMs: Long, downViewport: Pt) {
         val pageIndex = state.pageIndexAtContent(content) ?: return
+        if (!state.document.pages[pageIndex].layers.writable) return
         // Reaching here with a live selection means the press landed off it (on it the stylus would
         // have grabbed it): dismiss it. A bare tap that only dismissed is dropped in endDraw.
         strokeDismissedSelection = hasSelection
@@ -1528,7 +1546,7 @@ class InteractionController(
         val radius = stroke.config.baseWidth / 2.0 + Scribble.TOUCH_DP / dpPerUnit
         val reach = Rect.bounding(path).outset(radius)
         val candidates = ArrayList<Any>()
-        page.items.filterTo(candidates) { EraseRule.erasable(it) && it.paintBounds().intersects(reach) }
+        page.items.filterTo(candidates) { page.layers.editable(it) && EraseRule.erasable(it) && it.paintBounds().intersects(reach) }
         if (eraser.eraseMarkups) candidates.addAll(page.markups)
         val ptPerPx = 72.0 / state.document.dpi
         // A scribble is ink, so it takes only lines, never a fill.
@@ -1632,7 +1650,7 @@ class InteractionController(
      *  delete). Returns the repaint region, or null if nothing changed. */
     private fun eraseStrokesFromPage(page: Page, cx: Double, cy: Double, radius: Double): Rect? {
         var dirty = unfillOnPage(page, cx, cy, radius)
-        val toRemove = page.items.filter { EraseRule.takes(it, cx, cy, radius) }
+        val toRemove = page.items.filter { page.layers.editable(it) && EraseRule.takes(it, cx, cy, radius) }
         if (toRemove.isEmpty()) return dirty
         for (item in toRemove) {
             page.items.remove(item)
@@ -1651,7 +1669,7 @@ class InteractionController(
         var i = 0
         while (i < page.items.size) {
             val item = page.items[i]
-            val frags: List<CanvasItem>? = if (!EraseRule.erasable(item)) {
+            val frags: List<CanvasItem>? = if (!page.layers.editable(item) || !EraseRule.erasable(item)) {
                 null
             } else if (EraseRule.whole(item)) {
                 // A fill or a tape is never cut: whatever the eraser touches of it, it takes whole.
@@ -1675,6 +1693,7 @@ class InteractionController(
             for (f in frags) {
                 f.sync = item.sync // pieces were written when the whole was
                 f.group = item.group
+                f.layerId = item.layerId
             }
             val b = frags.fold(item.paintBounds()) { acc, f -> acc.union(f.paintBounds()) }
             dirty = dirty?.union(b) ?: b
@@ -1688,8 +1707,8 @@ class InteractionController(
     /** Take the fill alone off the filled shapes the eraser touches inside but not on their outline; the repaint region, or null. */
     private fun unfillOnPage(page: Page, cx: Double, cy: Double, radius: Double): Rect? {
         var dirty: Rect? = null
-        for (item in page.items) {
-            if (!EraseRule.takesFill(item, cx, cy, radius)) continue
+        for (item in page.editableItems) {
+            if (!page.layers.editable(item) || !EraseRule.takesFill(item, cx, cy, radius)) continue
             val shape = item as ShapeItem
             eraseUnfilled += RefillShapes.Entry(shape, shape.fillRgba, null)
             shape.fillRgba = null
@@ -1916,7 +1935,7 @@ class InteractionController(
         val pageIndex = state.pageIndexAtContent(content)
         if (pageIndex != null) {
             val local = state.toPageSpace(pageIndex, content)
-            val hit = state.document.pages[pageIndex].items.lastOrNull { !it.locked && it.contains(local) }
+            val hit = state.document.pages[pageIndex].editableItems.lastOrNull { !it.locked && it.contains(local) }
             if (hit != null) {
                 if (selection.none { it.item === hit }) setSelection(listOf(Selected(pageIndex, hit)))
                 beginMove(content)
@@ -2543,7 +2562,7 @@ class InteractionController(
     /** The topmost tape on page [pi] at page point [local], within a fingertip of its edge, or null. */
     private fun tapeAt(pi: Int, local: Pt): TapeItem? {
         val reach = TAPE_TAP_REACH * state.devicePxPerDp / state.zoom
-        return state.document.pages.getOrNull(pi)?.items?.lastOrNull { it is TapeItem && it.under(local, reach) } as? TapeItem
+        return state.document.pages.getOrNull(pi)?.editableItems?.lastOrNull { it is TapeItem && it.under(local, reach) } as? TapeItem
     }
 
     /** Whether the tape at [local] on page [pi] lies over every shape a shape-tool tap there would pick. */
@@ -2567,7 +2586,7 @@ class InteractionController(
     /** Select the topmost shape on page [pi] whose outline or fill is under page point [local], if any. */
     private fun selectShapeAt(pi: Int, local: Pt) {
         val reach = OUTLINE_GRAB / state.zoom
-        val hit = state.document.pages.getOrNull(pi)?.items?.lastOrNull {
+        val hit = state.document.pages.getOrNull(pi)?.editableItems?.lastOrNull {
             !it.locked && ((it is ShapeItem && it.touches(local, reach)) || (it is ConnectorItem && it.touches(local, reach)))
         } ?: return
         setSelection(listOf(Selected(pi, hit)))
@@ -2580,7 +2599,7 @@ class InteractionController(
     private fun glueHitAt(content: Pt): Pair<Int, Glue.Hit>? {
         val pi = state.pageIndexAtContent(content) ?: return null
         val page = state.document.pages.getOrNull(pi) ?: return null
-        return Glue.nearest(page.items, state.toPageSpace(pi, content), dotReach())?.let { pi to it }
+        return Glue.nearest(page.editableItems, state.toPageSpace(pi, content), dotReach())?.let { pi to it }
     }
 
     /** How far a route keeps clear of what it goes round: a fixed distance on screen. */
@@ -2604,7 +2623,7 @@ class InteractionController(
         val page = state.document.pages[pi]
         clearSelection()
         val width = shapeConfig.strokeWidth * SHAPE_PEN_PARITY
-        val draft = ConnectorDraft.startAt(state.toPageSpace(pi, content), page.items, dotReach()) {
+        val draft = ConnectorDraft.startAt(state.toPageSpace(pi, content), page.editableItems, dotReach()) {
             shapeConfig.startConnector(it, inkColor, width)
         } ?: return
         connectorDraft = draft
@@ -2621,7 +2640,7 @@ class InteractionController(
         val pi = connectorPage
         val page = state.document.pages.getOrNull(pi) ?: return
         if (state.pageRects.getOrNull(pi) == null) return
-        draft.drag(state.toPageSpace(pi, content), page.items, dotReach(), routeMargin())
+        draft.drag(state.toPageSpace(pi, content), page.editableItems, dotReach(), routeMargin())
         val c = draft.connector
         connectHot = listOfNotNull(c.start.takeIf { it.glued }?.let { pi to it.at }, draft.hot?.let { pi to it.point.at })
         requestRender()
@@ -2667,7 +2686,7 @@ class InteractionController(
         marks@ for (pi in state.pageRects.indices) {
             if (!state.pageRects[pi].intersects(view)) continue
             val page = state.document.pages.getOrNull(pi) ?: continue
-            for (item in page.items) {
+            for (item in page.editableItems) {
                 if (item === drawing) continue
                 for (cp in Glue.points(item)) {
                     val c = state.fromPageSpace(pi, cp.at)
@@ -2774,7 +2793,7 @@ class InteractionController(
         val pi = state.pageIndexAtContent(content) ?: return
         val local = state.toPageSpace(pi, content)
         val page = state.document.pages[pi]
-        val existing = page.items.lastOrNull { it is TextItem && it.contains(local) } as? TextItem
+        val existing = page.editableItems.lastOrNull { it is TextItem && it.contains(local) } as? TextItem
         if (existing != null) {
             startEditing(existing, pi, isNew = false)
             return
@@ -2915,7 +2934,7 @@ class InteractionController(
             } else if (item.text != editingOldText) {
                 // A box that grew or shrank takes the connectors glued to it along.
                 val present = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<CanvasItem, Boolean>()).apply { addAll(page.items) }
-                val follow = GlueFollow.of(listOf(item), page.items, { it in present }, rigid = false, pin = false)
+                val follow = GlueFollow.of(listOf(item), page.editableItems, { it in present }, rigid = false, pin = false)
                 val was = follow.items.map { it.paintBounds() }
                 follow.follow(Affine.IDENTITY)
                 val joined = if (follow.isEmpty) null else TransformItems(follow.items, follow.startSnapshots, follow.items.map { it.snapshotGeometry() })
@@ -3020,7 +3039,7 @@ class InteractionController(
         for ((pi, sels) in selection.groupBy { it.pageIndex }) {
             val page = state.document.pages.getOrNull(pi) ?: continue
             val present = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<CanvasItem, Boolean>()).apply { addAll(page.items) }
-            val f = GlueFollow.of(sels.map { it.item }, page.items, { it in present }, rigid, pin)
+            val f = GlueFollow.of(sels.map { it.item }, page.editableItems, { it in present }, rigid, pin)
             if (!f.isEmpty) out += pi to f
         }
         follows = out
@@ -3112,7 +3131,7 @@ class InteractionController(
         // A handle is small: a press that wobbles a pixel or two is still a tap.
         if (!jointMoved && content.distanceTo(jointDownAt) * state.zoom < LONG_PRESS_SLOP) return
         jointMoved = true
-        edit.drag(state.toPageSpace(jointPage, content), page.items, dotReach(), routeMargin())
+        edit.drag(state.toPageSpace(jointPage, content), page.editableItems, dotReach(), routeMargin())
         for ((_, f) in follows) f.follow(Affine.IDENTITY)
         connectHot = listOfNotNull(edit.hot?.let { jointPage to it.point.at })
         selObb = selectionBox()
@@ -3369,7 +3388,7 @@ class InteractionController(
         val pi = state.pageIndexAtContent(content) ?: return
         val local = state.toPageSpace(pi, content)
         val reach = OUTLINE_GRAB / state.zoom
-        val shape = state.document.pages[pi].items.lastOrNull { !it.locked && labelTargetHit(it, local, reach) } as? Labelled ?: return
+        val shape = state.document.pages[pi].editableItems.lastOrNull { !it.locked && labelTargetHit(it, local, reach) } as? Labelled ?: return
         if (shape in selectedBefore) return
         startLabelEdit(shape, pi)
     }
@@ -3410,7 +3429,7 @@ class InteractionController(
         val pageIndex = state.pageIndexAtContent(content)
         val hit = if (pageIndex != null) {
             val local = state.toPageSpace(pageIndex, content)
-            state.document.pages[pageIndex].items.lastOrNull { it.contains(local) }
+            state.document.pages[pageIndex].editableItems.lastOrNull { it.contains(local) }
         } else {
             null
         }
@@ -3496,8 +3515,8 @@ class InteractionController(
     private fun setSelection(picked: List<Selected>) {
         // A member picked brings its whole group along, from its own page: a group never spans pages.
         val onPages = picked.map { it.pageIndex }.distinct().asSequence()
-            .flatMap { i -> state.document.pages.getOrNull(i)?.items.orEmpty().asSequence().map { Selected(i, it) } }
-        val items = com.xnotes.core.model.Groups.withMembers(picked, onPages.asIterable()) { it.item }
+            .flatMap { i -> state.document.pages.getOrNull(i)?.editableItems.orEmpty().asSequence().map { Selected(i, it) } }
+        val items = com.xnotes.core.model.Groups.withMembers(picked.filter { state.document.pages[it.pageIndex].layers.editable(it.item) }, onPages.asIterable()) { it.item }
         // Items whose lifted state flips: those leaving the old selection (repainted back
         // into the cache) and those entering it (lifted out of it). Update the selection
         // first so the in-place repair below sees the new lifted set.
@@ -3576,7 +3595,7 @@ class InteractionController(
             } else {
                 pageIndexForBounds(state.fromPageSpaceRect(sel.pageIndex, sel.item.bounds()))
             }
-            if (from == null || target == null || target == sel.pageIndex) {
+            if (from == null || target == null || target == sel.pageIndex || !state.document.pages[target].layers.writable) {
                 rehomed.add(sel)
                 continue
             }
@@ -3662,7 +3681,7 @@ class InteractionController(
     fun selectAll() {
         val all = ArrayList<Selected>()
         state.document.pages.forEachIndexed { i, page ->
-            page.items.forEach { if (!it.locked) all.add(Selected(i, it)) }
+            page.editableItems.forEach { if (!it.locked) all.add(Selected(i, it)) }
         }
         setSelection(all)
     }
@@ -3901,6 +3920,7 @@ class InteractionController(
 
     /** Land fresh copies of the clipboard's items on page [pageIndex], their box's top-left (or centre, when [centred]) at [target]. */
     private fun pasteOnPage(pageIndex: Int, target: Pt, centred: Boolean) {
+        if (state.document.pages.getOrNull(pageIndex)?.layers?.writable != true) return
         val clip = ItemClipboard.clip ?: return
         if (state.pageRects.getOrNull(pageIndex) == null) return
         val clones = ItemClipboard.copiesFor(clip, state.document.dpi, clip.isFrom(state.document), textMeasurer)
@@ -3924,6 +3944,7 @@ class InteractionController(
         val existing = state.document.pages.flatMap { it.items }
         com.xnotes.core.model.Groups.refresh(clones, existing)
         com.xnotes.core.audio.RecordingIds.adopt(clones, existing, moves = moves)
+        clones.forEach { it.layerId = page.layers.activeId }
         page.items.addAll(clones)
         history.push(AddItems(page, clones))
         state.document.dirty = true
@@ -4515,7 +4536,7 @@ class InteractionController(
 
             // Lifted (selected) items, drawn live at the move offset; one that bends to stay joined is drawn below.
             for (sel in selection) {
-                if (sel.item in followed) continue
+                if (sel.item in followed || state.document.pages[sel.pageIndex].layers.entries.size > 1) continue
                 val pr = state.pageRects.getOrNull(sel.pageIndex) ?: continue
                 if (state.isUnderText(state.document.pages[sel.pageIndex], sel.item)) continue // painted under the ink
                 r.withSave {
@@ -4552,12 +4573,12 @@ class InteractionController(
             if (frontInk?.live != true) {
                 liveStroke?.let { stroke ->
                     val page = strokePageIndex?.let { state.document.pages.getOrNull(it) }
-                    paintClippedToPage(r, strokePageIndex) { state.paintLiveStroke(r, stroke, page) }
+                    if (page?.layers?.entries?.size == 1) paintClippedToPage(r, strokePageIndex) { state.paintLiveStroke(r, stroke, page) }
                 }
             }
-            pendingShape?.let { shape -> paintClippedToPage(r, shapePageIndex) { shape.paint(r) } }
-            pendingTape?.let { tape -> paintClippedToPage(r, tapePageIndex) { tape.paint(r) } }
-            connectorDraft?.let { d -> paintClippedToPage(r, connectorPage) { d.connector.paint(r) } }
+            pendingShape?.takeIf { shapePageIndex?.let { state.document.pages.getOrNull(it)?.layers?.entries?.size } == 1 }?.let { shape -> paintClippedToPage(r, shapePageIndex) { shape.paint(r) } }
+            pendingTape?.takeIf { tapePageIndex?.let { state.document.pages.getOrNull(it)?.layers?.entries?.size } == 1 }?.let { tape -> paintClippedToPage(r, tapePageIndex) { tape.paint(r) } }
+            connectorDraft?.takeIf { state.document.pages.getOrNull(connectorPage)?.layers?.entries?.size == 1 }?.let { d -> paintClippedToPage(r, connectorPage) { d.connector.paint(r) } }
 
             // Disappearing ink (magic wand): ephemeral strokes drawn live at the shared fade alpha,
             // without mutating their stored colour. Highlighters keep their MULTIPLY look while fading.

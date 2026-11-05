@@ -216,7 +216,19 @@ class MainActivity : ComponentActivity() {
     // Stylus side-button keys (Bluetooth/USI pens report the button only this way) are caught here,
     // before Compose focus routing, so the controller sees both press and release regardless of
     // which view holds focus. Other keys fall through to the normal dispatch.
+    var penKeyRecorder: ((KeyEvent) -> Boolean)? = null
+    var cancelPenRecording: (() -> Unit)? = null
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (penKeyRecorder?.invoke(event) == true) return true
+        val workspace = editor
+        // Release every pane: focus can have moved since the original press.
+        if (event.action == KeyEvent.ACTION_UP) {
+            var handled = false
+            workspace?.openPanes?.forEach { if (it.onRecordedPenKey(event)) handled = true }
+            if (handled) return true
+        } else if (workspace?.openPanes?.contains(workspace.active) == true &&
+            workspace.active.onRecordedPenKey(event)) return true
         // The pen writes in whichever pane has the focus, so its button keys go to that pane too.
         if (editor?.active?.onStylusButtonKey(event) == true) return true
         if (editor?.active?.onVolumeKey(event) == true) return true
@@ -287,6 +299,7 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) {
+            cancelPenRecording?.invoke()
             editor?.openPanes?.forEach { it.resetPenButtons() }
             StylusButtonLatch.releaseKey()
         } // a held pen key's key-up may not come back to this window
@@ -932,15 +945,23 @@ private fun EditorScreen(
                 render = { o, prog, cancel -> editor.exportFileToPdf(uriStr, o, prog, cancel) },
                 onReady = { temp -> runCatching { launchShare(temp, stem, "application/pdf") }.onFailure { editor.message = context.getString(R.string.err_share_note) } })
         } else {
-            // Sharing the bundle itself is just a fast byte copy — no render, no dialog needed. It
-            // keeps the source's own extension, so a canvas is shared as a canvas.
-            runCatching {
-                val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
-                dir.listFiles()?.forEach { it.delete() } // keep only the file we're about to share
-                val file = java.io.File(dir, "$stem${kindOf(uriStr).suffix}")
-                java.io.FileOutputStream(file).use { o -> editor.copyFileTo(uriStr, o) }
-                launchShare(file, stem, "application/octet-stream")
-            }.onFailure { editor.message = context.getString(R.string.err_share_note) }
+            // A portable bundle can embed a large shared PDF. Keep packaging off the UI thread.
+            scope.launch {
+                val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+                        dir.listFiles()?.forEach { it.delete() }
+                        val target = java.io.File(dir, "$stem${kindOf(uriStr).suffix}")
+                        try {
+                            java.io.FileOutputStream(target).use { editor.copyFileTo(uriStr, it) }
+                            target
+                        } catch (e: Exception) { target.delete(); throw e }
+                    }.getOrNull()
+                }
+                if (file == null) editor.message = context.getString(R.string.err_share_note)
+                else runCatching { launchShare(file, stem, "application/octet-stream") }
+                    .onFailure { editor.message = context.getString(R.string.err_share_note) }
+            }
         }
     }
 
@@ -1613,7 +1634,7 @@ private fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnote
                 position = com.xnotes.settings.ToolbarPosition.TOP, floating = false,
             )) {
                 val layout = com.xnotes.core.tools.workspaceToolbarLayout(editor.toolbarLayout, editor.canvasToolbarLayout)
-                com.xnotes.ui.ToolbarFrame(armed = if (editor.active.canvasOpen) editor.active.infinite.tool else editor.active.tool, leading = {
+                com.xnotes.ui.ToolbarFrame(armed = if (editor.active.canvasOpen) editor.active.infinite.toolbarTool else editor.active.toolbarTool, leading = {
                     com.xnotes.ui.ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home), onClick = actions.onMainMenu)
                 }, trailing = {
                     com.xnotes.ui.ToolbarIcon(XnotesIcons.save, stringResource(R.string.split_save), onClick = actions.onSaveSplit)
@@ -1923,8 +1944,9 @@ private fun EditorPane(
                         val layout = com.xnotes.core.tools.documentToolbarLayout(
                             com.xnotes.core.tools.workspaceToolbarLayout(app.toolbarLayout, app.canvasToolbarLayout), editor.canvasOpen, editor.hasPdf, app.toolbarDocuments())
                         CompositionLocalProvider(com.xnotes.ui.LocalToolbarLook provides look.copy(position = com.xnotes.settings.ToolbarPosition.TOP, floating = false),
-                            com.xnotes.ui.LocalWorkspaceToolbarLayout provides layout) {
-                            com.xnotes.ui.ToolbarFrame(armed = if (editor.canvasOpen) editor.infinite.tool else editor.tool) {
+                            com.xnotes.ui.LocalWorkspaceToolbarLayout provides layout,
+                            com.xnotes.ui.LocalToolbarFocused provides focused) {
+                            com.xnotes.ui.ToolbarFrame(armed = if (editor.canvasOpen) editor.infinite.toolbarTool else editor.toolbarTool) {
                                 CompositionLocalProvider(com.xnotes.ui.LocalEmbeddedToolbar provides true) {
                                     EditorToolbar(editor, app, actions, shared = true)
                                 }
@@ -1943,27 +1965,34 @@ private fun EditorPane(
                 val canvas = editor.infinite
                 val bar: @Composable () -> Unit = { EditorToolbar(editor, app, actions) }
                 PaneToolbarAround(!closable, bar, onCover = canvas::setToolbarCover) { floatingBar ->
-                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
-                        AndroidView(
-                            factory = { detached(canvas.surfaces) },
-                            modifier = Modifier.fillMaxSize(),
-                            update = { canvas.view.publish() },
-                        )
-                        canvas.editingField?.let { field ->
-                            com.xnotes.ui.TextEditorOverlay(canvas, field)
+                    Row(Modifier.fillMaxSize()) {
+                        if (canvas.layersSidebarVisible) {
+                            Box(Modifier.width(com.xnotes.ui.theme.LayerSidebarWidth).fillMaxHeight()) {
+                                com.xnotes.ui.LayersSidebar(canvas)
+                            }
                         }
-                        floatingBar()
-                        com.xnotes.ui.SelectionMenu(
-                            canvas,
-                            onSaveAudio = { actions.onSaveAudio(editor, it) },
-                            onShareAudio = { actions.onShareAudio(editor, it) },
-                            onShareImage = actions.onShareImage,
-                        )
-                        com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
-                        com.xnotes.ui.CropOverlay(canvas)
-                        com.xnotes.ui.TextStyleBar(canvas)
-                        com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
-                        com.xnotes.ui.CanvasDebugOverlay(canvas)
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                            AndroidView(
+                                factory = { detached(canvas.surfaces) },
+                                modifier = Modifier.fillMaxSize(),
+                                update = { canvas.view.publish() },
+                            )
+                            canvas.editingField?.let { field ->
+                                com.xnotes.ui.TextEditorOverlay(canvas, field)
+                            }
+                            floatingBar()
+                            com.xnotes.ui.SelectionMenu(
+                                canvas,
+                                onSaveAudio = { actions.onSaveAudio(editor, it) },
+                                onShareAudio = { actions.onShareAudio(editor, it) },
+                                onShareImage = actions.onShareImage,
+                            )
+                            com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
+                            com.xnotes.ui.CropOverlay(canvas)
+                            com.xnotes.ui.TextStyleBar(canvas)
+                            com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
+                            com.xnotes.ui.CanvasDebugOverlay(canvas)
+                        }
                     }
                 }
             } else {

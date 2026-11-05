@@ -65,4 +65,64 @@ class DocumentRegistryTest {
         db.references("note:one",emptySet())
         assertEquals(0,db.collect(Long.MAX_VALUE/2,0,root)); assertEquals("original",file.readText())
     }
+    @Test fun sharedOriginalSurvivesOneNoteDeletionAndPortableExportLease() = database { db, root ->
+        val pdf = File(root, "shared.pdf").apply { writeText("%PDF-1.7 original") }
+        val id = com.xnotes.format.BundleMigration.hash(pdf)
+        db.registerResource(DocumentRegistry.Resource(id, "PDF", pdf.path, pdf.length(), id))
+        db.references("note:first", setOf(id))
+        db.references("note:second", setOf(id))
+        db.references("note:first", emptySet())
+        assertEquals(0, db.collect(Long.MAX_VALUE / 2, 0, root))
+        assertEquals(id, com.xnotes.format.BundleMigration.hash(pdf))
+        val exportLease = db.lease(id, 1)
+        db.references("note:second", emptySet())
+        assertEquals(0, db.collect(Long.MAX_VALUE / 2, 0, root))
+        db.release(exportLease)
+        assertEquals(1, db.collect(Long.MAX_VALUE / 2, 0, root))
+    }
+
+    @Test fun legacyNoteMigratesOnceAndPortableExportRestoresOriginalPayload() {
+        val context = PenTestRunner.instance.targetContext
+        val storage = com.xnotes.storage.NotebookStorage.get(context)
+        val resources = com.xnotes.storage.PdfResources.get(context)
+        val root = com.xnotes.platform.AppStorageDocumentsProvider.treeUri(context)
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(root, "root")
+        val uri = android.provider.DocumentsContract.createDocument(context.contentResolver, parent,
+            "application/octet-stream", "migration-${UUID.randomUUID()}.xnote")!!
+        val pdfBytes = "%PDF-1.7 test-${UUID.randomUUID()}".toByteArray()
+        val originalIdentity = com.xnotes.format.BundleIdentity()
+        val file = storage.ownedFile(uri.toString())!!
+        try {
+            java.util.zip.ZipOutputStream(file.outputStream()).use { zip ->
+                for ((name, bytes) in listOf("manifest.json" to """{"format":"xnote","has_pdf":true,"pages":[],"future":1.0000}""".toByteArray(),
+                    com.xnotes.format.BundlePdf.ENTRY to pdfBytes, "unknown.bin" to byteArrayOf(1, 2, 3))) {
+                    zip.putNextEntry(java.util.zip.ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+                }
+                originalIdentity.write(zip)
+            }
+            val before = com.xnotes.format.BundleMigration.fingerprints(file)
+            val identity = storage.ensure(uri.toString(), "test.xnote", "xnote")
+            assertEquals(originalIdentity.documentId, identity.documentId)
+            assertTrue(identity.externalPdf)
+            assertFalse(com.xnotes.format.BundleMigration.fingerprints(file).containsKey(com.xnotes.format.BundlePdf.ENTRY))
+            val original = resources.resolve(identity.pdfResource!!)
+            assertArrayEquals(pdfBytes, original.readBytes())
+            assertEquals(setOf(identity.pdfResource), resources.references("note:${identity.documentId}"))
+            val migrated = file.readBytes()
+            assertEquals(identity, storage.ensure(uri.toString(), "test.xnote", "xnote"))
+            assertArrayEquals(migrated, file.readBytes())
+            val exported = File.createTempFile("portable-", ".xnote", context.cacheDir)
+            try {
+                exported.outputStream().use { com.xnotes.format.BundlePdf.write(file, it, identity, original, false) }
+                assertEquals(before.filterKeys { it != com.xnotes.format.BundleIdentity.ENTRY },
+                    com.xnotes.format.BundleMigration.fingerprints(exported).filterKeys { it != com.xnotes.format.BundleIdentity.ENTRY })
+                assertFalse(com.xnotes.format.BundleIdentity.read(exported)!!.externalPdf)
+            } finally { exported.delete() }
+        } finally {
+            android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            storage.registry.markUnavailable(uri.toString())
+            resources.pin("note:${originalIdentity.documentId}", emptySet())
+        }
+    }
+
 }

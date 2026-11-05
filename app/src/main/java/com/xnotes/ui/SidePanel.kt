@@ -93,7 +93,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** The side panel's tabs. */
-enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH }
+enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS }
 
 /**
  * The side panel. The Pages tab shows page thumbnails with a per-page three-dot menu (add / copy /
@@ -133,7 +133,7 @@ fun SidePanel(
     }
     Column(
         Modifier
-            .width(224.dp)
+            .width(com.xnotes.ui.theme.LayerSidebarWidth)
             .fillMaxHeight()
             .background(palette.panel.toComposeColor()),
     ) {
@@ -141,6 +141,7 @@ fun SidePanel(
             SegIcon(XnotesIcons.thumbnails, stringResource(R.string.pages), tab == SidePanelTab.PAGES) { editor.sidePanelTab = SidePanelTab.PAGES }
             SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == SidePanelTab.CONTENTS) { editor.sidePanelTab = SidePanelTab.CONTENTS }
             SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == SidePanelTab.BOOKMARKS) { editor.sidePanelTab = SidePanelTab.BOOKMARKS }
+            SegIcon(XnotesIcons.layers, stringResource(R.string.layers_title), tab == SidePanelTab.LAYERS) { editor.sidePanelTab = SidePanelTab.LAYERS }
             SegIcon(XnotesIcons.search, stringResource(R.string.search), tab == SidePanelTab.SEARCH, shortcut = Keys.SEARCH) { editor.sidePanelTab = SidePanelTab.SEARCH }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -149,6 +150,7 @@ fun SidePanel(
                 SidePanelTab.CONTENTS -> ContentsTab(editor)
                 SidePanelTab.BOOKMARKS -> BookmarksTab(editor)
                 SidePanelTab.SEARCH -> SearchTab(editor)
+                SidePanelTab.LAYERS -> LayersSidebar(editor)
             }
         }
         if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {

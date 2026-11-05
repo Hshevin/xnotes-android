@@ -266,6 +266,12 @@ private val PANE_GUTTER = 16.dp
 private val DRAWER_WIDTH = 296.dp
 
 /**
+ * Below this height (a short top/bottom split pane) the sidebar and rail scroll as a whole: their fixed
+ * header and footer would otherwise squeeze the scrolling middle to nothing.
+ */
+private val SIDEBAR_SCROLL_ALL_HEIGHT = 420.dp
+
+/**
  * The home-first layout: the explorer (or Preferences) fills the screen beside the sidebar. Wide
  * screens show either the full sidebar or its rail, remembered across launches; phones slide the
  * sidebar over the explorer from a hamburger.
@@ -498,54 +504,58 @@ private class SidebarNav(
 @Composable
 private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @Composable () -> Unit, onCollapse: () -> Unit) {
     val palette = LocalPalette.current
-    Column(modifier.fillMaxHeight().background(palette.panel.toComposeColor()).padding(vertical = Space.s12)) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = Space.s20, end = Space.s6, bottom = Space.s6),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("xnotes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = TextSize.heading)
-            Spacer(Modifier.weight(1f))
-            Tooltip(stringResource(R.string.collapse_sidebar)) {
-                IconButton(onClick = onCollapse) {
-                    Icon(XnotesIcons.prev, stringResource(R.string.collapse_sidebar), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
-                }
-            }
-        }
-        Spacer(Modifier.height(Space.s6))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Command(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
-            folderTree()
-            nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
-            if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-            if (nav.colors.isNotEmpty()) {
-                SidebarLabel(stringResource(R.string.toolbar_colours))
-                nav.colors.forEach { (color, name) ->
-                    key(color) {
-                        ColorCommand(
-                            color, name, selected = color == nav.activeColor,
-                            onClick = { nav.onOpenColor(color) }, onRename = { nav.onRenameColor(color) }, onForget = { nav.onForgetColor(color) },
-                        )
+    BoxWithConstraints(modifier.fillMaxHeight().background(palette.panel.toComposeColor())) {
+        val scrollAll = maxHeight < SIDEBAR_SCROLL_ALL_HEIGHT
+        val scroll = rememberScrollState()
+        Column(Modifier.fillMaxSize().then(if (scrollAll) Modifier.verticalScroll(scroll) else Modifier).padding(vertical = Space.s12)) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = Space.s20, end = Space.s6, bottom = Space.s6),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("xnotes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = TextSize.heading)
+                Spacer(Modifier.weight(1f))
+                Tooltip(stringResource(R.string.collapse_sidebar)) {
+                    IconButton(onClick = onCollapse) {
+                        Icon(XnotesIcons.prev, stringResource(R.string.collapse_sidebar), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
                     }
                 }
             }
-            if (nav.pins.isNotEmpty()) {
-                SidebarLabel(stringResource(R.string.pinned))
-                nav.pins.forEachIndexed { i, pin ->
-                    key(pin.uri) {
-                        PinnedCommand(pin.name, selected = i == nav.activePin, onClick = { nav.onOpenPin(pin) }, onUnpin = { nav.onUnpin(pin) })
+            Spacer(Modifier.height(Space.s6))
+            Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll)) {
+                Command(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
+                folderTree()
+                nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
+                if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
+                if (nav.colors.isNotEmpty()) {
+                    SidebarLabel(stringResource(R.string.toolbar_colours))
+                    nav.colors.forEach { (color, name) ->
+                        key(color) {
+                            ColorCommand(
+                                color, name, selected = color == nav.activeColor,
+                                onClick = { nav.onOpenColor(color) }, onRename = { nav.onRenameColor(color) }, onForget = { nav.onForgetColor(color) },
+                            )
+                        }
+                    }
+                }
+                if (nav.pins.isNotEmpty()) {
+                    SidebarLabel(stringResource(R.string.pinned))
+                    nav.pins.forEachIndexed { i, pin ->
+                        key(pin.uri) {
+                            PinnedCommand(pin.name, selected = i == nav.activePin, onClick = { nav.onOpenPin(pin) }, onUnpin = { nav.onUnpin(pin) })
+                        }
                     }
                 }
             }
-        }
-        RailDivider()
-        if (nav.trashCount >= 0) {
-            Command(XnotesIcons.trash, stringResource(R.string.trash), selected = nav.view == BackstageView.TRASH, count = nav.trashCount.takeIf { it > 0 }?.toString()) {
-                nav.onSelectView(BackstageView.TRASH)
+            RailDivider()
+            if (nav.trashCount >= 0) {
+                Command(XnotesIcons.trash, stringResource(R.string.trash), selected = nav.view == BackstageView.TRASH, count = nav.trashCount.takeIf { it > 0 }?.toString()) {
+                    nav.onSelectView(BackstageView.TRASH)
+                }
             }
+            Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+            Command(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
+            Command(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
         }
-        Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-        Command(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
-        Command(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
     }
 }
 
@@ -553,37 +563,41 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
 @Composable
 private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> Unit) {
     val palette = LocalPalette.current
-    Column(
-        modifier.fillMaxHeight().background(palette.panel.toComposeColor()).padding(vertical = Space.s12),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Tooltip(stringResource(R.string.expand_sidebar), side = TipSide.RIGHT) {
-            IconButton(onClick = onExpand, modifier = Modifier.size(48.dp)) {
-                Icon(XnotesIcons.menu, stringResource(R.string.expand_sidebar), tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+    BoxWithConstraints(modifier.fillMaxHeight().background(palette.panel.toComposeColor())) {
+        val scrollAll = maxHeight < SIDEBAR_SCROLL_ALL_HEIGHT
+        val scroll = rememberScrollState()
+        Column(
+            Modifier.fillMaxSize().then(if (scrollAll) Modifier.verticalScroll(scroll) else Modifier).padding(vertical = Space.s12),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Tooltip(stringResource(R.string.expand_sidebar), side = TipSide.RIGHT) {
+                IconButton(onClick = onExpand, modifier = Modifier.size(48.dp)) {
+                    Icon(XnotesIcons.menu, stringResource(R.string.expand_sidebar), tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+                }
             }
-        }
-        Spacer(Modifier.height(Space.s12))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-            RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
-            nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
-            if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-            if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
-            nav.pins.forEachIndexed { i, pin ->
-                key(pin.uri) {
-                    var menuOpen by remember { mutableStateOf(false) }
-                    Box {
-                        RailItem(XnotesIcons.folder, pin.name, selected = i == nav.activePin, labelled = true, onLongClick = { menuOpen = true }) { nav.onOpenPin(pin) }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.unpin_from_sidebar)) }, onClick = { menuOpen = false; nav.onUnpin(pin) })
+            Spacer(Modifier.height(Space.s12))
+            Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
+                RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
+                nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
+                if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
+                if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
+                nav.pins.forEachIndexed { i, pin ->
+                    key(pin.uri) {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            RailItem(XnotesIcons.folder, pin.name, selected = i == nav.activePin, labelled = true, onLongClick = { menuOpen = true }) { nav.onOpenPin(pin) }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.unpin_from_sidebar)) }, onClick = { menuOpen = false; nav.onUnpin(pin) })
+                            }
                         }
                     }
                 }
             }
+            if (nav.trashCount >= 0) RailItem(XnotesIcons.trash, stringResource(R.string.trash), selected = nav.view == BackstageView.TRASH) { nav.onSelectView(BackstageView.TRASH) }
+            RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+            RailItem(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
+            RailItem(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
         }
-        if (nav.trashCount >= 0) RailItem(XnotesIcons.trash, stringResource(R.string.trash), selected = nav.view == BackstageView.TRASH) { nav.onSelectView(BackstageView.TRASH) }
-        RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-        RailItem(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
-        RailItem(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
     }
 }
 

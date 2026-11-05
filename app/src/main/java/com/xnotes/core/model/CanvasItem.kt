@@ -14,6 +14,11 @@ import com.xnotes.core.pal.Renderer
  * undo commands can hold stable references across an undo/redo cycle.
  */
 interface CanvasItem {
+    /** Stable user layer ID, null only until a new object joins its document. */
+    var layerId: String?
+        get() = null
+        set(_) {}
+
     /** Short tag used by the file format: "stroke" | "image" | "text" | "shape". */
     val kind: String
 

@@ -168,12 +168,16 @@ class TransferItems(private val transfers: List<Transfer>) : Command {
         val item: CanvasItem,
         val dx: Double,
         val dy: Double,
-    )
+    ) {
+        val fromLayer = item.layerId
+        val toLayer = to.layers.activeId
+    }
 
     override fun redo() {
         for (t in transfers) {
             if (!t.from.items.removeRef(t.item)) continue
             t.item.translate(t.dx, t.dy)
+            t.item.layerId = t.toLayer
             if (!t.to.items.containsRef(t.item)) t.to.items.add(t.item)
         }
     }
@@ -182,6 +186,7 @@ class TransferItems(private val transfers: List<Transfer>) : Command {
         for (t in transfers.asReversed()) {
             if (!t.to.items.removeRef(t.item)) continue
             t.item.translate(-t.dx, -t.dy)
+            t.item.layerId = t.fromLayer
             if (!t.from.items.containsRef(t.item)) t.from.items.add(t.item)
         }
     }

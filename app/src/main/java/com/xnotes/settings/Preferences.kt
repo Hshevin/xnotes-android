@@ -43,8 +43,7 @@ data class Preferences(
     val detectShapes: Boolean = true,
     /** Tool the stylus side button activates while held; "none" disables it. */
     val penButtonTool: String = "none",
-    val proPenBindings: Map<Int, com.xnotes.pen.PenBinding> =
-        com.xnotes.pen.ProPenButtons.masks.associateWith { com.xnotes.pen.PenBinding() },
+    val penShortcuts: List<com.xnotes.pen.PenShortcut> = emptyList(),
     /** Whether the side-button tool also activates during hover (no contact needed); eraser/pan only. */
     val penButtonHover: Boolean = false,
     /** Action mapped to a clean two-finger tap; "none" (default) disables it. */
@@ -143,7 +142,7 @@ data class Preferences(
         .put("zoom_lock_pan", zoomLockPan)
         .put("new_split_position", newSplitPosition)
         .put("detect_shapes", detectShapes)
-        .put("pro_pen_bindings", com.xnotes.pen.PenBindingsJson.write(proPenBindings))
+        .put("pen_shortcuts", com.xnotes.pen.PenBindingsJson.write(penShortcuts))
         .put("pen_button_tool", penButtonTool)
         .put("pen_button_hover", penButtonHover)
         .put("two_finger_tap", twoFingerTap)
@@ -236,7 +235,7 @@ data class Preferences(
             }
             val legacyDualAccent = legacySeed ?: Rgba.fromHex(o.optString("accent_color")) ?: DEFAULT_ACCENT
             return Preferences(
-                proPenBindings = com.xnotes.pen.PenBindingsJson.read(o.optJSONObject("pro_pen_bindings")),
+                penShortcuts = com.xnotes.pen.PenBindingsJson.read(o.optJSONArray("pen_shortcuts")),
                 uiAppearance = appearance,
                 materialMode = materialMode,
                 materialSingleSeed = Rgba.fromHex(o.optString("material_single_seed"))

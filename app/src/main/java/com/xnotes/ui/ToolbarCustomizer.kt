@@ -437,6 +437,7 @@ private fun SectionCaret() {
 internal fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.HOME -> XnotesIcons.home
     ToolbarItem.TITLE -> XnotesIcons.edit
+    ToolbarItem.LAYERS -> XnotesIcons.sidebar
     ToolbarItem.SIDEBAR -> XnotesIcons.sidebar
     ToolbarItem.PEN -> ImageVector.vectorResource(R.drawable.ic_stroke_regular)
     ToolbarItem.DASHED -> ImageVector.vectorResource(R.drawable.ic_stroke_dashed)

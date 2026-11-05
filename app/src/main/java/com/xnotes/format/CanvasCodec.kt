@@ -150,11 +150,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             for (wp in doc.waypoints) writeWaypoint(j, wp)
             j.endArray()
         }
+        LayerJson.write(j, doc.layers)
         j.name("items").beginArray()
         val nextAsset = intArrayOf(0)
         val nextAudio = intArrayOf(0)
         val ids = GlueIds.of(doc.items)
-        for (item in doc.items) writeItem(j, item, assets, nextAsset, audio, nextAudio, ids)
+        for (item in doc.items) writeItem(j, item, assets, nextAsset, audio, nextAudio, ids, doc.layerIdForWrite(item))
         j.endArray()
         j.endObject()
     }
@@ -167,18 +168,19 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         audio: List<Pair<String, File>>,
         nextAudio: IntArray,
         ids: Map<CanvasItem, Int>,
+        layerId: String?,
     ) {
         when (item) {
-            is Stroke -> writeStroke(j, item)
+            is Stroke -> writeStroke(j, item, layerId = layerId)
             is ImageItem -> {
                 // The name was decided by [imageAssets]' walk of these same items; taking it from
                 // there keeps the entry and the manifest agreeing by construction.
-                assets.getOrNull(nextAsset[0]++)?.let { writeImage(j, item, it.first, ids[item]) }
+                assets.getOrNull(nextAsset[0]++)?.let { writeImage(j, item, it.first, ids[item], layerId = layerId) }
             }
-            is AudioItem -> audio.getOrNull(nextAudio[0]++)?.let { writeAudio(j, item, it.first) }
-            is ShapeItem -> writeShape(j, item, ids[item])
-            is ConnectorItem -> writeConnector(j, item, ids)
-            is TapeItem -> writeTape(j, item)
+            is AudioItem -> audio.getOrNull(nextAudio[0]++)?.let { writeAudio(j, item, it.first, layerId = layerId) }
+            is ShapeItem -> writeShape(j, item, ids[item], layerId = layerId)
+            is ConnectorItem -> writeConnector(j, item, ids, layerId = layerId)
+            is TapeItem -> writeTape(j, item, layerId = layerId)
             else -> {} // text and any unrecognized kind: not written, the canvas has none
         }
     }
@@ -219,7 +221,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         j.endObject()
     }
 
-    private fun writeStroke(j: JsonWrite, s: Stroke) {
+    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId) {
         // Per-sample time is only meaningful to the speed pen, so it's written as an optional
         // 4th element only then; every other stroke serializes without it.
         val withTime = s.config.speedStrength > 0.0
@@ -273,10 +275,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?) {
+    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId) {
         j.beginObject()
         j.name("kind").value(ImageItem.KIND)
         // Only on an item a connector glues to.
@@ -292,10 +295,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         item.sync?.let { writeSync(j, it) }
         if (item.locked) j.name("locked").value(true)
         item.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String) {
+    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId) {
         j.beginObject()
         j.name("kind").value(AudioItem.KIND)
         j.name("asset").value(assetName)
@@ -306,6 +310,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (a.audio.peaks.isNotEmpty()) j.name("peaks").value(java.util.Base64.getEncoder().encodeToString(a.audio.peaks))
         if (a.locked) j.name("locked").value(true)
         a.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -315,7 +320,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         j.name("rec_ms").value(m.ms)
     }
 
-    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?) {
+    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId) {
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
         val standIn = s.legacyOutline()
         val drawn = standIn?.let { Rect.bounding(it) }
@@ -383,6 +388,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -392,7 +398,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
      * route. Its style and label are a shape's.
      */
     /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
-    private fun writeTape(j: JsonWrite, t: TapeItem) {
+    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId) {
         val s = t.shape
         j.beginObject()
         j.name("kind").value(TapeItem.KIND)
@@ -406,10 +412,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (t.pattern != TapePattern.SOLID) j.name("pattern").value(t.pattern.id)
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>) {
+    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
         j.beginObject()
@@ -466,6 +473,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         c.sync?.let { writeSync(j, it) }
         if (c.locked) j.name("locked").value(true)
         c.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -567,6 +575,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         for ((name, f) in audioFiles) if (name !in used) f.delete()
         // Every item is in, so connectors can glue to whatever their ends name.
         m.glue.resolve()
+        doc.layers.restore(m.layers.entries, m.layers.activeId)
+        require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
         doc.addAll(items)
         return doc
     }
@@ -615,6 +625,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var created: Long? = null
         var dpi = PageSize.DEFAULT_DPI
         var background = CanvasBackground()
+        var layers = com.xnotes.core.model.DrawingLayers()
         var view: Waypoint? = null
         val waypoints = ArrayList<Waypoint>()
         val items = ArrayList<CanvasItem>()
@@ -638,6 +649,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val id: Int?,
         val sync: SyncMark?,
         val group: Int? = null,
+        val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
         val part: Rect? = null,
     ) : Pending(index, asset)
 
@@ -651,6 +663,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val peaks: ByteArray,
         val locked: Boolean,
         val group: Int? = null,
+        val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
     ) : Pending(index, asset)
 
     private fun parseManifest(p: JsonPull): ParsedManifest {
@@ -666,6 +679,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "created" -> m.created = stringOrNull(p)?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
                 "dpi" -> m.dpi = intOr(p, PageSize.DEFAULT_DPI)
                 "background" -> m.background = parseBackground(p)
+                "layers" -> m.layers = LayerJson.read(p)
                 "view" -> m.view = parseWaypoint(p, named = false)
                 "waypoints" -> parseWaypoints(p, m.waypoints)
                 "items" -> parseItems(p, m.items, m.images, m.glue)
@@ -743,6 +757,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     private class ItemScratch {
         var locked = false
         var group: Int? = null
+        var layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT
         var kind: String? = null
         var id: Int? = null
         var connector: ConnectorScratch? = null
@@ -855,6 +870,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "dash_gap" -> s.dashGap = doubleOr(p, 8.0)
                 "locked" -> s.locked = boolOr(p, false)
                 "group" -> s.group = intOrNull(p)
+                "layer" -> s.layerId = stringOr(p, com.xnotes.core.model.DrawingLayers.DEFAULT)
                 "rid" -> s.rid = intOr(p, 0)
                 "name" -> s.name = stringOr(p, "")
                 "duration_ms" -> s.durationMs = intOr(p, 0)
@@ -881,7 +897,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.part,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
                         ),
                     )
                 }
@@ -889,7 +905,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             AudioItem.KIND -> {
                 val asset = s.asset
                 if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
                 }
             }
             ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
@@ -899,6 +915,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // text and any unrecognized kind: skipped (forgiving)
         }
+        if (items.size > before) items[before].layerId = s.layerId
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every canvas written before locking existed, which reads back as unlocked.
         if (s.locked && items.size > before) items[before].locked = true
@@ -1185,6 +1202,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 it.locked = spec.locked
                 it.sync = spec.sync
                 it.group = spec.group
+                it.layerId = spec.layerId
             }
     }
 
@@ -1196,6 +1214,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             .also {
                 it.locked = spec.locked
                 it.group = spec.group
+                it.layerId = spec.layerId
             }
     }
 

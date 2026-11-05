@@ -88,7 +88,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         class Lift(val items: List<CanvasItem>, val at: LiftTransform) : Edit()
 
         class Remove(val item: CanvasItem) : Edit()
-        class Order(val items: List<CanvasItem>) : Edit()
+        class Order(val items: List<CanvasItem>, val activeLayerEnd: Int?) : Edit()
 
         /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
         class Reserve(val vertices: Long, val indices: Long) : Edit()
@@ -226,8 +226,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     }
 
     /** Publish the document's z order; the scene draws back to front by it. */
-    fun setOrder(items: List<CanvasItem>) {
-        post(Edit.Order(ArrayList(items)))
+    fun setOrder(items: List<CanvasItem>, activeLayerEnd: Int? = null) {
+        post(Edit.Order(ArrayList(items), activeLayerEnd))
     }
 
     /** Publish the in-progress stroke's triangles, or clear it when [mesh] is null. */
@@ -359,7 +359,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         // or the content moves. Re-blurring each of them every frame made the cost of neon scale
         // with how much of it was on screen: nine strokes took the canvas to a fifth of the
         // refresh rate, while none of them had actually changed.
-        drawCommittedHalos(program, frame, camChunkX, camChunkY)
+        if (activeLayerEnd == null) drawCommittedHalos(program, frame, camChunkX, camChunkY)
 
         // Back to front, batching every run of opaque items that happens to be contiguous in the
         // buffer into one call. Freshly loaded content is laid down in z order, so a screenful of
@@ -368,7 +368,20 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         var runStart = -1
         var runCount = 0
         val fade = fade
+        val layerEnd = activeLayerEnd
+        var livePainted = false
         for (record in visible) {
+            if (layerEnd != null && !livePainted && record.z > layerEnd) {
+                flushRun(runStart, runCount)
+                runStart = -1
+                runCount = 0
+                drawLifted(program, frame, camChunkX, camChunkY)
+                drawWet(program, frame, camChunkX, camChunkY)
+                rebind(program, frame, camChunkX, camChunkY)
+                store.bindForDraw(contextGen)
+                store.bindAttributes(program)
+                livePainted = true
+            }
             val faded = fade != null && fade.fades(record.item)
             if (record.image != null) {
                 flushRun(runStart, runCount)
@@ -408,7 +421,13 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                     InkPass.MULTIPLY, InkPass.SCREEN -> {
                         // Highlighters composite over the finished picture, matching the paged
                         // canvas, so their blend acts on what is beneath instead of washing it out.
-                        deferred.add(Deferred(record, part))
+                        if (layerEnd == null) deferred.add(Deferred(record, part)) else {
+                            flushRun(runStart, runCount)
+                            runStart = -1
+                            runCount = 0
+                            drawMasked(record, part, frame, part.pass)
+                            rebind(program, frame, camChunkX, camChunkY)
+                        }
                     }
                     InkPass.OPAQUE -> {
                         if (runStart >= 0 && part.slice.indexOffset == runStart + runCount) {
@@ -432,7 +451,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                         flushRun(runStart, runCount)
                         runStart = -1
                         runCount = 0
-                        drawGlowBody(program, store, part)
+                        if (layerEnd == null) drawGlowBody(program, store, part)
+                        else drawGlow(program, store, record, part, frame, camChunkX, camChunkY)
                     }
                 }
             }
@@ -444,8 +464,10 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             rebind(program, frame, camChunkX, camChunkY)
         }
 
-        drawLifted(program, frame, camChunkX, camChunkY)
-        drawWet(program, frame, camChunkX, camChunkY)
+        if (!livePainted) {
+            drawLifted(program, frame, camChunkX, camChunkY)
+            drawWet(program, frame, camChunkX, camChunkY)
+        }
         if (frame.minimapVisible) drawMinimap(frame)
 
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
@@ -1054,7 +1076,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 is Edit.Wet -> applyWet(edit)
                 is Edit.Lift -> applyLift(edit)
                 is Edit.Remove -> applyRemove(edit.item)
-                is Edit.Order -> applyOrder(edit.items)
+                is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
                 is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                 Edit.Reset -> applyReset()
             }
@@ -1164,6 +1186,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         unfileRecord(record)
         for (part in record.parts) store.free(part.slice)
     }
+
+    private var activeLayerEnd: Int? = null
 
     private fun applyOrder(items: List<CanvasItem>) {
         revision++

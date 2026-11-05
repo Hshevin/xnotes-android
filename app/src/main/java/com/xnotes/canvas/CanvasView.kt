@@ -407,7 +407,9 @@ class CanvasView @JvmOverloads constructor(
                 r.translate(pr.left, pr.top)
                 paintUnderInk(r, st, page, st.displayRectToPage(page, visible.translate(-pr.left, -pr.top)))
             }
-            st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
+            if (page.layers.entries.size > 1) {
+                paintUserLayers(r, st, page, pr, visible)
+            } else st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
         }
         r.restore()
 
@@ -439,7 +441,9 @@ class CanvasView @JvmOverloads constructor(
                         r.translate(pr.left, pr.top)
                         paintUnderInk(r, st, page, st.displayRectToPage(page, neighbourVisible.translate(-pr.left, -pr.top)))
                     }
-                    st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
+                    if (page.layers.entries.size > 1) {
+                        paintUserLayers(r, st, page, pr, neighbourVisible)
+                    } else st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
                 }
                 r.restore()
                 canvas.restore()
@@ -451,7 +455,7 @@ class CanvasView @JvmOverloads constructor(
         // the strip panning into view; once the view settles we re-render the sharp viewport for
         // the new area. A zoom change drops back to the soft caches until the settle re-render.
         // Room being drawn moves part of a page off what any sharp frame shows, so the soft caches serve until it settles.
-        if (room == null && st.isPastResolutionCap() && !st.pageFlipAnimating && st.flipOffsetX == 0.0) {
+        if (room == null && drawable.none { st.document.pages[it].layers.entries.size > 1 } && st.isPastResolutionCap() && !st.pageFlipAnimating && st.flipOffsetX == 0.0) {
             val blit = st.sharpViewportBlit()
             if (blit != null) {
                 val dw = blit.base.width * blit.scale
@@ -515,8 +519,8 @@ class CanvasView @JvmOverloads constructor(
                     r.clipRect(pr)
                     r.translate(pr.left, pr.top)
                     st.applyPageTransform(r, page)
-                    for ((k, item) in page.items.withIndex()) {
-                        if (item is Stroke && item.isHighlighterInk() && !st.isLiftedItem(item) &&
+                    for ((k, item) in page.visibleItems.withIndex()) {
+                        if (page.layers.entries.size == 1 && item is Stroke && item.isHighlighterInk() && !st.isLiftedItem(item) &&
                             item.bounds().intersects(visLocal)
                         ) {
                             // Blit the pre-rendered opaque ribbon at the ink's alpha and blend,
@@ -524,7 +528,7 @@ class CanvasView @JvmOverloads constructor(
                             val hc = st.highlighterCacheFor(item, page)
                             val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
                             // Composited over the finished page, so tape laid over it has to be cut out by hand.
-                            val covers = coveringTapes(st, page.items, k, item.bounds())
+                            val covers = coveringTapes(st, page.visibleItems, k, item.bounds())
                             r.withSave {
                                 if (covers != null) r.clipOutPolygons(covers)
                                 r.drawRasterBlended(hc.surface, hc.cover, item.renderColor.a / 255.0 * faint, item.blendMode)
@@ -636,7 +640,7 @@ class CanvasView @JvmOverloads constructor(
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
-            for (item in page.items) {
+            for (item in page.visibleItems) {
                 if (item !is Stroke || !item.isHighlighterInk() || st.isLiftedItem(item)) continue
                 val hc = st.highlighterCacheFor(item, page)
                 val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
@@ -672,6 +676,31 @@ class CanvasView @JvmOverloads constructor(
      * What goes live between a page's background and its ink cache: the fills under its typed text
      * that the cache leaves out, a lifted flow, and the formulas. [r] stands at the page's display origin.
      */
+    /** Composite user layers with the live stroke at the active layer, including highlighters.
+     * The PDF background remains independently cached. Only viewport-intersecting objects paint.
+     */
+    private fun paintUserLayers(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, visible: Rect) {
+        r.withSave {
+            r.clipRect(pr)
+            r.translate(pr.left, pr.top)
+            st.applyPageTransform(r, page)
+            val local = st.displayRectToPage(page, visible.translate(-pr.left, -pr.top))
+            val painter = st.inkRenderer(page, r)
+            val visibleItems = page.visibleItems
+            val underText = visibleItems.take(com.xnotes.core.model.PageLayers.underText(visibleItems)).toSet()
+            for (item in underText) if (!st.isLiftedItem(item) && item.paintBounds().intersects(local)) st.paintItem(item, r, page)
+            if (!st.flowLifted) st.paintFlow?.invoke(page, painter, local)
+            val items = visibleItems.groupBy { it.layerId }
+            for (layer in page.layers.entries) {
+                if (!layer.visible) continue
+                for (item in items[layer.id].orEmpty()) {
+                    if (item !in underText && !st.isLiftedItem(item) && item.paintBounds().intersects(local)) st.paintItem(item, r, page)
+                }
+                if (layer.id == page.layers.activeId) st.paintLayerPreview?.invoke(page, painter)
+            }
+        }
+    }
+
     private fun paintUnderInk(r: AndroidRenderer, st: CanvasState, page: Page, region: Rect) {
         r.withSave {
             st.applyPageTransform(r, page)

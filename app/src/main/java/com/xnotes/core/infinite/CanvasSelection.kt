@@ -61,7 +61,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
 
     /** Select [next], and with it every unlocked fellow member of the groups it touches. */
     fun select(next: List<CanvasItem>) {
-        items = com.xnotes.core.model.Groups.withMembers(next, doc.items) { it }
+        items = com.xnotes.core.model.Groups.withMembers(next.filter(doc.layers::editable), doc.editableItems) { it }
         box = boxOf(items)
     }
 

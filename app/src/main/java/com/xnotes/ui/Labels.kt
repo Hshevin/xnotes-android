@@ -108,6 +108,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.PAGE_NAV -> R.string.toolbar_page_nav
         ToolbarItem.STYLES -> R.string.toolbar_styles
         ToolbarItem.MARGINS -> R.string.toolbar_margins
+        ToolbarItem.LAYERS -> R.string.layers_title
         ToolbarItem.VIEW -> R.string.toolbar_view
         ToolbarItem.ZOOM -> R.string.toolbar_zoom
         ToolbarItem.FIT -> R.string.toolbar_fit

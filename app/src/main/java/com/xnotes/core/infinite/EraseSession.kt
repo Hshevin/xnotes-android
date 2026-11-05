@@ -58,7 +58,7 @@ class EraseSession(private val doc: InfiniteDocument) {
         val box = Rect(cx - radius, cy - radius, radius * 2, radius * 2)
         var dirty: Rect? = null
         for (item in doc.itemsIn(box)) {
-            if (!EraseRule.erasable(item)) continue
+            if (!doc.layers.editable(item) || !EraseRule.erasable(item)) continue
             if (EraseRule.takesFill(item, cx, cy, radius)) {
                 val shape = item as ShapeItem
                 unfilled.add(RefillShapes.Entry(shape, shape.fillRgba, null))
@@ -83,6 +83,7 @@ class EraseSession(private val doc: InfiniteDocument) {
             for (f in fragments) {
                 f.sync = item.sync // pieces were written when the whole was
                 f.group = item.group
+                f.layerId = item.layerId
             }
             val touched = item.paintBounds()
             val at = doc.replaceItem(item, fragments)

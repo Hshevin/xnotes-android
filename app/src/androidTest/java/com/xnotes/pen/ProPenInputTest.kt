@@ -14,7 +14,10 @@ class ProPenInputTest {
         0x40 to PenBinding("highlighter", PenBindingMode.SELECT),
         0x04 to PenBinding("undo", PenBindingMode.SELECT),
     )
-    private val input = ProPenInput({ bindings }, { tool }, { tool = it }, { commands.add(it) })
+    private fun shortcuts(bindings: Map<Int, PenBinding>) = bindings.map { (mask, binding) ->
+        PenShortcut("Button $mask", listOf(PenTrigger(PenTrigger.Kind.MOTION, mask, "", InputDevice.SOURCE_STYLUS)), binding)
+    }
+    private val input = ProPenInput({ shortcuts(bindings) }, { tool }, { tool = it }, { commands.add(it) })
 
     private fun event(action: Int, buttons: Int, type: Int = MotionEvent.TOOL_TYPE_STYLUS): MotionEvent {
         val property = MotionEvent.PointerProperties().apply { id = 0; toolType = type }
@@ -26,6 +29,12 @@ class ProPenInputTest {
         }
         return MotionEvent.obtain(1, 2, action, 1, arrayOf(property), arrayOf(coords),
             0, buttons, 1f, 1f, 19, 0, source, 0)
+    }
+
+    private fun inherit(adapter: ProPenInput, e: MotionEvent, mask: Int) {
+        val signals = PenSignals.motion(e, mask)
+        val holds = signals.filter { it.code == 0x20 }
+        adapter.inherit(PenInputSnapshot(signals, holds, e.deviceId))
     }
 
     private fun motion(action: Int, buttons: Int, type: Int = MotionEvent.TOOL_TYPE_STYLUS) {
@@ -89,7 +98,7 @@ class ProPenInputTest {
     }
     @Test fun crossingWithHeldCommandDoesNotRepeatItButNextPressWorks() {
         val e = event(MotionEvent.ACTION_HOVER_ENTER, 4)
-        try { input.motion(e, inheritedButtons = 4) } finally { e.recycle() }
+        try { inherit(input, e, 4); input.motion(e) } finally { e.recycle() }
         assertTrue(commands.isEmpty())
         motion(MotionEvent.ACTION_HOVER_MOVE, 4)
         assertTrue(commands.isEmpty())
@@ -100,12 +109,12 @@ class ProPenInputTest {
 
     @Test fun crossingWithHeldEraserRestoresPenOnRelease() {
         val e = event(MotionEvent.ACTION_HOVER_ENTER, 0x20)
-        try { input.motion(e, inheritedButtons = 0x20) } finally { e.recycle() }
+        try { inherit(input, e, 0x20); input.motion(e) } finally { e.recycle() }
         assertEquals(Tool.ERASER, tool)
         input.reset()
         assertEquals(Tool.PEN, tool)
         val returned = event(MotionEvent.ACTION_HOVER_ENTER, 0x20)
-        try { input.motion(returned, inheritedButtons = 0x20) } finally { returned.recycle() }
+        try { inherit(input, returned, 0x20); input.motion(returned) } finally { returned.recycle() }
         assertEquals(Tool.ERASER, tool)
         motion(MotionEvent.ACTION_HOVER_MOVE, 0)
         assertEquals(Tool.PEN, tool)
@@ -113,10 +122,10 @@ class ProPenInputTest {
 
     @Test fun sameCommandOnANewPhysicalButtonStillRunsAcrossPanes() {
         val seen = mutableListOf<String>()
-        val adapter = ProPenInput({ mapOf(0x20 to PenBinding("undo"), 0x40 to PenBinding("undo")) },
+        val adapter = ProPenInput({ shortcuts(mapOf(0x20 to PenBinding("undo"), 0x40 to PenBinding("undo"))) },
             { Tool.PEN }, {}, { seen.add(it) })
         val e = event(MotionEvent.ACTION_HOVER_ENTER, 0x60)
-        try { adapter.motion(e, inheritedButtons = 0x20) } finally { e.recycle() }
+        try { inherit(adapter, e, 0x20); adapter.motion(e) } finally { e.recycle() }
         assertEquals(listOf("undo"), seen)
     }
 
@@ -125,7 +134,7 @@ class ProPenInputTest {
         input.reset()
         // The other pane observed release; this pane has not seen that sample.
         val returned = event(MotionEvent.ACTION_HOVER_ENTER, 4)
-        try { input.motion(returned, inheritedButtons = 0) } finally { returned.recycle() }
+        try { inherit(input, returned, 0); input.motion(returned) } finally { returned.recycle() }
         assertEquals(listOf("undo", "undo"), commands)
     }
 

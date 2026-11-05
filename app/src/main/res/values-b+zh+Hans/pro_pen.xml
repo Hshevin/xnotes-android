@@ -1,8 +1,5 @@
 <resources>
     <string name="pro_pen_save_failed">按键映射保存失败，已保留原有设置。</string>
-    <string name="pro_pen_title">Pro Pen 3 按键映射</string>
-    <string name="pro_pen_button">第 %1$d 键</string>
-    <string name="pro_pen_help">为每个按键选择动作，设置自动保存在本机。书写中按键的动作在抬笔后生效。</string>
     <string name="pro_pen_hold">按住临时启用，松开恢复</string>
     <string name="pro_pen_select">按下切换，松开保持</string>
     <string name="pro_pen_once">每次按下执行一次，持续按住不会重复。</string>

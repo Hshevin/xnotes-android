@@ -103,7 +103,7 @@ fun InfiniteToolbar(
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
 
     // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = {
+    ToolbarFrame(armed = editor.toolbarTool, trailing = {
         onSplitDocument?.let { ToolbarIcon(XnotesIcons.split, stringResource(R.string.split_current_document), onClick = it) }
         onToggleSplitDirection?.let { ToolbarIcon(XnotesIcons.split, stringResource(R.string.split_change_direction), onClick = it) }
         onClosePane?.let { ClosePaneButton(it) }
@@ -125,7 +125,7 @@ fun InfiniteToolbar(
                         if (icon != null) {
                             Box {
                                 // Tapping the armed tool again opens its settings, as the paged bar does.
-                                val armed = editor.tool == tool
+                                val armed = LocalToolbarFocused.current && editor.toolbarTool == tool
                                 val configurable = tool.isStroke || tool == Tool.ERASER || tool == Tool.SHAPE || tool == Tool.SELECT || tool == Tool.TAPE
                                 ToolbarIcon(
                                     icon,
@@ -135,11 +135,11 @@ fun InfiniteToolbar(
                                     hint = if (armed && configurable) stringResource(R.string.tip_tap_for_settings) else null,
                                 ) {
                                     when {
-                                        tool == Tool.ERASER && editor.tool == tool -> eraserOpen = true
-                                        tool == Tool.SHAPE && editor.tool == tool -> shapeOpen = true
-                                        tool == Tool.SELECT && editor.tool == tool -> selectOpen = true
-                                        tool == Tool.TAPE && editor.tool == tool -> tapeOpen = true
-                                        tool.isStroke && editor.tool == tool -> penOpen = tool
+                                        tool == Tool.ERASER && armed -> eraserOpen = true
+                                        tool == Tool.SHAPE && armed -> shapeOpen = true
+                                        tool == Tool.SELECT && armed -> selectOpen = true
+                                        tool == Tool.TAPE && armed -> tapeOpen = true
+                                        tool.isStroke && armed -> penOpen = tool
                                         else -> editor.armTool(tool)
                                     }
                                 }
@@ -193,6 +193,7 @@ fun InfiniteToolbar(
                     // Where the paged bar keeps its page, styles and view menus. Waypoints take the
                     // place of pagination: on an unbounded canvas, a saved view is what a page
                     // number was.
+                    ToolbarItem.LAYERS -> LayersButton(editor)
                     ToolbarItem.STYLES -> Box {
                         ToolbarIcon(XnotesIcons.sliders, stringResource(R.string.toolbar_styles), active = stylesOpen) { stylesOpen = true }
                         if (stylesOpen) CanvasStylesPopup(editor) { stylesOpen = false }

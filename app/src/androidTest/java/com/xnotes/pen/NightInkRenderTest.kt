@@ -20,6 +20,24 @@ import org.junit.Test
 import java.nio.ByteBuffer
 
 class NightInkRenderTest {
+    @Test fun layerPreviewKeepsHiddenInkAndTransparentBackground() {
+        val page = com.xnotes.core.model.Page(64.0, 64.0)
+        val stroke = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN).copy(rgba = Rgba(0, 0, 0), baseWidth = 8.0))
+        stroke.addSample(Sample(8.0, 32.0, 1.0, 0.0))
+        stroke.addSample(Sample(56.0, 32.0, 1.0, 10.0))
+        page.items.add(stroke)
+        page.layers.update(page.layers.activeId) { it.copy(visible = false) }
+        val preview = com.xnotes.core.model.LayerPreview(page.items, com.xnotes.core.geometry.Rect(0.0, 0.0, 64.0, 64.0))
+        val bitmap = checkNotNull(com.xnotes.platform.LayerThumbnailRenderer.render(preview.itemsFor(page.layers.activeId), preview.frame, 64))
+        try {
+            assertEquals(Color.BLACK, bitmap.getPixel(32, 32))
+            assertEquals(Color.TRANSPARENT, bitmap.getPixel(0, 0))
+            assertEquals(64, bitmap.width)
+            assertEquals(Rgba(0, 0, 0), stroke.config.rgba)
+        } finally { bitmap.recycle() }
+        assertNull(com.xnotes.platform.LayerThumbnailRenderer.render(preview.itemsFor(page.layers.activeId), preview.frame, active = { false }))
+    }
+
     @Test fun androidCanvasDisplaysWhiteAndKeepsOriginalBlack() {
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
         try {

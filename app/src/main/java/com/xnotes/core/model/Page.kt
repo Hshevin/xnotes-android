@@ -7,7 +7,7 @@ package com.xnotes.core.model
 class Page(
     var width: Double,
     var height: Double,
-    val items: MutableList<CanvasItem> = mutableListOf(),
+    items: MutableList<CanvasItem> = mutableListOf(),
     /** Index of the source-PDF page drawn as this page's background, or null. */
     var pdfPage: Int? = null,
     /** Per-page style override (paper colour + ruling); null fields inherit. See [PageStyle]. */
@@ -21,6 +21,14 @@ class Page(
     /** The room Insert space opened on it, sorted (see [Rooms]). Replaced whole, never mutated, so any thread can read it. */
     @Volatile var rooms: List<Room> = emptyList(),
 ) {
+    /** Membership frozen with an autosave snapshot; live edits cannot retarget its objects. */
+    var savedLayerIds: Map<CanvasItem, String?>? = null
+        internal set
+    fun layerIdForWrite(item: CanvasItem): String? = savedLayerIds?.get(item) ?: item.layerId
+    val layers = DrawingLayers()
+    val items: MutableList<CanvasItem> = LayerItems(layers, items)
+    val visibleItems: List<CanvasItem> get() = layers.ordered(items)
+    val editableItems: List<CanvasItem> get() = items.filter(layers::editable)
     /**
      * A process-unique, stable id (not persisted). Pages compare by identity, but Compose list keys
      * must be a Bundle-storable type, so the side panel keys its thumbnail rows by this — it stays

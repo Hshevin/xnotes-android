@@ -1,8 +1,5 @@
 <resources>
     <string name="pro_pen_save_failed">Could not save button mappings. Your previous mappings are unchanged.</string>
-    <string name="pro_pen_title">Pro Pen 3 buttons</string>
-    <string name="pro_pen_button">Button %1$d</string>
-    <string name="pro_pen_help">Choose each button’s action. Changes are saved on this device. Changes made during a stroke take effect when the pen lifts.</string>
     <string name="pro_pen_hold">Hold temporarily; release to restore</string>
     <string name="pro_pen_select">Press to select; keep after release</string>
     <string name="pro_pen_once">Runs once per press, without repeating while held.</string>

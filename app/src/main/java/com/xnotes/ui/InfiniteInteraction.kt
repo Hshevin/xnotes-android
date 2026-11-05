@@ -313,6 +313,8 @@ class InfiniteInteraction(
     private var dwellEligible = false
     private var dwellAnchor = Pt.ZERO
 
+    var canEditLayer: () -> Boolean = { true }
+
     var mode = CanvasPointerMode.IDLE
         private set
 
@@ -563,6 +565,7 @@ class InfiniteInteraction(
         // A draft only lives through Free polygon presses; anything else that draws or edits ends it.
         val placing = effective == Tool.SHAPE && shapeConfig().placesCorners
         if (polygonDraft != null && !placing && effective != Tool.PAN) finishPolygonDraft()
+        if (effective != Tool.PAN && effective != Tool.SCREENSHOT && !canEditLayer()) return
         when {
             effective.isStroke -> beginDraw(vx, vy, effective, e)
             effective == Tool.ERASER -> beginErase(vx, vy)

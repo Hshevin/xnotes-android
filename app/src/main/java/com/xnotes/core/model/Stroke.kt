@@ -54,6 +54,7 @@ class Stroke(
 
     override val kind = KIND
     override val resizable = false
+    override var layerId: String? = null
     override var locked = false
     override var group: Int? = null
     override var sync: SyncMark? = null
@@ -829,6 +830,7 @@ class Stroke(
             m,
         )
         s.cuts = cuts
+        s.layerId = layerId
         return s
     }
 

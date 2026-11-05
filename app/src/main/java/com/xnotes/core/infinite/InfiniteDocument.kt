@@ -78,6 +78,13 @@ class InfiniteDocument(
         fun onReset() {}
     }
 
+    /** Membership frozen with an autosave snapshot; live edits cannot retarget its objects. */
+    var savedLayerIds: Map<CanvasItem, String?>? = null
+        internal set
+    fun layerIdForWrite(item: CanvasItem): String? = savedLayerIds?.get(item) ?: item.layerId
+    val layers = com.xnotes.core.model.DrawingLayers()
+    val editableItems: List<CanvasItem> get() = items.filter(layers::editable)
+
     var listener: Listener? = null
 
     private val backing = ArrayList<CanvasItem>()
@@ -116,6 +123,8 @@ class InfiniteDocument(
     fun snapshotForWrite(): InfiniteDocument {
         val copy = InfiniteDocument(dpi, path, displayName, dirty, background, waypoints.toMutableList(), lastView, created)
         copy.identity = identity
+        copy.layers.restore(layers.entries, layers.activeId)
+        copy.savedLayerIds = items.associateWith { it.layerId }
         copy.backing.addAll(backing)
         return copy
     }
@@ -123,6 +132,7 @@ class InfiniteDocument(
     // --- structural mutation ---
 
     fun add(item: CanvasItem) {
+        layers.adopt(item)
         backing.add(item)
         index.insert(item)
         invalidateDerived()
@@ -132,6 +142,7 @@ class InfiniteDocument(
 
     /** Insert at a z position, clamped into range. Used by undo to restore an exact slot. */
     fun add(at: Int, item: CanvasItem) {
+        layers.adopt(item)
         backing.add(at.coerceIn(0, backing.size), item)
         index.insert(item)
         invalidateDerived()
@@ -142,6 +153,7 @@ class InfiniteDocument(
     fun addAll(newItems: List<CanvasItem>) {
         if (newItems.isEmpty()) return
         for (item in newItems) {
+            layers.adopt(item)
             backing.add(item)
             index.insert(item)
             listener?.onItemAdded(item)
@@ -180,6 +192,7 @@ class InfiniteDocument(
      */
     fun replaceAll(newItems: List<CanvasItem>) {
         backing.clear()
+        newItems.forEach(layers::adopt)
         backing.addAll(newItems)
         index.clear()
         for (item in backing) index.insert(item)
@@ -259,7 +272,7 @@ class InfiniteDocument(
     // --- queries ---
 
     /** Items whose paint bounds meet the viewport, back to front. See [itemsIn]. */
-    fun visibleItems(rect: Rect): List<CanvasItem> = itemsIn(rect)
+    fun visibleItems(rect: Rect): List<CanvasItem> = layers.ordered(itemsIn(rect))
 
     /**
      * Items whose paint bounds meet [rect], back to front. This is the per-frame cull and the

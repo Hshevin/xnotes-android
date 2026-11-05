@@ -27,6 +27,7 @@ class AudioItem(
     override val resizable = true
     override val mirrorable = false
     override val exported = false
+    override var layerId: String? = null
     override var locked = false
     override var group: Int? = null
 

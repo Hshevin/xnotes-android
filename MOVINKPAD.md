@@ -54,3 +54,10 @@ It contains 3907 stylus events and 12/11/6 rising edges for buttons 1/2/3.
 Black handwriting on black paper in dark mode is displayed as white in blank note
 pages and the infinite canvas. Stored ink colours remain unchanged and PDF-backed
 pages are excluded. See `docs/movinkpad/night-ink-2026-10-31.md` for scope and validation.
+
+## Recorded button mappings (development branch, 2026-11-05)
+
+The fixed Pro Pen 3 settings above describe the previous preview. This branch replaces them
+with explicit button recording (MotionEvent and KeyEvent), named mappings and HOLD/SELECT
+behavior. Old `pro_pen_bindings` are intentionally ignored; users must record again.
+No APK is produced for this stage. See [implementation and validation](docs/movinkpad/recordable-pen-shortcuts-2026-11-05.md).

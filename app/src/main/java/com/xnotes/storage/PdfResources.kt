@@ -34,10 +34,26 @@ class PdfResources private constructor(private val context: Context) {
             val id = digest.digest().joinToString("") { "%02x".format(it) }
             val dest = File(directory,"$id.pdf")
             if (dest.exists()) {
-                check(dest.length() == temp.length()) { StorageText.t(StorageMsg.PDF_RESOURCE_VERIFY_FAILED) }
+                check(dest.length() == temp.length() && BundleMigration.hash(dest) == id) { StorageText.t(StorageMsg.PDF_RESOURCE_VERIFY_FAILED) }
             } else Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.ATOMIC_MOVE)
             register(dest,name); dest
         } finally { temp.delete() }
+    }
+    // Private immutable objects are hashed on first use and whenever their disk stamp changes.
+    // Do not re-read a hundreds-of-MB scan on every autosave/thumbnail.
+    private val verified = HashMap<String, Pair<Long, Long>>()
+    fun resolve(id: String): File = synchronized(gate) {
+        require(id.matches(Regex("[a-f0-9]{64}"))) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+        val file = File(directory, "$id.pdf")
+        check(file.isFile) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+        val stamp = file.length() to file.lastModified()
+        if (verified[id] != stamp) {
+            check(BundleMigration.hash(file) == id) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+            if (verified.size >= 256) verified.clear()
+            verified[id] = stamp
+        }
+        register(file, "PDF")
+        file
     }
     fun register(file: File, name: String) {
         check(isOwned(file) && file.isFile)

@@ -260,8 +260,8 @@ fun PreferencesPane(
                 Chip(stringResource(R.string.pan_none), prefs.zoomLockPan == "none") { update(prefs.copy(zoomLockPan = "none")) }
             }
             CheckRow(stringResource(R.string.pref_detect_shapes), prefs.detectShapes) { update(prefs.copy(detectShapes = it)) }
-            ProPenSettings(prefs.proPenBindings) {
-                if (editor.setProPenBindings(it)) prefs = editor.preferences
+            PenShortcutSettings(prefs.penShortcuts) {
+                editor.setPenShortcuts(it).also { saved -> if (saved) prefs = editor.preferences }
             }
             val tapOptions = tapGestureOptions.map { (id, res) -> id to stringResource(res) }
             FieldLabel(stringResource(R.string.pref_two_finger_tap))
@@ -883,17 +883,18 @@ private fun MillimetreField(label: String, value: Double, onChange: (Double) -> 
 }
 
 @Composable
-internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, onSelect: (String) -> Unit) {
+internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val palette = LocalPalette.current
     val label = options.firstOrNull { it.first == selectedId }?.second ?: options.first().second
     Box {
         Box(
-            Modifier
+            modifier
                 .clip(MaterialTheme.shapes.small)
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
                 .clickable { expanded = true }
                 .padding(horizontal = Space.s12, vertical = Space.s6),
+            contentAlignment = Alignment.CenterStart,
         ) {
             Text(label, color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge)
         }

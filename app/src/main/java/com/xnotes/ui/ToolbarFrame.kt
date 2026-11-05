@@ -125,6 +125,9 @@ internal fun ColumnScope.ToolbarAround(
     }
 }
 
+/** Only the focused pane advertises an active editing tool; view settings stay per document. */
+internal val LocalToolbarFocused = compositionLocalOf { true }
+
 internal val LocalEmbeddedToolbar = compositionLocalOf { false }
 internal val LocalWorkspaceToolbarLayout = compositionLocalOf<com.xnotes.core.tools.ToolbarLayout?> { null }
 
@@ -144,6 +147,7 @@ internal fun ToolbarFrame(
     val look = LocalToolbarLook.current
     val bar = barMetrics(look.size).copy(vertical = look.position.vertical)
     val glide = remember { ToolGlide() }
+    val visibleTool = armed.takeIf { LocalToolbarFocused.current }
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.extraLarge
     // Docked, the strip fills its edge; floating, a pill only as long as its tools, up to that edge.
@@ -181,7 +185,7 @@ internal fun ToolbarFrame(
                         .weight(1f, fill = !look.floating)
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = Space.s4)
-                        .toolGlide(glide, armed),
+                        .toolGlide(glide, visibleTool),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) { content() }
                 trailing?.invoke()
@@ -197,7 +201,7 @@ internal fun ToolbarFrame(
                         .weight(1f, fill = !look.floating)
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = Space.s4)
-                        .toolGlide(glide, armed),
+                        .toolGlide(glide, visibleTool),
                     verticalAlignment = Alignment.CenterVertically,
                 ) { content() }
                 trailing?.invoke()

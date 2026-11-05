@@ -35,6 +35,7 @@ fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
     // Carried, not reset: autosave snapshots the document through this, so dropping the lock here
     // would quietly unlock everything on the next save.
 }.also {
+    it.layerId = layerId
     it.locked = locked
     it.sync = sync
     it.group = group
@@ -59,7 +60,7 @@ fun List<CanvasItem>.deepCopyAll(measurer: TextMeasurer): List<CanvasItem> {
 
 /** A deep copy of a page — its items cloned ([deepCopyAll]) — keeping the size, PDF link, style, margins, markups and room. */
 fun Page.deepCopy(measurer: TextMeasurer): Page =
-    Page(width, height, items.deepCopyAll(measurer).toMutableList(), pdfPage, style, margins, markups, pdfTurn, rooms)
+    Page(width, height, items.deepCopyAll(measurer).toMutableList(), pdfPage, style, margins, markups, pdfTurn, rooms).also { it.layers.restore(layers.entries, layers.activeId) }
 
 /**
  * A deep copy of a document: pages cloned, bookmarks copied, the source PDF file and styles shared
@@ -101,7 +102,11 @@ fun Document.deepCopy(measurer: TextMeasurer): Document = Document(
  */
 fun Document.snapshot(): Document = Document(
     pages = pages.mapTo(mutableListOf()) { p ->
-        Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also { it.cover = p.cover }
+        Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also {
+            it.cover = p.cover
+            it.layers.restore(p.layers.entries, p.layers.activeId)
+            it.savedLayerIds = p.items.associateWith { item -> item.layerId }
+        }
     },
     dpi = dpi,
     path = path,

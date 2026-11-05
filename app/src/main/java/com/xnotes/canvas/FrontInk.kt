@@ -135,6 +135,7 @@ class FrontInk(
      */
     fun wet(stroke: Stroke?, pageIndex: Int?) {
         if (stroke == null || pageIndex == null) return abandon()
+        if (state.document.pages.getOrNull(pageIndex)?.layers?.entries?.size != 1) return abandon()
         val ribbon = stroke.wetRibbon
         // Ink whose runs cannot simply be laid over each other keeps the ordinary path, which
         // composites the whole stroke every frame and is what the wet cache is for.
@@ -170,6 +171,14 @@ class FrontInk(
     fun surfaceLost() {
         abandon()
         settle()
+    }
+
+    /** A layer edit changes composition even while the last completed stroke awaits handover. */
+    fun layersChanged() {
+        abandon()
+        settle()
+        val gen = handoffGen
+        view.publishThen { if (gen == handoffGen) pad.release() }
     }
 
     /** Give the pad back with nothing to hand over: a stroke abandoned, snapped to a shape, or gone. */

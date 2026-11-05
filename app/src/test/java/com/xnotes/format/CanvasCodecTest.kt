@@ -486,7 +486,7 @@ class CanvasCodecTest {
 
     @Test fun unknownTopLevelKeysAreSkipped() {
         val doc = readManifest(
-            """{"format":"xcanvas","layers":[1,2,3],"future":{"a":{"b":[null,true]}},"dpi":300,"items":[]}""",
+            """{"format":"xcanvas","future_layers":[1,2,3],"future":{"a":{"b":[null,true]}},"dpi":300,"items":[]}""",
         )
         assertEquals(300, doc.dpi)
     }

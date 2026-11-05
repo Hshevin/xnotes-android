@@ -458,7 +458,7 @@ object PdfExporter {
         renderer.beginMark(Mark.Decoration)
         paintRuling(page, renderer) // page ruling sits behind the ink
         renderer.endMark()
-        PageLayers.paint(page.items.forExport(), {
+        PageLayers.paint(page.visibleItems.forExport(), {
             flow.paint(page, renderer, cover, tagged = ctx.tags != null)
             for (link in flow.links(page)) renderer.addFlowLink(link)
         }) { item ->
@@ -553,7 +553,7 @@ object PdfExporter {
                     MarkupPainter.paint(renderer, page.markups, doc.dpi / 72.0) // on bare paper, beneath the ruling
                 }
                 paintRuling(page, renderer) // ruling behind ink
-                PageLayers.paint(page.items.forExport(), { flow.paint(page, renderer, cover) }) { it.paint(renderer) }
+                PageLayers.paint(page.visibleItems.forExport(), { flow.paint(page, renderer, cover) }) { it.paint(renderer) }
                 pdf.finishPage(pdfPage)
                 PdfItemRaster.releaseInkGeometry(page.items)
                 onProgress(index + 1, total)

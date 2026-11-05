@@ -82,6 +82,9 @@ class DocumentCodec(
     private val pdfGeometry: (Document, Int) -> PdfPageGeometry? = { _, _ -> null },
 ) {
 
+    /** Resolves only validated content IDs in the application-owned PDF store. */
+    var resolvePdf: ((String) -> File)? = null
+
     /** Thrown out of [write] when [isCancelled] turns true mid-copy, so the caller can discard the partial file. */
     class WriteCancelled : Exception()
 
@@ -163,8 +166,10 @@ class DocumentCodec(
         doc: Document,
         out: OutputStream,
         timing: WriteTiming? = null,
+        embedPdf: Boolean = true,
         isCancelled: () -> Boolean = { false },
     ) {
+        require(embedPdf || doc.pdfFile == null || doc.identity.pdfResource != null)
         val started = System.nanoTime()
         // Named up front by the same walk the manifest makes, so the entries can go in before it.
         val assets = imageAssets(doc)
@@ -184,9 +189,11 @@ class DocumentCodec(
             // Each image, packaged template and the source PDF streams straight from its file, never
             // as a byte[], so a note full of large assets doesn't materialize them in the heap on
             // every save. [isCancelled] lets a long copy abort (e.g. import cancel).
-            for ((name, file) in storedEntries(doc, assets, audio)) zos.putStored(name, file, isCancelled)
+            for ((name, file) in storedEntries(doc, assets, audio)) {
+                if (embedPdf || name != "assets/source.pdf") zos.putStored(name, file, isCancelled)
+            }
             val assetsDone = System.nanoTime()
-            writeTail(zos, doc, assets, timing, audio)
+            writeTail(zos, doc, assets, timing, audio, externalPdf = !embedPdf && doc.pdfFile != null)
             timing?.assetsMs = (assetsDone - started) / 1_000_000L
             timing?.manifestMs = (System.nanoTime() - assetsDone) / 1_000_000L
         }
@@ -203,8 +210,9 @@ class DocumentCodec(
         assets: List<Pair<String, File>>,
         timing: WriteTiming? = null,
         audio: List<Pair<String, File>> = audioAssets(doc),
+        externalPdf: Boolean = false,
     ) {
-        doc.identity.write(zos)
+        doc.identity.copy(externalPdf = externalPdf).write(zos)
         // The flow lives in its own ODF entry, written only when non-empty (or carrying
         // custom defaults) so untouched notes stay byte-identical to old readers.
         if (!doc.flow.isEmpty || !com.xnotes.core.text.FlowDefaults.of(doc.flow).isEmpty) {
@@ -341,26 +349,27 @@ class DocumentCodec(
         page.pdfPage?.let { j.value(it) } ?: j.nullValue()
         if (page.pdfPage != null && page.pdfTurn != 0) j.name("pdf_turn").value(page.pdfTurn)
         if (page.cover) j.name("cover").value(true)
+        LayerJson.write(j, page.layers)
         j.name("items").beginArray()
         // Ids only for what a connector on this page glues to; a page without connectors writes none.
         val ids = GlueIds.of(page.items)
         for (item in page.items) {
             when (item) {
-                is Stroke -> writeStroke(j, item)
+                is Stroke -> writeStroke(j, item, layerId = page.layerIdForWrite(item))
                 is ImageItem -> {
                     // The name was decided by [imageAssets]' walk of these same items; taking it
                     // from there keeps the entry and the manifest agreeing by construction.
                     val name = assets.getOrNull(nextAsset[0]++)?.first ?: continue
-                    writeImage(j, item, name, ids[item])
+                    writeImage(j, item, name, ids[item], layerId = page.layerIdForWrite(item))
                 }
                 is AudioItem -> {
                     val name = audio.getOrNull(nextAudio[0]++)?.first ?: continue
-                    writeAudio(j, item, name)
+                    writeAudio(j, item, name, layerId = page.layerIdForWrite(item))
                 }
-                is TextItem -> writeText(j, item, ids[item])
-                is ShapeItem -> writeShape(j, item, ids[item])
-                is ConnectorItem -> writeConnector(j, item, ids)
-                is TapeItem -> writeTape(j, item)
+                is TextItem -> writeText(j, item, ids[item], layerId = page.layerIdForWrite(item))
+                is ShapeItem -> writeShape(j, item, ids[item], layerId = page.layerIdForWrite(item))
+                is ConnectorItem -> writeConnector(j, item, ids, layerId = page.layerIdForWrite(item))
+                is TapeItem -> writeTape(j, item, layerId = page.layerIdForWrite(item))
                 else -> {} // unrecognized kind: not written
             }
         }
@@ -393,7 +402,7 @@ class DocumentCodec(
         j.endArray()
     }
 
-    private fun writeStroke(j: JsonWrite, s: Stroke) {
+    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId) {
         // Per-sample time is only meaningful to the speed pen, so it's written as an
         // optional 4th element only then — every other stroke serializes unchanged.
         val withTime = s.config.speedStrength > 0.0
@@ -448,10 +457,11 @@ class DocumentCodec(
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?) {
+    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId) {
         j.beginObject()
         j.name("kind").value(ImageItem.KIND)
         // Only on an item a connector glues to.
@@ -468,10 +478,11 @@ class DocumentCodec(
         item.sync?.let { writeSync(j, it) }
         if (item.locked) j.name("locked").value(true)
         item.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String) {
+    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId) {
         j.beginObject()
         j.name("kind").value(AudioItem.KIND)
         j.name("asset").value(assetName)
@@ -482,6 +493,7 @@ class DocumentCodec(
         if (a.audio.peaks.isNotEmpty()) j.name("peaks").value(java.util.Base64.getEncoder().encodeToString(a.audio.peaks))
         if (a.locked) j.name("locked").value(true)
         a.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -491,7 +503,7 @@ class DocumentCodec(
         j.name("rec_ms").value(m.ms)
     }
 
-    private fun writeText(j: JsonWrite, t: TextItem, id: Int?) {
+    private fun writeText(j: JsonWrite, t: TextItem, id: Int?, layerId: String? = t.layerId) {
         j.beginObject()
         j.name("kind").value(TextItem.KIND)
         id?.let { j.name("id").value(it) }
@@ -508,10 +520,11 @@ class DocumentCodec(
         t.sync?.let { writeSync(j, it) }
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?) {
+    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId) {
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
         val standIn = s.legacyOutline()
         val drawn = standIn?.let { Rect.bounding(it) }
@@ -581,6 +594,7 @@ class DocumentCodec(
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -590,7 +604,7 @@ class DocumentCodec(
      * route. Its style and label are a shape's.
      */
     /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
-    private fun writeTape(j: JsonWrite, t: TapeItem) {
+    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId) {
         val s = t.shape
         j.beginObject()
         j.name("kind").value(TapeItem.KIND)
@@ -604,10 +618,11 @@ class DocumentCodec(
         if (t.pattern != TapePattern.SOLID) j.name("pattern").value(t.pattern.id)
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
-    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>) {
+    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
         j.beginObject()
@@ -664,6 +679,7 @@ class DocumentCodec(
         c.sync?.let { writeSync(j, it) }
         if (c.locked) j.name("locked").value(true)
         c.group?.let { j.name("group").value(it) }
+        layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
         j.endObject()
     }
 
@@ -852,7 +868,12 @@ class DocumentCodec(
         doc.margins = m.margins
         doc.newPageSize = m.newPageSize
 
+        require(identity?.externalPdf != true || m.hasPdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }
         if (m.hasPdf) {
+            if (identity?.externalPdf == true && pdfFile == null && pdfDir != null) {
+                val id = requireNotNull(identity?.pdfResource)
+                pdfFile = requireNotNull(resolvePdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }(id)
+            }
             doc.pdfFile = pdfFile
         } else {
             if (pdfStore == null) pdfFile?.delete() // a stray PDF with no manifest flag: don't leak the temp file
@@ -881,6 +902,7 @@ class DocumentCodec(
                 if (item == null) {
                     dropped++
                 } else {
+                    require(page.layers.entries.any { it.id == item.layerId })
                     page.items.add(spec.index - dropped, item)
                     if (spec is PendingImage) glue.named(item, spec.id)
                 }
@@ -950,6 +972,7 @@ class DocumentCodec(
         val id: Int?,
         val sync: SyncMark?,
         val group: Int? = null,
+        val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
         val part: Rect? = null,
     ) : Pending(index, asset)
 
@@ -963,6 +986,7 @@ class DocumentCodec(
         val peaks: ByteArray,
         val locked: Boolean,
         val group: Int? = null,
+        val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
     ) : Pending(index, asset)
 
     /**
@@ -1079,6 +1103,7 @@ class DocumentCodec(
             var style = PageStyle()
             var margins = PageMargins()
             var rooms = emptyList<Room>()
+            var layers = com.xnotes.core.model.DrawingLayers()
             val items = mutableListOf<CanvasItem>()
             val pending = ArrayList<Pending>()
             val glue = GlueRead()
@@ -1093,6 +1118,7 @@ class DocumentCodec(
                     "style" -> style = parseStyle(p)
                     "margins" -> margins = parseMargins(p)
                     "rooms" -> rooms = parseRooms(p)
+                    "layers" -> layers = LayerJson.read(p)
                     "items" -> parseItems(p, items, pending, glue)
                     else -> p.skipValue()
                 }
@@ -1110,6 +1136,8 @@ class DocumentCodec(
                 pdfTurn = if (pdfPage == null) 0 else PageTurn.normalize(pdfTurn),
                 rooms = roomsWithin(rooms, width, height),
             )
+            page.layers.restore(layers.entries, layers.activeId)
+            require(page.items.all { item -> layers.entries.any { it.id == item.layerId } })
             // Only the first page can be the cover; a flag anywhere else is dropped.
             page.cover = cover && m.pages.isEmpty()
             m.pages.add(page)
@@ -1130,6 +1158,7 @@ class DocumentCodec(
     private class ItemScratch {
         var locked = false
         var group: Int? = null
+        var layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT
         var kind: String? = null
         var id: Int? = null
         var connector: ConnectorScratch? = null
@@ -1256,6 +1285,7 @@ class DocumentCodec(
                 "dash_gap" -> s.dashGap = doubleOr(p, 8.0)
                 "locked" -> s.locked = boolOr(p, false)
                 "group" -> s.group = intOrNull(p)
+                "layer" -> s.layerId = stringOr(p, com.xnotes.core.model.DrawingLayers.DEFAULT)
                 "rid" -> s.rid = intOr(p, 0)
                 "name" -> s.name = stringOr(p, "")
                 "duration_ms" -> s.durationMs = intOr(p, 0)
@@ -1280,7 +1310,7 @@ class DocumentCodec(
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.part,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
                         ),
                     )
                 }
@@ -1288,7 +1318,7 @@ class DocumentCodec(
             AudioItem.KIND -> {
                 val asset = s.asset
                 if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
                 }
             }
             TextItem.KIND -> items.add(
@@ -1310,6 +1340,7 @@ class DocumentCodec(
             TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // unrecognized kind: skipped (forgiving)
         }
+        if (items.size > before) items[before].layerId = s.layerId
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every note written before locking existed, which reads back as unlocked.
         if (s.locked && items.size > before) items[before].locked = true
@@ -1704,6 +1735,7 @@ class DocumentCodec(
                 it.locked = spec.locked
                 it.sync = spec.sync
                 it.group = spec.group
+                it.layerId = spec.layerId
             }
     }
 
@@ -1715,6 +1747,7 @@ class DocumentCodec(
             .also {
                 it.locked = spec.locked
                 it.group = spec.group
+                it.layerId = spec.layerId
             }
     }
 

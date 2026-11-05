@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="layers_title">图层</string>
+    <string name="layers_default">图层 %1$d</string>
+    <string name="layers_scope">书写和擦除仅作用于当前图层，页面背景保持独立。</string>
+    <string name="layers_hide">隐藏</string>
+    <string name="layers_show">显示</string>
+    <string name="layers_lock">锁定</string>
+    <string name="layers_unlock">解锁</string>
+    <string name="layers_rename">重命名</string>
+    <string name="layers_up">上移</string>
+    <string name="layers_down">下移</string>
+    <string name="layers_delete">删除</string>
+    <string name="layers_add">新建图层</string>
+    <string name="layers_close">关闭</string>
+    <string name="layers_move_selection">将选中内容移到此层</string>
+    <string name="layers_save">保存</string>
+    <string name="layers_cancel">取消</string>
+    <string name="layers_delete_confirm">删除此图层及其中的内容？可以通过撤销恢复。</string>
+    <string name="layers_not_writable">请选择显示且未锁定的图层进行编辑。</string>
+    <string name="layers_drag">拖动图层排序</string>
+    <string name="layers_drag_hint">拖动缩略图或名称排序，双击名称重命名。</string>
+    <string name="layers_actions">图层操作</string>
+    <string name="layers_preview_failed">缩略图暂不可用</string>
+    <string name="layers_preview_mode">缩略图显示</string>
+    <string name="layers_preview_none">不显示</string>
+    <string name="layers_preview_content">已有笔记区域</string>
+    <string name="layers_preview_page">整页笔记</string>
+</resources>

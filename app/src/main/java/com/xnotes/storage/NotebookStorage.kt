@@ -44,7 +44,7 @@ class NotebookStorage private constructor(private val context: Context) {
     fun ensure(uri: String, name: String, kind: String): BundleIdentity = synchronized(lock) {
         if (journal(uri).pending) journal(uri).publish(target(uri))
         val existing = identity(uri)
-        val identity = existing ?: migrate(uri, copy = false)
+        val identity = compactPdf(uri, existing ?: migrate(uri, copy = false))
         registry.register(identity.documentId, kind, name, uri)
         for(old in registry.locations(identity.documentId)) if(old!=uri) {
             val reachable=runCatching { context.contentResolver.openFileDescriptor(Uri.parse(old),"r")?.use { true } ?: false }.getOrDefault(false)
@@ -53,6 +53,56 @@ class NotebookStorage private constructor(private val context: Context) {
         identity.pdfResource?.let { id -> if(registry.resource(id)!=null) PdfResources.get(context).pin("note:${identity.documentId}",PdfResources.get(context).references("note:${identity.documentId}")+id) }
         identity
     }
+    /** Pin a verified immutable original before removing its embedded copy. Never re-encode ink. */
+    private fun compactPdf(uri: String, identity: BundleIdentity): BundleIdentity {
+        val resources = PdfResources.get(context)
+        if (identity.externalPdf) {
+            val id = requireNotNull(identity.pdfResource)
+            resources.resolve(id)
+            resources.pin("note:${identity.documentId}", resources.references("note:${identity.documentId}") + id)
+            return identity
+        }
+        val local = ownedFile(uri)
+        val source = local ?: File.createTempFile("pdf-migrate-", ".zip", context.cacheDir)
+        try {
+            if (local == null) target(uri).read().use { input -> source.outputStream().use { input.copyTo(it) } }
+            val pdf = java.util.zip.ZipFile(source).use { zip ->
+                val entry = zip.getEntry(com.xnotes.format.BundlePdf.ENTRY) ?: return identity
+                zip.getInputStream(entry).use { resources.admit(it, "PDF") }
+            }
+            val updated = identity.copy(pdfResource = pdf.nameWithoutExtension, externalPdf = true)
+            resources.resolve(pdf.nameWithoutExtension)
+            resources.pin("note:${identity.documentId}", resources.references("note:${identity.documentId}") + pdf.nameWithoutExtension)
+            val staged = com.xnotes.format.BundlePdf.prepare(source, local?.parentFile ?: context.cacheDir, updated, pdf)
+            try {
+                if (local != null) BundleMigration.publish(staged, local)
+                else { journal(uri).stage(source, staged.file); journal(uri).publish(target(uri)) }
+            } finally { staged.file.delete() }
+            return updated
+        } finally { if (local == null) source.delete() }
+    }
+
+    /** Complete candidate first; local replacement is atomic, SAF retains a durable recovery journal. */
+    fun publishNote(uri: String, candidate: File) = synchronized(lock) {
+        check(!journal(uri).pending) { StorageText.t(StorageMsg.MIGRATION_INTERRUPTED) }
+        val local = ownedFile(uri)
+        if (local != null) {
+            val sibling = File.createTempFile("save-", ".xnote", requireNotNull(local.parentFile))
+            try {
+                java.io.FileOutputStream(sibling).use { out -> candidate.inputStream().use { it.copyTo(out) }; out.fd.sync() }
+                check(BundleMigration.hash(sibling) == BundleMigration.hash(candidate))
+                java.nio.file.Files.move(sibling.toPath(), local.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } finally { sibling.delete() }
+        } else {
+            val source = File.createTempFile("save-original-", ".zip", context.cacheDir)
+            try {
+                target(uri).read().use { input -> source.outputStream().use { input.copyTo(it) } }
+                journal(uri).stage(source, candidate)
+                journal(uri).publish(target(uri))
+            } finally { source.delete() }
+        }
+    }
+
     private fun migrate(uri: String, copy: Boolean): BundleIdentity {
         val local = ownedFile(uri)
         if (local != null) {

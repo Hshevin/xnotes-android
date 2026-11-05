@@ -8,12 +8,14 @@ composeBom = "2026.05.01"
 coroutines = "1.10.2"
 junit = "4.13.2"
 json = "20240303"
+robolectric = "4.17"
 pdfboxAndroid = "2.0.27.0"
 androidsvg = "1.4"
 latex = "1.5.0-kt2.1.0"
 commonmark = "0.30.1"
 
 [libraries]
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
