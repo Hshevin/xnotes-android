@@ -19,5 +19,6 @@
     <string name="storage_msg_duplicate_documents_found">Found several documents with the same ID. Choose the original manually or make the copy an independent document</string>
     <string name="storage_msg_invalid_note_path">Invalid note path</string>
     <string name="storage_msg_pdf_resource_verify_failed">PDF resource verification failed</string>
-    <string name="storage_msg_pdf_resource_corrupt">PDF resource is missing or damaged. Attach it again</string>
+    <string name="storage_msg_pdf_resource_corrupt">The original PDF this note refers to is not stored in this app. Another installed version may have upgraded the note, or the app was reinstalled or its data cleared. Your ink and annotations are intact: choose the same original PDF to re-link it, or export the note from the installed version that upgraded it</string>
+    <string name="storage_msg_pdf_resource_mismatch">The selected PDF does not match this note\'s original PDF. Nothing was changed; choose the same file you first imported</string>
 </resources>

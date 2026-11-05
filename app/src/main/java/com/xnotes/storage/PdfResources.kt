@@ -39,6 +39,24 @@ class PdfResources private constructor(private val context: Context) {
             register(dest,name); dest
         } finally { temp.delete() }
     }
+    /** Re-attach a missing or damaged original: only bytes whose SHA-256 is [id] are kept, so a different PDF never lands under a note. */
+    fun restore(input: InputStream, id: String, name: String): File = synchronized(gate) {
+        require(id.matches(Regex("[a-f0-9]{64}"))) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+        val temp = File.createTempFile("resource-", ".tmp",directory)
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            FileOutputStream(temp).use { out ->
+                val bytes = ByteArray(65536)
+                while (true) { val n = input.read(bytes); if (n < 0) break; out.write(bytes,0,n); digest.update(bytes,0,n) }
+                out.fd.sync()
+            }
+            check(digest.digest().joinToString("") { "%02x".format(it) } == id) { StorageText.t(StorageMsg.PDF_RESOURCE_MISMATCH) }
+            val dest = File(directory,"$id.pdf")
+            if (!(dest.isFile && BundleMigration.hash(dest) == id)) Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+            verified.remove(id)
+            register(dest,name); dest
+        } finally { temp.delete() }
+    }
     // Private immutable objects are hashed on first use and whenever their disk stamp changes.
     // Do not re-read a hundreds-of-MB scan on every autosave/thumbnail.
     private val verified = HashMap<String, Pair<Long, Long>>()

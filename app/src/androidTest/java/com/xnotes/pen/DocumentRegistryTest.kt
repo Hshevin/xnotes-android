@@ -125,4 +125,41 @@ class DocumentRegistryTest {
         }
     }
 
+    @Test fun missingPrivateOriginalOnlyRelinksIdenticalPdf() {
+        val context = PenTestRunner.instance.targetContext
+        val storage = com.xnotes.storage.NotebookStorage.get(context)
+        val resources = com.xnotes.storage.PdfResources.get(context)
+        val root = com.xnotes.platform.AppStorageDocumentsProvider.treeUri(context)
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(root, "root")
+        val uri = android.provider.DocumentsContract.createDocument(context.contentResolver, parent,
+            "application/octet-stream", "relink-${UUID.randomUUID()}.xnote")!!
+        val pdfBytes = "%PDF-1.7 relink-${UUID.randomUUID()}".toByteArray()
+        val originalIdentity = com.xnotes.format.BundleIdentity()
+        val file = storage.ownedFile(uri.toString())!!
+        try {
+            java.util.zip.ZipOutputStream(file.outputStream()).use { zip ->
+                for ((name, bytes) in listOf("manifest.json" to """{"format":"xnote","has_pdf":true,"pages":[]}""".toByteArray(), com.xnotes.format.BundlePdf.ENTRY to pdfBytes)) {
+                    zip.putNextEntry(java.util.zip.ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+                }
+                originalIdentity.write(zip)
+            }
+            val identity = storage.ensure(uri.toString(), "relink.xnote", "xnote")
+            val id = identity.pdfResource!!
+            // As if another install migrated the shared file: this install has no private original.
+            assertTrue(File(resources.directory, "$id.pdf").delete())
+            val migrated = file.readBytes()
+            assertTrue(runCatching { storage.ensure(uri.toString(), "relink.xnote", "xnote") }.isFailure)
+            assertTrue(runCatching { resources.restore("%PDF-1.7 other".byteInputStream(), id, "x.pdf") }.isFailure)
+            assertFalse(File(resources.directory, "$id.pdf").exists())
+            resources.restore(pdfBytes.inputStream(), id, "x.pdf")
+            assertEquals(identity, storage.ensure(uri.toString(), "relink.xnote", "xnote"))
+            assertArrayEquals(pdfBytes, resources.resolve(id).readBytes())
+            assertArrayEquals(migrated, file.readBytes())
+        } finally {
+            android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            storage.registry.markUnavailable(uri.toString())
+            resources.pin("note:${originalIdentity.documentId}", emptySet())
+        }
+    }
+
 }

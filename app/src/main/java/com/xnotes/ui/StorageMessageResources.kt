@@ -26,6 +26,7 @@ internal fun StorageMsg.resId(): Int = when (this) {
     StorageMsg.INVALID_NOTE_PATH -> R.string.storage_msg_invalid_note_path
     StorageMsg.PDF_RESOURCE_VERIFY_FAILED -> R.string.storage_msg_pdf_resource_verify_failed
     StorageMsg.PDF_RESOURCE_CORRUPT -> R.string.storage_msg_pdf_resource_corrupt
+    StorageMsg.PDF_RESOURCE_MISMATCH -> R.string.storage_msg_pdf_resource_mismatch
 }
 
 /** Routes storage messages through Android resources so they follow the app locale. */

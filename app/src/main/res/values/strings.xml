@@ -803,10 +803,11 @@
     <string name="help_make_better">Help make xnotes better</string>
     <string name="report_bug">Report a bug</string>
     <string name="request_feature">Request a feature</string>
-    <string name="sponsor">Sponsor</string>
+    <string name="releases">Releases</string>
     <string name="enjoying_xnotes">"Enjoying xnotes? "</string>
     <string name="star_on_github">Star it on GitHub</string>
     <string name="mit_license">MIT License</string>
+    <string name="upstream_project">Upstream: shardulvs/xnotes-android</string>
     <string name="version_n">Version %1$s</string>
     <string name="version_copied">Version copied</string>
 

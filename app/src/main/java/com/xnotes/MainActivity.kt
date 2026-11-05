@@ -397,26 +397,35 @@ private fun EditorScreen(
     var pendingExportPages by remember { mutableStateOf<PendingPages?>(null) }
     val scope = rememberCoroutineScope()
     val storageProblemPane = listOfNotNull(editor, editor.secondary).firstOrNull { it.storageProblemUri != null }
+    var relinkPane by remember { mutableStateOf<com.xnotes.ui.Editor?>(null) }
+    var relinking by remember { mutableStateOf(false) }
+    val relinkPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pane = relinkPane; relinkPane = null
+        if (uri != null && pane != null) { relinking = true; scope.launch { try { pane.relinkMissingPdf(uri.toString()) } finally { relinking = false } } }
+    }
     storageProblemPane?.let { pane ->
         var working by remember(pane) { mutableStateOf(false) }
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { if (!working) pane.storageProblemUri = null },
+            onDismissRequest = { if (!working && !relinking) pane.storageProblemUri = null },
             title = { androidx.compose.material3.Text(stringResource(R.string.recovery_title)) },
             text = { androidx.compose.material3.Text(pane.storageProblemText) },
             confirmButton = {
                 androidx.compose.foundation.layout.Column {
-                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working, onClick = {
+                    if (pane.storageMissingPdf != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
+                        relinkPane = pane; relinkPdfLauncher.launch(arrayOf("application/pdf"))
+                    }) { androidx.compose.material3.Text(stringResource(R.string.recovery_relink_pdf)) }
+                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.recoverStorageProblem(restore = true); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_restore_backup)) }
-                    if (pane.storageDuplicate) androidx.compose.material3.TextButton(enabled = !working, onClick = {
+                    if (pane.storageDuplicate) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.recoverStorageProblem(copy = true); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_make_copy_independent)) }
-                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working, onClick = {
+                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.recoverStorageProblem(); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_keep_current)) }
                 }
             },
-            dismissButton = { androidx.compose.material3.TextButton(enabled = !working, onClick = { pane.storageProblemUri = null }) { androidx.compose.material3.Text(stringResource(R.string.recovery_later)) } },
+            dismissButton = { androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = { pane.storageProblemUri = null }) { androidx.compose.material3.Text(stringResource(R.string.recovery_later)) } },
         )
     }
     val resolver = context.contentResolver

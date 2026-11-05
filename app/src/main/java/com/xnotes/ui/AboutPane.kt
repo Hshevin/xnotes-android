@@ -61,11 +61,12 @@ import kotlinx.coroutines.launch
 import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
-private const val REPO_URL = "https://github.com/shardulvs/xnotes-android"
-private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
-private const val ISSUES_URL = "https://github.com/shardulvs/xnotes-android/issues/new"
-private const val FDROID_URL = "https://f-droid.org/en/packages/com.xnotes"
-private const val LICENSE_URL = "https://github.com/shardulvs/xnotes-android/blob/master/LICENSE"
+// This MovinkPad build's own repository; the upstream project is credited by UPSTREAM_URL.
+private const val REPO_URL = "https://github.com/Hshevin/xnotes-android"
+private const val RELEASES_URL = "$REPO_URL/releases"
+private const val ISSUES_URL = "$REPO_URL/issues/new"
+private const val LICENSE_URL = "$REPO_URL/blob/master/LICENSE"
+private const val UPSTREAM_URL = "https://github.com/shardulvs/xnotes-android"
 private const val MIN_FILL_MS = 120L
 
 /**
@@ -140,7 +141,7 @@ fun AboutPane() {
             ) {
                 AboutButton(XnotesIcons.bug, stringResource(R.string.report_bug)) { open(bugReportUrl(version)) }
                 AboutButton(XnotesIcons.idea, stringResource(R.string.request_feature)) { open(featureRequestUrl()) }
-                AboutButton(XnotesIcons.heart, stringResource(R.string.sponsor)) { open(SPONSOR_URL) }
+                AboutButton(XnotesIcons.download, stringResource(R.string.releases)) { open(RELEASES_URL) }
             }
 
             Spacer(Modifier.height(Space.s24))
@@ -157,7 +158,7 @@ fun AboutPane() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.mit_license), color = palette.textDim.toComposeColor(), fontSize = TextSize.caption, modifier = Modifier.clickable { open(LICENSE_URL) })
                 Text("   ·   ", color = palette.textDim.toComposeColor(), fontSize = TextSize.caption)
-                Text("F-Droid", color = palette.textDim.toComposeColor(), fontSize = TextSize.caption, modifier = Modifier.clickable { open(FDROID_URL) })
+                Text(stringResource(R.string.upstream_project), color = palette.textDim.toComposeColor(), fontSize = TextSize.caption, modifier = Modifier.clickable { open(UPSTREAM_URL) })
             }
         }
     }

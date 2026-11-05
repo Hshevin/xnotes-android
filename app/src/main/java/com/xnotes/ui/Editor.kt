@@ -853,6 +853,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var storageProblemText by mutableStateOf("")
     var storageCanRecover by mutableStateOf(false)
     var storageDuplicate by mutableStateOf(false)
+    /** SHA-256 of the referenced original PDF this install cannot resolve; non-null offers re-linking. */
+    var storageMissingPdf by mutableStateOf<String?>(null)
+    private var storageProblemName: String? = null
     private suspend fun registerForOpen(uri: String, name: String?, kind: String): Boolean {
         return try {
             withContext(Dispatchers.IO) {
@@ -863,10 +866,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } catch (e: Exception) {
             storageCanRecover = withContext(Dispatchers.IO) { notebookStorage.hasRecovery(uri) }
             storageDuplicate = withContext(Dispatchers.IO) { notebookStorage.registry.idAt(uri)?.let { notebookStorage.registry.locations(it).size > 1 } == true }
+            storageMissingPdf = if (kind == "xnote") withContext(Dispatchers.IO) {
+                runCatching { notebookStorage.identity(uri) }.getOrNull()?.takeIf { it.externalPdf }?.pdfResource?.takeIf { id ->
+                    runCatching { com.xnotes.storage.PdfResources.get(appContext).resolve(id) }.isFailure
+                }
+            } else null
+            storageProblemName = name
             storageProblemUri = uri
             storageProblemText = if (e is IllegalStateException || e is IllegalArgumentException) e.message ?: appContext.getString(R.string.recovery_register_failed) else appContext.getString(R.string.recovery_not_writable)
             false
         }
+    }
+    /** Verify [pdfUri] against the note's recorded original, store it privately, then reopen the note. */
+    suspend fun relinkMissingPdf(pdfUri: String): Boolean {
+        val uri = storageProblemUri ?: return false
+        val id = storageMissingPdf ?: return false
+        try {
+            withContext(Dispatchers.IO) {
+                val input = requireNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(pdfUri))) { appContext.getString(R.string.recovery_failed) }
+                input.use { com.xnotes.storage.PdfResources.get(appContext).restore(it, id, queryDisplayName(android.net.Uri.parse(pdfUri)) ?: "PDF") }
+            }
+        } catch (e: Exception) { storageProblemText = e.message ?: appContext.getString(R.string.recovery_failed); return false }
+        storageMissingPdf = null
+        storageProblemUri = null
+        openAsync(uri, storageProblemName)
+        return true
     }
     suspend fun recoverStorageProblem(restore: Boolean = false, copy: Boolean = false): Boolean {
         val uri = storageProblemUri ?: return false

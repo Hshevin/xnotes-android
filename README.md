@@ -6,7 +6,7 @@
 
 从 [GitHub Releases](https://github.com/Hshevin/xnotes-android/releases) 下载本 fork 的 **ARM64 APK**，在平板上打开安装。已安装本 fork 正式版的用户可用同签名的新版本直接覆盖升级。分支测试包使用独立包名，可与正式版并存，各自保存数据；旧 AI 和双窗格专用测试包不再纳入本地打包。当前分支测试包见[本地交付与验证记录](docs/movinkpad/branch-tests-2026-11-05.md)。
 
-最新本地覆盖更新：[0.9.8 / Release 93 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release93-arm64.apk)，沿用正式包名与签名，新增笔按键截屏动作并调整首页 AI 入口顺序。验证与设备验收边界见 [Release 93 记录](docs/movinkpad/release-2026-11-02.md#release-93098-主分支更新2026-11-05)，尚未发布到 GitHub。
+最新本地覆盖更新：[0.9.8 / Release 94 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release94-arm64.apk)，沿用正式包名与签名，新增引用式笔记缺失 PDF 原件时的重新关联入口，并更新关于页链接。验证与设备验收边界见 [Release 94 记录](docs/movinkpad/release-2026-11-02.md#release-94pdf-原件重新关联2026-11-05)，本次仅本地交付。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 

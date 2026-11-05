@@ -24,7 +24,8 @@ enum class StorageMsg(val zh: String) {
     DUPLICATE_DOCUMENTS_FOUND("找到多份相同ID的文档，请手动选择原件或将副本设为独立文档"),
     INVALID_NOTE_PATH("非法笔记路径"),
     PDF_RESOURCE_VERIFY_FAILED("PDF 资源校验失败"),
-    PDF_RESOURCE_CORRUPT("PDF 资源丢失或损坏，请重新附加"),
+    PDF_RESOURCE_CORRUPT("此笔记引用的原始 PDF 不在本应用中，可能已被另一个安装版本迁移，或应用曾重装 / 清除数据。笔迹与批注未受影响：请选择同一份原始 PDF 重新关联，或在原安装版本中导出笔记"),
+    PDF_RESOURCE_MISMATCH("所选 PDF 与此笔记的原始 PDF 内容不一致，未做任何更改；请选择当初导入的同一份文件"),
 }
 
 object StorageText {
