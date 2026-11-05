@@ -1,5 +1,7 @@
 # MovinkPad preview development
 
+- 2026-11-05 用户要求拉取远端主分支与新增功能分支，分别本地打包独立测试 APK；旧 AI/分屏专用测试包不再维护，可清理旧测试产物。各分支使用独立工作树、构建目录及 `com.xnotes.movinkpad.branchtest.<id>` 包名，保留原签名，不覆盖正式版；交付时报告包名和源码提交。保留用户未提交修改，不将不同功能分支擅自互相合并。本次不包含设备安装、推送或 GitHub Release。
+
 - Read `MOVINKPAD.md` and `README.md` before changing this fork. Read `docs/movinkpad/project-brief.md` and check `git status` before work. This fork is self-contained; the separate diagnostic application is not a module here.
 - Preserve upstream licenses and third-party notices. Automatically commit completed, validated work locally; push to GitHub only when explicitly requested.
 - Target Wacom MovinkPad Pro 14, Android 15, Pro Pen 3; product reference remains OneNote Android tablet.
