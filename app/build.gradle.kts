@@ -32,7 +32,7 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.xnotes.pen.PenTestRunner"
-        versionCode = if (aiPreview) 3 else if (splitPreview) 79 else 89
+        versionCode = if (aiPreview) 3 else if (splitPreview) 79 else 90
         versionName = "0.9.7"
         ndk {
             // This preview targets the ARM64 MovinkPad and ARM64 test emulator.
