@@ -2,7 +2,7 @@
 <resources>
     <string name="pen_shortcuts_title">手写笔按键映射</string>
     <string name="pen_shortcuts_help">先录入按键，再分配工具或操作。映射仅在文档编辑器内生效；书写中切换工具会等到抬笔后执行。</string>
-    <string name="pen_shortcuts_empty">尚未录入按键。旧 Pro Pen 3 映射不再使用，请重新录入按键。</string>
+    <string name="pen_shortcuts_empty">尚未录入按键。录入手写笔按键后即可为其分配工具或操作。</string>
     <string name="pen_record_add">录入按键</string>
     <string name="pen_record_help">请在 15 秒内将笔悬停在下方区域，按下一个按键并松开。没有反应时，请按住按键轻触区域，再松开。也可录入以键盘事件上报的笔按键。</string>
     <string name="pen_record_area">按键录入区域</string>
@@ -16,4 +16,8 @@
     <string name="pen_shortcuts_invalid">无法保存：映射中有重复或无效按键，或已超过数量上限。</string>
     <string name="pen_shortcut_near_screen">此映射需要笔靠近屏幕。若需远离屏幕使用遥控按键，请在远处重新录入。</string>
     <string name="pen_record_multiple">检测到多个按键，请一次只录入一个按键。</string>
+    <string name="pen_single_press">单击/按住</string>
+    <string name="pen_double_press">双击</string>
+    <string name="pen_double_delay">双击间隔：%1$d 毫秒</string>
+    <string name="pen_double_delay_help">按键设置了双击动作时，单击切换工具或单击执行的操作会等待这段时间以判断是否双击；按住临时启用仍立即生效。</string>
 </resources>

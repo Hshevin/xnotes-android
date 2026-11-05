@@ -85,15 +85,23 @@ class WorkspaceToolbarTest {
     }
 
 
-    @Test fun layersAppearOncePerDocumentInEveryWorkspaceCombination() {
+    @Test fun layersButtonOnlyOnCanvasBarsInEveryWorkspaceCombination() {
         val layout = workspaceToolbarLayout(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)
         for (first in ToolbarDocument.entries) for (second in ToolbarDocument.entries) {
             val workspace = setOf(first, second)
             assertFalse(ToolbarItem.LAYERS in items(layout.forDocumentControls(false, workspace)))
             for (doc in workspace) {
                 val bar = documentToolbarLayout(layout, doc == ToolbarDocument.CANVAS, doc == ToolbarDocument.PDF, workspace)
-                assertEquals(1, items(bar).count { it == ToolbarItem.LAYERS })
+                // Notes and PDFs open layers from the side panel tab instead.
+                assertEquals(if (doc == ToolbarDocument.CANVAS) 1 else 0, items(bar).count { it == ToolbarItem.LAYERS })
             }
         }
+    }
+
+    @Test fun storedPagedBarDropsItsOldLayersButton() {
+        val raw = listOf(listOf("pen" to true, "layers" to true, "styles" to true))
+        assertFalse(ToolbarItem.LAYERS in items(ToolbarLayout.fromRaw(raw)))
+        assertFalse(ToolbarItem.LAYERS in items(ToolbarLayout.DEFAULT))
+        assertTrue(ToolbarItem.LAYERS in items(ToolbarLayout.CANVAS_DEFAULT))
     }
 }

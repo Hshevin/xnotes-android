@@ -746,7 +746,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val proPenInput by lazy {
         com.xnotes.pen.ProPenInput(
             { preferences.penShortcuts }, { tool }, ::selectTool, ::dispatchTapGesture,
-            { toolbarTool = it },
+            { toolbarTool = it }, { preferences.penDoublePressMs.toLong() },
         )
     }
 
@@ -766,6 +766,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         get() = infiniteOrNull ?: InfiniteEditor(appContext).also {
             infiniteOrNull = it
             it.penShortcuts = { preferences.penShortcuts }
+            it.penDoublePressMs = { preferences.penDoublePressMs.toLong() }
             it.otherPenInContact = { sibling?.stylusInContact == true }
             it.beforePenInput = ::focusForPenInput
             it.applyPalette(palette)
@@ -2913,6 +2914,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             other.prefsVersion++
         }
         return true
+    }
+
+    /** The double-press window for recorded buttons; both panes read it at the next press. */
+    fun setPenDoublePressMs(ms: Int) {
+        val value = ms.coerceIn(com.xnotes.pen.PenBinding.DOUBLE_PRESS_RANGE)
+        if (value == preferences.penDoublePressMs) return
+        settings = settings.copy(prefs = preferences.copy(penDoublePressMs = value))
+        sibling?.let { other -> other.settings = other.settings.copy(prefs = other.preferences.copy(penDoublePressMs = value)) }
+        saveSettingsSoon()
+        prefsVersion++
     }
 
     /**
@@ -9380,15 +9391,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Feeder C entry point: route stylus side-button key presses (Bluetooth/USI pens) to the
-     *  controller's held latch, and the vendor double-tap/click keycodes to their gesture handlers;
-     *  a held key that can also be clicked goes to both. Returns true when consumed, so the host
+     *  controller's held latch. Other pen keys (vendor clicks, page keys) act only through recorded
+     *  mappings, which [onRecordedPenKey] sees first. Returns true when consumed, so the host
      *  swallows the key. */
     fun onRecordedPenKey(e: android.view.KeyEvent): Boolean =
         if (canvasOpen) infinite.onRecordedPenKey(e) else proPenInput.key(e)
 
     fun onStylusButtonKey(e: android.view.KeyEvent): Boolean {
-        if (e.keyCode == penDoubleTapKeycode) return onPenDoubleTapKey(e)
-        if (e.keyCode in penButtonTapKeycodes) return onPenButtonTapKey(e)
         val down = when (e.action) {
             android.view.KeyEvent.ACTION_DOWN -> true
             android.view.KeyEvent.ACTION_UP -> false
@@ -9396,67 +9405,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         // A canvas is on top: the same key stream drives its pen, so a Bluetooth or USI side
         // button behaves there exactly as it does on a note.
-        val held = if (canvasOpen) infinite.onStylusButtonKey(e.keyCode, down) else controller.onStylusButtonKey(e.keyCode, down)
-        if (held && e.keyCode in penButtonClickKeycodes) onPenButtonClick(e)
-        return held
-    }
-
-    // Pens with no side button (e.g. Huawei M-Pencil) report a barrel double-tap as a vendor key
-    // code with no standard mapping (718). One physical double-tap arrives as two quick presses, so
-    // a pair within the window fires the mapped gesture once. Consumed only when the gesture is set.
-    private val penDoubleTapKeycode = 718
-    private val penDoubleTapMs = 600L
-    private var lastPenTapMs = 0L
-    private fun onPenDoubleTapKey(e: android.view.KeyEvent): Boolean {
-        if (preferences.stylusDoubleTap == "none") return false
-        if (e.action == android.view.KeyEvent.ACTION_DOWN) {
-            val t = e.eventTime
-            if (lastPenTapMs != 0L && t - lastPenTapMs <= penDoubleTapMs) {
-                lastPenTapMs = 0L
-                dispatchTapGesture(preferences.stylusDoubleTap)
-            } else {
-                lastPenTapMs = t
-            }
-        }
-        return true
-    }
-
-    // Some pens report the side button as a momentary vendor key click, not a held state, so it can't
-    // drive the hold latch; fire the mapped gesture once per click, on the down, or on the up when
-    // no down came. HONOR Magic-Pencil 4s -> 333. Lenovo Tab Pen Plus has one button whose firmware
-    // sends a Lenovo code per gesture (600-604), nearly always as a lone up.
-    // Redmi Smart Pen sends its two buttons as the plain page keys, so 92/93 stay claimable by a
-    // hardware keyboard: an unmapped button falls through and still pages the note.
-    private val penButtonTapKeycodes = setOf(333, 600, 601, 602, 603, 604, 92, 93)
-    private var penTapDownCode = 0
-    private fun onPenButtonTapKey(e: android.view.KeyEvent): Boolean {
-        val action = when (e.keyCode) {
-            android.view.KeyEvent.KEYCODE_PAGE_UP -> preferences.stylusButton1Tap
-            android.view.KeyEvent.KEYCODE_PAGE_DOWN -> preferences.stylusButton2Tap
-            else -> preferences.stylusButtonTap
-        }
-        if (action == "none") return false
-        when (e.action) {
-            android.view.KeyEvent.ACTION_DOWN -> {
-                penTapDownCode = e.keyCode
-                dispatchTapGesture(action)
-            }
-            android.view.KeyEvent.ACTION_UP ->
-                if (penTapDownCode == e.keyCode) penTapDownCode = 0 else dispatchTapGesture(action)
-        }
-        return true
-    }
-
-    // Held side buttons whose hardware also reports a quick click, so the user gets both (see
-    // ButtonClick): a click runs the side button's tap action. OnePlus Pad Go 2 Stylo -> F21.
-    private val penButtonClickKeycodes = setOf(android.view.KeyEvent.KEYCODE_F21)
-    private fun onPenButtonClick(e: android.view.KeyEvent) {
-        val clicks = StylusButtonLatch.clicks
-        if (e.action == android.view.KeyEvent.ACTION_DOWN) {
-            if (e.repeatCount == 0 && preferences.stylusButtonTap != "none") clicks.onPress(e.downTime)
-        } else if (clicks.onRelease(e.eventTime) && !e.isCanceled) {
-            dispatchTapGesture(preferences.stylusButtonTap)
-        }
+        return if (canvasOpen) infinite.onStylusButtonKey(e.keyCode, down) else controller.onStylusButtonKey(e.keyCode, down)
     }
 
     fun newNote() {

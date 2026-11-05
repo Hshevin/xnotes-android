@@ -2,7 +2,7 @@
 <resources>
     <string name="pen_shortcuts_title">Stylus button mappings</string>
     <string name="pen_shortcuts_help">Record a button, then assign a tool or action. Mappings apply inside the editor only. Tool changes during a stroke wait until the pen lifts.</string>
-    <string name="pen_shortcuts_empty">No recorded buttons. Previous Pro Pen 3 mappings are not used; please record your buttons again.</string>
+    <string name="pen_shortcuts_empty">No buttons recorded yet. Record your stylus buttons to assign them a tool or action.</string>
     <string name="pen_record_add">Record a button</string>
     <string name="pen_record_help">Within 15 seconds, hover over the area below, press ONE button and release it. If nothing happens, hold the button and touch the area, then release. Keyboard-style pen keys can also be recorded.</string>
     <string name="pen_record_area">Button recording area</string>
@@ -16,4 +16,8 @@
     <string name="pen_shortcuts_invalid">Could not save: the mappings contain duplicate or invalid buttons, or exceed the limit.</string>
     <string name="pen_shortcut_near_screen">Requires the pen near the screen. To use a remote key away from the screen, record it there instead.</string>
     <string name="pen_record_multiple">More than one button was detected. Record one button at a time.</string>
+    <string name="pen_single_press">Press</string>
+    <string name="pen_double_press">Double press</string>
+    <string name="pen_double_delay">Double-press interval: %1$d ms</string>
+    <string name="pen_double_delay_help">For a button with a double-press action, a press that picks a tool or runs a command waits this long for a second press. Holding still starts at once.</string>
 </resources>

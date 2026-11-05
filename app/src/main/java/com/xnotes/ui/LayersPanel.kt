@@ -45,12 +45,6 @@ import com.xnotes.ui.theme.TextSize
 import kotlinx.coroutines.delay
 
 @Composable
-fun LayersButton(editor: Editor) {
-    ToolbarIcon(XnotesIcons.layers, stringResource(R.string.layers_title),
-        active = editor.sidebarVisible && editor.sidePanelTab == SidePanelTab.LAYERS) { editor.toggleLayersSidebar() }
-}
-
-@Composable
 fun LayersButton(editor: InfiniteEditor) {
     ToolbarIcon(XnotesIcons.layers, stringResource(R.string.layers_title), active = editor.layersSidebarVisible) {
         editor.layersSidebarVisible = !editor.layersSidebarVisible

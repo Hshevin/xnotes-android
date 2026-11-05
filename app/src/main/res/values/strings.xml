@@ -387,11 +387,6 @@
     <string name="pref_pen_button_hover">Activate during hover (no need to touch the screen)</string>
     <string name="pref_two_finger_tap">Two-finger tap</string>
     <string name="pref_three_finger_tap">Three-finger tap</string>
-    <string name="pref_stylus_double_tap">Stylus double-tap</string>
-    <string name="pref_stylus_button_tap">Stylus side button (tap)</string>
-    <string name="pref_redmi_buttons">Redmi Smart Pen side buttons (tap)</string>
-    <string name="pen_button_1">Button 1</string>
-    <string name="pen_button_2">Button 2</string>
     <string name="pref_new_notes">New notes</string>
     <string name="pref_filename_template">Filename template</string>
     <string name="pref_page">Page</string>

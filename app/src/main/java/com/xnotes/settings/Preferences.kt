@@ -44,23 +44,14 @@ data class Preferences(
     /** Tool the stylus side button activates while held; "none" disables it. */
     val penButtonTool: String = "none",
     val penShortcuts: List<com.xnotes.pen.PenShortcut> = emptyList(),
+    /** Longest gap (ms) between the two presses of a recorded button's double press. */
+    val penDoublePressMs: Int = com.xnotes.pen.PenBinding.DEFAULT_DOUBLE_PRESS_MS,
     /** Whether the side-button tool also activates during hover (no contact needed); eraser/pan only. */
     val penButtonHover: Boolean = false,
     /** Action mapped to a clean two-finger tap; "none" (default) disables it. */
     val twoFingerTap: String = "none",
     /** Action mapped to a clean three-finger tap; "none" (default) disables it. */
     val threeFingerTap: String = "none",
-    /** Action mapped to a stylus barrel double-tap (pens with no side button, e.g. Huawei M-Pencil
-     *  whose double-tap arrives as keycode 718); "none" (default) disables it. */
-    val stylusDoubleTap: String = "none",
-    /** Action mapped to a momentary stylus side-button click (pens that report the button as a vendor
-     *  key press rather than a held state, e.g. HONOR Magic-Pencil whose click arrives as keycode
-     *  333); "none" (default) disables it. */
-    val stylusButtonTap: String = "none",
-    /** Action mapped to the first page-key side button (keycode 92); "none" disables it. */
-    val stylusButton1Tap: String = "none",
-    /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
-    val stylusButton2Tap: String = "none",
     /** Whether the volume keys turn pages in a note (up for the previous page, down for the next). */
     val volumeKeysTurnPages: Boolean = false,
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
@@ -143,14 +134,11 @@ data class Preferences(
         .put("new_split_position", newSplitPosition)
         .put("detect_shapes", detectShapes)
         .put("pen_shortcuts", com.xnotes.pen.PenBindingsJson.write(penShortcuts))
+        .put("pen_double_press_ms", penDoublePressMs)
         .put("pen_button_tool", penButtonTool)
         .put("pen_button_hover", penButtonHover)
         .put("two_finger_tap", twoFingerTap)
         .put("three_finger_tap", threeFingerTap)
-        .put("stylus_double_tap", stylusDoubleTap)
-        .put("stylus_button_tap", stylusButtonTap)
-        .put("stylus_button_1_tap", stylusButton1Tap)
-        .put("stylus_button_2_tap", stylusButton2Tap)
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
@@ -268,14 +256,12 @@ data class Preferences(
                 zoomLockPan = zoomLockPan,
                 newSplitPosition = o.optString("new_split_position", "right").takeIf { it in listOf("left", "right", "top", "bottom") } ?: "right",
                 detectShapes = o.optBoolean("detect_shapes", true),
+                penDoublePressMs = o.optInt("pen_double_press_ms", com.xnotes.pen.PenBinding.DEFAULT_DOUBLE_PRESS_MS)
+                    .coerceIn(com.xnotes.pen.PenBinding.DOUBLE_PRESS_RANGE),
                 penButtonTool = o.optString("pen_button_tool", "eraser").ifEmpty { "eraser" },
                 penButtonHover = o.optBoolean("pen_button_hover", false),
                 twoFingerTap = tapAction("two_finger_tap"),
                 threeFingerTap = tapAction("three_finger_tap"),
-                stylusDoubleTap = tapAction("stylus_double_tap"),
-                stylusButtonTap = tapAction("stylus_button_tap"),
-                stylusButton1Tap = tapAction("stylus_button_1_tap"),
-                stylusButton2Tap = tapAction("stylus_button_2_tap"),
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),

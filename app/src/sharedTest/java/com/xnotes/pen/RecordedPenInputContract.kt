@@ -12,7 +12,20 @@ abstract class RecordedPenInputContract {
     private var tool = Tool.PEN
     private val commands = mutableListOf<String>()
     private var shortcuts = emptyList<PenShortcut>()
-    private val input = ProPenInput({ shortcuts }, { tool }, { tool = it }, { commands.add(it) })
+    private var onCommand: (String) -> Unit = {}
+    private var clock = 0L
+    private val timers = mutableListOf<Pair<Long, () -> Unit>>()
+    private val input = ProPenInput({ shortcuts }, { tool }, { tool = it }, { commands.add(it); onCommand(it) }, {},
+        { 300L }, { delay, block -> timers.add(clock + delay to block) }, { clock })
+    /** Advance the injected clock and run the timers that came due, as the main looper would. */
+    private fun advanceTo(at: Long) {
+        clock = at
+        while (true) {
+            val due = timers.filter { it.first <= at }.ifEmpty { return }
+            timers.removeAll(due)
+            due.forEach { it.second() }
+        }
+    }
 
     private fun event(action: Int, mask: Int, source: Int = InputDevice.SOURCE_STYLUS,
                       type: Int = MotionEvent.TOOL_TYPE_STYLUS, deviceId: Int = 9999, flags: Int = 0): MotionEvent {
@@ -27,8 +40,10 @@ abstract class RecordedPenInputContract {
     private fun touch(action: Int, mask: Int, during: () -> Unit = {}) {
         event(action, mask).let { try { input.touch(it) { during(); true } } finally { it.recycle() } }
     }
-    private fun key(action: Int, repeats: Int = 0, flags: Int = 0, code: Int = 600, deviceId: Int = 9999): KeyEvent =
-        KeyEvent(1, 2, action, code, repeats, 0, deviceId, 42, flags, InputDevice.SOURCE_KEYBOARD)
+    private fun key(action: Int, repeats: Int = 0, flags: Int = 0, code: Int = 600, deviceId: Int = 9999, at: Long = 2): KeyEvent =
+        KeyEvent(1, at, action, code, repeats, 0, deviceId, 42, flags, InputDevice.SOURCE_KEYBOARD)
+    private fun keyShortcut(code: Int, binding: PenBinding) =
+        PenShortcut("Key $code", listOf(PenSignals.key(key(KeyEvent.ACTION_DOWN, code = code))!!), binding)
     private fun bindMotion(mask: Int, action: String, mode: PenBindingMode = PenBindingMode.HOLD) {
         val e = event(MotionEvent.ACTION_HOVER_MOVE, mask)
         try { shortcuts = listOf(PenShortcut("Button", PenSignals.motion(e).toList(), PenBinding(action, mode))) }
@@ -417,6 +432,54 @@ abstract class RecordedPenInputContract {
         adapter.key(key(KeyEvent.ACTION_UP))
         assertEquals(Tool.ERASER, selection)
         assertEquals(Tool.ERASER, tool)
+    }
+    @Test fun doublePressedKeyRunsOnlyItsDoubleAction() {
+        shortcuts = listOf(keyShortcut(600, PenBinding("undo", PenBindingMode.SELECT, double = "redo")))
+        input.key(key(KeyEvent.ACTION_DOWN, at = 100)); input.key(key(KeyEvent.ACTION_UP, at = 150))
+        input.key(key(KeyEvent.ACTION_DOWN, at = 300)); input.key(key(KeyEvent.ACTION_UP, at = 350))
+        advanceTo(1000)
+        assertEquals(listOf("redo"), commands)
+    }
+    @Test fun singlePressRunsWhenTheWindowClosesWithoutASecond() {
+        shortcuts = listOf(keyShortcut(600, PenBinding("undo", PenBindingMode.SELECT, double = "redo")))
+        clock = 100
+        input.key(key(KeyEvent.ACTION_DOWN, at = 100)); input.key(key(KeyEvent.ACTION_UP, at = 150))
+        advanceTo(399)
+        assertTrue(commands.isEmpty())
+        advanceTo(401)
+        assertEquals(listOf("undo"), commands)
+    }
+    @Test fun singlePressWaitingDuringAStrokeRunsAfterPenUp() {
+        shortcuts = listOf(keyShortcut(600, PenBinding("lasso", PenBindingMode.SELECT, double = "redo")))
+        clock = 100
+        touch(MotionEvent.ACTION_DOWN, 0)
+        input.key(key(KeyEvent.ACTION_DOWN, at = 100)); input.key(key(KeyEvent.ACTION_UP, at = 150))
+        advanceTo(800)
+        assertEquals(Tool.PEN, tool)
+        touch(MotionEvent.ACTION_UP, 0) { assertEquals(Tool.PEN, tool) }
+        assertEquals(Tool.LASSO, tool)
+    }
+    @Test fun holdWithADoubleActionStillHoldsAtOnce() {
+        shortcuts = listOf(keyShortcut(600, PenBinding("eraser", PenBindingMode.HOLD, double = "undo")))
+        input.key(key(KeyEvent.ACTION_DOWN, at = 100))
+        assertEquals(Tool.ERASER, tool)
+        input.key(key(KeyEvent.ACTION_UP, at = 150))
+        assertEquals(Tool.PEN, tool)
+        input.key(key(KeyEvent.ACTION_DOWN, at = 250))
+        assertEquals(Tool.PEN, tool)
+        assertEquals(listOf("undo"), commands)
+    }
+    @Test fun toolPickedByAMappedCommandOutlastsALaterHold() {
+        // As the editors do: a toggle selects a tool through the same path as the toolbar.
+        onCommand = { if (it == "toggle_previous") { input.selected(Tool.HIGHLIGHTER); tool = Tool.HIGHLIGHTER } }
+        shortcuts = listOf(keyShortcut(600, PenBinding("eraser", PenBindingMode.HOLD)),
+            keyShortcut(601, PenBinding("toggle_previous", PenBindingMode.SELECT)))
+        input.key(key(KeyEvent.ACTION_DOWN, code = 601)); input.key(key(KeyEvent.ACTION_UP, code = 601))
+        assertEquals(Tool.HIGHLIGHTER, tool)
+        input.key(key(KeyEvent.ACTION_DOWN))
+        assertEquals(Tool.ERASER, tool)
+        input.key(key(KeyEvent.ACTION_UP))
+        assertEquals(Tool.HIGHLIGHTER, tool)
     }
     @Test fun tipFingerAndMouseDoNotRecordPenButtons() {
         for ((type, mask) in listOf(MotionEvent.TOOL_TYPE_STYLUS to 0,

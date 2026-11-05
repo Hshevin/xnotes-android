@@ -260,7 +260,8 @@ fun PreferencesPane(
                 Chip(stringResource(R.string.pan_none), prefs.zoomLockPan == "none") { update(prefs.copy(zoomLockPan = "none")) }
             }
             CheckRow(stringResource(R.string.pref_detect_shapes), prefs.detectShapes) { update(prefs.copy(detectShapes = it)) }
-            PenShortcutSettings(prefs.penShortcuts) {
+            PenShortcutSettings(prefs.penShortcuts, prefs.penDoublePressMs,
+                { editor.setPenDoublePressMs(it); prefs = editor.preferences }) {
                 editor.setPenShortcuts(it).also { saved -> if (saved) prefs = editor.preferences }
             }
             val tapOptions = tapGestureOptions.map { (id, res) -> id to stringResource(res) }
@@ -268,21 +269,6 @@ fun PreferencesPane(
             OptionDropdown(tapOptions, prefs.twoFingerTap) { update(prefs.copy(twoFingerTap = it)) }
             FieldLabel(stringResource(R.string.pref_three_finger_tap))
             OptionDropdown(tapOptions, prefs.threeFingerTap) { update(prefs.copy(threeFingerTap = it)) }
-            FieldLabel(stringResource(R.string.pref_stylus_double_tap))
-            OptionDropdown(tapOptions, prefs.stylusDoubleTap) { update(prefs.copy(stylusDoubleTap = it)) }
-            FieldLabel(stringResource(R.string.pref_stylus_button_tap))
-            OptionDropdown(tapOptions, prefs.stylusButtonTap) { update(prefs.copy(stylusButtonTap = it)) }
-            FieldLabel(stringResource(R.string.pref_redmi_buttons))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s4)) {
-                    Text(stringResource(R.string.pen_button_1), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
-                    OptionDropdown(tapOptions, prefs.stylusButton1Tap) { update(prefs.copy(stylusButton1Tap = it)) }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s4)) {
-                    Text(stringResource(R.string.pen_button_2), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
-                    OptionDropdown(tapOptions, prefs.stylusButton2Tap) { update(prefs.copy(stylusButton2Tap = it)) }
-                }
-            }
             CheckRow(stringResource(R.string.pref_volume_keys_turn_pages), prefs.volumeKeysTurnPages) { update(prefs.copy(volumeKeysTurnPages = it)) }
 
             HorizontalDivider(color = palette.border.toComposeColor())

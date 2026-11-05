@@ -16,7 +16,9 @@ object PenBindingsJson {
                 val t = triggers.getJSONObject(i)
                 PenTrigger(PenTrigger.Kind.valueOf(t.getString("kind")), t.getInt("code"),
                     t.getString("descriptor"), t.getInt("source"), t.optInt("scanCode"))
-            }, PenBinding(entry.getString("action"), PenBindingMode.valueOf(entry.getString("mode"))))
+            }, PenBinding(entry.getString("action"), PenBindingMode.valueOf(entry.getString("mode")),
+                // Written by builds with double presses; older builds ignore it and keep the mapping.
+                entry.optString("double", "none")))
         }
         require(PenShortcut.valid(shortcuts))
         shortcuts
@@ -26,7 +28,7 @@ object PenBindingsJson {
         require(PenShortcut.valid(shortcuts))
         return JSONArray().apply {
             shortcuts.forEach { s ->
-                put(JSONObject().put("name", s.name).put("action", s.binding.action).put("mode", s.binding.mode.name)
+                put(JSONObject().put("name", s.name).put("action", s.binding.action).put("mode", s.binding.mode.name).put("double", s.binding.double)
                     .put("triggers", JSONArray().apply {
                         s.triggers.forEach { t -> put(JSONObject().put("kind", t.kind.name).put("code", t.code)
                             .put("descriptor", t.descriptor).put("source", t.source).put("scanCode", t.scanCode)) }

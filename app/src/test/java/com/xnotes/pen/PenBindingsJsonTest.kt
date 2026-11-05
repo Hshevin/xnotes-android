@@ -14,6 +14,21 @@ class PenBindingsJsonTest {
     @Test fun recordedAliasesAndBehaviorSurviveRoundTrip() {
         assertEquals(shortcuts, PenBindingsJson.read(JSONArray(PenBindingsJson.write(shortcuts).toString())))
     }
+    @Test fun doublePressAndToggleActionsSurviveRoundTrip() {
+        val more = listOf(PenShortcut("Tail", listOf(PenTrigger(PenTrigger.Kind.KEY, 601, "remote", 257)),
+            PenBinding("eraser", PenBindingMode.HOLD, double = "toggle_previous")))
+        assertTrue(PenShortcut.valid(more))
+        assertEquals(more, PenBindingsJson.read(JSONArray(PenBindingsJson.write(more).toString())))
+    }
+    @Test fun mappingsSavedWithoutADoubleActionHaveNone() {
+        val old = JSONArray(PenBindingsJson.write(shortcuts).toString())
+        old.getJSONObject(0).remove("double")
+        assertEquals(shortcuts, PenBindingsJson.read(old))
+        assertEquals("none", PenBindingsJson.read(old).single().binding.double)
+    }
+    @Test fun unknownDoubleActionIsRejected() {
+        assertFalse(PenShortcut.valid(listOf(shortcuts.single().copy(binding = PenBinding("eraser", double = "format_disk")))))
+    }
     @Test fun missingOrMalformedSettingsAreEmpty() {
         assertTrue(PenBindingsJson.read(null).isEmpty())
         assertTrue(PenBindingsJson.read(JSONArray("[{}]")).isEmpty())

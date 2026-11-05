@@ -180,9 +180,10 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
         )
 
-        /** Everything the paged bar can hold: the whole enum bar the two canvas-only additions. Insert space is the note bar's alone. */
+        /** Everything the paged bar can hold: the whole enum bar the canvas-only additions. Insert space is the note bar's alone;
+         *  paged layers live in the side panel's tab, so a stored paged bar drops its old button on load. */
         val NOTE_ITEMS: Set<ToolbarItem> =
-            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP)
+            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.LAYERS)
 
         /** Mirrors the hardcoded bar exactly (see Toolbar.kt) so existing users see no change. */
         val DEFAULT: ToolbarLayout = of(
@@ -197,7 +198,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.LAYERS, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
+            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
             listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
             listOf(ToolbarItem.FULLSCREEN),
         )
@@ -276,9 +277,10 @@ private val ToolbarItem.scope: ToolbarScope get() = when (this) {
     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FULLSCREEN, ToolbarItem.COLORS -> ToolbarScope.COMMON
     ToolbarItem.INSERT_SPACE -> ToolbarScope.PAGED_TOOL
     ToolbarItem.MARKUP -> ToolbarScope.PDF_TOOL
-    ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES, ToolbarItem.LAYERS -> ToolbarScope.ALL_VIEW
+    ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES -> ToolbarScope.ALL_VIEW
     ToolbarItem.SIDEBAR, ToolbarItem.PAGE_NAV, ToolbarItem.MARGINS, ToolbarItem.VIEW -> ToolbarScope.PAGED_VIEW
-    ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> ToolbarScope.CANVAS_VIEW
+    // Paged documents reach layers through the side panel; only the canvas needs a button.
+    ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> ToolbarScope.CANVAS_VIEW
 }
 
 private val pagedDocuments = setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF)

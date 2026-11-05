@@ -29,7 +29,7 @@ data class PenShortcut(
                     it.triggers.isNotEmpty() && it.triggers.size <= MAX_SIGNALS &&
                     it.triggers.all(PenTrigger::valid) &&
                     it.triggers.map { t -> t.kind }.distinct().size == it.triggers.size &&
-                    it.binding.action in PenBinding.actions
+                    it.binding.action in PenBinding.actions && it.binding.double in PenBinding.actions
             } && shortcuts.flatMap { it.triggers }.let { it.distinct().size == it.size }
     }
 }

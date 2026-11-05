@@ -137,18 +137,30 @@ class SettingsTest {
         val prefs = Preferences(
             twoFingerTap = "undo",
             threeFingerTap = "redo",
-            stylusDoubleTap = "toggle_eraser",
-            stylusButtonTap = "toggle_pan",
-            stylusButton1Tap = "toggle_previous",
-            stylusButton2Tap = "undo",
         )
         val back = Settings.fromJson(Settings(prefs = prefs).toJson()).prefs
         assertEquals("undo", back.twoFingerTap)
         assertEquals("redo", back.threeFingerTap)
-        assertEquals("toggle_eraser", back.stylusDoubleTap)
-        assertEquals("toggle_pan", back.stylusButtonTap)
-        assertEquals("toggle_previous", back.stylusButton1Tap)
-        assertEquals("undo", back.stylusButton2Tap)
+    }
+
+    @Test fun penDoublePressIntervalRoundTripsAndStaysInRange() {
+        assertEquals(450, Settings.fromJson(Settings(prefs = Preferences(penDoublePressMs = 450)).toJson()).prefs.penDoublePressMs)
+        val json = Settings().toJson()
+        json.getJSONObject("prefs").remove("pen_double_press_ms")
+        assertEquals(com.xnotes.pen.PenBinding.DEFAULT_DOUBLE_PRESS_MS, Settings.fromJson(json).prefs.penDoublePressMs)
+        json.getJSONObject("prefs").put("pen_double_press_ms", 5)
+        assertEquals(com.xnotes.pen.PenBinding.DOUBLE_PRESS_RANGE.first, Settings.fromJson(json).prefs.penDoublePressMs)
+    }
+
+    @Test fun retiredStylusTapSettingsAreIgnoredOnLoad() {
+        // Settings saved before recorded pen mappings replaced them still load, and are not written back.
+        val json = Settings(prefs = Preferences(twoFingerTap = "undo")).toJson()
+        json.getJSONObject("prefs").put("stylus_double_tap", "toggle_eraser").put("stylus_button_tap", "toggle_pan")
+            .put("stylus_button_1_tap", "toggle_previous").put("stylus_button_2_tap", "undo")
+        val back = Settings.fromJson(json)
+        assertEquals("undo", back.prefs.twoFingerTap)
+        val written = back.toJson().getJSONObject("prefs")
+        for (key in listOf("stylus_double_tap", "stylus_button_tap", "stylus_button_1_tap", "stylus_button_2_tap")) assertFalse(key, written.has(key))
     }
 
     @Test fun frontBufferingIsOnUntilItIsTurnedOff() {

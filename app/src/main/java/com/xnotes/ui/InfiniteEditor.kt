@@ -432,10 +432,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Shared preferences supplied by the owning paged editor. */
     var penShortcuts: () -> List<com.xnotes.pen.PenShortcut> = { emptyList() }
+    var penDoublePressMs: () -> Long = { com.xnotes.pen.PenBinding.DEFAULT_DOUBLE_PRESS_MS.toLong() }
     private val proPenInput by lazy {
         com.xnotes.pen.ProPenInput(
             { penShortcuts() }, { tool }, ::armTool, ::dispatchTapGesture,
-            { toolbarTool = it },
+            { toolbarTool = it }, { penDoublePressMs() },
         )
     }
     var otherPenInContact: () -> Boolean = { false }

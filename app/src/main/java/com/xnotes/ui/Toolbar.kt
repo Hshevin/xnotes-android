@@ -200,7 +200,8 @@ private fun ToolbarItemView(
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
-        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> DisabledToolbarItem(item)
+        // Paged layers are the side panel's tab.
+        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.LAYERS -> DisabledToolbarItem(item)
 
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.
@@ -213,7 +214,6 @@ private fun ToolbarItemView(
                     .clickable { onRename() },
             )
         }
-        ToolbarItem.LAYERS -> LayersButton(editor)
         ToolbarItem.SIDEBAR ->
             ToolbarIcon(XnotesIcons.sidebar, stringResource(R.string.side_panel), active = editor.sidebarVisible, shortcut = Keys.SIDEBAR) { editor.toggleSidebar() }
 

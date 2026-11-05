@@ -18,7 +18,7 @@ import com.xnotes.ui.theme.*
 
 /** Recorded stylus buttons as one outlined list: a row per mapping, recording and naming at its foot. */
 @Composable
-fun PenShortcutSettings(shortcuts: List<PenShortcut>, onChange: (List<PenShortcut>) -> Boolean) {
+fun PenShortcutSettings(shortcuts: List<PenShortcut>, doublePressMs: Int, onDoublePressMs: (Int) -> Unit, onChange: (List<PenShortcut>) -> Boolean) {
     var recording by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<List<PenTrigger>?>(null) }
     var message by remember { mutableStateOf<Int?>(null) }
@@ -30,6 +30,8 @@ fun PenShortcutSettings(shortcuts: List<PenShortcut>, onChange: (List<PenShortcu
         "highlighter" to R.string.tool_highlighter, "eraser" to R.string.tool_eraser,
         "pan" to R.string.tool_pan, "select" to R.string.tool_select,
         "lasso" to R.string.tool_lasso, "undo" to R.string.undo, "redo" to R.string.redo,
+        "toggle_previous" to R.string.toggle_previous, "toggle_eraser" to R.string.toggle_eraser,
+        "toggle_pan" to R.string.toggle_pan,
     ).map { (id, label) -> id to stringResource(label) }
     val palette = LocalPalette.current
     val text = palette.text.toComposeColor()
@@ -112,24 +114,47 @@ fun PenShortcutSettings(shortcuts: List<PenShortcut>, onChange: (List<PenShortcu
             }
         }
         message?.let { Text(stringResource(it), color = text, fontSize = TextSize.body) }
+        // Local while dragging, saved on release, so a drag does not write settings every frame.
+        var interval by remember(doublePressMs) { mutableFloatStateOf(doublePressMs.toFloat()) }
+        Column(Modifier.widthIn(max = 560.dp).fillMaxWidth()) {
+            Text(stringResource(R.string.pen_double_delay, Math.round(interval)), color = text, fontSize = TextSize.body)
+            Slider(value = interval, onValueChange = { interval = it },
+                onValueChangeFinished = { onDoublePressMs(Math.round(interval)) },
+                valueRange = PenBinding.DOUBLE_PRESS_RANGE.first.toFloat()..PenBinding.DOUBLE_PRESS_RANGE.last.toFloat(),
+                steps = (PenBinding.DOUBLE_PRESS_RANGE.last - PenBinding.DOUBLE_PRESS_RANGE.first) / 50 - 1)
+            Text(stringResource(R.string.pen_double_delay_help), color = dim, fontSize = TextSize.label)
+        }
     }
 }
 
-/** The action, then how a tool is held; commands only ever fire once per press. */
+/**
+ * What a press does (held or picked for a tool; once for a command), then an optional double-press
+ * action on its own line. A double press picks a tool or runs a command; it never holds.
+ */
 @Composable
 private fun BindingFields(actions: List<Pair<String, String>>, binding: PenBinding, onChange: (PenBinding) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-        OptionDropdown(actions, binding.action, Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) { action ->
-            onChange(binding.copy(action = action,
-                mode = if (action in PenBinding.commands) PenBindingMode.SELECT else binding.mode))
-        }
-        if (binding.action in PenBinding.tools) {
-            OptionDropdown(listOf("HOLD" to stringResource(R.string.pro_pen_hold), "SELECT" to stringResource(R.string.pro_pen_select)), binding.mode.name,
-                Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) {
-                onChange(binding.copy(mode = PenBindingMode.valueOf(it)))
+    val dim = LocalPalette.current.textDim.toComposeColor()
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s4)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+            Text(stringResource(R.string.pen_single_press), Modifier.widthIn(min = 56.dp), color = dim, fontSize = TextSize.label)
+            OptionDropdown(actions, binding.action, Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) { action ->
+                onChange(binding.copy(action = action,
+                    mode = if (action in PenBinding.commands) PenBindingMode.SELECT else binding.mode))
             }
-        } else if (binding.action in PenBinding.commands) {
-            Text(stringResource(R.string.pro_pen_once), color = LocalPalette.current.textDim.toComposeColor(), fontSize = TextSize.label)
+            if (binding.action in PenBinding.tools) {
+                OptionDropdown(listOf("HOLD" to stringResource(R.string.pro_pen_hold), "SELECT" to stringResource(R.string.pro_pen_select)), binding.mode.name,
+                    Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) {
+                    onChange(binding.copy(mode = PenBindingMode.valueOf(it)))
+                }
+            } else if (binding.action in PenBinding.commands) {
+                Text(stringResource(R.string.pro_pen_once), color = dim, fontSize = TextSize.label)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+            Text(stringResource(R.string.pen_double_press), Modifier.widthIn(min = 56.dp), color = dim, fontSize = TextSize.label)
+            OptionDropdown(actions, binding.double, Modifier.sizeIn(minWidth = 120.dp, minHeight = MinTouchTarget)) {
+                onChange(binding.copy(double = it))
+            }
         }
     }
 }

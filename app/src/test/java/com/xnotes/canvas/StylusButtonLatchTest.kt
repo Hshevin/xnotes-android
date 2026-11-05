@@ -72,7 +72,7 @@ class StylusButtonLatchTest {
 
     @Test
     fun tapKeysAndOrdinaryKeysAreNotTheButton() {
-        // Honor 333, Lenovo 600-604, Huawei 718 and Redmi's page keys fire tap actions instead.
+        // Vendor click keys (333, 600-604, 718) and page keys are only reachable as recorded mappings.
         val codes = listOf(333, 600, 604, 718, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_A)
         for (code in codes) assertFalse("$code", latch.onKey(code, down = true))
         assertFalse(latch.held)

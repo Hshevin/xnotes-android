@@ -11,8 +11,14 @@ class ProPenInput(
     private val armTool: (Tool) -> Unit,
     private val command: (String) -> Unit,
     private val selectionChanged: (Tool) -> Unit = {},
+    private val doublePressMs: () -> Long = { PenBinding.DEFAULT_DOUBLE_PRESS_MS.toLong() },
+    /** Runs a block after a delay on the input thread; a single press waiting for a second press ends this way. */
+    private val schedule: (delayMs: Long, block: () -> Unit) -> Unit = { delay, block ->
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(block, delay)
+    },
+    private val now: () -> Long = android.os.SystemClock::uptimeMillis,
 ) {
-    private val buttons by lazy { ProPenButtons(currentTool().id) }
+    private val buttons by lazy { ProPenButtons(currentTool().id, doublePressMs) }
     private val signals = PenShortcutState()
     private var applying = false
     private var contact = false
@@ -20,15 +26,15 @@ class ProPenInput(
     private var device: Int? = null
 
     // Store transitions, not samples. Nothing mutates the committed tool until the stroke ends.
-    private data class Transition(val mask: Int, val pressed: Int, var bindings: Map<Int, PenBinding>)
+    private data class Transition(val mask: Int, val pressed: Int, var bindings: Map<Int, PenBinding>, val at: Long)
     private val deferred = mutableListOf<Transition>()
 
     fun selected(tool: Tool) {
         if (!applying) {
             buttons.select(tool.id)
             selectionChanged(tool)
-            // A later explicit selection supersedes queued tools, but not queued commands.
-            deferred.forEach { it.bindings = it.bindings.filterValues { b -> b.action in PenBinding.commands } }
+            // A later explicit selection supersedes queued tools, but not queued commands or double presses.
+            deferred.forEach { it.bindings = it.bindings.mapValues { (_, b) -> if (b.action in PenBinding.tools) b.copy(action = "none") else b } }
         }
     }
 
@@ -115,7 +121,7 @@ class ProPenInput(
 
     private fun updateMotion(e: MotionEvent) {
         signals.motion(PenSignals.motion(e))
-        update()
+        update(e.eventTime)
     }
 
     fun key(e: KeyEvent): Boolean {
@@ -132,28 +138,44 @@ class ProPenInput(
             val mask = 1 shl slot
             deferred.lastOrNull { it.pressed and mask != 0 }?.let { it.bindings = it.bindings - mask }
         }
-        update()
+        update(e.eventTime)
         return true
     }
 
-    private fun update() {
+    private fun update(at: Long) {
         val shortcuts = bindings()
         val mask = signals.mask(shortcuts)
         val configured = signals.bindings(shortcuts)
-        if (!contact) { apply(buttons.update(mask, configured)); return }
+        if (!contact) { apply(buttons.update(mask, configured, at)); scheduleExpiry(); return }
         val previous = deferred.lastOrNull()?.mask ?: buttons.observedButtons
-        if (mask != previous) deferred.add(Transition(mask, mask and previous.inv(), configured.toMap()))
+        if (mask != previous) deferred.add(Transition(mask, mask and previous.inv(), configured.toMap(), at))
     }
 
     private fun commitDeferred() {
-        var result: PenButtonResult? = null
+        val replayed = deferred.isNotEmpty()
+        val before = buttons.selectedTool
         val commands = mutableListOf<String>()
-        deferred.forEach {
-            result = buttons.update(it.mask, it.bindings)
-            commands.addAll(result!!.commands)
-        }
+        deferred.forEach { commands.addAll(buttons.update(it.mask, it.bindings, it.at).commands) }
         deferred.clear()
-        result?.let { apply(it.copy(commands = commands)) }
+        // Single presses whose window closed during the stroke run now, after the pen lifted.
+        val result = buttons.expire(now())
+        commands.addAll(result.commands)
+        if (replayed || commands.isNotEmpty() || buttons.selectedTool != before) apply(result.copy(commands = commands))
+        scheduleExpiry()
+    }
+
+    private fun scheduleExpiry() {
+        val deadline = buttons.nextDeadline ?: return
+        schedule((deadline - now()).coerceAtLeast(0L) + 1L) { expire() }
+    }
+
+    /** A single press that no second press followed; mid-stroke it waits for pen-up instead. */
+    private fun expire() {
+        if (contact) return
+        val before = buttons.selectedTool
+        val result = buttons.expire(now())
+        if (result.commands.isNotEmpty() || buttons.selectedTool != before) apply(result)
+        scheduleExpiry()
     }
 
     private fun apply(result: PenButtonResult) {
@@ -161,7 +183,9 @@ class ProPenInput(
         try {
             Tool.fromId(buttons.selectedTool)?.let(selectionChanged)
             Tool.fromId(result.tool)?.let { if (it != currentTool()) armTool(it) }
-            result.commands.forEach(command)
         } finally { applying = false }
+        // Outside the guard: a command that picks a tool (toggle_previous…) is an explicit
+        // selection, so a later hold release returns to it rather than to the tool before.
+        result.commands.forEach(command)
     }
 }
