@@ -80,3 +80,7 @@
 ## 2026-11-07 思考参数降级合并与推送
 
 - 用户要求「合并并推送」：将 `worktree-ai-thinking-fallback`（`04725967`，GPT-4o 等模型拒绝思考字段时去掉重发、本次运行内记住并标注）以 `--no-ff` 合入本地 `master`；因远端已有 Release 96 打包与日志提交，先合并 `origin/master`（仅 `authorization-history.md` 冲突，两侧记录均保留），再推送 `master` 到 `origin/master`。推送内容包括此前仅本地合并的应用内模板生成、图像模型封面、界面交互修正与主分支复查修复。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
+
+## 2026-11-07 无限画布退出分屏黑区候选合并
+
+- 用户要求「合并到主分支」：授权将 `codex/canvas-split-black`（修复提交 `c4f30567`）以 `--no-ff` 合入本地 `master`，保留原修复分支。主分支合并前为分支基线 `0b35d341`，工作区干净；合并不引入 `codex/render-lifecycle`。应用及测试源码与已通过 687 项相关 JVM/Robolectric 测试、源码及 Android 测试 Kotlin 编译的候选一致，仅增加本次合并记录，不重复运行无代码变化的测试。黑区效果及目标 GPU 验收仍待真机确认。本次不包含推送、打包 APK、设备安装或 GitHub Release。
