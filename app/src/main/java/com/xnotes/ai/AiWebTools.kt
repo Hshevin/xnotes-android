@@ -88,10 +88,13 @@ object AiWebTools {
     fun guidance(today: java.time.LocalDate = java.time.LocalDate.now()): String =
         "$GUIDANCE\n- 今天是 $today（本机日期）。涉及“最新”“今年”等时间时，按这个日期写检索词并判断资料是否过时。"
 
-    /** [messages] with [LIMIT_NOTICE] added to the last tool result. */
-    fun withLimitNotice(messages: List<JSONObject>): List<JSONObject> = messages.mapIndexed { index, message ->
-        if (index != messages.lastIndex) message
-        else JSONObject(message.toString()).put("content", message.getString("content") + "\n\n（$LIMIT_NOTICE）")
+    /** [messages] with [notice] added to the last tool result; a following page-image message is left as it is. */
+    fun withLimitNotice(messages: List<JSONObject>, notice: String = LIMIT_NOTICE): List<JSONObject> {
+        val last = messages.indexOfLast { it.optString("role") == "tool" }
+        return messages.mapIndexed { index, message ->
+            if (index != last) message
+            else JSONObject(message.toString()).put("content", message.getString("content") + "\n\n（$notice）")
+        }
     }
 
     fun definitions(): JSONArray = JSONArray()
