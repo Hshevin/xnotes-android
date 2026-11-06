@@ -235,6 +235,14 @@ internal class JsonPull(private val reader: Reader,private val strict:Boolean=fa
         }
     }
 
+    /** Exact schema discriminator; callers can compare without Double rounding or legacy int coercion. */
+    fun nextNumberLiteral():String {
+        expect(Token.NUMBER)
+        val value=scanNumber()
+        startValue()
+        return value
+    }
+
     fun nextBoolean(): Boolean {
         expect(Token.BOOLEAN)
         val v = buf[pos] == 't'

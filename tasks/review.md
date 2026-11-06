@@ -31,3 +31,10 @@
 B2a 实现独立审核发现并修复：前置ZIP摘要先于reader限制导致超大条目完整解压；改为中央目录和顺序视图均检查声明尺寸及实际字节，清单512MiB、marker/BundleIdentity各4096。重复键HashSet可持有大量字符串；增加短键及活动祖先累计预算，补嵌套超限和兄弟对象释放测试。超限拒绝与取消清理不放宽。孤立local测试首次因有ZIP注释而不能用ZipTail构造，保留其他带注释夹具，仅该反例用无注释容器，并先独立断言中心目录与顺序清单确有不同。tmp/anchor-bundle-green.log保留该夹具失败证据；tmp/anchor-bundle-fixed.log和tmp/anchor-budget-focused.log均通过。首次全量tmp/anchor-stage-full.log 2788项通过，最后身份条目限流补充后继续全量验证，不把旧结果冒充最后结果。
 
 B2a 最终复核完成，身份条目同样前置限流的漏项已修复；独立代理未发现剩余确定性必修。tmp/anchor-stage-verified.log 全量2789项通过、Android仪器源码编译成功，diff检查通过。未运行仪器／设备／真实SAF；内部staging尚未接入口。
+
+## B2b1 模型／编解码计划审核（2026-11-07）
+
+独立代理review_input_plan只读审核，计划可行，所有契约建议接受并落tasks/plan.md：一次性身份原子与可见；按实际成员出现次数拒绝重复归属；snapshot冻结、deepCopy不继承／未知类型拒绝；writer显式参数且不分配身份；raw目标与全部物化对象对账、marker末尾追认、unknown/缺资产/空白自动补页不冒充完整anchored可写模型；失败只清理本read创建的临时文件，不碰受管／借入PDF。无marker有ID必须先原字节补标记；完全无ID旧文件继续兼容。B2b2打开／登记／SAF和B2c后继另审。
+
+
+B2b1 实现复核完成：模型基本契约无必修；补竞争与线程异常收集及再次快照回归，修复旧 snapshot 重读实时图层。codec审核发现PDF原件未加载仍返回完整模型，以及Double近1版本舍入；均有RED重现并修复。新增独立 readInkCopy 先原ID映射对账再新身份，保留既有恢复入口与legacy模式，借入PDF不删。最后补引用式身份夹带另一PDF的真实反例，普通anchored read拒绝歧义包；独立针对复核认可。tmp/anchor-codec-final.log全量2808项通过、仪器源码编译成功。真实PNG／平台身份仪器测试已新增仅编译。没有未处理的确定性必修，B2b2与B2c仍未实现。

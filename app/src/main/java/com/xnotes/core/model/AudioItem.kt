@@ -22,6 +22,8 @@ class AudioItem(
     var rid: Int,
     val measurer: TextMeasurer,
 ) : CanvasItem {
+    override val referenceIdentity = ReferenceIdentity()
+
 
     override val kind = KIND
     override val resizable = true

@@ -53,6 +53,9 @@ class Document(
     /** The size of each page added from now on, or null to give it the size of the page before it. */
     var newPageSize: PageSizeChoice? = null,
 ) {
+    /** True only for a new model explicitly enabled, or a complete validated anchor bundle. */
+    var hasReferenceAnchors:Boolean=false
+        internal set
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
 

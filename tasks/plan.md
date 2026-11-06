@@ -321,7 +321,7 @@ PDF 笔记、普通笔记、无限画布可混合并排；同一 PDF／分页笔
 
 EditingField.x/y 是宿主 viewport 物理 px，width/height/fontPx 是内容 px，zoom 为图实际比例；直接沿用既有 Density 与 graphicsLayer。内容原点和度量须来自 MapPainter（16px 内距、width-32、18px 字体），不把整个节点当文字框。光标回报映射 rotation 的四角；仅图相机响应遮挡，防止系统窗口额外平移和反馈抖动。图工具栏编辑时压缩以给 IME 留出可编辑区域。进入前释放图手势；结束统一拒绝迟到回调，待 IME/尺寸稳定后恢复原相机和选择。验收与风险见 tasks/review.md。
 
-### B2 分拆及 B2a 待审核计划：原始 manifest 字节保真锚点升级
+### B2 分拆及 B2a 已实施计划：原始 manifest 字节保真锚点升级
 
 B1b 本地提交 c5d0d4ac。B2 不以进程 Page.uid 或 GlueIds 的位置序号冒充稳定身份，分为三步：B2a 升级基础，B2b 模型／编解码／快照／复制与显式存储接入，B2c 碎片等确定后继和删除／移动／撤销语义。C1 对象引用必须等依赖完成，不能提前按位置匹配。
 
@@ -348,3 +348,25 @@ strict读取路径明确限制单token最多1,048,576个字符、JSON嵌套256�
 B2a 最终计划审核已完成，全部建议接受。补充同一快照约束：先复制原件到独立暂存文件并核对快照 SHA-256 与预先取得的来源摘要相同，所有格式短扫、结构扫描、字符复制及 ZIP 校验只打开这份快照，防止跨遍 A→B→A 对应错位。最终发布仍核对原件摘要。UTF-8 decoder 与 encoder 均使用 REPORT，持续一个 Reader/Writer 跨所有字符块，禁止每块单独编码；计数使用 Long 且只计已消费 UTF-16 单元。新增 1 字符短读与代理对跨缓冲测试。
 
 B2a 实现复核修订：前置ZIP摘要即按名称限流，manifest 512MiB、anchors和BundleIdentity条目各4096字节，同时检查声明／实际解压字节；不能先完整摘要再限流。重复键去重另外限制单键1024字符、活动递归链8192键／262144字符，单对象仍最多4096键，退出兄弟对象释放预算。均有主机回归。实现与测试细节见 docs/movinkpad/reference-anchors-2026-11-07.md；本阶段仍不接文档打开／SAF。
+
+### B2b1 已实施：持久身份的模型／编解码／快照契约（2026-11-07）
+
+B2a 已提交 c93f8129。先分出可独立验证的 B2b1，不立刻改打开／SAF／登记。B2b2 才启用实际用户文件升级和新文档创建路径；B2c 确定后继仍另审。
+
+计划增加原生模型 `ReferenceIdentity`：公开只读 nullable ID，内部一次性 assign/restore（恢复已有值时只允许相同值），不暴露随意替换ID的setter。Page 和每个具体 CanvasItem 持有一个独立容器；CanvasItem 接口要求明确实现，不给未知类型伪造兜底。新对象暂未赋ID，实际持久化／引用准备才分配UUID，避免每次临时渲染或笔输入构造随机数。旧Page.uid和GlueIds保持原用途，不替代稳定引用身份。
+
+Document/InfiniteDocument 新增已验证锚点状态，默认false保留旧序列化字节；只有明确的新文档启用或已验证marker读取才设为true。已启用文档在主线程捕获snapshot前分配尚无ID的新成员并校验全局唯一；所有ID一经赋值不变。snapshot复制页面ID／模式，冻结对象ID映射，与已冻结layer成员关系相同，后台writer只读快照；不能以`map[id] ?: liveId`回退导致原null值被后来赋值污染。正常移动／图层／跨页转移／撤销持有原对象，身份保持。Page.deepCopy/items.deepCopy创建新容器不继承身份，后续赋新ID；Document.deepCopy继续用于独立可编辑副本，snapshot才保留身份。当前Clone里的Stroke复制不能隐式复制新身份容器。
+
+编解码显式传递每个页面／对象的可选reference_id，不通过解析后的列表位置配对；图像／音频pending DTO携带ID并在物化时恢复。读取跟踪全部原始page/item（含未知kind与缺资源pending）的ID，校验类型／UUID、重复字段／重复ID；marker存在时任何原始目标缺ID都拒绝，不因模型跳过未知对象而略过身份损坏。marker的format/version/documentId解析提取为复用的有界组件，文档身份缺失或错配拒绝，ZIP重复marker／identity／manifest拒绝。普通旧格式无marker仍沿用原读取兼容，不伪称已有持久引用能力。
+
+写入前若已启用则验证实际序列化成员全部有ID、唯一，并写marker；ID作为可选字段追加，各writer函数显式参数，不用共享codec可变“当前模式”，避免并发导出／保存串扰。marker在manifest之前，保留manifest最后的尾部约定。legacy模式不加字段／marker，维持现有字节与条目顺序测试。正常编辑保存可走既有样本写入规则；首次元数据升级只能用B2a原字节候选，禁止用这些模型writer升级旧文件。
+
+验收：新模型启用后note/canvas roundtrip所有七种对象（含延迟图片／音频）；页面重排、对象移动／跨页／图层与撤销保持ID；复制页面／对象新ID；snapshot与深拷贝身份语义分开、后台保存不读后来成员／身份；legacy输出与旧样本字节测试保持；marker前/后、身份缺失／错配／重复／部分缺ID与未知kind拒绝；普通笔迹／PDF已有测试。Android平台差异仍保留仪器编译／验收边界。B2b2的新建、可信expectedAnchored登记与恢复发布另立规格，不在本阶段悄悄启用。
+
+B2b1 审核中语义修订（已接受）：已锚定的模型读取采用完整性拒绝策略，不返回丢了未知／缺资源对象的“可写完整文档”。原始目标ID与实际物化对象全量对账，unknown kind、无效Tape、缺／解码失败图片音频、零页后默认补白页均不得静默通过；marker在manifest之后也追认。刻意read(imageDir=null)不能返回部分anchored可写模型，调用方应改用peek／raw校验API。失败只清理本次read创建的临时图片、音频、模板和自行抽取的PDF文件；pdfStore／resolvePdf返回的受管／借入PDF不属于codec清理对象，禁止删除。普通legacy读取兼容不扩大拒绝范围。
+
+B2b1 接口审核修订（已接受）：assign/restore 使用同步一次性更新与可见读值；不假设“公开只读”自动带来线程安全。prepare按照实际序列化出现次数校验，拒绝同一Page/同一item被重复列出，不能先用IdentityHashMap去重。独立deepCopy遇未支持CanvasItem类型拒绝，不能沿用Clone.kt的else->this承诺新身份却共享原对象。无marker但发现任意reference_id时，模型read拒绝并要求先用B2a原字节补marker，不返回会在legacy写出时剥离ID的可写模型；完全无ID旧包保持兼容。
+
+note支持七类对象，canvas现有格式不支持独立TextItem（文本在ShapeLabel）；对应验收为note七类／canvas六类。已启用writer遇不支持序列化的模型成员必须拒绝，不能静默丢掉其ID或内容，legacy模式维持旧路径。
+
+B2b1源码与主机验收完成，独立复核必修均已处理，最终2808项通过／仪器源码编译成功。PDF/版本与显式独立恢复修订的最终实现与证据见docs/movinkpad/reference-identity-model-2026-11-07.md。接下来制定并审核B2b2普通打开／可信登记／SAF激活和复制包身份一致性计划。

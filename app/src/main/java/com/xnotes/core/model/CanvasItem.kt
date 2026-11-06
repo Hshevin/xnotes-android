@@ -14,6 +14,9 @@ import com.xnotes.core.pal.Renderer
  * undo commands can hold stable references across an undo/redo cycle.
  */
 interface CanvasItem {
+    /** Persisted reference identity, independent of geometry, grouping and layer membership. */
+    val referenceIdentity: ReferenceIdentity
+
     /** Stable user layer ID, null only until a new object joins its document. */
     var layerId: String?
         get() = null

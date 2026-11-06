@@ -1,7 +1,5 @@
 package com.xnotes.format
 
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -14,9 +12,9 @@ import java.util.zip.ZipOutputStream
 
 /** Explicit staging only. Storage/editor integration is a later step; no SAF or source writes here. */
 internal object BundleAnchors {
-    const val ENTRY="xnotes-anchors.json"
+    const val ENTRY=AnchorMetadata.ENTRY
     private const val MANIFEST="manifest.json"
-    private const val MAX_MARKER_BYTES=4096L
+    private const val MAX_MARKER_BYTES=AnchorMetadata.MAX_BYTES
     data class Prepared(val file:File,val identity:BundleIdentity,val sourceHash:String,val anchorCount:Int)
 
     fun prepare(source:File,directory:File,expectedAnchored:Boolean=false,cancelled:()->Boolean={false}):Prepared {
@@ -105,24 +103,9 @@ internal object BundleAnchors {
         return central
     }
     private fun limitFor(name:String)=when(name) {MANIFEST->AnchorManifest.MAX_BYTES;ENTRY,BundleIdentity.ENTRY->MAX_MARKER_BYTES;else->Long.MAX_VALUE}
-    private fun markerBytes(identity:BundleIdentity) = """{"format":"xnotes-object-anchors","version":1,"documentId":"${identity.documentId}"}""".toByteArray(Charsets.UTF_8)
+    private fun markerBytes(identity:BundleIdentity)=AnchorMetadata(identity.documentId).bytes()
     private fun readMarker(input:InputStream,identity:BundleIdentity) {
-        val out=ByteArrayOutputStream();val buffer=ByteArray(512)
-        while(true) {val n=input.read(buffer);if(n<0) break;out.write(buffer,0,n);require(out.size()<=4096) {"Anchor marker too large"}}
-        AnchorManifest.reader(ByteArrayInputStream(out.toByteArray())).use {r->
-            val p=JsonPull(r,strict=true,tokenLimit=4096);val keys=hashSetOf<String>()
-            p.beginObject()
-            while(p.hasNext()) {
-                val key=p.nextName();require(keys.add(key)) {"Duplicate anchor marker key"}
-                when(key) {
-                    "format" -> require(p.nextString()=="xnotes-object-anchors")
-                    "version" -> require(p.nextInt()==1) {"Unsupported anchor version"}
-                    "documentId" -> require(p.nextString()==identity.documentId) {"Anchor metadata belongs to another document"}
-                    else -> throw IllegalArgumentException("Unknown anchor marker field")
-                }
-            }
-            p.endObject();require(keys==setOf("format","version","documentId"));require(p.peek()==JsonPull.Token.END_DOCUMENT)
-        }
+        require(AnchorMetadata.read(input).documentId==identity.documentId) {"Anchor metadata belongs to another document"}
     }
     private fun copy(input:InputStream,out:OutputStream,cancelled:()->Boolean) {
         val buffer=ByteArray(65536)

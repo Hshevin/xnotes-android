@@ -11,7 +11,7 @@ import java.util.UUID
 /** Lossless insertion into an immutable UTF-8 source. Never constructs or reserializes ink models. */
 internal object AnchorManifest {
     const val MAX_BYTES=512L*1024*1024
-    const val MAX_ANCHORS=200_000
+    const val MAX_ANCHORS=com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS
     private const val MAX_KEYS=4096
     private const val MAX_KEY_CHARS=1024
     private const val MAX_ACTIVE_KEYS=8192

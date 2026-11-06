@@ -99,6 +99,8 @@ class TapeItem(
     rgba: Rgba,
     pattern: TapePattern = TapePattern.SOLID,
 ) : CanvasItem, Resizable {
+    override val referenceIdentity = ReferenceIdentity()
+
 
     override val kind = KIND
     override val resizable = true

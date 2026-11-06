@@ -917,12 +917,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val uri = storageProblemUri ?: return false
         val doc = try {
             withContext(Dispatchers.IO) {
-                // No PDF directory: the codec leaves a referenced original unresolved instead of failing.
+                // Explicit validated copy: new document/member identities, without the unavailable PDF background.
                 requireNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))) { appContext.getString(R.string.err_open_that_note) }
-                    .use { codec.read(it, null, imageDir) }
+                    .use { codec.readInkCopy(it, imageDir) }
             }
-        } catch (e: Exception) { storageProblemText = e.message ?: appContext.getString(R.string.err_open_that_note); return false }
-        doc.identity = com.xnotes.format.BundleIdentity()
+        } catch (e: Exception) { storageProblemText = appContext.getString(R.string.recovery_failed); return false }
         doc.path = null
         doc.displayName = appContext.getString(R.string.recovery_ink_only_name, com.xnotes.core.util.DocumentKind.stripSuffix(storageProblemName ?: queryDisplayName(android.net.Uri.parse(uri)) ?: ""))
         doc.dirty = true // nothing is on disk yet; the close guard offers to save it

@@ -11,6 +11,7 @@ import com.xnotes.core.model.ConnectorEnd
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.CutEdge
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.model.ImageCrop
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
@@ -169,6 +170,7 @@ class DocumentCodec(
         embedPdf: Boolean = true,
         isCancelled: () -> Boolean = { false },
     ) {
+        com.xnotes.core.model.ReferenceAnchors.validateForWrite(doc)
         require(embedPdf || doc.pdfFile == null || doc.identity.pdfResource != null)
         val started = System.nanoTime()
         // Named up front by the same walk the manifest makes, so the entries can go in before it.
@@ -212,7 +214,9 @@ class DocumentCodec(
         audio: List<Pair<String, File>> = audioAssets(doc),
         externalPdf: Boolean = false,
     ) {
+        com.xnotes.core.model.ReferenceAnchors.validateForWrite(doc)
         doc.identity.copy(externalPdf = externalPdf).write(zos)
+        if(doc.hasReferenceAnchors) AnchorMetadata(doc.identity.documentId).write(zos)
         // The flow lives in its own ODF entry, written only when non-empty (or carrying
         // custom defaults) so untouched notes stay byte-identical to old readers.
         if (!doc.flow.isEmpty || !com.xnotes.core.text.FlowDefaults.of(doc.flow).isEmpty) {
@@ -326,7 +330,7 @@ class DocumentCodec(
         j.name("pages").beginArray()
         val nextAsset = intArrayOf(0)
         val nextAudio = intArrayOf(0)
-        for (page in doc.pages) writePage(j, page, assets, nextAsset, audio, nextAudio)
+        for (page in doc.pages) writePage(j, page, assets, nextAsset, audio, nextAudio, doc.hasReferenceAnchors)
         j.endArray()
         writeStyle(j, doc.style)
         writeMargins(j, doc.margins)
@@ -341,6 +345,7 @@ class DocumentCodec(
         nextAsset: IntArray,
         audio: List<Pair<String, File>>,
         nextAudio: IntArray,
+        withReferences: Boolean,
     ) {
         j.beginObject()
         j.name("width").value(page.width)
@@ -355,21 +360,21 @@ class DocumentCodec(
         val ids = GlueIds.of(page.items)
         for (item in page.items) {
             when (item) {
-                is Stroke -> writeStroke(j, item, layerId = page.layerIdForWrite(item))
+                is Stroke -> writeStroke(j, item, layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
                 is ImageItem -> {
                     // The name was decided by [imageAssets]' walk of these same items; taking it
                     // from there keeps the entry and the manifest agreeing by construction.
                     val name = assets.getOrNull(nextAsset[0]++)?.first ?: continue
-                    writeImage(j, item, name, ids[item], layerId = page.layerIdForWrite(item))
+                    writeImage(j, item, name, ids[item], layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
                 }
                 is AudioItem -> {
                     val name = audio.getOrNull(nextAudio[0]++)?.first ?: continue
-                    writeAudio(j, item, name, layerId = page.layerIdForWrite(item))
+                    writeAudio(j, item, name, layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
                 }
-                is TextItem -> writeText(j, item, ids[item], layerId = page.layerIdForWrite(item))
-                is ShapeItem -> writeShape(j, item, ids[item], layerId = page.layerIdForWrite(item))
-                is ConnectorItem -> writeConnector(j, item, ids, layerId = page.layerIdForWrite(item))
-                is TapeItem -> writeTape(j, item, layerId = page.layerIdForWrite(item))
+                is TextItem -> writeText(j, item, ids[item], layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
+                is ShapeItem -> writeShape(j, item, ids[item], layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
+                is ConnectorItem -> writeConnector(j, item, ids, layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
+                is TapeItem -> writeTape(j, item, layerId = page.layerIdForWrite(item), referenceId = if(withReferences) page.referenceIdForWrite(item) else null)
                 else -> {} // unrecognized kind: not written
             }
         }
@@ -377,6 +382,7 @@ class DocumentCodec(
         writeStyle(j, page.style)
         writeMargins(j, page.margins)
         writeRooms(j, page.rooms)
+        if(withReferences) j.name("reference_id").value(requireNotNull(page.referenceIdentity.id))
         j.endObject()
     }
 
@@ -402,7 +408,7 @@ class DocumentCodec(
         j.endArray()
     }
 
-    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId) {
+    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId, referenceId: String? = null) {
         // Per-sample time is only meaningful to the speed pen, so it's written as an
         // optional 4th element only then — every other stroke serializes unchanged.
         val withTime = s.config.speedStrength > 0.0
@@ -458,10 +464,11 @@ class DocumentCodec(
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId) {
+    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId, referenceId: String? = null) {
         j.beginObject()
         j.name("kind").value(ImageItem.KIND)
         // Only on an item a connector glues to.
@@ -479,10 +486,11 @@ class DocumentCodec(
         if (item.locked) j.name("locked").value(true)
         item.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId) {
+    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId, referenceId: String? = null) {
         j.beginObject()
         j.name("kind").value(AudioItem.KIND)
         j.name("asset").value(assetName)
@@ -494,6 +502,7 @@ class DocumentCodec(
         if (a.locked) j.name("locked").value(true)
         a.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -503,7 +512,7 @@ class DocumentCodec(
         j.name("rec_ms").value(m.ms)
     }
 
-    private fun writeText(j: JsonWrite, t: TextItem, id: Int?, layerId: String? = t.layerId) {
+    private fun writeText(j: JsonWrite, t: TextItem, id: Int?, layerId: String? = t.layerId, referenceId: String? = null) {
         j.beginObject()
         j.name("kind").value(TextItem.KIND)
         id?.let { j.name("id").value(it) }
@@ -521,10 +530,11 @@ class DocumentCodec(
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId) {
+    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId, referenceId: String? = null) {
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
         val standIn = s.legacyOutline()
         val drawn = standIn?.let { Rect.bounding(it) }
@@ -595,6 +605,7 @@ class DocumentCodec(
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -604,7 +615,7 @@ class DocumentCodec(
      * route. Its style and label are a shape's.
      */
     /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
-    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId) {
+    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId, referenceId: String? = null) {
         val s = t.shape
         j.beginObject()
         j.name("kind").value(TapeItem.KIND)
@@ -619,10 +630,11 @@ class DocumentCodec(
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId) {
+    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId, referenceId: String? = null) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
         j.beginObject()
@@ -680,6 +692,7 @@ class DocumentCodec(
         if (c.locked) j.name("locked").value(true)
         c.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
+        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -762,185 +775,228 @@ class DocumentCodec(
      * (so neither is ever held in RAM) and the caller owns those files' lifetime. When a dir is null
      * that asset is skipped, which is what validation-only reads want.
      */
-    fun read(
+    fun read(input:InputStream,pdfDir:File?=null,imageDir:File?=null,timing:ReadTiming?=null,pdfStore:((InputStream)->File)?=null):Document =
+        readDocument(input,pdfDir,imageDir,timing,pdfStore,false)
+
+    /** Explicit recovery copy: validate the source first, then mint independent identities without cloning sample arrays. */
+    fun readInkCopy(input:InputStream,imageDir:File?=null):Document = readDocument(input,null,imageDir,null,null,true)
+
+    private fun readDocument(
         input: InputStream,
         pdfDir: File? = null,
         imageDir: File? = null,
         timing: ReadTiming? = null,
         pdfStore: ((InputStream) -> File)? = null,
+        independentCopy:Boolean,
     ): Document {
-        var manifest: ParsedManifest? = null
-        var identity: BundleIdentity? = null
-        var flowBytes: ByteArray? = null
-        var markupBytes: ByteArray? = null
-        val templates = HashMap<String, String>()
-        val packages = HashMap<String, File>()
-        val imageFiles = HashMap<String, File>()
-        val audioFiles = HashMap<String, File>()
-        var pdfFile: File? = null
-        ZipInputStream(input).use { zis ->
-            var entry: ZipEntry? = zis.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    val name = entry.name
-                    if (name == BundleIdentity.ENTRY) {
-                        require(identity == null) { "Duplicate document identity" }
-                        identity = BundleIdentity.read(zis)
-                    } else if (name == "manifest.json") {
-                        // Parsed straight off the zip stream: a dense note's manifest is never
-                        // materialized as bytes, a String, or an org.json DOM (which held a boxed
-                        // wrapper per number and made big notes cost minutes and ~3x their heap).
-                        if (manifest == null) {
-                            val probe = InflateProbe(zis)
-                            val started = System.nanoTime()
-                            manifest = try {
-                                parseManifest(JsonPull(InputStreamReader(probe, Charsets.UTF_8)))
-                            } catch (_: JsonPullException) {
-                                throw XNoteFormatException(NOT_XNOTE)
+        val created=ArrayList<File>()
+        try {
+            var manifest: ParsedManifest? = null
+            var identity: BundleIdentity? = null
+            var anchorMarker:AnchorMetadata?=null
+            val entryNames=hashSetOf<String>();var duplicateEntry=false
+            var flowBytes: ByteArray? = null
+            var markupBytes: ByteArray? = null
+            val templates = HashMap<String, String>()
+            val packages = HashMap<String, File>()
+            val imageFiles = HashMap<String, File>()
+            val audioFiles = HashMap<String, File>()
+            var pdfFile: File? = null
+            var embeddedPdfSeen=false
+            ZipInputStream(input).use { zis ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    if(!entryNames.add(entry.name)) duplicateEntry=true
+                    if (!entry.isDirectory) {
+                        val name = entry.name
+                        if(name==AnchorMetadata.ENTRY) {
+                            require(anchorMarker==null) {"Duplicate anchor metadata"};anchorMarker=AnchorMetadata.read(zis)
+                        } else if (name == BundleIdentity.ENTRY) {
+                            require(identity == null) { "Duplicate document identity" }
+                            identity = BundleIdentity.read(zis)
+                        } else if (name == "manifest.json") {
+                            // Parsed straight off the zip stream: a dense note's manifest is never
+                            // materialized as bytes, a String, or an org.json DOM (which held a boxed
+                            // wrapper per number and made big notes cost minutes and ~3x their heap).
+                            if (manifest == null) {
+                                val probe = InflateProbe(zis)
+                                val started = System.nanoTime()
+                                manifest = try {
+                                    parseManifest(JsonPull(InputStreamReader(probe, Charsets.UTF_8)),independentCopy)
+                                } catch (_: JsonPullException) {
+                                    throw XNoteFormatException(NOT_XNOTE)
+                                }
+                                timing?.inflateMs = probe.nanos / 1_000_000L
+                                timing?.parseMs = (System.nanoTime() - started - probe.nanos) / 1_000_000L
                             }
-                            timing?.inflateMs = probe.nanos / 1_000_000L
-                            timing?.parseMs = (System.nanoTime() - started - probe.nanos) / 1_000_000L
-                        }
-                    } else if (name == "assets/source.pdf") {
-                        // Never slurp the PDF into memory: stream it to disk (or skip it).
-                        if (pdfDir != null) {
-                            val started = System.nanoTime()
-                            pdfFile = if (pdfStore != null) pdfStore(zis) else {
-                                val f = File.createTempFile("src", ".pdf", pdfDir)
+                        } else if (name == "assets/source.pdf") {
+                            embeddedPdfSeen=true
+                            // Never slurp the PDF into memory: stream it to disk (or skip it).
+                            if (pdfDir != null) {
+                                val started = System.nanoTime()
+                                pdfFile = if (pdfStore != null) pdfStore(zis) else {
+                                    val f = File.createTempFile("src", ".pdf", pdfDir).also {created+=it}
+                                    FileOutputStream(f).use { zis.copyTo(it) }
+                                    f
+                                }
+                                timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
+                            }
+                        } else if (name.startsWith("assets/image-")) {
+                            // Stream images to disk too (or skip): a note full of large images must never
+                            // load all their encoded bytes into the heap at once.
+                            if (imageDir != null) {
+                                val started = System.nanoTime()
+                                val f = File.createTempFile("img", null, imageDir).also {created+=it}
                                 FileOutputStream(f).use { zis.copyTo(it) }
-                                f
+                                imageFiles[name] = f
+                                timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
                             }
-                            timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
+                        } else if (name.startsWith(AUDIO_ASSET)) {
+                            // A recording streams to disk beside the images; it is played from the file.
+                            if (imageDir != null) {
+                                val started = System.nanoTime()
+                                val f = File.createTempFile("aud", null, imageDir).also {created+=it}
+                                FileOutputStream(f).use { zis.copyTo(it) }
+                                audioFiles[name] = f
+                                timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
+                            }
+                        } else if (name.startsWith(TEMPLATE_ASSET) && name.endsWith(TEMPLATE_EXT)) {
+                            // A packaged template goes to disk like an image, so its pictures never sit in the heap.
+                            val key = name.substring(TEMPLATE_ASSET.length, name.length - TEMPLATE_EXT.length)
+                            if (imageDir != null && TEMPLATE_KEY.matches(key)) {
+                                val f = File.createTempFile("tpl", TEMPLATE_EXT, imageDir).also {created+=it}
+                                FileOutputStream(f).use { zis.copyTo(it) }
+                                packages[key] = f
+                            }
+                        } else if (name == FlowXml.ENTRY_NAME) {
+                            flowBytes = zis.readBytes()
+                        } else if (name == MarkupsXfdf.ENTRY_NAME) {
+                            markupBytes = readAtMost(zis, MarkupsXfdf.MAX_BYTES)
+                        } else if (name.startsWith(TEMPLATE_DIR) && name.endsWith(TEMPLATE_EXT)) {
+                            val key = name.substring(TEMPLATE_DIR.length, name.length - TEMPLATE_EXT.length)
+                            val bytes = readAtMost(zis, TemplateReader.MAX_BYTES)
+                            if (TEMPLATE_KEY.matches(key) && bytes != null) templates[key] = String(bytes, Charsets.UTF_8)
                         }
-                    } else if (name.startsWith("assets/image-")) {
-                        // Stream images to disk too (or skip): a note full of large images must never
-                        // load all their encoded bytes into the heap at once.
-                        if (imageDir != null) {
-                            val started = System.nanoTime()
-                            val f = File.createTempFile("img", null, imageDir)
-                            FileOutputStream(f).use { zis.copyTo(it) }
-                            imageFiles[name] = f
-                            timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
-                        }
-                    } else if (name.startsWith(AUDIO_ASSET)) {
-                        // A recording streams to disk beside the images; it is played from the file.
-                        if (imageDir != null) {
-                            val started = System.nanoTime()
-                            val f = File.createTempFile("aud", null, imageDir)
-                            FileOutputStream(f).use { zis.copyTo(it) }
-                            audioFiles[name] = f
-                            timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
-                        }
-                    } else if (name.startsWith(TEMPLATE_ASSET) && name.endsWith(TEMPLATE_EXT)) {
-                        // A packaged template goes to disk like an image, so its pictures never sit in the heap.
-                        val key = name.substring(TEMPLATE_ASSET.length, name.length - TEMPLATE_EXT.length)
-                        if (imageDir != null && TEMPLATE_KEY.matches(key)) {
-                            val f = File.createTempFile("tpl", TEMPLATE_EXT, imageDir)
-                            FileOutputStream(f).use { zis.copyTo(it) }
-                            packages[key] = f
-                        }
-                    } else if (name == FlowXml.ENTRY_NAME) {
-                        flowBytes = zis.readBytes()
-                    } else if (name == MarkupsXfdf.ENTRY_NAME) {
-                        markupBytes = readAtMost(zis, MarkupsXfdf.MAX_BYTES)
-                    } else if (name.startsWith(TEMPLATE_DIR) && name.endsWith(TEMPLATE_EXT)) {
-                        val key = name.substring(TEMPLATE_DIR.length, name.length - TEMPLATE_EXT.length)
-                        val bytes = readAtMost(zis, TemplateReader.MAX_BYTES)
-                        if (TEMPLATE_KEY.matches(key) && bytes != null) templates[key] = String(bytes, Charsets.UTF_8)
+                        // Anything else is an asset from a newer version: skipped, never buffered.
                     }
-                    // Anything else is an asset from a newer version: skipped, never buffered.
+                    zis.closeEntry()
+                    entry = zis.nextEntry
                 }
-                zis.closeEntry()
-                entry = zis.nextEntry
             }
-        }
 
-        val m = manifest ?: throw XNoteFormatException(NOT_XNOTE)
-        if (!m.formatOk) throw XNoteFormatException(NOT_XNOTE)
+            val m = manifest ?: throw XNoteFormatException(NOT_XNOTE)
+            if (!m.formatOk) throw XNoteFormatException(NOT_XNOTE)
 
-        val doc = Document(dpi = m.dpi)
-        identity?.let { doc.identity = it }
-        doc.bodyStartPage = m.bodyStartPage?.takeIf { it >= 0 }
-        doc.created = m.created
-        doc.templates = templates
-        doc.templatePackages = packages
-        doc.style = m.style
-        doc.margins = m.margins
-        doc.newPageSize = m.newPageSize
+            val doc = Document(dpi = m.dpi)
+            identity?.let { doc.identity = it }
+            doc.bodyStartPage = m.bodyStartPage?.takeIf { it >= 0 }
+            doc.created = m.created
+            doc.templates = templates
+            doc.templatePackages = packages
+            doc.style = m.style
+            doc.margins = m.margins
+            doc.newPageSize = m.newPageSize
 
-        require(identity?.externalPdf != true || m.hasPdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }
-        if (m.hasPdf) {
-            if (identity?.externalPdf == true && pdfFile == null && pdfDir != null) {
-                val id = requireNotNull(identity?.pdfResource)
-                pdfFile = requireNotNull(resolvePdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }(id)
-            }
-            doc.pdfFile = pdfFile
-        } else {
-            if (pdfStore == null) pdfFile?.delete() // a stray PDF with no manifest flag: don't leak the temp file
-        }
-
-        doc.bookmarks.addAll(m.bookmarks)
-        flowBytes?.let { FlowXml.readInto(doc.flow, it) }
-
-        if (m.pages.isEmpty()) {
-            doc.pages.add(Page.blank(PageSize.A4, Orientation.PORTRAIT, m.dpi))
-            return doc
-        }
-        doc.pages.addAll(m.pages)
-        if (m.writer < OWN_TEMPLATE_SETTINGS_SINCE) doc.keepBorrowedTemplateSettings()
-        markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
-
-        // Image entries stream out of the zip after the manifest, so image items materialize only
-        // now that their files exist; the recorded index restores each one's z-order slot.
-        for ((page, specs, glue) in m.pageImages) {
-            var dropped = 0
-            for (spec in specs) {
-                val item = when (spec) {
-                    is PendingImage -> materializeImage(spec, imageFiles)
-                    is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
+            require(identity?.externalPdf != true || m.hasPdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }
+            if (m.hasPdf) {
+                if (identity?.externalPdf == true && pdfFile == null && pdfDir != null) {
+                    val id = requireNotNull(identity?.pdfResource)
+                    pdfFile = requireNotNull(resolvePdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }(id)
                 }
-                if (item == null) {
-                    dropped++
-                } else {
+                doc.pdfFile = pdfFile
+            } else {
+                if (pdfStore == null) pdfFile?.delete() // a stray PDF with no manifest flag: don't leak the temp file
+            }
+
+            doc.bookmarks.addAll(m.bookmarks)
+            flowBytes?.let { FlowXml.readInto(doc.flow, it) }
+
+            if (m.pages.isEmpty()) {
+                require(anchorMarker==null && !independentCopy) {"Cannot substitute a new blank page for a reference or recovery document"}
+                m.anchors.complete(null,identity,emptySequence())
+                doc.pages.add(Page.blank(PageSize.A4, Orientation.PORTRAIT, m.dpi))
+                return doc
+            }
+            doc.pages.addAll(m.pages)
+            if (m.writer < OWN_TEMPLATE_SETTINGS_SINCE) doc.keepBorrowedTemplateSettings()
+            markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
+
+            // Image entries stream out of the zip after the manifest, so image items materialize only
+            // now that their files exist; the recorded index restores each one's z-order slot.
+            for ((page, specs, glue) in m.pageImages) {
+                var dropped = 0
+                for (spec in specs) {
+                    val item = when (spec) {
+                        is PendingImage -> materializeImage(spec, imageFiles, anchorMarker!=null)
+                        is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
+                    }
+                    if (item == null) {
+                        dropped++
+                    } else {
+                        m.anchors.bind(item.referenceIdentity,spec.referenceId)
                     require(page.layers.entries.any { it.id == item.layerId })
-                    page.items.add(spec.index - dropped, item)
-                    if (spec is PendingImage) glue.named(item, spec.id)
-                }
-            }
-        }
-        // A recording whose item did not survive leaves its file behind; nothing else will delete it.
-        val used = m.pageImages.flatMap { it.second }.filterIsInstance<PendingAudio>().map { it.asset }.toSet()
-        for ((name, f) in audioFiles) if (name !in used) f.delete()
-        // Every page's items are in, so connectors can glue to whatever their ends name.
-        for (glue in m.pageGlue) glue.resolve()
-
-        // Ink written before pen-up sample reduction shipped (writer < 43, or no writer field at
-        // all) carries far more samples than the ribbon needs; compact it once at load. In-memory
-        // only — the file shrinks whenever the user next edits and saves.
-        if (m.writer < SIMPLIFIED_SINCE && StrokeSimplify.enabled) {
-            val compactStart = System.nanoTime()
-            doc.compactedOnLoad = true
-            for (page in doc.pages) {
-                for (item in page.items) {
-                    if (item !is Stroke || item.straight) continue
-                    val slim = StrokeSimplify.simplify(
-                        item.samples, item.geometry().halfWidths, StrokeSimplify.LEGACY_EPS,
-                        item.smoothScale, item.config.directionStrength,
-                    )
-                    if (slim.size != item.samples.size) {
-                        item.setSamples(slim)
+                        page.items.add(spec.index - dropped, item)
+                        if (spec is PendingImage) glue.named(item, spec.id)
                     }
-                    item.invalidate() // also frees the geometry built for the width channel
                 }
             }
-            timing?.compactMs = (System.nanoTime() - compactStart) / 1_000_000L
+            // A recording whose item did not survive leaves its file behind; nothing else will delete it.
+            val used = m.pageImages.flatMap { it.second }.filterIsInstance<PendingAudio>().map { it.asset }.toSet()
+            for ((name, f) in audioFiles) if (name !in used) f.delete()
+            // Every page's items are in, so connectors can glue to whatever their ends name.
+            for (glue in m.pageGlue) glue.resolve()
+
+            if(anchorMarker!=null && !independentCopy) {
+                require(identity?.externalPdf!=true || !embeddedPdfSeen) {"Reference-only PDF identity cannot be overridden by embedded data"}
+                require(!m.hasPdf || doc.pdfFile?.let {it.isFile && it.canRead()}==true) {"Cannot expose an anchored note without its PDF original"}
+                require(m.hasPdf || (!embeddedPdfSeen && doc.pages.none {it.pdfPage!=null})) {"Inconsistent anchored PDF background"}
+            }
+            require(anchorMarker==null || !duplicateEntry) {"Duplicate anchored ZIP entries"}
+            doc.hasReferenceAnchors=m.anchors.complete(anchorMarker,identity,doc.pages.asSequence().flatMap {page->
+                sequenceOf(page.referenceIdentity)+page.items.asSequence().map {it.referenceIdentity}
+            })
+
+            // Ink written before pen-up sample reduction shipped (writer < 43, or no writer field at
+            // all) carries far more samples than the ribbon needs; compact it once at load. In-memory
+            // only — the file shrinks whenever the user next edits and saves.
+            if (m.writer < SIMPLIFIED_SINCE && StrokeSimplify.enabled) {
+                val compactStart = System.nanoTime()
+                doc.compactedOnLoad = true
+                for (page in doc.pages) {
+                    for (item in page.items) {
+                        if (item !is Stroke || item.straight) continue
+                        val slim = StrokeSimplify.simplify(
+                            item.samples, item.geometry().halfWidths, StrokeSimplify.LEGACY_EPS,
+                            item.smoothScale, item.config.directionStrength,
+                        )
+                        if (slim.size != item.samples.size) {
+                            item.setSamples(slim)
+                        }
+                        item.invalidate() // also frees the geometry built for the width channel
+                    }
+                }
+                timing?.compactMs = (System.nanoTime() - compactStart) / 1_000_000L
+            }
+            if(independentCopy) {
+                doc.identity=BundleIdentity()
+                doc.pdfFile=null
+                for(page in doc.pages) {page.pdfPage=null;page.pdfTurn=0}
+                if(doc.hasReferenceAnchors) doc.enableReferenceAnchors()
+                doc.dirty=true
+            }
+            return doc
+        } catch(error:Throwable) {
+            // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
+            created.forEach {runCatching {it.delete()}}
+            throw error
         }
-        return doc
+
     }
 
     // --- streaming json -> model ---
 
-    private class ParsedManifest {
+    private class ParsedManifest(independentCopy:Boolean) {
+        val anchors=AnchorReadState(independentCopy)
         var formatOk = false
         var writer = 0
         var bodyStartPage: Int? = null
@@ -957,7 +1013,7 @@ class DocumentCodec(
     }
 
     /** An item parsed before its asset entry has streamed out of the zip, and the slot it goes back to. */
-    private sealed class Pending(val index: Int, val asset: String)
+    private sealed class Pending(val index: Int, val asset: String, val referenceId:String?)
 
     private class PendingImage(
         index: Int,
@@ -974,7 +1030,8 @@ class DocumentCodec(
         val group: Int? = null,
         val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
         val part: Rect? = null,
-    ) : Pending(index, asset)
+        referenceId:String?=null,
+    ) : Pending(index, asset, referenceId)
 
     private class PendingAudio(
         index: Int,
@@ -987,7 +1044,8 @@ class DocumentCodec(
         val locked: Boolean,
         val group: Int? = null,
         val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
-    ) : Pending(index, asset)
+        referenceId:String?=null,
+    ) : Pending(index, asset, referenceId)
 
     /**
      * A note's page count, PDF flag and created time, read from [ch] through the zip's central directory
@@ -1036,11 +1094,13 @@ class DocumentCodec(
         return if (isNote) NotePeek(pages, hasPdf, created) else null
     }
 
-    private fun parseManifest(p: JsonPull): ParsedManifest {
-        val m = ParsedManifest()
-        p.beginObject()
+    private fun parseManifest(p: JsonPull,independentCopy:Boolean=false): ParsedManifest {
+        val m = ParsedManifest(independentCopy)
+        p.beginObject();val anchorKeys=hashSetOf<String>()
         while (p.hasNext()) {
-            when (p.nextName()) {
+            val key=p.nextName();m.anchors.key(anchorKeys,key)
+            when (key) {
+                "version" -> m.anchors.version(p)
                 "format" -> {
                     if (stringOr(p, "") != FORMAT) throw XNoteFormatException(NOT_XNOTE)
                     m.formatOk = true
@@ -1059,6 +1119,7 @@ class DocumentCodec(
             }
         }
         p.endObject()
+        m.anchors.root(anchorKeys,"pages")
         return m
     }
 
@@ -1087,14 +1148,16 @@ class DocumentCodec(
     }
 
     private fun parsePages(p: JsonPull, m: ParsedManifest) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
+        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {m.anchors.invalid();return p.skipValue()}
         val (fallbackW, fallbackH) = PageSize.A4.pixels(Orientation.PORTRAIT, m.dpi)
         p.beginArray()
         while (p.hasNext()) {
             if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
-                p.skipValue()
+                m.anchors.invalid();m.anchors.observe(null);p.skipValue()
                 continue
             }
+            var referenceId:String?=null;var referenceSeen=false
+            val anchorKeys=hashSetOf<String>()
             var width = fallbackW
             var height = fallbackH
             var pdfPage: Int? = null
@@ -1109,7 +1172,9 @@ class DocumentCodec(
             val glue = GlueRead()
             p.beginObject()
             while (p.hasNext()) {
-                when (p.nextName()) {
+                val key=p.nextName();m.anchors.key(anchorKeys,key)
+                when (key) {
+                    "reference_id" -> {require(!referenceSeen);referenceSeen=true;referenceId=p.nextString().also {com.xnotes.core.model.ReferenceIdentity.requireUuid(it)}}
                     "width" -> width = doubleOr(p, fallbackW)
                     "height" -> height = doubleOr(p, fallbackH)
                     "pdf_page" -> pdfPage = intOrNull(p)
@@ -1119,7 +1184,7 @@ class DocumentCodec(
                     "margins" -> margins = parseMargins(p)
                     "rooms" -> rooms = parseRooms(p)
                     "layers" -> layers = LayerJson.read(p)
-                    "items" -> parseItems(p, items, pending, glue)
+                    "items" -> parseItems(p, items, pending, glue, m.anchors)
                     else -> p.skipValue()
                 }
             }
@@ -1131,11 +1196,13 @@ class DocumentCodec(
                 height = prev?.height ?: fallbackH
                 pdfPage = null
             }
+            m.anchors.observe(referenceId)
             val page = Page(
                 width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins,
                 pdfTurn = if (pdfPage == null) 0 else PageTurn.normalize(pdfTurn),
                 rooms = roomsWithin(rooms, width, height),
             )
+            m.anchors.bind(page.referenceIdentity,referenceId)
             page.layers.restore(layers.entries, layers.activeId)
             require(page.items.all { item -> layers.entries.any { it.id == item.layerId } })
             // Only the first page can be the cover; a flag anywhere else is dropped.
@@ -1147,15 +1214,17 @@ class DocumentCodec(
         p.endArray()
     }
 
-    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
+    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead, anchors:AnchorReadState) {
+        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {anchors.invalid();return p.skipValue()}
         p.beginArray()
-        while (p.hasNext()) parseItem(p, items, pending, glue)
+        while (p.hasNext()) parseItem(p, items, pending, glue, anchors)
         p.endArray()
     }
 
     /** Union of every kind's fields, so an item parses in one pass whatever its key order. */
     private class ItemScratch {
+        var referenceId:String?=null
+        var referenceSeen=false
         var locked = false
         var group: Int? = null
         var layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT
@@ -1234,12 +1303,16 @@ class DocumentCodec(
         var highlighterInverse: Boolean? = null
     }
 
-    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
-        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) return p.skipValue()
+    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead, anchors:AnchorReadState) {
+        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {anchors.invalid();anchors.observe(null);return p.skipValue()}
         val s = ItemScratch()
         p.beginObject()
         while (p.hasNext()) {
             when (p.nextName()) {
+                "reference_id" -> {
+                    require(!s.referenceSeen) {"Duplicate reference identity field"};s.referenceSeen=true
+                    s.referenceId=p.nextString().also {com.xnotes.core.model.ReferenceIdentity.requireUuid(it)}
+                }
                 "kind" -> s.kind = stringOr(p, "")
                 "id" -> s.id = intOrNull(p)
                 "connector" -> s.connector = parseConnector(p)
@@ -1300,6 +1373,7 @@ class DocumentCodec(
             }
         }
         p.endObject()
+        anchors.observe(s.referenceId)
         val before = items.size
         val sync = s.rec?.let { SyncMark(it, s.recMs) }
         when (s.kind) {
@@ -1310,7 +1384,7 @@ class DocumentCodec(
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part, s.referenceId,
                         ),
                     )
                 }
@@ -1318,7 +1392,7 @@ class DocumentCodec(
             AudioItem.KIND -> {
                 val asset = s.asset
                 if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId, s.referenceId))
                 }
             }
             TextItem.KIND -> items.add(
@@ -1340,6 +1414,7 @@ class DocumentCodec(
             TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // unrecognized kind: skipped (forgiving)
         }
+        if(items.size>before) anchors.bind(items[before].referenceIdentity,s.referenceId)
         if (items.size > before) items[before].layerId = s.layerId
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every note written before locking existed, which reads back as unlocked.
@@ -1719,8 +1794,9 @@ class DocumentCodec(
         return size?.let { PageSizeChoice(it, orientation, clamp(width), clamp(height)) }
     }
 
-    private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>): ImageItem? {
+    private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>, anchored:Boolean=false): ImageItem? {
         val file = imageFiles[spec.asset] ?: return null
+        if(anchored && imageCodec.probeFile(file.path)==null) return null
         var w = spec.srcW
         var h = spec.srcH
         if (w <= 0 || h <= 0) {
