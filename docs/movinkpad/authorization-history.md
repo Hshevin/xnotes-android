@@ -89,3 +89,5 @@
 ## 2026-11-07 模型自选与生图模型合并推送
 
 - 用户要求「合并到主分支并推送」：将 `worktree-ai-template-models`（`46dc22a7`，供应商分聊天 / 生图模型、新建笔记生成模板时自选文字与图像模型）以 `--no-ff` 合入本地 `master`；合并 `origin/master` 的 Release 97 记录（仅 `authorization-history.md` 冲突，两侧均保留）后推送 `master` 到 `origin/master`。本地 `master` 此前已含另一任务授权合并、尚未推送的无限画布分屏黑区候选修复（`c4f30567` 等，其黑区效果与目标 GPU 仍待真机确认），按本次「推送主分支」一并推送。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
+
+- 用户再次要求拉取更新并打包覆盖更新 APK，不发布 Release，自动推送打包日志。本轮快进到 `0b7a9f30`，本地交付 0.9.8 / versionCode 98，沿用正式身份与原签名；授权推送本轮版本及日志至 origin/master，不上传 APK、不发布 GitHub Release、不安装用户设备。原有三处本地修改保留，画布黑屏候选修复仍待目标设备验收。
