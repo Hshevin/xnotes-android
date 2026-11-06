@@ -60,3 +60,4 @@
 ## 2026-11-06
 
 - 用户于 2026-11-06 要求推送远端：推送本地 `master`（含关闭 / 切换文档误删私有 PDF 原件的修复、重新关联与仅笔迹副本）到 `origin/master`。此授权仅限本次，不包含打包 APK、安装或 GitHub Release。
+- 用户随后于 2026-11-06 提供本机构建的 Release 95 APK 并要求发布：补提交 versionCode 95，推送 `master` 与标签 `v0.9.8-movinkpad.95`，发布 GitHub Release（附 APK 与 SHA256SUMS.txt）。仅限本次，不包含设备安装。
