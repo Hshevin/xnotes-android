@@ -412,8 +412,11 @@ private fun EditorScreen(
             confirmButton = {
                 androidx.compose.foundation.layout.Column {
                     if (pane.storageMissingPdf != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
-                        relinkPane = pane; relinkPdfLauncher.launch(arrayOf("application/pdf"))
+                        relinkPane = pane; relinkPdfLauncher.launch(arrayOf("application/pdf", "application/octet-stream", "application/zip"))
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_relink_pdf)) }
+                    if (pane.storageMissingPdf != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
+                        working = true; scope.launch { pane.openInkWithoutPdf(); working = false }
+                    }) { androidx.compose.material3.Text(stringResource(R.string.recovery_open_ink_only)) }
                     if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.recoverStorageProblem(restore = true); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_restore_backup)) }

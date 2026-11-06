@@ -25,5 +25,7 @@
     <string name="missing_search_failed">The search failed. Check folder access.</string>
     <string name="missing_wrong_file">The selected file is not the original document. Choose the file with the same document ID.</string>
     <string name="missing_relocate_failed">Could not locate the document.</string>
-    <string name="recovery_relink_pdf">Choose the original PDF to re-link</string>
+    <string name="recovery_relink_pdf">Choose the original PDF or an older note file to re-link</string>
+    <string name="recovery_open_ink_only">Open the ink only (without the PDF, as a copy to save)</string>
+    <string name="recovery_ink_only_name">%1$s (ink only)</string>
 </resources>

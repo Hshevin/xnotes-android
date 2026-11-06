@@ -60,3 +60,9 @@
 
 - 2026-11-05 用户授权将本地 `master` 推送远端 `origin`，包含「关于」页改为指向 `Hshevin/xnotes-android`（Issues、Releases、许可证，上游署名），以及此前未推送的 PDF 重新关联与无限画布黑屏调查记录。仅本次推送，不包含打包、安装或 GitHub Release。
 - 用户要求拉取远端并更新 APK，随后明确纠正为「不要发布 Release，只打包」。本次仅本地交付 0.9.8 / Release 94，沿用正式身份和签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release。
+
+## 2026-11-06
+
+- 用户于 2026-11-06 要求推送远端：推送本地 `master`（含关闭 / 切换文档误删私有 PDF 原件的修复、重新关联与仅笔迹副本）到 `origin/master`。此授权仅限本次，不包含打包 APK、安装或 GitHub Release。
+
+- 用户要求「打包主线最新提交」。本次拉取并合入远端 `ae3e54b7`，本地交付 0.9.8 / Release 95，沿用正式包名和原签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release，保留已有本地修改。
