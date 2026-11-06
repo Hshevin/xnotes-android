@@ -8,8 +8,11 @@ import org.json.JSONObject
 /** A tool call the model asked for, assembled from streamed fragments; [arguments] is its raw JSON text. */
 data class AiToolCall(val id: String, val name: String, val arguments: String)
 
-/** One streamed completion: its text, reasoning to hand back alongside tool calls, and the calls. */
-data class AiReply(val content: String = "", val reasoning: String = "", val calls: List<AiToolCall> = emptyList())
+/**
+ * One streamed completion: its text, reasoning to hand back alongside tool calls, and the calls.
+ * [thinkingDropped] when it went without the chosen thinking level, which the model refuses.
+ */
+data class AiReply(val content: String = "", val reasoning: String = "", val calls: List<AiToolCall> = emptyList(), val thinkingDropped: Boolean = false)
 
 /** The provider rejected a request that offered tools: the model or API cannot take tool calls. */
 class AiToolsUnsupported(val status: Int, detail: String = "") : IllegalStateException(AiConnection.httpFailure(status, detail))

@@ -368,7 +368,25 @@ class AiConnection(private val openConnection: (String) -> HttpURLConnection = {
     override suspend fun stream(config: AiConfig, messages: List<AiMessage>, delta: suspend (String) -> Unit) {
         complete(config, messages, emptyList(), null, "auto", delta)
     }
+    /** The request refused the thinking field it carried; nothing of the answer has arrived yet. */
+    private class ThinkingRefused : Exception()
+
+    /**
+     * Models without reasoning refuse a thinking level (OpenAI's GPT-4o answers `reasoning_effort` with
+     * HTTP 400), so a refusal that names the field is sent again once without it, and the model and level
+     * are then sent without it for the rest of the session. The reply says so.
+     */
     override suspend fun complete(config: AiConfig, messages: List<AiMessage>, tail: List<JSONObject>, tools: org.json.JSONArray?, toolChoice: String, delta: suspend (String) -> Unit): AiReply {
+        if (AiThinking.refuses(config)) return send(config.copy(effort = ""), messages, tail, tools, toolChoice, delta).copy(thinkingDropped = true)
+        return try {
+            send(config, messages, tail, tools, toolChoice, delta)
+        } catch (e: ThinkingRefused) {
+            AiThinking.markRefused(config)
+            send(config.copy(effort = ""), messages, tail, tools, toolChoice, delta).copy(thinkingDropped = true)
+        }
+    }
+
+    private suspend fun send(config: AiConfig, messages: List<AiMessage>, tail: List<JSONObject>, tools: org.json.JSONArray?, toolChoice: String, delta: suspend (String) -> Unit): AiReply {
         val conn = openConnection(AiProtocol.endpoint(config.url))
         connection = conn
         try {
@@ -388,6 +406,7 @@ class AiConnection(private val openConnection: (String) -> HttpURLConnection = {
             val status = conn.responseCode
             // The provider's own reason, so a rejected request says what it was rejected for.
             val detail = if (status in 200..299) "" else AiProtocol.providerError(errorBody(conn), config.key)
+            if ((status == 400 || status == 422) && AiThinking.refused(detail, config.effort, config.thinkingFormat, config.url)) throw ThinkingRefused()
             // A request rejected only because it offered tools: the caller answers without them and says so.
             if (tools != null && (status == 400 || status == 422)) throw AiToolsUnsupported(status, detail)
             check(status in 200..299) { httpFailure(status, detail) }

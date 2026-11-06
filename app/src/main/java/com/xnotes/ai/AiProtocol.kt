@@ -35,6 +35,30 @@ object AiThinking {
         }
     }
 
+    /** The request field [apply] writes for [format] at [url]. */
+    fun field(format: String, url: String): String = when (resolve(format, url)) {
+        DEEPSEEK -> "thinking"
+        QWEN -> "enable_thinking"
+        OPENROUTER -> "reasoning"
+        else -> "reasoning_effort"
+    }
+
+    /**
+     * Whether a refusal's [detail] is about the thinking field a request with [effort] carried, as
+     * models without reasoning (GPT-4o and the like) answer `reasoning_effort` with HTTP 400.
+     */
+    fun refused(detail: String, effort: String, format: String, url: String): Boolean =
+        effort.isNotEmpty() && detail.contains(field(format, url), ignoreCase = true)
+
+    /** Endpoint, model and level found this session to be refused; their requests go without the field. */
+    private val refusing = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private fun key(config: AiConfig) = listOf(config.url.trim().trimEnd('/'), config.model.trim(), config.effort).joinToString("\n")
+
+    fun refuses(config: AiConfig): Boolean = config.effort.isNotEmpty() && key(config) in refusing
+
+    fun markRefused(config: AiConfig) { refusing += key(config) }
+
     fun apply(body: JSONObject, effort: String, format: String, url: String) {
         if (effort.isEmpty()) return
         val on = effort != OFF

@@ -96,4 +96,5 @@
     <string name="ai_msg_image_model_required">Set up an image model in AI settings first</string>
     <string name="ai_msg_image_invalid_reply">The image service returned no usable picture</string>
     <string name="ai_msg_image_too_large">The generated picture is too large</string>
+    <string name="ai_msg_thinking_unsupported">This model does not support the chosen thinking setting; it answered with its own default</string>
 </resources>
