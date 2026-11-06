@@ -55,13 +55,28 @@
 - 2026-11-05 用户随后授权将当前主分支打包为正式覆盖更新 Release 90，沿用 `com.xnotes.movinkpad` 和历史签名，递增 versionCode；只本地交付，不安装、不推送、不发布 GitHub Release。图层和按键录入分支保持独立。
 - 2026-11-05 用户要求再次拉取远端 master 并打包，授权本地交付 Release 91：包含已在远端主分支合入的图层、通用按键及共享 PDF 存储，沿用正式包名和签名、递增版本。不安装用户设备、不推送或发布 GitHub Release；设备与真实 SAF 迁移验收仍单独记录。
 - 随后用户要求拉取远端更新并合并。本次获取 `6a93afc4`，仅合并协作规则文档重组；本地分支构建隔离与版本递增规则归入对应主题，Release 90/91 及测试包授权移入本节。未改应用代码，未打包、安装或推送。检查文档链接、冲突标记、差异空白和原有用户修改；无需重跑应用测试。README 当前功能、交付和构建入口仍准确，无需改写。
+- 用户随后要求拉取远端并打包主分支覆盖更新，本次授权本地交付 Release 92（远端 `e83cb20d`），沿用正式包名、原签名及递增版本号。不包含推送、安装用户设备或 GitHub Release；原有未提交修改保留。
+- 用户再次要求拉取最新主分支并打包可覆盖安装的 APK，随后明确将显示版本号递增到 `0.9.8`。本次本地交付 Release 93 / versionCode 93，沿用正式包名和历史签名；不安装用户设备、不推送或发布 GitHub Release。
+
 - 2026-11-05 用户授权将本地 `master` 推送远端 `origin`，包含「关于」页改为指向 `Hshevin/xnotes-android`（Issues、Releases、许可证，上游署名），以及此前未推送的 PDF 重新关联与无限画布黑屏调查记录。仅本次推送，不包含打包、安装或 GitHub Release。
+- 用户要求拉取远端并更新 APK，随后明确纠正为「不要发布 Release，只打包」。本次仅本地交付 0.9.8 / Release 94，沿用正式身份和签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release。
 
 ## 2026-11-06
 
 - 用户于 2026-11-06 要求推送远端：推送本地 `master`（含关闭 / 切换文档误删私有 PDF 原件的修复、重新关联与仅笔迹副本）到 `origin/master`。此授权仅限本次，不包含打包 APK、安装或 GitHub Release。
+
+- 用户要求「打包主线最新提交」。本次拉取并合入远端 `ae3e54b7`，本地交付 0.9.8 / Release 95，沿用正式包名和原签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release，保留已有本地修改。
+
 - 用户随后于 2026-11-06 提供本机构建的 Release 95 APK 并要求发布：补提交 versionCode 95，推送 `master` 与标签 `v0.9.8-movinkpad.95`，发布 GitHub Release（附 APK 与 SHA256SUMS.txt）。仅限本次，不包含设备安装。
 - 用户于 2026-11-06 要求合并到主分支：将 `worktree-ai-markdown-latex`（`e49b612e`，AI 回答 LaTeX 公式排版）与 `worktree-ai-pdf-native-tools`（`d716ef7e`，AI 读取 PDF 改为原生工具调用）以 `--no-ff` 合入本地 `master`，保留两条原分支。合并后全部 JVM 单元测试（2720 项）通过、仪器测试可编译。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release。
 - 用户于 2026-11-07 要求合并到主分支：将 `worktree-ai-openai-400`（`48c7729c`，OpenAI 官方接口改发 `max_completion_tokens`、失败提示附供应商原因）以 `--no-ff` 合入本地 `master`，保留原分支。该分支基于合并前的 `master`，合并结果与已通过全部 JVM 单元测试（2724 项）的分支代码一致。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release；真实 OpenAI 密钥复测待用户执行。
 - 用户随后于 2026-11-07 要求推送远端：将本地 `master` 推送到 `origin/master`（`Hshevin/xnotes-android`），包含 AI 回答 LaTeX 公式、PDF 原生工具读取、OpenAI HTTP 400 修复及此前未推送的无限画布分屏诊断记录 `47256b5a`。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
 - 用户于 2026-11-07 要求「完工之后把改动合并到主分支，然后重新检查一遍主分支的代码」：将 `worktree-ai-template-gen`（应用内模板生成、图像模型封面、界面交互修正）以 `--no-ff` 合入本地 `master`（`40f01a18`）；复查主分支发现 PDF 页图被不支持图片的模型拒绝时整轮失败，修复后经 `worktree-master-review`（`439ca643`）合入（`5f222ee7`）。两条原分支保留。复查环境：独立工作树中全部 JVM 单元测试 2740 项通过、仪器测试可编译、Debug APK 可构建（仅作构建检查，未交付）。主工作区旧 `app/build` 的 DEX 增量缓存导致该目录下 `dexBuilderDebug` 失败，同一代码在新构建目录中正常，属本机缓存问题。仅本地合并，不包含推送、打包交付、安装或 GitHub Release。
+
+## 2026-11-07 本机打包与日志推送
+
+- 用户要求「拉取更新并打包覆盖更新 apk，不要发布 release，自动把打包日志推送远端」。本次合入 `origin/master` 的 `6f34c664`，构建 0.9.8 / versionCode 96、沿用正式包名与原签名。授权推送打包日志、验证记录及对应版本/合并提交至 `origin/master`；不发布 GitHub Release、不上传 APK、不安装用户设备。保留原有本地未提交修改。
+
+## 2026-11-07 思考参数降级合并与推送
+
+- 用户要求「合并并推送」：将 `worktree-ai-thinking-fallback`（`04725967`，GPT-4o 等模型拒绝思考字段时去掉重发、本次运行内记住并标注）以 `--no-ff` 合入本地 `master`；因远端已有 Release 96 打包与日志提交，先合并 `origin/master`（仅 `authorization-history.md` 冲突，两侧记录均保留），再推送 `master` 到 `origin/master`。推送内容包括此前仅本地合并的应用内模板生成、图像模型封面、界面交互修正与主分支复查修复。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
