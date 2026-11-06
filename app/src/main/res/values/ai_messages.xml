@@ -88,4 +88,12 @@
     <string name="ai_msg_models_response_too_large">The model list is too large</string>
     <string name="ai_msg_models_invalid_reply">The provider returned no recognisable model list</string>
     <string name="ai_msg_config_too_many_models">You can save up to %1$d models. Remove some first.</string>
+    <string name="ai_msg_template_gen_empty">Describe the template you want first</string>
+    <string name="ai_msg_template_gen_too_long">The request can be at most %1$d characters</string>
+    <string name="ai_msg_template_gen_failed">The AI still returned an unusable template after several tries: %1$s</string>
+    <string name="ai_msg_config_image_provider_required">Choose a provider for the image model</string>
+    <string name="ai_msg_config_image_model_invalid">The image model name is not valid</string>
+    <string name="ai_msg_image_model_required">Set up an image model in AI settings first</string>
+    <string name="ai_msg_image_invalid_reply">The image service returned no usable picture</string>
+    <string name="ai_msg_image_too_large">The generated picture is too large</string>
 </resources>

@@ -50,7 +50,16 @@ data class AiConfig(
     val attachPdfByDefault: Boolean = false,
     val providers: List<AiProvider> = emptyList(),
     val provider: String = "",
+    /** The provider and model that paint pictures (an OpenAI-style Images API); none when [imageModel] is blank. */
+    val imageProvider: String = "",
+    val imageModel: String = "",
 ) {
+    /** This setup sending picture requests to [imageModel] through [imageProvider]; null when none is set up. */
+    fun imageRoute(): AiConfig? {
+        val model = imageModel.trim().takeIf { it.isNotEmpty() } ?: return null
+        val p = providerOf(imageProvider) ?: return null
+        return copy(provider = p.id, url = p.url, key = p.key, models = p.modelChoices, thinkingFormat = p.thinkingFormat, model = model)
+    }
     /** The saved pick list in the user's order, always holding the default model. */
     val modelChoices: List<String> get() = (if (model.trim() in models.map(String::trim)) models else listOf(model) + models).map(String::trim).filter(String::isNotEmpty).distinct()
     /** PDF tool steps must return bare JSON: no thinking, no user prompt. */
@@ -70,8 +79,10 @@ data class AiConfig(
      * moves to the first provider and its first model, so settings never save a dangling default.
      */
     fun withValidDefault(): AiConfig {
-        val p = providerOf(provider) ?: providers.firstOrNull() ?: return copy(provider = "", model = "", url = "", key = "", models = emptyList())
-        return route(p.id, model.trim().takeIf { it in p.modelChoices } ?: p.modelChoices.firstOrNull().orEmpty())
+        // A picture model whose provider is gone is dropped with it, never moved to another provider.
+        val image = if (providerOf(imageProvider) == null) copy(imageProvider = "", imageModel = "") else this
+        val p = providerOf(provider) ?: providers.firstOrNull() ?: return image.copy(provider = "", model = "", url = "", key = "", models = emptyList())
+        return image.route(p.id, model.trim().takeIf { it in p.modelChoices } ?: p.modelChoices.firstOrNull().orEmpty())
     }
     /** The provider a model picked before providers existed belongs to: the default's if it lists it. */
     fun ownerOf(model: String): String? =
@@ -142,6 +153,7 @@ class AiConfigStore(context: Context) {
                 .put("maxTokens", config.maxTokens).put("instructions", config.instructions.trim())
                 .put("searchByDefault", config.searchByDefault).put("attachPdfByDefault", config.attachPdfByDefault)
                 .put("providers", list).put("provider", current?.id.orEmpty())
+                .put("imageProvider", config.imageProvider).put("imageModel", config.imageModel.trim())
         }
 
         /** A stored setup, resolved to its default route; one from before providers becomes [LEGACY_PROVIDER]. */
@@ -167,7 +179,10 @@ class AiConfigStore(context: Context) {
                 // A config saved before prompts existed gets the default; an emptied prompt stays empty.
                 instructions = if (json.has("instructions")) json.optString("instructions", "") else defaultInstructions,
                 searchByDefault = json.optBoolean("searchByDefault", false), attachPdfByDefault = json.optBoolean("attachPdfByDefault", false),
-                providers = providers, provider = provider)
+                providers = providers, provider = provider,
+                imageProvider = json.optString("imageProvider", "").takeIf { id -> providers.any { it.id == id } }.orEmpty(),
+                imageModel = json.optString("imageModel", "").trim())
+                .let { if (it.imageProvider.isEmpty()) it.copy(imageModel = "") else it }
             return if (providers.isEmpty()) config.copy(model = model) else config.route(provider, model)
         }
 
@@ -197,6 +212,11 @@ class AiConfigStore(context: Context) {
             require(config.maxTokens in AiProtocol.MIN_MAX_TOKENS..AiProtocol.MAX_MAX_TOKENS) { AiText.t(AiMsg.CONFIG_MAX_TOKENS_INVALID, AiProtocol.MIN_MAX_TOKENS, AiProtocol.MAX_MAX_TOKENS) }
             require(config.instructions.length <= AiProtocol.MAX_INSTRUCTIONS) { AiText.t(AiMsg.CONFIG_INSTRUCTIONS_TOO_LONG, AiProtocol.MAX_INSTRUCTIONS) }
             require(config.effort in AiThinking.LEVELS) { AiText.t(AiMsg.CONFIG_THINKING_INVALID) }
+            val imageModel = config.imageModel.trim()
+            if (imageModel.isNotEmpty()) {
+                require(config.providerOf(config.imageProvider) != null) { AiText.t(AiMsg.CONFIG_IMAGE_PROVIDER_REQUIRED) }
+                require(imageModel.length <= 200 && imageModel.none { it == '\n' || it == '\r' }) { AiText.t(AiMsg.CONFIG_IMAGE_MODEL_INVALID) }
+            }
         }
     }
 }
@@ -218,6 +238,8 @@ interface AiTransport {
         stream(config, messages) { text.append(it); delta(it) }
         return AiReply(text.toString())
     }
+    /** A picture for [prompt] from [config]'s image model (see [AiImages]). */
+    fun image(config: AiConfig, prompt: String): AiImage = throw IllegalStateException(AiText.t(AiMsg.IMAGE_MODEL_REQUIRED))
 }
 
 /** One request, no redirects/retries/logging; cancellation closes the active socket. */
@@ -279,6 +301,40 @@ class AiConnection(private val openConnection: (String) -> HttpURLConnection = {
             }
             check(!cancelled) { AiText.t(AiMsg.CONNECTION_STOPPED) }
             return result.toString()
+        } finally { conn.disconnect(); connection = null }
+    }
+    override fun image(config: AiConfig, prompt: String): AiImage {
+        require(config.key.isNotBlank() && !config.key.contains('\n') && !config.key.contains('\r')) { AiText.t(AiMsg.PROVIDER_NOT_CONFIGURED) }
+        val bytes = AiImages.request(config.model, prompt).toString().toByteArray(Charsets.UTF_8)
+        check(!cancelled) { AiText.t(AiMsg.CONNECTION_STOPPED) }
+        val conn = openConnection(AiImages.endpoint(config.url))
+        connection = conn
+        try {
+            check(!cancelled) { AiText.t(AiMsg.CONNECTION_STOPPED) }
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 15000
+            // Painting takes a while; a picture is one long response, not a stream.
+            conn.readTimeout = 240000
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Authorization", "Bearer ${config.key}")
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setFixedLengthStreamingMode(bytes.size)
+            conn.outputStream.use { it.write(bytes) }
+            val status = conn.responseCode
+            check(status in 200..299) { httpFailure(status, AiProtocol.providerError(errorBody(conn), config.key)) }
+            val result = StringBuilder()
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                val buffer = CharArray(64 * 1024)
+                while (!cancelled) {
+                    val count = reader.read(buffer)
+                    if (count < 0) break
+                    check(result.length + count <= AiImages.MAX_RESPONSE) { AiText.t(AiMsg.IMAGE_TOO_LARGE) }
+                    result.append(buffer, 0, count)
+                }
+            }
+            check(!cancelled) { AiText.t(AiMsg.CONNECTION_STOPPED) }
+            return AiImages.decode(result.toString())
         } finally { conn.disconnect(); connection = null }
     }
     /** The provider's OpenAI-style model list (GET /models); sent only when the user asks for it in settings. */

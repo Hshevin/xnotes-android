@@ -8977,6 +8977,26 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /**
+     * Add a template the AI made in the new-note screen to the library, and select it as an imported
+     * one is: plain text as it is, a cover with a painted picture packaged with it first.
+     */
+    fun importGeneratedTemplate(made: com.xnotes.ai.AiTemplateGen.Generated) {
+        val picture = made.picture ?: return adoptTemplate { TemplateLibrary.importText(made.json) }
+        adoptTemplate {
+            val dir = appContext.cacheDir
+            val image = java.io.File.createTempFile("ai-cover", "." + picture.extension, dir)
+            val pkg = java.io.File.createTempFile("ai-cover", ".xtemplate", dir)
+            try {
+                image.writeBytes(picture.bytes)
+                com.xnotes.format.TemplatePackage.write(pkg, made.json, listOf(made.src to image))
+                TemplateLibrary.import(pkg, null)
+            } finally {
+                image.delete(); pkg.delete()
+            }
+        }
+    }
+
     /** Add a template this note carries, but the library lacks, to the library. */
     fun keepNoteTemplate(key: String) {
         val pkg = state.document.templatePackages[key]

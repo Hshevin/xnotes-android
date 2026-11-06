@@ -81,7 +81,7 @@ private fun AiSpinner(color: Color = LocalPalette.current.textDim.toComposeColor
 
 /** A full-width notice on a grey fill: storage failures, source errors, the deleted-chat undo. */
 @Composable
-private fun AiBanner(text: String, action: String? = null, onAction: () -> Unit = {}) {
+internal fun AiBanner(text: String, action: String? = null, onAction: () -> Unit = {}) {
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.medium
     Row(
@@ -191,12 +191,12 @@ private fun AiSegmented(options: List<Pair<String, String>>, selected: String, m
 
 /** A setting that is on or off: label and note on the left, the switch on the right; the whole row toggles. */
 @Composable
-private fun AiSwitchRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun AiSwitchRow(title: String, detail: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
-        .toggleable(checked, role = Role.Switch, onValueChange = onChange).padding(horizontal = Space.s4),
+        .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange).padding(horizontal = Space.s4),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
         SettingsLabel(title, detail, Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -255,7 +255,7 @@ private val PROVIDER_PRESETS = listOf(
  * anywhere except an explicit model-list fetch, and nothing is stored until Save.
  */
 @Composable
-private fun AiSettings(close: () -> Unit) {
+internal fun AiSettings(close: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val store = remember { AiConfigStore(context) }
@@ -266,6 +266,7 @@ private fun AiSettings(close: () -> Unit) {
     // The provider on the editor sheet, and whether it is new (not yet in the list).
     var editing by remember { mutableStateOf<Pair<AiProvider, Boolean>?>(null) }
     var defaultModelMenu by remember { mutableStateOf(false) }
+    var imageProviderMenu by remember { mutableStateOf(false) }
     var promptMenu by remember { mutableStateOf(false) }
     val localDefaultPrompt = AiDefaults.instructions(context.resources.configuration.locales[0].toLanguageTag())
     val many = config.providers.size > 1
@@ -370,6 +371,28 @@ private fun AiSettings(close: () -> Unit) {
                             Icon(XnotesIcons.close, null, Modifier.size(16.dp)); Spacer(Modifier.width(Space.s8)); Text(stringResource(R.string.ai_instructions_clear))
                         }
                     }
+                }
+                SettingsGroup(stringResource(R.string.ai_settings_image), stringResource(R.string.ai_settings_image_note)) {
+                    Box {
+                        val imageLabel = config.providerOf(config.imageProvider)?.label ?: stringResource(R.string.ai_image_none)
+                        Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
+                            .clickable(enabled = config.providers.isNotEmpty()) { imageProviderMenu = true }.padding(horizontal = Space.s4),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            SettingsLabel(stringResource(R.string.ai_image_provider), modifier = Modifier.weight(1f))
+                            Text(imageLabel, Modifier.widthIn(max = 300.dp), color = palette.text.toComposeColor(), fontSize = TextSize.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(XnotesIcons.chevronDown, null, Modifier.padding(start = Space.s4).size(16.dp), tint = palette.textDim.toComposeColor())
+                        }
+                        DropdownMenu(expanded = imageProviderMenu, onDismissRequest = { imageProviderMenu = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.ai_image_none)) }, onClick = { config = config.copy(imageProvider = "", imageModel = ""); imageProviderMenu = false },
+                                trailingIcon = { if (config.providerOf(config.imageProvider) == null) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) })
+                            config.providers.forEach { p ->
+                                DropdownMenuItem(text = { Text(p.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = { config = config.copy(imageProvider = p.id); imageProviderMenu = false },
+                                    trailingIcon = { if (p.id == config.imageProvider) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) })
+                            }
+                        }
+                    }
+                    if (config.providerOf(config.imageProvider) != null) OutlinedTextField(config.imageModel, { config = config.copy(imageModel = it.take(200)) }, Modifier.fillMaxWidth(),
+                        singleLine = true, label = { Text(stringResource(R.string.ai_image_model)) }, placeholder = { Text(stringResource(R.string.ai_image_model_hint)) })
                 }
                 SettingsGroup(stringResource(R.string.ai_settings_search), stringResource(R.string.ai_settings_search_note)) {
                     OutlinedTextField(config.searchKey, { config = config.copy(searchKey = it) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.ai_settings_search_key)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())

@@ -94,6 +94,14 @@ internal fun AiMsg.resId(): Int = when (this) {
     AiMsg.STOPPED_BY_USER -> R.string.ai_msg_stopped_by_user
     AiMsg.REQUEST_FAILED -> R.string.ai_msg_request_failed
     AiMsg.NETWORK_ERROR -> R.string.ai_msg_network_error
+    AiMsg.TEMPLATE_GEN_EMPTY -> R.string.ai_msg_template_gen_empty
+    AiMsg.TEMPLATE_GEN_TOO_LONG -> R.string.ai_msg_template_gen_too_long
+    AiMsg.TEMPLATE_GEN_FAILED -> R.string.ai_msg_template_gen_failed
+    AiMsg.CONFIG_IMAGE_PROVIDER_REQUIRED -> R.string.ai_msg_config_image_provider_required
+    AiMsg.CONFIG_IMAGE_MODEL_INVALID -> R.string.ai_msg_config_image_model_invalid
+    AiMsg.IMAGE_MODEL_REQUIRED -> R.string.ai_msg_image_model_required
+    AiMsg.IMAGE_INVALID_REPLY -> R.string.ai_msg_image_invalid_reply
+    AiMsg.IMAGE_TOO_LARGE -> R.string.ai_msg_image_too_large
 }
 
 /** Routes AI backend messages through Android resources so they follow the app locale. */
