@@ -19,6 +19,7 @@
     <string name="map_add_ink">手绘子节点</string>
     <string name="map_add_sibling">同级节点</string>
     <string name="map_edit">编辑节点</string>
+    <string name="map_text_conflict">此节点在编辑期间已改变。草稿仍保留，请取消编辑后重新查看当前内容。</string>
     <string name="map_collapse">折叠</string>
     <string name="map_expand">展开</string>
     <string name="map_layout">自动布局</string>

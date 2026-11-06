@@ -89,3 +89,14 @@ D 文件关系网络 UI 和可重建反向索引尚未实现。不得从同一�
 最终：**2757 tests，0 failures/errors/skipped**；`:app:compileDebugAndroidTestKotlin` 成功。新增共享事件回归涵盖原位越框、手指隔离、失焦、快速两笔与视口锁定、满容量橡皮、连续及延后回写套索；JVM 覆盖适应内容的世界坐标／撤销、专用提交保留来源、旧属性草稿合并，以及稳定缓存构造次数。日志 tmp/ink-stage-verified.log。独立审核发现、处理与证据见 tasks/review.md。
 
 真实 Compose 宿主测试新增到 MapInkEditingHostTest：未选中手绘节点第一笔跨重组，进入放大后同一底图实例且禁用、返回恢复选择／视口与文档不变；本轮**仅编译，未运行仪器测试**。没有打包／安装／推送／合并。MovinkPad Android 15 / Pro Pen 3 防掌触、窗口／横竖屏、视觉、延迟、GPU 均未验收。B1 文本原位输入仍待实现，B2/C/D 按原计划继续，整个功能目标仍未完成。
+
+
+### B1b 文本原位源码阶段（2026-11-06）
+
+文本双击／编辑按钮复用现有 TextEditorOverlay + TextEditHost + EditingField。事务 token、TextFieldValue 的选择和组合状态由 MapSession 保持，视口、IME 和来源变化不重建草稿；完成核对初始文本／节点类型，用当前宽度测高，只合并正文和高度，保留后来来源。无改动不布局、不增加历史；取消不改文档。对超长输入在共享字段接受前拒绝，冲突保留草稿并说明。文本确认前的未确认草稿目前只在 ViewModel 存活，不作为进程异常退出后已保存内容。
+
+只在编辑时压缩图工具条，取消底图手势并禁用底图输入。光标内容坐标经过 zoom／rotation 映射到宿主像素；只移动图相机，保留旧笔记／画布的 NoBringIntoView 默认语义。相机与宿主尺寸变化都会重新报告光标；新宿主恢复可读编辑比例，不覆盖最初相机快照。确认／取消／应用 Back 走同一结束路径，拒绝旧 token 回调，隐藏键盘并待 IME 和宿主尺寸稳定后恢复相机中心／比例与选择。节点属性仍可切换文本根为手绘；文本在原位字段中不额外提供样式栏。
+
+验证：tmp/text-green.log 先验证草稿事务；tmp/text-geometry.log 验证几何与事务；tmp/text-stage-verified.log 全量 **2770 项主机测试，0 failures/errors/skipped**，compileDebugAndroidTestKotlin 成功。新增 8 项事务测试与 5 项几何测试覆盖组合值、emoji、多行、空值、超限、并发来源／宽度、旧正文冲突、迟到回调、一步撤销、恢复等待、旋转／缩放光标、极小可视区幂等避让和新尺寸／density 下相机中心恢复。
+
+MapTextEditingHostTest 已接入 PenTestRunner：使用实际 Compose InputConnection 的组合输入、确认／取消、仅宿主 resize、Activity 重建保持事务与比例。**仅编译，未执行**；不能据此宣称软键盘、旋转或真实平台宿主验收通过。目标设备笔输入、GPU、真实 SAF 和全引用闭环仍未验收；没有打包、安装、推送或合并。下一源码阶段 B2 为稳定页／对象身份与字节保真迁移，再推进 C1/C2/D；A2 剩余需求继续保留。

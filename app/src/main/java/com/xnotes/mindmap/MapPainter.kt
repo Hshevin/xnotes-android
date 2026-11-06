@@ -30,7 +30,7 @@ class MapPainter {
         strokes.keys.removeAll { !keep.containsKey(it) }
     }
     fun clear() { strokes.clear(); layouts.clear() }
-    fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null) {
+    fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
         val visible = doc.visible()
@@ -78,7 +78,9 @@ class MapPainter {
             paint.style = Paint.Style.STROKE; paint.color = fg; paint.strokeWidth = if (n.id == dropTarget) 6f else 2f
             canvas.drawRect(0f, 0f, n.width.toFloat(), n.height.toFloat(), paint)
             canvas.save(); canvas.clipRect(2f, 2f, n.width.toFloat() - 2, n.height.toFloat() - 2)
-            if (n.kind != NodeKind.INK || n.ink.isEmpty()) {
+            if (n.id==editingText) {
+                // The native text overlay paints this node's draft, including any overflow.
+            } else if (n.kind != NodeKind.INK || n.ink.isEmpty()) {
                 val layout = layout(n.text.ifEmpty { if(n.kind==NodeKind.REFERENCE) n.sources.firstOrNull()?.fileName.orEmpty() else "" }, n.width)
                 text.color = color
                 canvas.translate(16f, maxOf(12f, (n.height.toFloat() - layout.height) / 2))
@@ -106,6 +108,7 @@ class MapPainter {
             StaticLayout.Builder.obtain(value, 0, value.length, text, w).setIncludePad(false).build()
         }
     }
+    fun textHeight(value:String,width:Double):Double = layout(value,width).height.toDouble()
     fun measuredHeight(value: String, width: Double) = maxOf(72.0, layout(value, width).height + 24.0)
     fun drawInk(canvas: Canvas, ink: List<MapInk>, color: Int = Color.BLACK) {
         val renderer = AndroidRenderer(canvas)

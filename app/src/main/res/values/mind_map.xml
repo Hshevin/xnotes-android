@@ -19,6 +19,7 @@
     <string name="map_add_ink">Handwriting child</string>
     <string name="map_add_sibling">Sibling</string>
     <string name="map_edit">Edit node</string>
+    <string name="map_text_conflict">This node changed while editing. Your draft is kept. Cancel to reload its current content.</string>
     <string name="map_collapse">Collapse</string>
     <string name="map_expand">Expand</string>
     <string name="map_layout">Auto layout</string>

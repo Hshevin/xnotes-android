@@ -14,3 +14,12 @@
 独立代理 review_input_plan 只读审阅计划和既有 TextEditorOverlay / TextEditHost / EditingField。计划通过，以下约束全部接受，尚未实施：优先复用现有组件而非第二条 BasicTextField；明确 viewport px 与未缩放内容 px 的单位，不重复 Density 转换；独立编辑事务 ID 和稳定 key，草稿与选择跟随事务保存；提交核对初始文本／类型且按当前宽度测高，只合并文本字段；输入超限在共享字段接受前明确拒绝，默认策略不影响笔记／画布；光标回报含 rotation 的宿主局部几何，宿主只在遮挡时平移相机，保留 NoBringIntoView；进入前取消原图输入，退出统一屏蔽迟到 IME 回调，待 IME/宿主尺寸稳定后恢复视口／选择；编辑期间工具栏压缩，避免键盘挤空图区域。
 
 需要验证：中文组合输入、emoji、多行、空文本、超限、光标／手动拖动、键盘与横竖屏、多 density/fontScale/zoom、并发来源、旧文本冲突、取消零历史、完成一步撤销，以及旧笔记／画布默认不自动平移。真实 UI 与设备验证不能用模型测试替代。
+
+
+## B1b 原位文本实现审核（2026-11-06）
+
+独立代理 review_input_plan 只读审核实现与计划。确认的三项必修均修复：文本原位替代对话框后保留所有节点的属性入口；共享光标 effect 新增默认 0 的 caretGeometryRevision，图相机／宿主变化显式刷新；每个新 (View,token) 宿主只准备一次可读编辑比例，保持事务和最初返回快照。
+
+主机回归新增 8 项事务与 5 项几何测试；最终 tmp/text-stage-verified.log 全量 2770 项通过，Android 仪器源码编译通过。新增 MapTextEditingHostTest 编译覆盖实际输入连接、resize 与 Activity 重建，但未在设备／模拟器执行。最终独立复核进行中，不将主机几何结果等同平台 IME 验收。
+
+复核建议已补入仪器源码：resize 前等待相机稳定，验证实际字段回报的光标在新可视区；返回同时断言相机内容中心、比例和选择。新增内部几何诊断只保留字段最近的宿主像素回报。最后 tmp/text-host-compile-final.log 再次编译通过；这些仪器断言仍未运行。

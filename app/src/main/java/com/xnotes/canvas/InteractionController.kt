@@ -124,13 +124,15 @@ data class EditingField(
     val centred: Boolean = false,
 ) {
     /** The field's on-screen bounding box, turned corners and all. */
-    fun screenBounds(): Rect {
-        val a = Math.toRadians(rotation)
-        val cs = kotlin.math.cos(a)
-        val sn = kotlin.math.sin(a)
-        val w = width * zoom
-        val h = height * zoom
-        return Rect.bounding(listOf(Pt(0.0, 0.0), Pt(w, 0.0), Pt(w, h), Pt(0.0, h)).map { Pt(x + it.x * cs - it.y * sn, y + it.x * sn + it.y * cs) })
+    fun screenBounds(): Rect = screenBounds(Rect(0.0,0.0,width,height))
+
+    /** A content-local rectangle mapped to host viewport px, including rotation. */
+    fun screenBounds(local:Rect):Rect {
+        val a=Math.toRadians(rotation)
+        val cs=kotlin.math.cos(a);val sn=kotlin.math.sin(a)
+        return Rect.bounding(listOf(Pt(local.left,local.top),Pt(local.right,local.top),Pt(local.right,local.bottom),Pt(local.left,local.bottom)).map {
+            Pt(x+(it.x*cs-it.y*sn)*zoom,y+(it.x*sn+it.y*cs)*zoom)
+        })
     }
 }
 

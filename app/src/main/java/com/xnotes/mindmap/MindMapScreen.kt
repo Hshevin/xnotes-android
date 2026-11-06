@@ -13,8 +13,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
@@ -42,6 +46,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             if(uri!=null && id!=null) session.addSource(uri,id)
         }
         var view by remember { mutableStateOf<MindMapView?>(null) }
+        var viewRevision by remember { mutableIntStateOf(0) }
         var editing by remember { mutableStateOf<String?>(null) }
         var propertiesFor by remember {mutableStateOf<String?>(null)}
         var deleting by remember { mutableStateOf(false) }
@@ -52,16 +57,69 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             if (uri != null) session.saveCopy(uri) {}
         }
         val close = { if (session.document == null) onClose() else session.save(onClose) }
+        val focus = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        val density = LocalDensity.current
+        val imeBottom = WindowInsets.ime.getBottom(density)
+        val textDraft = session.textDraft
+        val textRestore = session.textRestore
+        fun endText(confirm:Boolean) {
+            val draft=session.textDraft ?: return
+            if(confirm && !session.finishTextDraft(draft.token)) return
+            if(!confirm) session.cancelTextDraft(draft.token)
+            focus.clearFocus();keyboard?.hide()
+        }
+        // The transaction is owned by the session, so IME/host recomposition keeps composition and selection.
+        LaunchedEffect(editing,view,viewRevision) {
+            val id=editing ?: return@LaunchedEffect
+            val graph=view ?: return@LaunchedEffect
+            if(graph.width>0 && graph.height>0 && session.document?.nodes?.any {it.id==id && it.kind==NodeKind.TEXT}==true &&
+                session.beginText(id,graph.viewport(),graph.width,graph.height,graph.resources.displayMetrics.density)) {
+                editing=null
+            }
+        }
+        // Exiting has one path, including configuration recreation with an outstanding restore.
+        val geometry=remember(viewRevision,view) {Pair(view?.width ?: 0,view?.height ?: 0)}
+        var preparedText by remember(view,textDraft?.token) {mutableStateOf(false)}
+        LaunchedEffect(view,textDraft?.token,geometry) {
+            val draft=textDraft ?: return@LaunchedEffect
+            val graph=view ?: return@LaunchedEffect
+            if(!preparedText && graph.width>0 && graph.height>0) {
+                preparedText=true
+                graph.prepareTextEditing(draft.nodeId)
+            }
+        }
+        LaunchedEffect(textRestore?.token,view,imeBottom,geometry) {
+            val restore=textRestore ?: return@LaunchedEffect
+            focus.clearFocus();keyboard?.hide()
+            val graph=view ?: return@LaunchedEffect
+            if(imeBottom!=0 || graph.width<=0 || graph.height<=0) return@LaunchedEffect
+            val size=Pair(graph.width,graph.height)
+            repeat(2) {withFrameNanos {}}
+            if(size!=Pair(graph.width,graph.height)) return@LaunchedEffect
+            graph.restoreViewport(restore.viewport,restore.width,restore.height,restore.density)
+            session.completeTextRestore(restore.token)
+        }
         BackHandler {
-            if(editing!=null) editing=null
+            if(session.textDraft!=null) endText(false)
+            else if(session.textRestore!=null) Unit
+            else if(editing!=null) editing=null
             else if(session.inkContact) view?.inkInput?.cancel()
             else if (!session.closing) close()
         }
         val palette = LocalPalette.current
         val enlarged=editing?.let { id -> session.document?.nodes?.any {it.id==id && it.kind==NodeKind.INK} } == true
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
-          CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged)) {
+          CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null)) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
+                if(textDraft!=null) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
+                        MapButton(R.string.map_done) {endText(true)}
+                        MapButton(R.string.cancel) {endText(false)}
+                        Text(stringResource(R.string.map_edit),fontSize=TextSize.title,modifier=Modifier.align(Alignment.CenterVertically).padding(horizontal=Space.s12))
+                        session.problemText()?.let {Text(stringResource(it),fontSize=TextSize.body,maxLines=1,modifier=Modifier.align(Alignment.CenterVertically))}
+                    }
+                } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8), verticalAlignment = Alignment.CenterVertically) {
                     MapButton(R.string.map_close, enabled = !session.closing) { close() }
                     Text(title.ifBlank { stringResource(R.string.map_title) }, fontSize = TextSize.title, modifier = Modifier.padding(horizontal = Space.s12))
@@ -77,10 +135,11 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                     MapButton(R.string.map_save_copy, enabled = session.document != null && !session.saving) { saveCopy.launch("${title.ifBlank { context.getString(R.string.map_title) }}.xmap") }
                     MapButton(R.string.map_help) { help = true }
                 }
+                }
                 HorizontalDivider()
                 val doc = session.document
                 val node = doc?.nodes?.firstOrNull { it.id == session.selected }
-                if (doc != null) {
+                if (doc != null && textDraft==null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         fun add(kind: NodeKind, sibling: Boolean) {
                             val parent = if (sibling) node?.parent else node?.id
@@ -108,7 +167,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapInkTools(session)
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                             MapButton(R.string.ink_fit_content,enabled=node?.kind==NodeKind.INK){node?.let {n->session.operate {it.update(n.id) {it.fitInkContent()}}}}
-                            MapButton(R.string.ink_properties,enabled=node?.kind==NodeKind.INK){propertiesFor=node?.id}
+                            MapButton(R.string.ink_properties,enabled=node!=null){propertiesFor=node?.id}
                         }
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
@@ -127,10 +186,12 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 }
                 val problem = session.problemText()
                 HorizontalDivider()
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     when {
                         doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize(), update = { v ->
-                            v.isEnabled=!enlarged && !session.closing
+                            v.isEnabled=!enlarged && textDraft==null && textRestore==null && !session.closing
+                            v.onViewportChanged={viewRevision++}
+                            v.editingText=textDraft?.nodeId
                             v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
                             v.onInkContact={session.inkContact=it};v.onInkLimit=session::reportInkLimit;v.onInk={id,old,next ->
                                 session.commitInk(id,old,next).also { accepted -> if(accepted) session.document?.let {v.document=it} }
@@ -142,19 +203,20 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
                     }
-                    problem?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
-                        Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
-                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
-                    } }
+                    if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,viewRevision)}
                     editing?.let { id -> doc?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.INK}?.let { n ->
                         MapInkEditor(session,n) {editing=null}
                     } }
+                    problem?.takeIf {textDraft==null}?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
+                        Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
+                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
+                    } }
                 }
-                Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
+                if(textDraft==null) Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
           }
         }
-        (propertiesFor ?: editing)?.let { id -> session.document?.nodes?.firstOrNull { it.id == id && (propertiesFor!=null || it.kind!=NodeKind.INK) }?.let { node ->
+        propertiesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id == id }?.let { node ->
             MapNodeDialog(node, onDismiss = { editing = null;propertiesFor=null }, onConfirm = { edited ->
                 session.editNodeProperties(id,edited).also { if (it) {editing = null;propertiesFor=null} }
             })

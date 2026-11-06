@@ -1,12 +1,11 @@
 # 自主推进恢复点
 
-目标：按 docs/movinkpad/graph-network-2026-11-06.md 全部阶段持续实现直至完整验收。整体 complete=false，goal active。用户暂停后已恢复，最新授权仍为 active。
+目标：按 docs/movinkpad/graph-network-2026-11-06.md 全部阶段持续实现直至完整验收。整体 complete=false，goal active。
 授权：实现、验证、文档和本地提交；不打包、安装、推送、合并、发布。
-上一目标回合分类：progress，新增共享原位／放大输入事务、越框保真、共享历史、宿主保护及回归与独立审核。
-当前阶段：B1a 源码／主机验证完成、设备宿主验收 pending；B1 总体 in_progress。
-最新代码提交：771d9ef5（shared in-place/enlarged ink transactions）。独立审核 review_input_plan 完成，全部必修已修复，详见 tasks/review.md。
-验证：tmp/ink-stage-verified.log 全量 2757 tests，0 failures/errors/skipped；compileDebugAndroidTestKotlin 成功。资源语言键与两套中文一致，diff 检查通过。
-运行作业：无已知 Gradle 作业（最后会话85452已输出 BUILD SUCCESSFUL）；不得仅因日志存在重跑旧作业。
-接下来：B1b 文本原位编辑，独立计划审核已完成（tasks/review.md 和 tasks/plan.md），实现尚未开始；复用 ui/TextEditorOverlay.kt + TextEditHost + canvas/EditingField，保留默认 NoBringIntoView，新增可选文本接受策略与光标宿主像素回报，导图宿主草稿/事务合并提交与相机可见性适配；随后 B2 稳定页／对象身份、C1/C2 引用闭环、D 网络。A2 残余（无中心、连接入口、多选等）仍保留。
-未执行：真实 Compose 宿主仪器测试（已新增且编译），真实 SAF、目标硬件、GPU／延迟、完整 UI／无障碍。全目标未完成，未得出 blocker；不标记 complete/blocked。
-提交状态：代码771d9ef5、阶段文档50feaf66已本地提交；本恢复点和 B1b 审核结果继续本地提交。不得把本阶段主机验证扩展为真机验收。
+当前阶段：B1a/b 源码与主机验证完成，实际 Compose／IME／目标设备验收 pending；B1 总体 in_progress，接下来 B2。
+本阶段：原位文本复用既有 TextEditorOverlay/EditingField，草稿 token 与组合输入、旧值校验／字段合并、确认一步历史与取消、相机避让和退出恢复；保留全部节点属性入口。独立代理 review_input_plan 已复核三项必修修复，无仍需先处理的确定性代码错误。
+证据：tmp/text-stage-verified.log 全量2770 tests，0 failures/errors/skipped，compileDebugAndroidTestKotlin成功；最后仪器断言加强后的 tmp/text-host-compile-final.log 编译成功；资源语言键、双中文和diff检查通过。MapTextEditingHostTest 实际输入连接／resize／重建测试只编译，未执行。
+运行作业：无已知Gradle作业；最后36774与43940已成功，不要重复启动。
+源码：当前B1b diff已验证，待本地提交；上阶段HEAD dd5714b5。提交后读取git log取得最终提交号。
+下一步：B2a 先设计／独立审核并实现稳定页／对象身份的原始JSON字节保真升级基础，再接编解码、快照、复制与后继映射；随后 C1来源入口／预览、C2导航返回／反向引用／恢复、D网络。A2无中心、连接入口／端点、多选等继续保留。
+未执行：真实仪器／模拟器／设备、真实SAF、GPU／延迟、无障碍与软键盘验收。未确认文本草稿仅在ViewModel存活，不宣称异常退出已保存。整个引用闭环未完成，未出现 blocker，不标记 complete/blocked。

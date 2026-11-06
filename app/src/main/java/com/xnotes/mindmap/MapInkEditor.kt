@@ -72,6 +72,7 @@ internal fun MapNode.fitInkContent():MapNode {
 
 /** Shared error selection; overlays must not resize the paper during an active gesture. */
 internal fun MapSession.problemText():Int? = when {
+    textEditConflict -> R.string.map_text_conflict
     limitError -> R.string.map_limit
     conflict -> R.string.map_conflict
     saveFailed -> R.string.map_recovery_notice

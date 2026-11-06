@@ -25,6 +25,11 @@ class MindMapView(context: Context) : View(context) {
         set(value) { field = value; invalidate() }
     var dark = false
         set(value) { field = value; invalidate() }
+    var onViewportChanged:()->Unit={}
+    /** Last host-local report from the native text field, also used by platform host regressions. */
+    internal var editingCaretBounds:com.xnotes.core.geometry.Rect?=null; private set
+    var editingText:String?=null
+        set(value) {if(field!=value) {field=value;editingCaretBounds=null;invalidate()}}
     var onSelect: (String?) -> Unit = {}
     var onSources: (String) -> Unit = {}
     var onEdit: (String) -> Unit = {}
@@ -87,14 +92,14 @@ class MindMapView(context: Context) : View(context) {
         zoom = (s / resources.displayMetrics.density).coerceIn(.05f, 4f)
         panX = width / 2f - b.centerX.toFloat() * scale
         panY = height / 2f - b.centerY.toFloat() * scale
-        initialized = true; invalidate()
+        initialized = true; invalidate();onViewportChanged()
     }
     fun centerOn(id: String) {
         if(inkInput.active) return
         document.nodes.firstOrNull { it.id == id }?.bounds?.let {
             panX = width / 2f - it.centerX.toFloat() * scale
             panY = height / 2f - it.centerY.toFloat() * scale
-            invalidate()
+            invalidate();onViewportChanged()
         }
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
@@ -113,6 +118,34 @@ class MindMapView(context: Context) : View(context) {
     }
     data class Viewport(val zoom:Float,val panX:Float,val panY:Float)
     fun viewport()=Viewport(zoom,panX,panY)
+    fun contentScale()=scale.toDouble()
+    fun prepareTextEditing(id:String) {
+        inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=false
+        parent?.requestDisallowInterceptTouchEvent(false)
+        val cancel=MotionEvent.obtain(0,0,MotionEvent.ACTION_CANCEL,0f,0f,0)
+        try {gestures.onTouchEvent(cancel);scaleDetector.onTouchEvent(cancel)} finally {cancel.recycle()}
+        zoom=maxOf(1f,zoom);centerOn(id)
+    }
+    fun panText(dx:Float,dy:Float) {
+        if(inkInput.active || !dx.isFinite() || !dy.isFinite()) return
+        panX+=dx;panY+=dy;invalidate();onViewportChanged()
+    }
+    fun restoreViewport(saved:Viewport,oldWidth:Int,oldHeight:Int,oldDensity:Float) {
+        if(width<=0 || height<=0 || oldDensity<=0 || inkInput.active) return
+        zoom=saved.zoom.coerceIn(.05f,4f)
+        val oldScale=oldDensity*saved.zoom
+        panX=width/2f-(oldWidth/2f-saved.panX)/oldScale*scale
+        panY=height/2f-(oldHeight/2f-saved.panY)/oldScale*scale
+        invalidate();onViewportChanged()
+    }
+    fun revealCaret(r:com.xnotes.core.geometry.Rect) {
+        if(width<=0 || height<=0 || !listOf(r.x,r.y,r.w,r.h).all {it.isFinite()}) return
+        editingCaretBounds=r
+        val margin=minOf(16f*resources.displayMetrics.density,width/4f,height/4f).toDouble()
+        val dx=when {r.w>width-2*margin || r.left<margin->margin-r.left;r.right>width-margin->width-margin-r.right;else->0.0}
+        val dy=when {r.h>height-2*margin || r.top<margin->margin-r.top;r.bottom>height-margin->height-margin-r.bottom;else->0.0}
+        if(kotlin.math.abs(dx)>=.5 || kotlin.math.abs(dy)>=.5) panText(dx.toFloat(),dy.toFloat())
+    }
     fun screenPoint(p:Pt)=Pt((panX+p.x*scale).toDouble(),(panY+p.y*scale).toDouble())
     fun zoomBy(factor: Float) = scaleAt(factor, width / 2f, height / 2f)
     private fun scaleAt(factor: Float, x: Float, y: Float) {
@@ -120,16 +153,16 @@ class MindMapView(context: Context) : View(context) {
         val p = point(x, y)
         zoom = (zoom * factor).coerceIn(.05f, 4f)
         panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
-        invalidate()
+        invalidate();onViewportChanged()
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { inkInput.cancel(); if (!initialized) fit() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         canvas.save(); canvas.translate(panX, panY); canvas.scale(scale, scale)
         val owner=document.nodes.firstOrNull {it.id==inkOwner}
         painter.retainInk(document.nodes.flatMap {it.ink})
         val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else preview ?: document
-        painter.draw(canvas, shown, dark, selected, dropTarget)
+        painter.draw(canvas, shown, dark, selected, dropTarget,editingText)
         if(owner!=null && selected==owner.id) {
             canvas.save();canvas.translate(owner.x.toFloat(),owner.y.toFloat())
             canvas.clipRect(0f,0f,owner.width.toFloat(),owner.height.toFloat())

@@ -27,6 +27,47 @@ private object MapSaves {
 }
 
 class MapSession : ViewModel() {
+    var textDraft by mutableStateOf<MapTextDraft?>(null); private set
+    var textRestore by mutableStateOf<MapTextRestore?>(null); private set
+    var textEditConflict by mutableStateOf(false); private set
+    fun beginText(id:String,viewport:MindMapView.Viewport,width:Int,height:Int,density:Float=1f):Boolean {
+        if(closing || inkContact || textDraft!=null || textRestore!=null || width<=0 || height<=0 || !density.isFinite() || density<=0) return false
+        val node=document?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.TEXT} ?: return false
+        textEditConflict=false
+        textDraft=MapTextDraft(nodeId=id,initialText=node.text,viewport=viewport,viewWidth=width,viewHeight=height,previousSelection=selected,viewDensity=density)
+        selected=id
+        return true
+    }
+    fun updateTextDraft(token:String,value:androidx.compose.ui.text.input.TextFieldValue):Boolean {
+        val draft=textDraft?.takeIf {it.token==token} ?: return false
+        if(value.text.length>20_000) {limitError=true;return false}
+        textDraft=draft.copy(value=value);limitError=false
+        return true
+    }
+    fun finishTextDraft(token:String):Boolean {
+        val draft=textDraft?.takeIf {it.token==token} ?: return false
+        val doc=document ?: return false
+        val n=doc.nodes.firstOrNull {it.id==draft.nodeId}
+        if(n==null || n.kind!=NodeKind.TEXT || n.text!=draft.initialText) {textEditConflict=true;return false}
+        if(draft.value.text!=draft.initialText) {
+            val height=MapPainter().measuredHeight(draft.value.text,n.width)
+            val updated=doc.update(n.id) {it.copy(text=draft.value.text,height=height)}
+            val next=try {if(n.free) updated else MapLayout.arrange(updated)} catch(_:IllegalArgumentException) {limitError=true;return false}
+            if(!commit(next)) return false
+        }
+        endText(draft)
+        return true
+    }
+    fun cancelTextDraft(token:String) {textDraft?.takeIf {it.token==token}?.let(::endText)}
+    private fun endText(draft:MapTextDraft) {
+        textDraft=null;textEditConflict=false
+        textRestore=MapTextRestore(draft.token,draft.viewport,draft.viewWidth,draft.viewHeight,draft.previousSelection,draft.viewDensity)
+    }
+    fun completeTextRestore(token:String) {
+        val restore=textRestore?.takeIf {it.token==token} ?: return
+        selected=restore.selection?.takeIf {id->document?.nodes?.any {it.id==id}==true} ?: document?.root?.id
+        textRestore=null
+    }
     var inkContact by mutableStateOf(false)
     var inkMode by mutableStateOf(InkMode.PEN)
     var inkWidth by mutableStateOf(3.0)
