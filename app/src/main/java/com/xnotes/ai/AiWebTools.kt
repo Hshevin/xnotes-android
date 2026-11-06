@@ -12,7 +12,7 @@ data class AiToolCall(val id: String, val name: String, val arguments: String)
 data class AiReply(val content: String = "", val reasoning: String = "", val calls: List<AiToolCall> = emptyList())
 
 /** The provider rejected a request that offered tools: the model or API cannot take tool calls. */
-class AiToolsUnsupported(val status: Int) : IllegalStateException(AiText.t(AiMsg.REQUEST_HTTP_FAILED, status))
+class AiToolsUnsupported(val status: Int, detail: String = "") : IllegalStateException(AiConnection.httpFailure(status, detail))
 
 /**
  * Collects Chat Completions stream chunks into tool calls. Fragments arrive per `index`: the id and

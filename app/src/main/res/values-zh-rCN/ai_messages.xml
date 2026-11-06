@@ -10,6 +10,7 @@
     <string name="ai_msg_search_response_too_large">搜索响应过大</string>
     <string name="ai_msg_request_too_large">截图或会话过大，请新建会话并缩小截图</string>
     <string name="ai_msg_request_http_failed">请求失败（HTTP %1$d），请检查接口、密钥、模型及额度</string>
+    <string name="ai_msg_request_http_failed_detail">请求失败（HTTP %1$d）：%2$s</string>
     <string name="ai_msg_answer_too_long">回答超出长度限制</string>
     <string name="ai_msg_provider_error">供应商返回错误，请检查模型配置</string>
     <string name="ai_msg_connection_ended_early">连接提前结束，请重试</string>
