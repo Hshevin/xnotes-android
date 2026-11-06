@@ -29,3 +29,7 @@ DeepSeek Harness `deepseek-ai/deepseek-harness`（MIT）提交 `fcc0ad46`：`pac
 - DeepSeek 官方及其他 OpenAI 兼容供应商上的真实工具调用、思考模式下的多轮调用、页图消息是否被接受。
 - 不支持图片输入的模型调用 `pdf_view_page` 后，下一次请求可能被供应商拒绝（与旧流程相同的限制）。
 - 目标设备 MovinkPad Pro 14 上的完整流程。
+
+## 复查补充（2026-11-07）
+
+主分支复查发现：`pdf_view_page` 的页图随下一次请求发送，DeepSeek `deepseek-chat` 等不接受图片输入的模型会以 400 拒绝；此时已有工具轮次，旧逻辑直接让整轮回答失败。现改为：带页图的请求被拒（`AiToolsUnsupported`）且本轮尚未关闭页图时，把对话尾部的页图消息替换为「页图未能发送」说明，`Reader.imagesOff` 后 `pdf_view_page` 只回该说明，模型改用文字继续作答；只重试一次，其他原因的拒绝仍按原样结束本轮。新增 `AiSessionsTest.aModelWithoutPictureInputGoesOnInTextWhenPageImagesAreRefused`。
