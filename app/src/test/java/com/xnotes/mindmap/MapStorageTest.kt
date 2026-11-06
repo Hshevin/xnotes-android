@@ -69,4 +69,30 @@ class MapStorageTest {
         assertEquals(external, MapStore(tmp.root, "one", target).open().document)
         assertEquals(external, MapStore(tmp.root, "two", target).open().document)
     }
+    @Test fun failedLatestCheckpointMustNotClaimOlderJournalIsSafeToClose() {
+        val directory = tmp.newFolder("journal")
+        val target = Target(MapCodec.encode(doc()))
+        val store = MapStore(directory, "uri", target)
+        val opened = store.open()
+        store.save(opened.document)
+        directory.listFiles()!!.forEach { it.delete() }
+        directory.delete()
+        directory.writeText("blocked")
+        val edit = opened.document.update(opened.document.root.id) { it.copy(text = "latest") }
+        assertThrows(Exception::class.java) { store.save(edit) }
+        assertFalse(store.journalReady)
+        assertEquals(opened.document, MapCodec.decode(target.bytes))
+    }
+    @Test fun cleanJournalCanRecoverADamagedOriginalWithoutOverwritingIt() {
+        val target = Target(MapCodec.encode(doc()))
+        val store = MapStore(tmp.root, "uri", target)
+        val opened = store.open()
+        store.save(opened.document)
+        target.bytes = byteArrayOf(1)
+        val recovery = MapStore(tmp.root, "uri", target).open()
+        assertEquals(opened.document, recovery.document)
+        assertTrue(recovery.recovered)
+        assertTrue(recovery.conflict)
+    }
+
 }

@@ -9,16 +9,22 @@ object MapCodec {
     const val MAX_BYTES = 32 * 1024 * 1024
     fun read(input: InputStream): MindMapDocument = decode(readBytes(input))
     fun readBytes(input: InputStream): ByteArray {
-        val bytes = input.readNBytes(MAX_BYTES + 1)
-        require(bytes.size <= MAX_BYTES)
-        return bytes
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            require(out.size() + count <= MAX_BYTES)
+            out.write(buffer, 0, count)
+        }
+        return out.toByteArray()
     }
     fun encode(doc: MindMapDocument): ByteArray {
         doc.validate()
-        return toJson(doc).toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
+        return toJson(doc).toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES - 4096) }
     }
     fun decode(bytes: ByteArray): MindMapDocument {
-        require(bytes.size <= MAX_BYTES)
+        require(bytes.size <= MAX_BYTES - 4096)
         return fromJson(JSONObject(String(bytes, Charsets.UTF_8)))
     }
     internal fun toJson(doc: MindMapDocument) = JSONObject()

@@ -18,7 +18,7 @@ class MapConflict : IOException()
 class MapStore(directory: File, key: String, private val target: MapTarget) {
     private val journal = File(directory, hash(key.toByteArray()) + ".json")
     private var expectedHash: String? = null
-    var journalReady = false; private set
+    @Volatile var journalReady = false; private set
     data class Opened(val document: MindMapDocument, val recovered: Boolean = false, val conflict: Boolean = false)
 
     fun open(): Opened {
@@ -41,12 +41,19 @@ class MapStore(directory: File, key: String, private val target: MapTarget) {
             }
             return Opened(saved.first, recovered = true, conflict = remoteHash != saved.second)
         }
-        val doc = remote?.let(MapCodec::decode) ?: throw IOException("Unreadable mind map")
+        val decoded = remote?.let { runCatching { MapCodec.decode(it) }.getOrNull() }
+        if (decoded == null && saved != null) {
+            expectedHash = saved.second
+            journalReady = true
+            return Opened(saved.first, recovered = true, conflict = true)
+        }
+        val doc = decoded ?: throw IOException("Unreadable mind map")
         expectedHash = remoteHash
         return Opened(doc)
     }
 
     fun save(doc: MindMapDocument) {
+        journalReady = false
         val bytes = MapCodec.encode(doc) // validate before touching either copy
         checkpoint(doc, pending = true)
         val remote = runCatching { target.read() }.getOrNull()
