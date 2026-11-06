@@ -983,7 +983,7 @@ internal fun NewNoteScreen(
                                 HorizontalDivider(color = border)
                                 if (aiOpen) {
                                     AiTemplateTab(
-                                        coverOnly, wide = true, onImport = onImportTemplate, onGenerated = editor::importTemplateText,
+                                        coverOnly, wide = true, onImport = onImportTemplate, onGenerated = editor::importGeneratedTemplate,
                                         modifier = Modifier.fillMaxSize().verticalScroll(aiScroll).padding(start = Space.s24, end = Space.s24, top = Space.s20, bottom = Space.s40),
                                     )
                                 } else {
@@ -1034,7 +1034,7 @@ internal fun NewNoteScreen(
                                 item(span = { GridItemSpan(maxLineSpan) }) { Tabs() }
                                 if (aiOpen) {
                                     item(span = { GridItemSpan(maxLineSpan) }) {
-                                        AiTemplateTab(coverOnly, wide = false, onImport = onImportTemplate, onGenerated = editor::importTemplateText, modifier = Modifier.padding(top = Space.s12))
+                                        AiTemplateTab(coverOnly, wide = false, onImport = onImportTemplate, onGenerated = editor::importGeneratedTemplate, modifier = Modifier.padding(top = Space.s12))
                                     }
                                 } else gallery()
                             }

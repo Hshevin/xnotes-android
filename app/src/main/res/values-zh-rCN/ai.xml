@@ -190,10 +190,22 @@
     <string name="ai_tpl_gen_fixing">正在修正模板（第 %1$d / %2$d 次）…已收到 %3$d 字</string>
     <string name="ai_tpl_gen_checking">正在检查模板…</string>
     <string name="ai_tpl_gen_no_provider">在 AI 设置中添加模型供应商后，即可在应用内生成模板。</string>
-    <string name="ai_tpl_gen_cover_note">在应用内生成的封面只用图形和文字绘制；需要照片或绘画的封面，请使用下方的其他 AI 助手。</string>
+    <string name="ai_tpl_gen_cover_note">未设置图像模型时，应用内生成的封面只用图形和文字绘制；在 AI 设置中设置图像模型即可生成图片，也可使用下方的其他 AI 助手。</string>
     <string name="ai_tpl_gen_examples">示例（点按填入）</string>
     <string name="ai_tpl_external">使用其他 AI 助手</string>
     <string name="ai_tpl_external_about">适合带图片的封面：把格式说明交给 ChatGPT、Claude 等助手，再导入它生成的文件。</string>
     <string name="ai_prompt_cover_frame">一个封面模板：可调颜色的深蓝底色，距页边 12 毫米处画细金色双线边框，在页面上方三分之一处放一个米色标题标签。</string>
     <string name="ai_prompt_cover_stripes">一个封面模板：可调底色上铺斜向细条纹，靠近底部放一个白色标题标签。</string>
+    <string name="ai_tpl_gen_picture">用 %1$s 生成图片</string>
+    <string name="ai_tpl_gen_picture_note">画面描述会发送给 %1$s · %2$s 生成图片，供应商可能按张计费。</string>
+    <string name="ai_tpl_gen_painting">正在生成图片…</string>
+    <string name="ai_prompt_cover_paint_pines">一个封面：柔和水彩风格的黎明时分雾气弥漫的松林，靠近顶部放一个白色小标题标签。</string>
+    <string name="ai_prompt_cover_paint_leather">一个仿深棕色皮革的封面，带压印边框和金色标题标签。</string>
+    <string name="ai_prompt_cover_paint_circles">一个封面：深蓝与青绿半透明圆形相互重叠的生成式图案，加细金色边框和标题标签。</string>
+    <string name="ai_settings_image">图像模型</string>
+    <string name="ai_settings_image_note">用于在新建笔记中生成带图片的封面。需要 OpenAI 兼容的图像接口，例如 OpenAI 的 gpt-image 模型。</string>
+    <string name="ai_image_provider">供应商</string>
+    <string name="ai_image_none">不使用</string>
+    <string name="ai_image_model">图像模型名称</string>
+    <string name="ai_image_model_hint">例如 gpt-image-1</string>
 </resources>

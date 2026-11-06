@@ -20,8 +20,30 @@ object AiTemplateGen {
     const val MIN_OUTPUT_TOKENS = 16000
     const val MAX_REQUEST = 2000
 
+    /** Where the one picture of a cover painted here sits in its package; its extension follows the image's format. */
+    const val PICTURE_SRC = "images/cover.png"
+
     /** Overrides the guide's "What to hand back", which assumes a chat assistant that makes files. */
-    private fun inApp(kind: TemplateKind) = """
+    private fun inApp(kind: TemplateKind, picture: Boolean) = if (picture) """
+
+## In-app generation (this replaces "What to hand back")
+
+You are being called by the xnotes app itself, through its API. You cannot run code or create files;
+the app reads your reply directly, has an image model paint the picture you describe, and packages
+the two.
+
+- Make a cover template, with `"kind": "cover"`, built around one picture: fill the page with a
+  `rect` in the cover's colour, then exactly one `image` node with `"src": "$PICTURE_SRC"`,
+  `"fit": "cover"` and a `position` that keeps the subject in view on a wide page, then any frame and
+  a label to write the title on. No other `image` node.
+- Reply with exactly two code blocks: the complete template JSON in one ```json block, then the
+  picture's description for the image model in one ```prompt block.
+- The description is in English, at most 800 characters: a portrait picture about 2:3, the subject,
+  style, colours and light, with calm space where the label goes, and no text, letters or frame in
+  the picture itself.
+- Outside the blocks write at most one short sentence saying what you chose, in the language of the
+  request. Write the `name`, `description`, labels and text on the page in the language of the request.
+""" else """
 
 ## In-app generation (this replaces "What to hand back")
 
@@ -37,7 +59,12 @@ make pictures, and the app reads your reply directly.
 """
 
     /** The system prompt: [guide] and the in-app note. */
-    fun instructions(guide: String, kind: TemplateKind): String = guide.trimEnd() + "\n" + inApp(kind)
+    fun instructions(guide: String, kind: TemplateKind, picture: Boolean = false): String = guide.trimEnd() + "\n" + inApp(kind, picture)
+
+    /** The picture description in [reply]'s last ```prompt block, or null. */
+    fun extractPrompt(reply: String): String? =
+        Regex("```prompt[ \\t]*\\r?\\n(.*?)```", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)).findAll(reply).lastOrNull()
+            ?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
 
     /** The template in [reply]: its last ```json block, else its last fenced block, else its outermost braces. */
     fun extract(reply: String): String? {
@@ -54,14 +81,17 @@ make pictures, and the app reads your reply directly.
      * message tells the model what to fix. The reader drops what it cannot use without a word, so
      * the nodes it kept are counted against those written.
      */
-    fun check(text: String, kind: TemplateKind): String {
+    fun check(text: String, kind: TemplateKind, picture: Boolean = false): String {
         val template = try { TemplateReader.read(text) } catch (e: TemplateFormatException) {
             throw IllegalArgumentException("It is not a valid xtemplate: ${e.message}.")
         }
         val json = JSONObject(text)
         val written = mutableListOf<JSONObject>()
         collect(json.optJSONArray("items"), written)
-        require(written.none { it.optString("type") == "image" }) {
+        val images = written.filter { it.optString("type") == "image" }
+        if (picture) require(images.size == 1 && images[0].opt("src") == PICTURE_SRC) {
+            "It must have exactly one `image` node, with `\"src\": \"$PICTURE_SRC\"`, for the picture the app paints."
+        } else require(images.isEmpty()) {
             "It uses an `image` node, but a template made here cannot carry a picture. Draw it with shapes and text only."
         }
         require(template.kind == kind) {
@@ -99,19 +129,31 @@ make pictures, and the app reads your reply directly.
         /** Text arriving: [chars] so far, in [attempt] of [MAX_ATTEMPTS]. */
         data class Writing(val attempt: Int, val chars: Int) : Stage
         data class Checking(val attempt: Int) : Stage
+        /** The image model painting the cover's picture. */
+        data object Painting : Stage
     }
+
+    /** A made template: plain [json], or [json] and the [picture] it names at [src] in its package. */
+    class Generated(val json: String, val picture: AiImage? = null, val src: String = PICTURE_SRC)
 
     /**
      * A checked template of [kind] for [request], from [config]'s default provider and model with
-     * [guide] as the system prompt. Throws [IllegalStateException] with a user-facing reason when
-     * no usable template came back.
+     * [guide] as the system prompt. With [painter] (an image model's route, covers only) the
+     * template is built around one picture that model then paints from the description the text
+     * model wrote. Throws [IllegalStateException] with a user-facing reason when no usable template
+     * came back.
      */
-    suspend fun generate(config: AiConfig, client: AiTransport, guide: String, request: String, kind: TemplateKind, stage: suspend (Stage) -> Unit = {}): String {
+    suspend fun generate(
+        config: AiConfig, client: AiTransport, guide: String, request: String, kind: TemplateKind,
+        painter: AiConfig? = null, stage: suspend (Stage) -> Unit = {},
+    ): Generated {
         val ask = request.trim()
         require(ask.isNotEmpty()) { AiText.t(AiMsg.TEMPLATE_GEN_EMPTY) }
         require(ask.length <= MAX_REQUEST) { AiText.t(AiMsg.TEMPLATE_GEN_TOO_LONG, MAX_REQUEST) }
         require(config.url.isNotBlank() && config.key.isNotBlank() && config.model.isNotBlank()) { AiText.t(AiMsg.PROVIDER_NOT_CONFIGURED) }
-        val settings = config.copy(instructions = instructions(guide, kind), maxTokens = maxOf(config.maxTokens, MIN_OUTPUT_TOKENS))
+        val picture = painter != null && kind == TemplateKind.COVER
+        if (picture) require(painter!!.url.isNotBlank() && painter.key.isNotBlank() && painter.model.isNotBlank()) { AiText.t(AiMsg.IMAGE_MODEL_REQUIRED) }
+        val settings = config.copy(instructions = instructions(guide, kind, picture), maxTokens = maxOf(config.maxTokens, MIN_OUTPUT_TOKENS))
         val messages = mutableListOf(AiMessage("user", ask))
         var reason = ""
         for (attempt in 1..MAX_ATTEMPTS) {
@@ -120,13 +162,25 @@ make pictures, and the app reads your reply directly.
             client.stream(settings, messages) { reply.append(it); stage(Stage.Writing(attempt, reply.length)) }
             stage(Stage.Checking(attempt))
             val text = reply.toString()
+            var checked: Pair<String, String?>? = null
             reason = try {
                 val json = extract(text) ?: throw IllegalArgumentException("No template JSON was found in the reply.")
-                return check(json, kind)
+                val description = if (picture) extractPrompt(text) ?: throw IllegalArgumentException("No picture description was found: give it in a ```prompt block.") else null
+                checked = check(json, kind, picture) to description
+                ""
             } catch (e: IllegalArgumentException) { e.message.orEmpty() }
             catch (e: org.json.JSONException) { "It is not valid JSON: ${e.message}." }
+            checked?.let { (json, description) ->
+                if (description == null) return Generated(json)
+                // Painted once, after the template holds; a failure here is the image service's, not the model's to fix.
+                stage(Stage.Painting)
+                val image = client.image(painter!!, description)
+                val src = PICTURE_SRC.substringBeforeLast('.') + "." + image.extension
+                return Generated(if (src == PICTURE_SRC) json else json.replace("\"$PICTURE_SRC\"", "\"$src\""), image, src)
+            }
             messages += AiMessage("assistant", text.ifBlank { "(empty reply)" })
-            messages += AiMessage("user", "That template cannot be used. $reason Reply with the complete corrected template in one ```json block.")
+            messages += AiMessage("user", "That template cannot be used. $reason Reply with the complete corrected template" +
+                (if (picture) " in one ```json block and the picture's description in one ```prompt block." else " in one ```json block."))
         }
         throw IllegalStateException(AiText.t(AiMsg.TEMPLATE_GEN_FAILED, reason))
     }

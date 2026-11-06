@@ -30,7 +30,7 @@ class AiTemplateGenTest {
     @Test fun guideIsTheSystemPromptAndAJsonBlockIsTaken() {
         val model = Model(listOf("我选了 8 毫米行距。\n```json\n$page\n```\n"))
         val stages = mutableListOf<AiTemplateGen.Stage>()
-        assertEquals(page, run(model, stages = stages))
+        assertEquals(page, run(model, stages = stages).json)
         val (sent, messages) = model.requests.single()
         assertTrue(sent.instructions.startsWith("GUIDE TEXT"))
         assertTrue(sent.instructions.contains("In-app generation")); assertTrue(sent.instructions.contains("page template"))
@@ -43,7 +43,7 @@ class AiTemplateGenTest {
     @Test fun unusableReplyGoesBackWithTheReasonThenTheFixIsTaken() {
         val bad = """{"xtemplate":1,"name":"Pic","items":[{"type":"image","src":"images/a.jpg"}]}"""
         val model = Model(listOf("```json\n$bad\n```", "```json\n$page\n```"))
-        assertEquals(page, run(model))
+        assertEquals(page, run(model).json)
         val second = model.requests[1].second
         assertEquals(listOf("user", "assistant", "user"), second.map { it.role })
         assertTrue(second.last().text.contains("`image` node"))
@@ -65,7 +65,7 @@ class AiTemplateGenTest {
 
     @Test fun coverKindIsAskedForAndAccepted() {
         val model = Model(listOf("```JSON\n$cover\n```"))
-        assertEquals(cover, run(model, TemplateKind.COVER))
+        assertEquals(cover, run(model, TemplateKind.COVER).json)
         assertTrue(model.requests.single().first.instructions.contains("\"kind\": \"cover\""))
     }
 
@@ -93,7 +93,7 @@ class AiTemplateGenTest {
         for (f in files) {
             val text = f.readText()
             val kind = TemplateReader.read(text).kind
-            assertEquals(f.name, text, AiTemplateGen.check(text, kind))
+            assertEquals(f.name, text, AiTemplateGen.check(text, kind, picture = false))
         }
     }
 }
