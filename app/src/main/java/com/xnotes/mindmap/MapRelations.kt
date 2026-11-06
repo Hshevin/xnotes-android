@@ -1,0 +1,60 @@
+package com.xnotes.mindmap
+
+import com.xnotes.core.geometry.Rect
+import java.util.UUID
+
+enum class SourceScope { FILE, PAGE, PDF_REGION, OBJECTS, REGION }
+enum class SourceStatus { UNVERIFIED, CURRENT, STALE, UNAVAILABLE, PARTIALLY_DELETED, DELETED, EMPTY, TRASHED }
+/** Cached display fields never participate in source identity. Preview keys are opaque asset IDs. */
+data class MapSource(
+    val id: String = UUID.randomUUID().toString(),
+    val documentId: String,
+    val fileName: String = "",
+    val scope: SourceScope = SourceScope.FILE,
+    val pageId: String? = null,
+    val objectIds: List<String> = emptyList(),
+    val region: Rect? = null,
+    val note: String = "",
+    val status: SourceStatus = SourceStatus.UNVERIFIED,
+    val previewKey: String? = null,
+    val sourceVersion: String? = null,
+    val includeAnnotations: Boolean = false,
+) {
+    fun validate() {
+        require(id.isNotBlank() && id.length <= 128)
+        require(UUID.fromString(documentId).toString() == documentId)
+        require(fileName.length <= 4096 && note.length <= 20_000)
+        require(pageId == null || pageId.isNotBlank() && pageId.length <= 128)
+        require(objectIds.size <= 10000 && objectIds.distinct().size == objectIds.size && objectIds.all { it.isNotBlank() && it.length <= 128 })
+        require(previewKey == null || previewKey.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(sourceVersion == null || sourceVersion.length <= 512)
+        region?.let { r -> require(listOf(r.x,r.y,r.w,r.h).all { it.isFinite() && kotlin.math.abs(it) <= MindMapDocument.MAX_COORD } && r.w > 0 && r.h > 0) }
+        when(scope) {
+            SourceScope.FILE -> require(pageId == null && region == null && objectIds.isEmpty())
+            SourceScope.PAGE -> require(pageId != null && region == null && objectIds.isEmpty())
+            SourceScope.PDF_REGION -> require(pageId != null && region != null && objectIds.isEmpty())
+            SourceScope.OBJECTS -> require(objectIds.isNotEmpty() && region == null)
+            SourceScope.REGION -> require(region != null && objectIds.isEmpty())
+        }
+        require(!includeAnnotations || scope == SourceScope.PDF_REGION)
+    }
+}
+enum class RelationKind { RELATED, REFERENCED_FROM, BELONGS_TO, DEPENDS_ON }
+data class MapRelation(val id: String = UUID.randomUUID().toString(), val from: String, val to: String,
+    val kind: RelationKind = RelationKind.RELATED, val label: String = "") {
+    val directed get() = kind != RelationKind.RELATED
+    fun duplicateKey(): List<String> = (if (directed) listOf(from,to) else listOf(from,to).sorted()) + kind.name
+}
+enum class MapDirection { BOTH, RIGHT, DOWN }
+
+fun MindMapDocument.addFree(kind: NodeKind, text: String, x: Double, y: Double): Pair<MindMapDocument,String> {
+    val added=MapNode(parent=null,kind=kind,text=text,x=x,y=y,free=true)
+    return copy(nodes=nodes+added).also { it.validate() } to added.id
+}
+fun MindMapDocument.detach(id: String): MindMapDocument = if (id == root.id) this else update(id) { it.copy(parent=null,free=true) }
+fun MindMapDocument.connect(from: String, to: String, kind: RelationKind): Pair<MindMapDocument,String> {
+    require(from != to); node(from);node(to)
+    val edge=MapRelation(from=from,to=to,kind=kind)
+    relations.firstOrNull { it.duplicateKey()==edge.duplicateKey() }?.let { return this to it.id }
+    return copy(relations=relations+edge).also { it.validate() } to edge.id
+}

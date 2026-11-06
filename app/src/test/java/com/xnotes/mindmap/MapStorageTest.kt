@@ -25,7 +25,7 @@ class MapStorageTest {
     }
     @Test fun unknownVersionsMalformedNumbersAndTreesFailClosed() {
         val good = String(MapCodec.encode(doc()), Charsets.UTF_8)
-        for (bad in listOf(good.replace("\"version\":1", "\"version\":99"),
+        for (bad in listOf(good.replace("\"version\":2", "\"version\":99"),
             good.replace("\"pressure\":0.67", "\"pressure\":\"0.67\""),
             good.replace("\"parent\":null", "\"parent\":\"missing\""),
             good.replace("\"kind\":\"INK\"", "\"kind\":\"UNKNOWN\""))) {

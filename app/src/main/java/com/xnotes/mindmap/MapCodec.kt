@@ -28,11 +28,12 @@ object MapCodec {
         return fromJson(JSONObject(String(bytes, Charsets.UTF_8)))
     }
     internal fun toJson(doc: MindMapDocument) = JSONObject()
-        .put("format", "xnotes-mind-map").put("version", 1).put("id", doc.id)
+        .put("format", "xnotes-mind-map").put("version", 2).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
         .put("nodes", JSONArray().also { array -> doc.nodes.forEach { n ->
             array.put(JSONObject().put("id", n.id).put("parent", n.parent ?: JSONObject.NULL)
                 .put("kind", n.kind.name).put("text", n.text).put("x", n.x).put("y", n.y)
                 .put("width", n.width).put("height", n.height).put("collapsed", n.collapsed)
+                .put("free",n.free).put("sources",MapGraphJson.sources(n)).put("primarySource",n.primarySource ?: JSONObject.NULL)
                 .put("ink", JSONArray().also { ink -> n.ink.forEach { s ->
                     ink.put(JSONObject().put("width", s.width).put("points", JSONArray().also { points ->
                         s.points.forEach { p -> points.put(JSONObject().put("x", p.x).put("y", p.y)
@@ -42,7 +43,8 @@ object MapCodec {
         } })
 
     internal fun fromJson(j: JSONObject): MindMapDocument {
-        require(j.string("format") == "xnotes-mind-map" && j.number("version") == 1.0)
+        require(j.string("format") == "xnotes-mind-map")
+        val version=j.number("version"); require(version == 1.0 || version == 2.0)
         val array = j.getJSONArray("nodes")
         require(array.length() in 1..MindMapDocument.MAX_NODES)
         var count = 0
@@ -54,6 +56,9 @@ object MapCodec {
                 kind = NodeKind.valueOf(n.string("kind")), text = n.string("text"),
                 width = n.number("width"), height = n.number("height"), x = n.number("x"), y = n.number("y"),
                 collapsed = n.get("collapsed").let { require(it is Boolean); it },
+                free=if(version==2.0) MapGraphJson.bool(n,"free") else false,
+                sources=if(version==2.0) MapGraphJson.readSources(n) else emptyList(),
+                primarySource=if(version==2.0) MapGraphJson.nullable(n,"primarySource") else null,
                 ink = (0 until ink.length()).map { k ->
                     val s = ink.getJSONObject(k)
                     val points = s.getJSONArray("points")
@@ -64,7 +69,7 @@ object MapCodec {
                     } }, s.number("width"))
                 })
         }
-        return MindMapDocument(j.string("id"), nodes).also { it.validate() }
+        return MindMapDocument(j.string("id"), nodes, if(version==2.0) MapGraphJson.readRelations(j) else emptyList(), if(version==2.0) MapDirection.valueOf(j.string("direction")) else MapDirection.BOTH).also { it.validate() }
     }
     private fun JSONObject.string(key: String): String = get(key).let { require(it is String); it }
     private fun JSONObject.number(key: String): Double = get(key).let { require(it is Number); it.toDouble().also { d -> require(d.isFinite()) } }

@@ -4,7 +4,7 @@ import com.xnotes.core.geometry.Rect
 import java.util.UUID
 import kotlin.math.abs
 
-enum class NodeKind { TEXT, INK }
+enum class NodeKind { TEXT, INK, REFERENCE }
 data class InkPoint(val x: Double, val y: Double, val pressure: Double = 1.0, val time: Double = 0.0)
 data class MapInk(val points: List<InkPoint>, val width: Double = 3.0)
 
@@ -20,6 +20,9 @@ data class MapNode(
     val x: Double = 0.0,
     val y: Double = 0.0,
     val collapsed: Boolean = false,
+    val free: Boolean = false,
+    val sources: List<MapSource> = emptyList(),
+    val primarySource: String? = null,
 ) {
     val bounds get() = Rect(x, y, width, height)
 }
@@ -27,8 +30,10 @@ data class MapNode(
 data class MindMapDocument(
     val id: String = UUID.randomUUID().toString(),
     val nodes: List<MapNode> = listOf(MapNode(parent = null)),
+    val relations: List<MapRelation> = emptyList(),
+    val direction: MapDirection = MapDirection.BOTH,
 ) {
-    val root get() = nodes.single { it.parent == null }
+    val root get() = nodes.single { it.parent == null && !it.free }
     fun node(id: String) = nodes.first { it.id == id }
     fun children(id: String) = nodes.filter { it.parent == id }
     fun update(id: String, change: (MapNode) -> MapNode) = copy(nodes = nodes.map { if (it.id == id) change(it) else it })
@@ -45,7 +50,7 @@ data class MindMapDocument(
     fun visible(): List<MapNode> {
         val children = nodes.groupBy { it.parent }
         val visible = hashSetOf<String>()
-        val todo = ArrayDeque<MapNode>().apply { add(root) }
+        val todo = ArrayDeque<MapNode>().apply { nodes.filter { it.parent == null }.forEach { add(it) } }
         while (todo.isNotEmpty()) {
             val at = todo.removeFirst()
             if (visible.add(at.id) && !at.collapsed) children[at.id].orEmpty().forEach { todo.add(it) }
@@ -64,11 +69,11 @@ data class MindMapDocument(
     fun delete(id: String): MindMapDocument {
         if (id == root.id) return this
         val removed = descendants(id)
-        return copy(nodes = nodes.filter { it.id !in removed })
+        return copy(nodes = nodes.filter { it.id !in removed }, relations = relations.filter { it.from !in removed && it.to !in removed })
     }
     fun reparent(id: String, parent: String): MindMapDocument {
         if (id == root.id || parent in descendants(id) || nodes.none { it.id == parent }) return this
-        val doc = update(id) { it.copy(parent = parent) }.update(parent) { it.copy(collapsed = false) }
+        val doc = update(id) { it.copy(parent = parent, free = false) }.update(parent) { it.copy(collapsed = false) }
         // Moving a deep subtree must also respect the reader's depth limit.
         return runCatching { doc.validate(); MapLayout.arrange(doc) }.getOrDefault(this)
     }
@@ -79,11 +84,19 @@ data class MindMapDocument(
 
     fun validate() {
         require(id.isNotBlank() && id.length <= 128)
-        require(nodes.size in 1..MAX_NODES && nodes.count { it.parent == null } == 1)
+        require(nodes.size in 1..MAX_NODES && nodes.count { it.parent == null && !it.free } == 1)
         val byId = nodes.associateBy { it.id }
         require(byId.size == nodes.size)
+        require(relations.size <= 4000 && relations.map { it.id }.distinct().size == relations.size)
+        require(relations.map { it.duplicateKey() }.distinct().size == relations.size)
+        relations.forEach { require(it.id.isNotBlank() && it.id.length <= 128 && it.from in byId && it.to in byId && it.from != it.to && it.label.length <= 20_000) }
+        val sources = nodes.flatMap { it.sources }
+        require(sources.size <= 5000 && sources.map { it.id }.distinct().size == sources.size)
         var pointCount = 0
         for (n in nodes) {
+            require(!n.free || n.parent == null)
+            require(n.sources.size <= 128 && (n.primarySource == null || n.sources.any { it.id == n.primarySource }))
+            n.sources.forEach { it.validate() }
             require(n.id.isNotBlank() && n.id.length <= 128 && n.text.length <= 20_000)
             require(n.width.isFinite() && n.width in 48.0..4096.0 && n.height.isFinite() && n.height in 48.0..4096.0)
             require(n.x.isFinite() && abs(n.x) <= MAX_COORD && n.y.isFinite() && abs(n.y) <= MAX_COORD)

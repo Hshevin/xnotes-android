@@ -6,6 +6,11 @@ object MapLayout {
     private const val V_GAP = 28.0
     fun arrange(doc: MindMapDocument): MindMapDocument {
         doc.validate()
+        if (doc.direction == MapDirection.DOWN) {
+            val swapped=doc.copy(direction=MapDirection.RIGHT,nodes=doc.nodes.map { it.copy(x=it.y,y=it.x,width=it.height,height=it.width) })
+            val laid=arrange(swapped)
+            return doc.copy(nodes=laid.nodes.map { it.copy(x=it.y,y=it.x,width=it.height,height=it.width) })
+        }
         val children = doc.nodes.groupBy { it.parent }
         val heights = hashMapOf<String, Double>()
         fun height(n: MapNode): Double = heights.getOrPut(n.id) {
@@ -27,7 +32,7 @@ object MapLayout {
             }
         }
         if (!root.collapsed) for (right in listOf(true, false)) {
-            val kids = children[root.id].orEmpty().filterIndexed { i, _ -> (i % 2 == 0) == right }
+            val kids = children[root.id].orEmpty().filterIndexed { i, _ -> if(doc.direction == MapDirection.RIGHT) right else (i % 2 == 0) == right }
             var top = -(kids.sumOf { height(it) } + V_GAP * (kids.size - 1).coerceAtLeast(0)) / 2
             for (c in kids) {
                 val h = height(c)
