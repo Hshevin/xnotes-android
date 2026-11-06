@@ -66,3 +66,12 @@
 - 用户于 2026-11-06 要求推送远端：推送本地 `master`（含关闭 / 切换文档误删私有 PDF 原件的修复、重新关联与仅笔迹副本）到 `origin/master`。此授权仅限本次，不包含打包 APK、安装或 GitHub Release。
 
 - 用户要求「打包主线最新提交」。本次拉取并合入远端 `ae3e54b7`，本地交付 0.9.8 / Release 95，沿用正式包名和原签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release，保留已有本地修改。
+
+- 用户随后于 2026-11-06 提供本机构建的 Release 95 APK 并要求发布：补提交 versionCode 95，推送 `master` 与标签 `v0.9.8-movinkpad.95`，发布 GitHub Release（附 APK 与 SHA256SUMS.txt）。仅限本次，不包含设备安装。
+- 用户于 2026-11-06 要求合并到主分支：将 `worktree-ai-markdown-latex`（`e49b612e`，AI 回答 LaTeX 公式排版）与 `worktree-ai-pdf-native-tools`（`d716ef7e`，AI 读取 PDF 改为原生工具调用）以 `--no-ff` 合入本地 `master`，保留两条原分支。合并后全部 JVM 单元测试（2720 项）通过、仪器测试可编译。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release。
+- 用户于 2026-11-07 要求合并到主分支：将 `worktree-ai-openai-400`（`48c7729c`，OpenAI 官方接口改发 `max_completion_tokens`、失败提示附供应商原因）以 `--no-ff` 合入本地 `master`，保留原分支。该分支基于合并前的 `master`，合并结果与已通过全部 JVM 单元测试（2724 项）的分支代码一致。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release；真实 OpenAI 密钥复测待用户执行。
+- 用户随后于 2026-11-07 要求推送远端：将本地 `master` 推送到 `origin/master`（`Hshevin/xnotes-android`），包含 AI 回答 LaTeX 公式、PDF 原生工具读取、OpenAI HTTP 400 修复及此前未推送的无限画布分屏诊断记录 `47256b5a`。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
+
+## 2026-11-07 本机打包与日志推送
+
+- 用户要求「拉取更新并打包覆盖更新 apk，不要发布 release，自动把打包日志推送远端」。本次合入 `origin/master` 的 `6f34c664`，构建 0.9.8 / versionCode 96、沿用正式包名与原签名。授权推送打包日志、验证记录及对应版本/合并提交至 `origin/master`；不发布 GitHub Release、不上传 APK、不安装用户设备。保留原有本地未提交修改。

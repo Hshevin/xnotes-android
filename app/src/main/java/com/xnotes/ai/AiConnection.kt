@@ -222,6 +222,25 @@ interface AiTransport {
 
 /** One request, no redirects/retries/logging; cancellation closes the active socket. */
 class AiConnection(private val openConnection: (String) -> HttpURLConnection = { URL(it).openConnection() as HttpURLConnection }) : AiTransport {
+    companion object {
+        /** A failed request's message, with the provider's reason when it gave one. */
+        fun httpFailure(status: Int, detail: String): String =
+            if (detail.isEmpty()) AiText.t(AiMsg.REQUEST_HTTP_FAILED, status) else AiText.t(AiMsg.REQUEST_HTTP_FAILED_DETAIL, status, detail)
+
+        /** At most 64 KiB of an error response, or "" when there is none to read. */
+        private fun errorBody(conn: HttpURLConnection): String = runCatching {
+            conn.errorStream?.use { input ->
+                val bytes = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (bytes.size() < 65536) {
+                    val n = input.read(buffer, 0, minOf(buffer.size, 65536 - bytes.size()))
+                    if (n < 0) break
+                    bytes.write(buffer, 0, n)
+                }
+                bytes.toString(Charsets.UTF_8.name())
+            }
+        }.getOrNull().orEmpty()
+    }
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var cancelled = false
     override fun cancel() { cancelled = true; connection?.disconnect() }
@@ -311,9 +330,11 @@ class AiConnection(private val openConnection: (String) -> HttpURLConnection = {
             conn.setFixedLengthStreamingMode(bytes.size)
             conn.outputStream.use { it.write(bytes) }
             val status = conn.responseCode
+            // The provider's own reason, so a rejected request says what it was rejected for.
+            val detail = if (status in 200..299) "" else AiProtocol.providerError(errorBody(conn), config.key)
             // A request rejected only because it offered tools: the caller answers without them and says so.
-            if (tools != null && (status == 400 || status == 422)) throw AiToolsUnsupported(status)
-            check(status in 200..299) { AiText.t(AiMsg.REQUEST_HTTP_FAILED, status) }
+            if (tools != null && (status == 400 || status == 422)) throw AiToolsUnsupported(status, detail)
+            check(status in 200..299) { httpFailure(status, detail) }
             val calls = AiToolCallAssembler(AiProtocol.replyBudget(config.maxTokens))
             val streamLimit = AiProtocol.streamBudget(config.maxTokens)
             val content = StringBuilder()

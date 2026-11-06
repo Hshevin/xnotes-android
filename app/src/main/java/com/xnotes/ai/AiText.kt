@@ -27,6 +27,7 @@ enum class AiMsg(val zh: String) {
     SEARCH_RESPONSE_TOO_LARGE("搜索响应过大"),
     REQUEST_TOO_LARGE("截图或会话过大，请新建会话并缩小截图"),
     REQUEST_HTTP_FAILED("请求失败（HTTP %1\$d），请检查接口、密钥、模型及额度"),
+    REQUEST_HTTP_FAILED_DETAIL("请求失败（HTTP %1\$d）：%2\$s"),
     ANSWER_TOO_LONG("回答超出长度限制"),
     PROVIDER_ERROR("供应商返回错误，请检查模型配置"),
     CONNECTION_ENDED_EARLY("连接提前结束，请重试"),

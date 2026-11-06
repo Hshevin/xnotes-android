@@ -16,6 +16,7 @@ internal fun AiMsg.resId(): Int = when (this) {
     AiMsg.SEARCH_RESPONSE_TOO_LARGE -> R.string.ai_msg_search_response_too_large
     AiMsg.REQUEST_TOO_LARGE -> R.string.ai_msg_request_too_large
     AiMsg.REQUEST_HTTP_FAILED -> R.string.ai_msg_request_http_failed
+    AiMsg.REQUEST_HTTP_FAILED_DETAIL -> R.string.ai_msg_request_http_failed_detail
     AiMsg.ANSWER_TOO_LONG -> R.string.ai_msg_answer_too_long
     AiMsg.PROVIDER_ERROR -> R.string.ai_msg_provider_error
     AiMsg.CONNECTION_ENDED_EARLY -> R.string.ai_msg_connection_ended_early

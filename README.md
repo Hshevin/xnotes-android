@@ -6,7 +6,7 @@
 
 从 [GitHub Releases](https://github.com/Hshevin/xnotes-android/releases) 下载本 fork 的 **ARM64 APK**，在平板上打开安装。已安装本 fork 正式版的用户可用同签名的新版本直接覆盖升级。分支测试包使用独立包名，可与正式版并存，各自保存数据；旧 AI 和双窗格专用测试包不再纳入本地打包。当前分支测试包见[本地交付与验证记录](docs/movinkpad/branch-tests-2026-11-05.md)。
 
-最新本地覆盖更新：[0.9.8 / Release 95 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release95-arm64.apk)，沿用正式包名与签名，修复关闭或切换文档时误删私有 PDF 原件的路径，支持从旧笔记 / 导出包重新关联原件及打开仅笔迹副本。验证与设备验收边界见 [Release 95 记录](docs/movinkpad/release-2026-11-02.md#release-95pdf-原件保护与恢复2026-11-06)，本次仅本地交付。
+最新本地覆盖更新：[0.9.8 / Release 96 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release96-arm64.apk)，沿用正式包名与签名，包含 AI 公式排版、PDF 原生工具读取及 OpenAI 请求参数与错误提示更新。见 [打包与验证记录](docs/movinkpad/release96-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 
@@ -35,6 +35,7 @@
 
 - [版本更新与验证记录](docs/movinkpad/release-2026-11-02.md) · [早期开发记录](docs/movinkpad/development-history.md)
 - [源码构建与测试](docs/movinkpad/server-build.md)（JDK 21） · [MovinkPad 适配与验证范围](MOVINKPAD.md)
+- [无限画布退出分屏黑屏：排查与只读取证](docs/movinkpad/infinite-split-audit-2026-11-06.md)（根因未确认，尚无真机验证的修复）
 
 本项目源自 [XNotes Android](https://github.com/shardulvs/xnotes-android)，沿用 [MIT 许可证](LICENSE)。
 
