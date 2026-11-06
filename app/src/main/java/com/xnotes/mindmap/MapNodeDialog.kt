@@ -1,0 +1,89 @@
+package com.xnotes.mindmap
+
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.xnotes.R
+import com.xnotes.ui.theme.*
+
+@Composable
+internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (MapNode) -> Boolean) {
+    var text by remember(node.id) { mutableStateOf(node.text) }
+    val history = remember(node.id) { MapHistory(MindMapDocument(nodes = listOf(node.copy(parent = null)))) }
+    var current by remember(node.id) { mutableStateOf(node) }
+    var mode by remember { mutableStateOf(InkMode.PEN) }
+    var width by remember { mutableStateOf(3f) }
+    var undo by remember { mutableStateOf(false) }
+    var redo by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf(false) }
+    val painter = remember { MapPainter() }
+    fun refresh() { current = history.document.root.copy(parent = node.parent); undo = history.canUndo; redo = history.canRedo }
+    fun commit(next: MapNode) {
+        try {
+            history.commit(history.document.update(node.id) { next.copy(parent = null) })
+            problem = false; refresh()
+        } catch (_: IllegalArgumentException) { problem = true }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+        Surface(Modifier.fillMaxSize(.94f).imePadding()) {
+            Column(Modifier.fillMaxSize().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
+                Text(stringResource(if (current.kind == NodeKind.INK) R.string.map_ink_node else R.string.map_edit), fontSize = TextSize.heading)
+                Row {
+                    MapButton(R.string.map_text_node, selected = current.kind == NodeKind.TEXT, enabled = current.ink.isEmpty()) {
+                        commit(current.copy(kind = NodeKind.TEXT))
+                    }
+                    MapButton(R.string.map_ink_node, selected = current.kind == NodeKind.INK) {
+                        commit(current.copy(kind = NodeKind.INK, width = maxOf(320.0, current.width), height = maxOf(200.0, current.height)))
+                    }
+                }
+                OutlinedTextField(value = text, onValueChange = { if (it.length <= 20_000) text = it else problem = true },
+                    label = { Text(stringResource(R.string.map_node_text), fontSize = TextSize.body) },
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = TextSize.bodyLarge),
+                    modifier = if (current.kind == NodeKind.TEXT) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().heightIn(min = MinTouchTarget),
+                    maxLines = if (current.kind == NodeKind.TEXT) Int.MAX_VALUE else 2)
+                if (current.kind == NodeKind.INK) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        MapButton(R.string.map_pen, selected = mode == InkMode.PEN) { mode = InkMode.PEN }
+                        MapButton(R.string.map_eraser, selected = mode == InkMode.ERASER) { mode = InkMode.ERASER }
+                        MapButton(R.string.map_lasso, selected = mode == InkMode.LASSO) { mode = InkMode.LASSO }
+                        MapButton(R.string.undo, enabled = undo) { history.undo(); refresh() }
+                        MapButton(R.string.redo, enabled = redo) { history.redo(); refresh() }
+                        MapButton(R.string.map_clear, enabled = current.ink.isNotEmpty()) { commit(current.copy(ink = emptyList())) }
+                        MapButton(R.string.map_larger, enabled = current.width < 4096 && current.height < 4096) {
+                            commit(current.copy(width = (current.width * 1.5).coerceAtMost(4096.0), height = (current.height * 1.5).coerceAtMost(4096.0)))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+                        Text(stringResource(R.string.map_pen_width), fontSize = TextSize.body, modifier = Modifier.padding(top = Space.s12))
+                        Slider(value = width, onValueChange = { width = it }, valueRange = 1f..8f, modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget))
+                    }
+                    AndroidView(factory = { InkPadView(it) }, modifier = Modifier.fillMaxWidth().weight(1f)
+                        .border(Space.s2, LocalPalette.current.text.toComposeColor()), update = { v ->
+                        v.nodeWidth = current.width; v.nodeHeight = current.height; v.ink = current.ink; v.mode = mode; v.penWidth = width.toDouble()
+                        v.contentDescription = text
+                        v.onCommit = { commit(current.copy(ink = it)) }
+                        v.invalidate()
+                    })
+                    Text(stringResource(R.string.map_ink_hint), fontSize = TextSize.caption)
+                }
+                if (problem) Text(stringResource(R.string.map_limit), fontSize = TextSize.body)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    MapButton(R.string.cancel, onClick = onDismiss)
+                    MapButton(R.string.map_done) {
+                        val next = current.copy(text = text, height = if (current.kind == NodeKind.TEXT) painter.measuredHeight(text, current.width) else current.height)
+                        try { MindMapDocument(nodes = listOf(next.copy(parent = null))).validate(); if (!onConfirm(next)) problem = true }
+                        catch (_: IllegalArgumentException) { problem = true }
+                    }
+                }
+            }
+        }
+    }
+}
