@@ -80,3 +80,5 @@
 ## 2026-11-07 思考参数降级合并与推送
 
 - 用户要求「合并并推送」：将 `worktree-ai-thinking-fallback`（`04725967`，GPT-4o 等模型拒绝思考字段时去掉重发、本次运行内记住并标注）以 `--no-ff` 合入本地 `master`；因远端已有 Release 96 打包与日志提交，先合并 `origin/master`（仅 `authorization-history.md` 冲突，两侧记录均保留），再推送 `master` 到 `origin/master`。推送内容包括此前仅本地合并的应用内模板生成、图像模型封面、界面交互修正与主分支复查修复。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
+
+- 用户再次要求拉取更新并打包覆盖更新 APK，不发布 Release，自动推送打包日志。本次快进到 `0b35d341`，交付 0.9.8 / versionCode 97，沿用正式身份和原签名；推送本轮版本与日志提交至 origin/master，不上传 APK、不发布 GitHub Release、不安装用户设备。原有三处本地修改单独保护并恢复。
