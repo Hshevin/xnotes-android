@@ -38,3 +38,9 @@ B2a 最终复核完成，身份条目同样前置限流的漏项已修复；独�
 
 
 B2b1 实现复核完成：模型基本契约无必修；补竞争与线程异常收集及再次快照回归，修复旧 snapshot 重读实时图层。codec审核发现PDF原件未加载仍返回完整模型，以及Double近1版本舍入；均有RED重现并修复。新增独立 readInkCopy 先原ID映射对账再新身份，保留既有恢复入口与legacy模式，借入PDF不删。最后补引用式身份夹带另一PDF的真实反例，普通anchored read拒绝歧义包；独立针对复核认可。tmp/anchor-codec-final.log全量2808项通过、仪器源码编译成功。真实PNG／平台身份仪器测试已新增仅编译。没有未处理的确定性必修，B2b2与B2c仍未实现。
+
+## B2b2a 存储计划审核（2026-11-07）
+
+独立代理review_input_plan只读审核，全部要求接受并落tasks/plan.md：旧位置UUID变更不能静默重登记；覆盖BundlePdf/portable/newIdentity所有入口及同一快照；恢复在写入／清journal前检查契约；文件→DB→清pending可恢复顺序；in-place拒绝不能降级覆盖；初次保存外层截断前检查，空目标必须显式新建。Header需有界压缩、尺寸／CRC、absent/unsupported区分和从头回退。整包复制保留成员ID而改变doc UUID的作用域定义经认可。实施分a1格式层与a2登记／恢复／UI保存保护，所有必修继续保留；活模型绑定另审。
+
+B2b2a1 helper局部实现复核：修复File/Channel容器校验差异、CD加密位、普通DD、per-entry ZIP64回退与暂存文件落盘摘要。tmp/bundle-header-review-red.log三项真实失败已修，tmp/bundle-header-boundaries.log 12项定向通过。独立局部复核未发现剩余确定性必修；未涉及writer，最新helper未做全量／Android验证。用户现已暂停，后续先按新渲染架构重新核对接口再续。

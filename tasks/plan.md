@@ -370,3 +370,34 @@ B2b1 接口审核修订（已接受）：assign/restore 使用同步一次性更
 note支持七类对象，canvas现有格式不支持独立TextItem（文本在ShapeLabel）；对应验收为note七类／canvas六类。已启用writer遇不支持序列化的模型成员必须拒绝，不能静默丢掉其ID或内容，legacy模式维持旧路径。
 
 B2b1源码与主机验收完成，独立复核必修均已处理，最终2808项通过／仪器源码编译成功。PDF/版本与显式独立恢复修订的最终实现与证据见docs/movinkpad/reference-identity-model-2026-11-07.md。接下来制定并审核B2b2普通打开／可信登记／SAF激活和复制包身份一致性计划。
+
+### B2b2a 待审核：锚点契约登记与整包复制一致性（2026-11-07）
+
+B2b1已提交0f0a8d91。先完成可独立验收的存储防退化与整包复制；B2b2b再接新建／普通保存激活及旧编辑器模型的精确身份绑定，不在本步对正在打开的legacy模型猜测补ID。
+
+1. 增加有界BundleHeader读取：同一容器取得BundleIdentity和可选AnchorMetadata，拒绝重复元数据条目、错误版本／类型／UUID绑定。普通seekable URI可用中央目录，但必须正确限制STORED条目读取边界，不能读入下一ZIP条目；不支持的comment/Zip64/不可seek描述符退到私有临时快照，失败只清本次临时文件。不把metadata检查宣称为完整模型校验，实际打开继续由B2b1完整性对账。
+2. DocumentRegistry升级到schema2，新增按document UUID记录“曾声明锚点契约”的单调状态。移动／URI别名／回收站不清除，不依赖文件名或路径；无FK级联以免普通位置／文档登记清理误删恢复证据。表只代表契约被观察，不冒充内容版本／完整模型可读性。schema1→2保留原文档、位置、资源、租约和引用；未知未来版本拒绝。
+3. NotebookStorage.ensure在任何身份生成或PDF迁移之前检查契约：标记与文档UUID绑定错误拒绝；已知锚定UUID缺标记，或已知位置的身份也缺失，显式报恢复错误，不自动生成新页／对象ID。完全legacy继续现有打开路径，不强制为普通阅读升级，也不新增写权限要求。成功观察有效绑定标记就保存expected状态；普通原ID改名／移动保持。新增storage消息经StorageText/StorageMsg与三套资源／穷尽映射，不把新英文格式异常直接给用户。
+4. 整包文件复制只分配新的document UUID，并同步重绑定marker；page/item ID仍按新document UUID作用域独立，manifest、全部旧笔迹／PDF／其他未知负载字节不变，不加入旧文档引用。这个整文件复制不同于同文档内对象／页面deepCopy（后者生成新成员ID）。源marker必须有效且绑定其现有UUID；无身份却带marker或绑定矛盾不静默猜修复。明确的新副本可为完全legacy生成新文档UUID。复制候选保留原件、失败清副本，原件SHA不变。
+5. BundleMigration所有扫描都改为同一份预先hash校验的不可变源快照，避免identity取A而payload取B。已有marker的复制先校验两种ZIP读取视图一致与资源上限，更新identity/marker必须重封装，不留下旧local元数据。manifest和其他原负载逐条摘要不变。legacy的大二进制PDF不加新解压总量限制；只对锚定manifest应用既有512MiB边界，元数据始终4096字节。取消／来源改动／发布冲突保留原件，原有身份迁移幂等测试保留。
+6. 保存增加模式／身份防退化：普通publishNote和Editor公共保存分支（包括绕过publishNote的in-place路径）检查候选模式不能剥离已知锚点、源UUID/marker不能被未知替换。已被外部改变的原件仍走现有分叉保护；新创建空目标允许首次写入。成功持久写出后才记录expected，DB失败不假装完整保存成功。SAF仍用已有MigrationPublication先留原件／候选并读回校验，不能裸覆盖；pending恢复保留该契约。此检查只防身份／模式退化，不把它当作来源内容全摘要冲突保护。
+
+验收：文件与URI Header的DEFLATED/STORED、后随大条目、comment/Zip64或pipe回退、重复／损坏元数据；schema1升级保留数据与expected跨move/重启；完全legacy打开不升级，expected缺失不改文件，marker绑定错误拒绝；锚定note/canvas文件复制新doc UUID+marker匹配、manifest及非元数据原字节不变、原引用resolve仍到原件；普通保存和in-place不能剥离契约、首次空目标允许；SAF部分写入／中断／取消／来源变化／恢复与候选清理。主机Robolectric + Android共享契约源码编译，真实SAF／设备验收单列。B2b2b活模型绑定／历史／会话与C1创建引用仍另审、未完成，不用本步API悄悄发布旧模型里的随机身份。
+
+B2b2a 审核修订（全部接受，2026-11-07）：
+
+- 已登记位置A且expected(A)时，当前Header UUID变为B不能静默重登记；保留A证据，进入独立的“接受当前位置为另一文档”流程（保留B身份，不用“作为副本”伪代替）。需要再次验证当前UUID，别名按规范location_key处理。新复制／明确新建目标另走独立语义；异常空文件不是新建证据。
+- 所有整包改UUID入口统一，包括BundleMigration、BundlePdf.write/prepare、Editor.copyFileTo(newIdentity=true)、provider复制和fallback复制。同UUID便携PDF导出保留marker原字节；新UUID副本同步重绑。PDF包装也必须从同一已校验快照取header/PDF/payload；不能只修普通identity复制。
+- pending的publish/restore/keepCurrent清日志前，先校验original/candidate/current与registry的UUID/契约；旧候选剥marker不得自动发布，keepCurrent不能只ZIP摘要就删唯一完好备份。成功文件发布→DB登记→清pending，DB失败保留恢复证据供重试；原先MigrationPublication清理时序需扩展callback或等价状态。
+- 所有实际写入前检查，特别in-place。契约拒绝是明确错误，不能被getOrDefault(false)吞成“不支持拼接”再全量覆盖。OutputStream已被外层截断后再检查来不及：初次保存／导出入口必须在openOutputStream前校验上下文；新空目标例外需明确创建语义且无登记或pending。
+- Header快速路径严格区分absent与unsupported/error。压缩切片限制、实际尺寸和CRC验证，元数据最大解压4096字节（压缩读取也需合理上限）；STORED不能读到相邻条目。fallback从原件起点取快照，不在解析失败后伪装“缺身份”生成UUID。
+
+为控制每次可验证改动，实施分为B2b2a1与B2b2a2：a1先实现有界Header和所有原始整包writer的不可变快照／marker重绑，纯格式层可独立验收，不启用新用户文件。a2再实现schema2单调登记、显式位置替换、保存／pending／恢复防退化和新目标预检查，所有上述安全要求保留。B2b2b再处理活模型原始来源证据、撤销／会话以及真正引用激活。此分拆不取消任何需求。
+
+B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64KiB压缩元数据预算，核对实际长度与CRC；Channel不改变／关闭调用方描述符，unsupported返回单独结果，错误不当absence。Header保留原marker字节供同UUID导出；绑定变化才生成新marker。引入内部拥有的BundleSnapshot：File输入先摘要→拷贝fsync→核对摘要，之后只从同一snapshot取header和全部负载；InputStream导出直接生成一次私有快照，避免Editor已有临时包再复制大型PDF。public File包装入口自行take snapshot，内部重用证明型snapshot入口。
+
+原始writer重用同一metadata重绑组件，BundleMigration和BundlePdf候选/导出均覆盖；已锚定输入先校验双ZIP视图，legacy同样拒绝孤立/重复local语义但不套用锚点manifest大小上限。PDF参数仍必须是受管不可变资源（生产调用沿用resolve+hold），不为了导出又复制一遍共享PDF。compactPdf后续a2调用也需先从snapshot核对与预读identity一致，从这份snapshot提取/登记PDF并构建候选，再比对原URI摘要发布；这一调用链不在a1单独宣称已接入。
+
+### 用户暂停（2026-11-07）
+
+用户准备重构渲染架构，本目标已暂停，不自动继续实施。已保存B2b2a1的Header/Snapshot局部源码与12项定向验证，writer接入未开始，最新helper未全量验证。恢复时先根据新的渲染／模型／输入／宿主接口重新检查既有B1及后续计划，不直接沿用旧渲染接法。完整交接见docs/movinkpad/mind-map-rendering-handoff-2026-11-07.md；所有未完成需求保留。

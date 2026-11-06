@@ -1,13 +1,10 @@
-# 自主推进恢复点
+# 自主推进恢复点：已暂停
 
-目标：按docs/movinkpad/graph-network-2026-11-06.md全部阶段持续实现直至完整验收。整体complete=false，goal active，无已确认blocker。
-授权：实现、验证、文档和本地提交；不打包、安装、推送、合并、发布。
-当前阶段：B1a/b源码与主机验证完成，实际Compose／IME／设备pending；B2a和B2b1源码／主机／独立复核完成，B2总体in_progress。
-B2b1成果：Page/七类CanvasItem的ReferenceIdentity一次性线程安全容器；显式模型开关，snapshot冻结与独立deepCopy；Doc/Canvas codec可选ID+marker，pending直接带ID、raw→实际成员完整对账、未知/缺资源/缺ID/版本异常拒绝部分可写模型；本read临时文件失败清理，不删借入/受管PDF；精确版本及PDF完整性/引用式夹带PDF歧义保护。readInkCopy私有sourceID映射先对账后独立doc/member身份，不reset、不复制点数组；legacy恢复仍legacy，Editor唯一入口已更新并本地化错误。
-尚未激活：普通文档打开/登记/SAF的anchor升级、新文档创建开启模式、raw包复制marker重绑定与可信expectedAnchored记录，均为下一B2b2；B2c碎片/后继未做。不得因模型源码存在就宣称引用闭环可用。
-证据：tmp/anchor-codec-final.log全量2808 tests，0 failures/errors/skipped，compileDebugAndroidTestKotlin成功；diff检查通过。新ReferenceCodecAndroidTest已加入PenTestRunner，真实PNG/平台身份仅编译未运行。详细源码边界在docs/movinkpad/reference-identity-model-2026-11-07.md。
-独立审核：review_input_plan计划/实现多轮只读复核，PDF缺失/Double近1/再次快照/引用式夹带PDF等必修均有RED重现并修复；最终针对复核无剩余确定性必修，见tasks/review.md。
-作业：无已知Gradle作业，最后93454成功，不要重复启动旧作业。
-提交：B1b c5d0d4ac、B2a c93f8129已提交；B2b1随本恢复点同次本地提交，以git log读取最终号。不推送合并。
-下一步：先制定并独立审核B2b2安全存储激活/新建/复制/expectedAnchored状态/损坏与失败恢复计划，再实施；然后B2c对象确定后继，再C1来源入口/预览、C2往返/反向引用/恢复、D文件网络；A2无中心/边缘连线/端点/多选等继续保留。
-未执行：真实仪器/模拟器/设备、真实SAF、GPU/延迟、无障碍/软键盘、完整引用链验收。整个目标未完成，不能标complete/blocked。
+目标：思维导图与文件关系网络，整体complete=false。用户于2026-11-07明确要求先停下保留进度，准备重构渲染架构；goal status=paused。不要自动续跑或继续实现。
+工作树：/Users/kita/.codex/worktrees/mind-map/xnotes；分支codex/mind-map，保留供后续接续，不归档／删除。
+授权：本次只保存现有改动、证据、交接和本地提交；不打包、安装、推送、合并或发布。
+已完成提交：c5d0d4ac（B1b原位文本）、c93f8129（B2a保真升级）、0f0a8d91（B2b1身份模型/codec/PDF恢复）。0f0a8d91全量2808 tests，0失败/错误/跳过，Android仪器源码编译；实际仪器/设备未运行。
+当前局部保存：B2b2a1新增BundleHeader/BundleSnapshot和测试，12项定向通过(tmp/bundle-header-boundaries.log，Header8/Snapshot4)，独立helper复核完成；最新helper未跑全量/Android，未接入writer。整包改UUID、BundlePdf/复制/登记/SAF/pending安全要求已审核但未实现。此WIP与交接同次本地提交，恢复时用git log读取保存点号。
+运行工作：无已知Gradle作业；64985已成功结束。review_input_plan已完成只读复核并停止。不要重复启动旧作业。
+恢复入口：docs/movinkpad/mind-map-rendering-handoff-2026-11-07.md，完整计划/待办/审核保留。先核对新渲染架构及最新规则/分支状态，重审原位/放大、文本覆盖层、输入仲裁、对象生命周期/snapshot、工具/撤销和双窗格假设，再修订计划。用户明确恢复后才继续；不主动合并重构分支。
+未完成：B2b2、B2c、C1/C2/D及A2残余全部保留；完整引用闭环未完成。真实SAF/设备/GPU/延迟/软键盘/完整UI验收未执行。
