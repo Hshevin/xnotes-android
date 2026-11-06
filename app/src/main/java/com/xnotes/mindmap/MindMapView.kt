@@ -19,6 +19,7 @@ class MindMapView(context: Context) : View(context) {
     var dark = false
         set(value) { field = value; invalidate() }
     var onSelect: (String?) -> Unit = {}
+    var onSources: (String) -> Unit = {}
     var onEdit: (String) -> Unit = {}
     var onChange: (MindMapDocument) -> Unit = {}
     private val painter = MapPainter()
@@ -52,7 +53,7 @@ class MindMapView(context: Context) : View(context) {
         }
         override fun onLongPress(e: MotionEvent) { if (!dragging) hit(e.x, e.y)?.let { onEdit(it.id) }; cancelGesture() }
     })
-    init { isFocusable = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
+    init { painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
     override fun performClick(): Boolean { super.performClick(); return true }
     private val scale get() = resources.displayMetrics.density * zoom
     private fun point(x: Float, y: Float) = Pt(((x - panX) / scale).toDouble(), ((y - panY) / scale).toDouble())
@@ -149,8 +150,12 @@ class MindMapView(context: Context) : View(context) {
         pointer = e.getPointerId(index)
         downX = e.getX(index); downY = e.getY(index); lastX = downX; lastY = downY
         dragging = false; cancelled = false; before = document; preview = null; dropTarget = null
-        dragged = hit(downX, downY)?.id
+        val node=hit(downX,downY)
+        dragged = node?.id
         onSelect(dragged)
+        if(node != null && node.sources.isNotEmpty() && point(downX,downY).y >= node.y+node.height-28) {
+            cancelled=true;dragged=null;onSources(node.id)
+        }
     }
     override fun onDetachedFromWindow() { cancelGesture(); super.onDetachedFromWindow() }
 }

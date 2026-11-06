@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="graph_free">自由放置节点</string>
+    <string name="graph_detach">脱离分支</string>
+    <string name="graph_relations">普通关系线</string>
+    <string name="graph_connect">从选中节点连线</string>
+    <string name="graph_related">关联（无方向）</string>
+    <string name="graph_referenced">起点引用自终点</string>
+    <string name="graph_belongs">起点属于终点</string>
+    <string name="graph_depends">起点依赖于终点</string>
+    <string name="graph_reverse">交换端点</string>
+    <string name="graph_description">关系说明</string>
+    <string name="graph_invalid">关系重复或无效，已有数据保持不变。</string>
+    <string name="graph_sources">来源</string>
+    <string name="graph_sources_count">来源 %1$d</string>
+    <string name="graph_sources_notice">本阶段仅支持整文件引用，尚未接入预览、位置范围和来源跳转。引用不会把源文件包含在备份中。</string>
+    <string name="graph_note">来源备注</string>
+    <string name="graph_primary">主要预览来源</string>
+    <string name="graph_up">上移</string>
+    <string name="graph_down">下移</string>
+    <string name="graph_add_source">添加文件来源</string>
+    <string name="graph_source_error">来源无法读取、缺少身份或身份重复。请先在文件浏览器打开或修复原文件，本操作未修改来源内容。</string>
+    <string name="graph_reference">引用节点</string>
+    <string name="graph_both">左右展开</string>
+    <string name="graph_right">向右展开</string>
+    <string name="graph_vertical">向下展开</string>
+    <string name="graph_preview">布局预览</string>
+    <string name="graph_preview_notice">画布正在显示候选布局。确认后整次整理一步撤销，取消则保持原位置。自由节点保持原位。</string>
+    <string name="graph_status_unverified">预览尚未校验</string>
+    <string name="graph_status_current">预览有效</string>
+    <string name="graph_status_stale">预览需要刷新</string>
+    <string name="graph_status_unavailable">来源暂不可访问</string>
+    <string name="graph_status_partial">部分引用对象已删除</string>
+    <string name="graph_status_deleted">引用内容已删除</string>
+    <string name="graph_status_empty">区域当前为空</string>
+    <string name="graph_status_trashed">来源在回收站</string>
+</resources>

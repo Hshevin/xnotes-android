@@ -37,6 +37,7 @@ class MapSession : ViewModel() {
     var closing by mutableStateOf(false); private set
     var dirty by mutableStateOf(false); private set
     var limitError by mutableStateOf(false); private set
+    var sourceFailed by mutableStateOf(false); private set
     var copySaved by mutableStateOf(false); private set
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
@@ -110,6 +111,15 @@ class MapSession : ViewModel() {
                 onClosed?.invoke()
             }?.onFailure {
                 saveFailed = true; conflict = it is MapConflict; closing = false
+            }
+        }
+    }
+    fun addSource(uri: Uri, nodeId: String) {
+        viewModelScope.launch {
+            val source=withContext(Dispatchers.IO) { runCatching { MapSourceAccess.inspect(app,uri) } }
+            sourceFailed=source.isFailure
+            source.getOrNull()?.let { s ->
+                if(document?.nodes?.any { it.id==nodeId } == true) operate { it.update(nodeId) { n -> n.copy(sources=n.sources+s) } }
             }
         }
     }

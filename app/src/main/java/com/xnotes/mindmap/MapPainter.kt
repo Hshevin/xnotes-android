@@ -21,6 +21,7 @@ class MapPainter {
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 18f }
     private val strokes = IdentityHashMap<MapInk, Stroke>()
     private val layouts = hashMapOf<Pair<String, Int>, StaticLayout>()
+    var sourceLabel: (Int) -> String = { it.toString() }
     fun clear() { strokes.clear(); layouts.clear() }
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null) {
         val bg = if (dark) Color.BLACK else Color.WHITE
@@ -42,6 +43,25 @@ class MapPainter {
             }
             canvas.drawPath(path, paint)
         }
+        for (edge in doc.relations) {
+            val a=byId[edge.from] ?: continue
+            val b=byId[edge.to] ?: continue
+            val start=a.bounds.center; val end=b.bounds.center
+            paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
+            paint.pathEffect=android.graphics.DashPathEffect(floatArrayOf(8f,6f),0f)
+            canvas.drawLine(start.x.toFloat(),start.y.toFloat(),end.x.toFloat(),end.y.toFloat(),paint)
+            paint.pathEffect=null
+            // Arrow near the destination border; endpoints always bind to current node geometry.
+            val dx=end.x-start.x;val dy=end.y-start.y
+            val factor=minOf(if(dx==0.0) Double.POSITIVE_INFINITY else b.width/2/kotlin.math.abs(dx),if(dy==0.0) Double.POSITIVE_INFINITY else b.height/2/kotlin.math.abs(dy))
+            if(edge.directed && factor.isFinite()) {
+                val x=end.x-dx*factor;val y=end.y-dy*factor
+                val angle=kotlin.math.atan2(dy,dx)
+                for(sign in listOf(-1,1)) canvas.drawLine(x.toFloat(),y.toFloat(),(x-14*kotlin.math.cos(angle+sign*.45)).toFloat(),(y-14*kotlin.math.sin(angle+sign*.45)).toFloat(),paint)
+            }
+            text.color=fg
+            canvas.drawText(edge.label.take(80),((start.x+end.x)/2).toFloat(),((start.y+end.y)/2-8).toFloat(),text)
+        }
         for (n in visible) {
             val active = n.id == selected
             val color = if (active) bg else fg
@@ -51,13 +71,17 @@ class MapPainter {
             paint.style = Paint.Style.STROKE; paint.color = fg; paint.strokeWidth = if (n.id == dropTarget) 6f else 2f
             canvas.drawRect(0f, 0f, n.width.toFloat(), n.height.toFloat(), paint)
             canvas.save(); canvas.clipRect(2f, 2f, n.width.toFloat() - 2, n.height.toFloat() - 2)
-            if (n.kind == NodeKind.TEXT || n.ink.isEmpty()) {
-                val layout = layout(n.text, n.width)
+            if (n.kind != NodeKind.INK || n.ink.isEmpty()) {
+                val layout = layout(n.text.ifEmpty { if(n.kind==NodeKind.REFERENCE) n.sources.firstOrNull()?.fileName.orEmpty() else "" }, n.width)
                 text.color = color
                 canvas.translate(16f, maxOf(12f, (n.height.toFloat() - layout.height) / 2))
                 layout.draw(canvas)
             } else drawInk(canvas, n.ink, color)
             canvas.restore()
+            if(n.sources.isNotEmpty()) {
+                text.color=color
+                canvas.drawText(sourceLabel(n.sources.size),16f,n.height.toFloat()-10f,text)
+            }
             if (n.collapsed && n.id in parents) {
                 paint.style = Paint.Style.FILL; paint.color = fg
                 canvas.drawCircle(n.width.toFloat(), n.height.toFloat(), 12f, paint)

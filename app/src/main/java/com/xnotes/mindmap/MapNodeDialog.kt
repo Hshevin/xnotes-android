@@ -17,7 +17,7 @@ import com.xnotes.ui.theme.*
 @Composable
 internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (MapNode) -> Boolean) {
     var text by remember(node.id) { mutableStateOf(node.text) }
-    val history = remember(node.id) { MapHistory(MindMapDocument(nodes = listOf(node.copy(parent = null)))) }
+    val history = remember(node.id) { MapHistory(MindMapDocument(nodes = listOf(node.copy(parent = null, free = false)))) }
     var current by remember(node.id) { mutableStateOf(node) }
     var mode by remember { mutableStateOf(InkMode.PEN) }
     var width by remember { mutableStateOf(3f) }
@@ -25,10 +25,10 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
     var redo by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf(false) }
     val painter = remember { MapPainter() }
-    fun refresh() { current = history.document.root.copy(parent = node.parent); undo = history.canUndo; redo = history.canRedo }
+    fun refresh() { current = history.document.root.copy(parent = node.parent, free = node.free); undo = history.canUndo; redo = history.canRedo }
     fun commit(next: MapNode) {
         try {
-            history.commit(history.document.update(node.id) { next.copy(parent = null) })
+            history.commit(history.document.update(node.id) { next.copy(parent = null, free = false) })
             problem = false; refresh()
         } catch (_: IllegalArgumentException) { problem = true }
     }
@@ -79,7 +79,7 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                     MapButton(R.string.cancel, onClick = onDismiss)
                     MapButton(R.string.map_done) {
                         val next = current.copy(text = text, height = if (current.kind == NodeKind.TEXT) painter.measuredHeight(text, current.width) else current.height)
-                        try { MindMapDocument(nodes = listOf(next.copy(parent = null))).validate(); if (!onConfirm(next)) problem = true }
+                        try { MindMapDocument(nodes = listOf(next.copy(parent = null, free = false))).validate(); if (!onConfirm(next)) problem = true }
                         catch (_: IllegalArgumentException) { problem = true }
                     }
                 }

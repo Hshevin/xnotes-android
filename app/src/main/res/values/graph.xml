@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="graph_free">Free node</string>
+    <string name="graph_detach">Detach branch</string>
+    <string name="graph_relations">Relations</string>
+    <string name="graph_connect">Connect selected node</string>
+    <string name="graph_related">Related (undirected)</string>
+    <string name="graph_referenced">Source → target: referenced from</string>
+    <string name="graph_belongs">Source → target: belongs to</string>
+    <string name="graph_depends">Source → target: depends on</string>
+    <string name="graph_reverse">Swap endpoints</string>
+    <string name="graph_description">Relationship description</string>
+    <string name="graph_invalid">Duplicate or invalid relationship; existing data kept.</string>
+    <string name="graph_sources">Sources</string>
+    <string name="graph_sources_count">Sources %1$d</string>
+    <string name="graph_sources_notice">File references only in this stage. Previews, location ranges and source navigation are not connected yet. References do not include source files in backups.</string>
+    <string name="graph_note">Source note</string>
+    <string name="graph_primary">Main preview source</string>
+    <string name="graph_up">Up</string>
+    <string name="graph_down">Down</string>
+    <string name="graph_add_source">Add file source</string>
+    <string name="graph_source_error">Source unavailable, missing identity or duplicate identity. Open or repair the original in the file browser first. No source content was changed.</string>
+    <string name="graph_reference">Reference node</string>
+    <string name="graph_both">Left and right</string>
+    <string name="graph_right">To the right</string>
+    <string name="graph_vertical">Downwards</string>
+    <string name="graph_preview">Layout preview</string>
+    <string name="graph_preview_notice">The canvas shows the proposed layout. Confirm to apply as one undo step; cancel to keep original positions. Free nodes stay in place.</string>
+    <string name="graph_status_unverified">Preview not verified</string>
+    <string name="graph_status_current">Preview current</string>
+    <string name="graph_status_stale">Preview needs refresh</string>
+    <string name="graph_status_unavailable">Source unavailable</string>
+    <string name="graph_status_partial">Some referenced objects deleted</string>
+    <string name="graph_status_deleted">Referenced content deleted</string>
+    <string name="graph_status_empty">Region currently empty</string>
+    <string name="graph_status_trashed">Source in trash</string>
+</resources>

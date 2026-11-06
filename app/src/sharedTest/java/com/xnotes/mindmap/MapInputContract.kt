@@ -142,4 +142,20 @@ abstract class MapInputContract {
         assertEquals(70.0, v.ink.single().points.first().y, .001)
     }
 
+    @Test fun graphSourceNullsAndRelationsRoundTripOnBothPlatforms() = ui { _ ->
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="root",parent=null,sources=listOf(MapSource(documentId="00000000-0000-0000-0000-000000000001"))),MapNode(id="free",parent=null,free=true)),relations=listOf(MapRelation(from="root",to="free")))
+        assertEquals(doc,MapCodec.decode(MapCodec.encode(doc)))
+    }
+
+    @Test fun tappingSourceFooterOpensItsListWithoutMovingTheNode() = ui { context ->
+        val v=MindMapView(context)
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="root",parent=null,sources=listOf(MapSource(documentId="00000000-0000-0000-0000-000000000001")))))
+        v.document=doc;v.layout(0,0,500,400);v.fit()
+        var opened:String?=null;var commits=0
+        v.onSources={opened=it};v.onChange={commits++}
+        send(v,MotionEvent.ACTION_DOWN,250f,240f)
+        send(v,MotionEvent.ACTION_UP,250f,240f)
+        assertEquals("root",opened);assertEquals(0,commits);assertEquals(doc,v.document)
+    }
+
 }
