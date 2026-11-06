@@ -133,6 +133,20 @@ make pictures, and the app reads your reply directly.
         data object Painting : Stage
     }
 
+    /**
+     * The routes a template is made through: the text model [text] (provider ID and model) picked on the
+     * form, else [config]'s default; the image model's provider [imageProvider] and [imageModel] picked
+     * there, each else the image model set in AI settings. A provider that no longer exists is never
+     * swapped for another; an image route without a model name is none.
+     */
+    fun routes(config: AiConfig, text: Pair<String, String>?, imageProvider: String?, imageModel: String?): Pair<AiConfig, AiConfig?> {
+        val writer = text?.takeIf { (p, m) -> config.providerOf(p) != null && m.isNotBlank() }?.let { (p, m) -> config.route(p, m.trim()) } ?: config
+        val provider = imageProvider ?: config.imageProvider
+        val model = (imageModel ?: config.imageModel).trim()
+        val painter = if (config.providerOf(provider) != null && model.isNotEmpty()) config.route(provider, model) else null
+        return writer to painter
+    }
+
     /** A made template: plain [json], or [json] and the [picture] it names at [src] in its package. */
     class Generated(val json: String, val picture: AiImage? = null, val src: String = PICTURE_SRC)
 
