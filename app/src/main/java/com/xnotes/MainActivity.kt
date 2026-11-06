@@ -1608,8 +1608,9 @@ private val SwallowTouches = Modifier.pointerInput(Unit) {
  * leaves the backstage showing.
  *
  * The panes are placed by offset and size inside one Box rather than by a Row that becomes a Column,
- * so a pane keeps its composition node — and with it its canvas view, raster caches and GL context —
- * when the split opens, closes or the device turns.
+ * so direction changes need not replace the outer pane node. The toolbar's single/split branches
+ * can still replace the inner AndroidView host: retained editor views are detached and reattached,
+ * which restarts a GLSurfaceView's GL thread/context. This layout does not guarantee GL continuity.
  */
 private data class SplitTitleDrag(val source: Editor, val origin: Offset, val point: Offset, val returning: Boolean = false)
 
