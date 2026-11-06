@@ -1986,7 +1986,10 @@ private fun EditorPane(
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
                             AndroidView(
-                                factory = { detached(canvas.surfaces) },
+                                factory = {
+                                    detached(canvas.surfaces)
+                                    canvas.surfacesForAttach()
+                                },
                                 modifier = Modifier.fillMaxSize(),
                                 update = { canvas.view.publish() },
                             )

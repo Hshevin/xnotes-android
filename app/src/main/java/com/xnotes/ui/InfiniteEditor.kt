@@ -92,10 +92,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     val history = History()
 
-    val view = InfiniteCanvasView(appContext)
+    @Volatile
+    var view = InfiniteCanvasView(appContext)
+        private set
 
     /** The front buffer wet ink goes into, above [view] and transparent whenever no pen is down. */
-    val pad = com.xnotes.gl.GlWetPad(appContext)
+    var pad = com.xnotes.gl.GlWetPad(appContext)
+        private set
 
     /**
      * The two surfaces, in order. They are siblings rather than one view because the canvas needs a
@@ -108,6 +111,33 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
         addView(pad, android.widget.FrameLayout.LayoutParams(-1, -1))
         addView(toolOverlay, android.widget.FrameLayout.LayoutParams(-1, -1))
+    }
+
+    /** Replace native surfaces only at a real host reattachment, keeping the editor and view state. */
+    fun surfacesForAttach(): android.widget.FrameLayout {
+        check(!surfaces.isAttachedToWindow)
+        // The first factory call has no old ancestor clip. Replacing here would also leave a
+        // never-attached GLSurfaceView's thread waiting forever for a surface.
+        if (!view.detachedFromWindow) return surfaces
+        val oldView = view
+        val oldPad = pad
+        oldPad.onSurfaceLost = null
+        recoverSurfaceInk()
+        // settleHeld may have queued a completion on the retired View. It cannot acknowledge
+        // publication on the replacement, even if its main-thread Runnable arrives late.
+        surfaceAttachGeneration++
+        awaitingPublish = false
+        surfaces.removeView(oldView)
+        surfaces.removeView(oldPad)
+        view = oldView.replacementForAttach()
+        pad = com.xnotes.gl.GlWetPad(appContext).also {
+            it.frontBuffering = oldPad.frontBuffering
+            it.lightBlackInk = oldPad.lightBlackInk
+            it.onSurfaceLost = ::recoverSurfaceInk
+        }
+        surfaces.addView(view, 0, android.widget.FrameLayout.LayoutParams(-1, -1))
+        surfaces.addView(pad, 1, android.widget.FrameLayout.LayoutParams(-1, -1))
+        return surfaces
     }
 
     val viewport: CanvasViewport get() = view.viewport
@@ -307,7 +337,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.hover = { beforePenInput(it); proPenInput.motion(it); interaction.onHover(it) }
         view.afterLayout = { applyInitialView() }
         view.onContextReady = { renderFailure = view.failure }
-        pad.onSurfaceLost = { endFrontInk(); settleHeld() }
+        pad.onSurfaceLost = ::recoverSurfaceInk
         view.onFourFingerTap = { toggleDebug() }
         view.minimapVisible = minimapVisible
         view.scene = scene
@@ -315,7 +345,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // thread; the finished bitmap is uploaded at the start of the next frame, which the decode
         // asks for itself, since nothing else may be drawing.
         scene.decodeOn = { work -> decodeExecutor.execute { work.run(); view.requestRender() } }
-        scene.onOutOfMemory = { short -> view.post { outOfMemory = short } }
+        scene.onOutOfMemory = { short -> mainHandler.post { outOfMemory = short } }
         document.listener = modelListener
         // Whatever is added while this canvas records takes the recording's moment.
         history.onPush = { command -> AudioRecording.stamp(this, command.added()) }
@@ -388,7 +418,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             }
             // Claimed and filed on the main thread, so this cannot land after a removal that was
             // decided while it ran and put the item back on the canvas.
-            view.post {
+            mainHandler.post {
                 if (!vectorMeshGen.remove(item, token) || parts.isEmpty() || !document.layers.visible(item)) return@post
                 scene.lastTessellateMs = ms
                 scene.upsert(item, parts, bounds)
@@ -1422,6 +1452,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      */
     private var awaitingPublish = false
 
+    /** Completions belonging to a retired canvas cannot clear the replacement's pending ink. */
+    private var surfaceAttachGeneration = 0
+
     /** The tail as it was last meshed, which a stroke joining this one has to settle first. */
     private var wetTail: List<MeshPart> = emptyList()
 
@@ -1613,8 +1646,29 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // Every handover tracks its own publication, whichever path settled: what the caller does
         // next is not what says when these triangles reached the glass.
         awaitingPublish = true
-        view.publishThen { mainHandler.post { awaitingPublish = false } }
+        val surfaceGeneration = surfaceAttachGeneration
+        view.publishThen {
+            mainHandler.post {
+                if (surfaceGeneration == surfaceAttachGeneration) awaitingPublish = false
+            }
+        }
         return true
+    }
+
+    /** Return all pad-owned ink before retiring a surface, including an unfinished live stroke. */
+    private fun recoverSurfaceInk() {
+        endFrontInk()
+        settleHeld()
+        val stroke = wetOwner ?: return
+        // The old pad may have contained the settled runs. Rebuild the whole wet stroke in the
+        // ordinary scene, without cancelling input or attempting to take the new pad mid-stroke.
+        wetMeshed = 0
+        wetArc = 0.0
+        runPoints = WET_RUN_POINTS
+        frontDecided = true
+        scene.setWetParts(emptyList(), Rect(0.0, 0.0, 0.0, 0.0))
+        publishWetStroke(stroke)
+        view.publish()
     }
 
     private fun startFrontInk(): Boolean {
@@ -1895,7 +1949,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Place recordings a crash left behind for this canvas, once it has a size to place them in the middle of. */
     fun recoverRecordings(fromSession: Boolean, tries: Int = 0) {
-        view.postDelayed({
+        mainHandler.postDelayed({
             if (view.width <= 0 || view.height <= 0) {
                 if (tries < 40) recoverRecordings(fromSession, tries + 1)
                 return@postDelayed

@@ -164,4 +164,7 @@ dependencies {
 // Robolectric resolves its Android runtime separately from Gradle dependencies.
 tasks.withType<Test>().configureEach {
     systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+    // Robolectric's SharedMemory close path accesses JDK FileDescriptor internals on JDK 21.
+    // Limit this module opening to the host-test JVM; it does not affect Android builds.
+    jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
 }

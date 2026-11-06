@@ -69,7 +69,7 @@ interface GlScene {
  * was holding, and rebuilds. Anything GPU-resident records the generation it was born under, and
  * a stale generation means rebuild rather than bind a dangling name.
  */
-class GlRenderer : GLSurfaceView.Renderer {
+class GlRenderer(initialContextGen: Int = 0) : GLSurfaceView.Renderer {
 
     /** Snapshot the next frame will draw; replaced wholesale by the main thread. */
     @Volatile
@@ -94,9 +94,9 @@ class GlRenderer : GLSurfaceView.Renderer {
         afterFrame.add(action)
     }
 
-    /** Bumped on every new EGL context. Everything GPU-resident is stamped with it. */
+    /** Bumped on every new EGL context; a replacement View seeds this from the retired renderer. */
     @Volatile
-    var contextGen: Int = 0
+    var contextGen: Int = initialContextGen
         private set
 
     /** Set when a shader would not build, so the host can show a message rather than a black view. */
