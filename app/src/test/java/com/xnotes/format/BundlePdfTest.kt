@@ -72,6 +72,19 @@ class BundlePdfTest {
         val imported = portable.inputStream().use { standalone.read(it, dir) }
         assertArrayEquals(pdf.readBytes(), imported.pdfFile!!.readBytes())
     }
+    @Test fun missingReferencedPdfStillYieldsInkWithoutPdfDirectory() = scenario { dir, _, pdf, identity ->
+        val codec = DocumentCodec(FakeImageCodec(), FakeTextMeasurer())
+        val doc = Document().apply { pdfFile = pdf; this.identity = identity }
+        doc.pages.add(com.xnotes.core.model.Page.blank(com.xnotes.core.model.PageSize.A4, com.xnotes.core.model.Orientation.PORTRAIT, doc.dpi).apply { pdfPage = 0 })
+        val local = File(dir, "local.xnote")
+        local.outputStream().use { codec.write(doc, it, embedPdf = false) }
+        codec.resolvePdf = { error("original is gone") }
+        assertThrows(IllegalStateException::class.java) { local.inputStream().use { codec.read(it, dir) } }
+        val inkOnly = local.inputStream().use { codec.read(it, null) }
+        assertNull(inkOnly.pdfFile)
+        assertEquals(doc.pages.size, inkOnly.pages.size)
+        assertEquals(0, inkOnly.pages[0].pdfPage)
+    }
     @Test fun referenceCopyPreservesResourceButChangesDocumentId() = scenario { dir, source, pdf, identity ->
         BundleMigration.publish(BundlePdf.prepare(source, dir, identity, pdf), source)
         val copy = BundleMigration.prepare(source, dir, copy = true)

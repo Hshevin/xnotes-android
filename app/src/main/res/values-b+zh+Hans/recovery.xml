@@ -25,5 +25,7 @@
     <string name="missing_search_failed">查找失败，请检查文件夹授权</string>
     <string name="missing_wrong_file">所选文件不是原文档，请选择具有相同文档 ID 的文件</string>
     <string name="missing_relocate_failed">无法重新定位文档</string>
-    <string name="recovery_relink_pdf">选择原始 PDF 重新关联</string>
+    <string name="recovery_relink_pdf">选择原始 PDF 或旧笔记文件重新关联</string>
+    <string name="recovery_open_ink_only">只打开笔迹（不含 PDF，另存为副本）</string>
+    <string name="recovery_ink_only_name">%1$s（仅笔迹）</string>
 </resources>

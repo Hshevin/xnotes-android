@@ -883,13 +883,47 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val id = storageMissingPdf ?: return false
         try {
             withContext(Dispatchers.IO) {
-                val input = requireNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(pdfUri))) { appContext.getString(R.string.recovery_failed) }
-                input.use { com.xnotes.storage.PdfResources.get(appContext).restore(it, id, queryDisplayName(android.net.Uri.parse(pdfUri)) ?: "PDF") }
+                val picked = android.net.Uri.parse(pdfUri)
+                val name = queryDisplayName(picked) ?: "PDF"
+                val resources = com.xnotes.storage.PdfResources.get(appContext)
+                val open = { requireNotNull(appContext.contentResolver.openInputStream(picked)) { appContext.getString(R.string.recovery_failed) } }
+                val zip = open().use { val head = ByteArray(2); it.read(head) == 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() }
+                // An older or exported .xnote still embeds the original; take it from there, verified the same way.
+                if (zip) open().use { raw ->
+                    val entries = java.util.zip.ZipInputStream(raw)
+                    while (true) {
+                        val entry = entries.nextEntry ?: error(com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_MISMATCH))
+                        if (entry.name == com.xnotes.format.BundlePdf.ENTRY) { resources.restore(entries, id, name); break }
+                    }
+                } else open().use { resources.restore(it, id, name) }
             }
         } catch (e: Exception) { storageProblemText = e.message ?: appContext.getString(R.string.recovery_failed); return false }
         storageMissingPdf = null
         storageProblemUri = null
         openAsync(uri, storageProblemName)
+        return true
+    }
+    /**
+     * Open the ink of a note whose original PDF is gone, over blank pages, as an unsaved copy with a
+     * new identity. The note file itself is never written, so a later re-link still finds it intact.
+     */
+    suspend fun openInkWithoutPdf(): Boolean {
+        val uri = storageProblemUri ?: return false
+        val doc = try {
+            withContext(Dispatchers.IO) {
+                // No PDF directory: the codec leaves a referenced original unresolved instead of failing.
+                requireNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))) { appContext.getString(R.string.err_open_that_note) }
+                    .use { codec.read(it, null, imageDir) }
+            }
+        } catch (e: Exception) { storageProblemText = e.message ?: appContext.getString(R.string.err_open_that_note); return false }
+        doc.identity = com.xnotes.format.BundleIdentity()
+        doc.path = null
+        doc.displayName = appContext.getString(R.string.recovery_ink_only_name, com.xnotes.core.util.DocumentKind.stripSuffix(storageProblemName ?: queryDisplayName(android.net.Uri.parse(uri)) ?: ""))
+        doc.dirty = true // nothing is on disk yet; the close guard offers to save it
+        storageMissingPdf = null
+        storageProblemUri = null
+        if (!saveCanvasBeforeReplacement()) return false
+        replaceDocument(doc)
         return true
     }
     suspend fun recoverStorageProblem(restore: Boolean = false, copy: Boolean = false): Boolean {
@@ -2338,7 +2372,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // that write out rather than pulling the source out from under it.
         val pending = noteWriteJob
         openPdfTemp?.let { old ->
-            if (old != keep && sibling?.openPdfTemp != old) autosaveScope.launch { pending?.join(); old.delete() }
+            // A shared private original is the note's only copy of its PDF, never a temp: leave it to reference collection.
+            if (old != keep && sibling?.openPdfTemp != old && !com.xnotes.storage.PdfResources.get(appContext).isOwned(old)) autosaveScope.launch { pending?.join(); old.delete() }
         }
         openPdfTemp = keep
     }
