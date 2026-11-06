@@ -81,7 +81,7 @@ private fun AiSpinner(color: Color = LocalPalette.current.textDim.toComposeColor
 
 /** A full-width notice on a grey fill: storage failures, source errors, the deleted-chat undo. */
 @Composable
-private fun AiBanner(text: String, action: String? = null, onAction: () -> Unit = {}) {
+internal fun AiBanner(text: String, action: String? = null, onAction: () -> Unit = {}) {
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.medium
     Row(
@@ -191,12 +191,12 @@ private fun AiSegmented(options: List<Pair<String, String>>, selected: String, m
 
 /** A setting that is on or off: label and note on the left, the switch on the right; the whole row toggles. */
 @Composable
-internal fun AiSwitchRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun AiSwitchRow(title: String, detail: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
-        .toggleable(checked, role = Role.Switch, onValueChange = onChange).padding(horizontal = Space.s4),
+        .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange).padding(horizontal = Space.s4),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
         SettingsLabel(title, detail, Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -255,7 +255,7 @@ private val PROVIDER_PRESETS = listOf(
  * anywhere except an explicit model-list fetch, and nothing is stored until Save.
  */
 @Composable
-private fun AiSettings(close: () -> Unit) {
+internal fun AiSettings(close: () -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     val store = remember { AiConfigStore(context) }

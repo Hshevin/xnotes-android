@@ -194,6 +194,7 @@
     <string name="ai_tpl_gen_fixing">Fixing the template (try %1$d of %2$d)… %3$d characters</string>
     <string name="ai_tpl_gen_checking">Checking the template…</string>
     <string name="ai_tpl_gen_no_provider">Add a model provider in AI settings to generate templates here.</string>
+    <string name="ai_tpl_gen_open_settings">Open AI settings</string>
     <string name="ai_tpl_gen_cover_note">Without an image model, covers made here are drawn with shapes and text only. Set one up in AI settings to paint pictures, or use another AI assistant below.</string>
     <string name="ai_tpl_gen_examples">Examples (tap to fill in)</string>
     <string name="ai_tpl_external">Use another AI assistant</string>

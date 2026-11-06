@@ -50,7 +50,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Stable
+import com.xnotes.ai.AiSessions
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.OutlinedTextField
@@ -84,17 +89,50 @@ private val PICTURE_GEN_PROMPTS = listOf(R.string.ai_prompt_cover_paint_pines, R
  * template (with prompts to try), and import the `.xtemplate` file it made. [coversOnly] keeps to
  * covers, for the cover picker of an open note; [wide] sets the example prompts in two columns.
  */
+/**
+ * What the Generate here form holds and the request it runs. Kept by the new-note screen rather than
+ * the tab, so looking at the pages or covers while a template (and its picture) is made neither
+ * stops it nor loses the request; only closing the screen does ([rememberTemplateGen]).
+ */
+@Stable
+internal class TemplateGenState(val scope: CoroutineScope, coversOnly: Boolean) {
+    var kind by mutableStateOf(if (coversOnly) TemplateKind.COVER else TemplateKind.PAGE)
+    var request by mutableStateOf("")
+    /** Whether a cover gets a painted picture, when an image model is set up. */
+    var paint by mutableStateOf(true)
+    var stage by mutableStateOf<AiTemplateGen.Stage?>(null)
+    var error by mutableStateOf<String?>(null)
+    var job by mutableStateOf<Job?>(null)
+    var client by mutableStateOf<AiConnection?>(null)
+    val running: Boolean get() = job != null
+    fun stop() { client?.cancel(); job?.cancel() }
+}
+
+/** The new-note screen's [TemplateGenState]; a request still running when the screen closes is stopped. */
 @Composable
-internal fun AiTemplateTab(coversOnly: Boolean, wide: Boolean, onImport: () -> Unit, onGenerated: (AiTemplateGen.Generated) -> Unit, modifier: Modifier = Modifier) {
+internal fun rememberTemplateGen(coversOnly: Boolean): TemplateGenState {
+    val scope = rememberCoroutineScope()
+    val state = remember { TemplateGenState(scope, coversOnly) }
+    DisposableEffect(state) { onDispose { state.stop() } }
+    return state
+}
+
+@Composable
+internal fun AiTemplateTab(
+    coversOnly: Boolean, wide: Boolean, onImport: () -> Unit, onGenerated: (AiTemplateGen.Generated) -> Unit,
+    gen: TemplateGenState, modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
-    val config by produceState<AiConfig?>(null) {
+    // Read again whenever AI settings are saved, so setting a provider up from here shows at once.
+    val revision = AiSessions.get(context).configRevision
+    val config by produceState<AiConfig?>(null, revision) {
         value = withContext(Dispatchers.IO) { runCatching { AiConfigStore(context).load() }.getOrNull() ?: AiConfig() }
     }
     val ready = config?.let { it.url.isNotBlank() && it.key.isNotBlank() && it.model.isNotBlank() } == true
     // Without a provider the other assistant is the way to go, so it starts open.
     var external by remember(ready) { mutableStateOf(!ready) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s32)) {
-        GenerateHere(config, ready, coversOnly, wide, onGenerated)
+        GenerateHere(config, ready, coversOnly, wide, onGenerated, gen)
         Column(verticalArrangement = Arrangement.spacedBy(Space.s16)) {
             val palette = LocalPalette.current
             Row(
@@ -116,44 +154,41 @@ internal fun AiTemplateTab(coversOnly: Boolean, wide: Boolean, onImport: () -> U
 
 /** Generating through the configured provider: what to make, the request, and progress or the error. */
 @Composable
-private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean, wide: Boolean, onGenerated: (AiTemplateGen.Generated) -> Unit) {
+private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean, wide: Boolean, onGenerated: (AiTemplateGen.Generated) -> Unit, gen: TemplateGenState) {
     val palette = LocalPalette.current
     val context = LocalContext.current
     val text = palette.text.toComposeColor()
     val dim = palette.textDim.toComposeColor()
-    val scope = rememberCoroutineScope()
-    var kind by remember { mutableStateOf(if (coversOnly) TemplateKind.COVER else TemplateKind.PAGE) }
-    var request by remember { mutableStateOf("") }
-    var stage by remember { mutableStateOf<AiTemplateGen.Stage?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var job by remember { mutableStateOf<Job?>(null) }
-    var client by remember { mutableStateOf<AiConnection?>(null) }
+    var settings by remember { mutableStateOf(false) }
+    if (settings) AiSettings { settings = false }
     // The image model's route, when one is set up; a cover then gets a painted picture unless switched off.
     val painter = remember(config) { config?.imageRoute() }
-    var paint by remember(painter) { mutableStateOf(painter != null) }
-    // Leaving the tab or the screen stops a request in flight; nothing is added afterwards.
-    DisposableEffect(Unit) { onDispose { client?.cancel(); job?.cancel() } }
-    val running = job != null
+    val running = gen.running
+    var kind by gen::kind
+    var request by gen::request
+    var paint by gen::paint
 
-    fun stop() { client?.cancel(); job?.cancel() }
     fun generate() {
         val c = config ?: return
+        val made = kind
+        val ask = request
+        val picture = painter.takeIf { made == TemplateKind.COVER && paint }
         val connection = AiConnection()
-        client = connection; error = null
-        job = scope.launch {
+        gen.client = connection; gen.error = null
+        gen.job = gen.scope.launch {
             try {
                 val guide = withContext(Dispatchers.IO) { context.assets.open(GUIDE).use { String(it.readBytes(), Charsets.UTF_8) } }
                 val template = withContext(Dispatchers.IO) {
-                    AiTemplateGen.generate(c, connection, guide, request, kind, painter.takeIf { kind == TemplateKind.COVER && paint }) { s -> withContext(Dispatchers.Main) { stage = s } }
+                    AiTemplateGen.generate(c, connection, guide, ask, made, picture) { s -> withContext(Dispatchers.Main) { gen.stage = s } }
                 }
                 onGenerated(template)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // A stop the person asked for is not an error.
-                if (job?.isCancelled != true) error = if (e is IllegalArgumentException || e is IllegalStateException) e.message else AiText.t(AiMsg.NETWORK_ERROR)
+                if (gen.job?.isCancelled != true) gen.error = if (e is IllegalArgumentException || e is IllegalStateException) e.message else AiText.t(AiMsg.NETWORK_ERROR)
             } finally {
-                stage = null; job = null; client = null
+                gen.stage = null; gen.job = null; gen.client = null
             }
         }
     }
@@ -164,7 +199,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
     ) {
         Text(stringResource(R.string.ai_tpl_gen_title), color = text, fontSize = TextSize.title, fontWeight = FontWeight.Medium)
         if (config != null && !ready) {
-            Text(stringResource(R.string.ai_tpl_gen_no_provider), color = dim, fontSize = TextSize.body, lineHeight = 19.sp)
+            AiBanner(stringResource(R.string.ai_tpl_gen_no_provider), stringResource(R.string.ai_tpl_gen_open_settings)) { settings = true }
             return@Column
         }
         val c = config ?: return@Column
@@ -190,7 +225,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
             }
         }
         OutlinedTextField(
-            request, { request = it.take(AiTemplateGen.MAX_REQUEST) }, Modifier.fillMaxWidth(),
+            request, { request = it.take(AiTemplateGen.MAX_REQUEST); gen.error = null }, Modifier.fillMaxWidth(),
             enabled = !running, minLines = 3, maxLines = 8,
             placeholder = { Text(stringResource(R.string.ai_tpl_gen_hint), fontSize = TextSize.body) },
         )
@@ -198,11 +233,15 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
         if (kind == TemplateKind.COVER) {
             if (painter != null) {
                 val host = painter.providerOf(painter.provider)?.label ?: runCatching { java.net.URI(painter.url).host }.getOrNull().orEmpty()
-                AiSwitchRow(stringResource(R.string.ai_tpl_gen_picture, painter.model), stringResource(R.string.ai_tpl_gen_picture_note, host, painter.model), paint) {
-                    if (!running) paint = it
+                AiSwitchRow(stringResource(R.string.ai_tpl_gen_picture, painter.model), stringResource(R.string.ai_tpl_gen_picture_note, host, painter.model), paint, enabled = !running) {
+                    paint = it
                 }
             }
             if (!picture) Text(stringResource(R.string.ai_tpl_gen_cover_note), color = dim, fontSize = TextSize.label, lineHeight = 17.sp)
+            // No image model yet: the place to set one up is a tap away.
+            if (painter == null) TextButton(onClick = { settings = true }, enabled = !running, contentPadding = PaddingValues(horizontal = Space.s4)) {
+                Text(stringResource(R.string.ai_tpl_gen_open_settings), fontSize = TextSize.body)
+            }
         }
         Text(stringResource(R.string.ai_tpl_gen_examples), color = dim, fontSize = TextSize.label)
         val examples = when {
@@ -229,7 +268,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
             FilledTonalButton(
-                onClick = { if (running) stop() else generate() },
+                onClick = { if (running) gen.stop() else generate() },
                 enabled = running || request.isNotBlank(),
                 modifier = Modifier.heightIn(min = MinTouchTarget),
                 colors = ButtonDefaults.filledTonalButtonColors(
@@ -237,7 +276,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
                     contentColor = palette.selectionForeground.toComposeColor(),
                 ),
             ) { Text(stringResource(if (running) R.string.ai_stop else R.string.ai_tpl_gen_button), fontWeight = FontWeight.Medium) }
-            val status = when (val s = stage) {
+            val status = when (val s = gen.stage) {
                 is AiTemplateGen.Stage.Writing -> if (s.attempt == 1) stringResource(R.string.ai_tpl_gen_writing, s.chars)
                     else stringResource(R.string.ai_tpl_gen_fixing, s.attempt, AiTemplateGen.MAX_ATTEMPTS, s.chars)
                 is AiTemplateGen.Stage.Checking -> stringResource(R.string.ai_tpl_gen_checking)
@@ -246,7 +285,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
             }
             if (status != null) Text(status, color = dim, fontSize = TextSize.label, modifier = Modifier.weight(1f))
         }
-        error?.let { Text(it, color = text, fontSize = TextSize.body, lineHeight = 19.sp) }
+        gen.error?.let { AiBanner(it) }
     }
 }
 

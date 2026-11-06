@@ -190,6 +190,7 @@
     <string name="ai_tpl_gen_fixing">正在修正模板（第 %1$d / %2$d 次）…已收到 %3$d 字</string>
     <string name="ai_tpl_gen_checking">正在检查模板…</string>
     <string name="ai_tpl_gen_no_provider">在 AI 设置中添加模型供应商后，即可在应用内生成模板。</string>
+    <string name="ai_tpl_gen_open_settings">打开 AI 设置</string>
     <string name="ai_tpl_gen_cover_note">未设置图像模型时，应用内生成的封面只用图形和文字绘制；在 AI 设置中设置图像模型即可生成图片，也可使用下方的其他 AI 助手。</string>
     <string name="ai_tpl_gen_examples">示例（点按填入）</string>
     <string name="ai_tpl_external">使用其他 AI 助手</string>
