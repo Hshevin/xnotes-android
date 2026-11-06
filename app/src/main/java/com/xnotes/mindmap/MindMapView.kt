@@ -13,7 +13,14 @@ import kotlin.math.hypot
 /** One native surface for the graph; no nested AndroidViews or wet-ink Surface reattachment. */
 class MindMapView(context: Context) : View(context) {
     var document = MindMapDocument()
-        set(value) { if (field != value) { field = value; painter.clear(); invalidate() } }
+        set(value) { if (field != value) {
+            val old=field.nodes.firstOrNull {it.id==inkOwner}
+            val new=value.nodes.firstOrNull {it.id==inkOwner}
+            if(inkInput.active && (old==null || new==null || old.bounds!=new.bounds || old.kind!=new.kind || old.ink!=new.ink)) inkInput.cancel()
+            field=value
+            if(new!=null) inkInput.ink=new.ink
+            painter.retainInk(value.nodes.flatMap {it.ink});invalidate()
+        } }
     var selected: String? = null
         set(value) { field = value; invalidate() }
     var dark = false
@@ -22,6 +29,12 @@ class MindMapView(context: Context) : View(context) {
     var onSources: (String) -> Unit = {}
     var onEdit: (String) -> Unit = {}
     var onChange: (MindMapDocument) -> Unit = {}
+    val inkInput=InkGestureController()
+    var onInk:((String,List<MapInk>,List<MapInk>)->Boolean)?=null
+    var onInkContact:(Boolean)->Unit={}
+    var onInkLimit:()->Unit={}
+    private var inkOwner:String?=null
+    private var suppressRemainingTouch=false
     private val painter = MapPainter()
     private var zoom = 1f
     private var panX = 0f
@@ -51,15 +64,24 @@ class MindMapView(context: Context) : View(context) {
             cancelled = true; preview = null
             return true
         }
-        override fun onLongPress(e: MotionEvent) { if (!dragging) hit(e.x, e.y)?.let { onEdit(it.id) }; cancelGesture() }
+        override fun onLongPress(e: MotionEvent) { if (!dragging) hit(e.x, e.y)?.takeUnless {it.kind==NodeKind.INK}?.let { onEdit(it.id) }; cancelGesture() }
     })
-    init { painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
+    init {
+        inkInput.onCommit={old,next ->
+            val id=inkOwner
+            val current=document.nodes.firstOrNull {it.id==id}
+            if(id==null || current==null || current.ink!=old) false
+            else onInk?.invoke(id,old,next) ?: run {onChange(document.update(id) {it.copy(ink=next)});true}
+        }
+        inkInput.onContact={onInkContact(it);parent?.requestDisallowInterceptTouchEvent(it)}
+        inkInput.onLimit={onInkLimit()}
+        painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
     override fun performClick(): Boolean { super.performClick(); return true }
     private val scale get() = resources.displayMetrics.density * zoom
     private fun point(x: Float, y: Float) = Pt(((x - panX) / scale).toDouble(), ((y - panY) / scale).toDouble())
     private fun hit(x: Float, y: Float, doc: MindMapDocument = document) = doc.visible().lastOrNull { it.bounds.contains(point(x, y)) }
     fun fit() {
-        if (width == 0 || height == 0) return
+        if (width == 0 || height == 0 || inkInput.active) return
         val b = MapPainter.bounds(document)
         val s = minOf(width / b.w, height / b.h).toFloat().coerceAtMost(resources.displayMetrics.density * 1.5f)
         zoom = (s / resources.displayMetrics.density).coerceIn(.05f, 4f)
@@ -68,6 +90,7 @@ class MindMapView(context: Context) : View(context) {
         initialized = true; invalidate()
     }
     fun centerOn(id: String) {
+        if(inkInput.active) return
         document.nodes.firstOrNull { it.id == id }?.bounds?.let {
             panX = width / 2f - it.centerX.toFloat() * scale
             panY = height / 2f - it.centerY.toFloat() * scale
@@ -75,6 +98,7 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(!isEnabled || inkInput.active) return false
         val visible = document.visible()
         val at = visible.indexOfFirst { it.id == selected }.coerceAtLeast(0)
         when (keyCode) {
@@ -87,22 +111,68 @@ class MindMapView(context: Context) : View(context) {
         }
         return super.onKeyDown(keyCode, event)
     }
+    data class Viewport(val zoom:Float,val panX:Float,val panY:Float)
+    fun viewport()=Viewport(zoom,panX,panY)
+    fun screenPoint(p:Pt)=Pt((panX+p.x*scale).toDouble(),(panY+p.y*scale).toDouble())
     fun zoomBy(factor: Float) = scaleAt(factor, width / 2f, height / 2f)
     private fun scaleAt(factor: Float, x: Float, y: Float) {
+        if(inkInput.active) return
         val p = point(x, y)
         zoom = (zoom * factor).coerceIn(.05f, 4f)
         panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
         invalidate()
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { if (!initialized) fit() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { inkInput.cancel(); if (!initialized) fit() }
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         canvas.save(); canvas.translate(panX, panY); canvas.scale(scale, scale)
-        painter.draw(canvas, preview ?: document, dark, selected, dropTarget)
+        val owner=document.nodes.firstOrNull {it.id==inkOwner}
+        painter.retainInk(document.nodes.flatMap {it.ink})
+        val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else preview ?: document
+        painter.draw(canvas, shown, dark, selected, dropTarget)
+        if(owner!=null && selected==owner.id) {
+            canvas.save();canvas.translate(owner.x.toFloat(),owner.y.toFloat())
+            canvas.clipRect(0f,0f,owner.width.toFloat(),owner.height.toFloat())
+            inkInput.drawSelection(canvas,if(dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE,scale)
+            canvas.restore()
+        }
         canvas.restore()
     }
     private fun cancelGesture() { cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
+    private fun inkBody(n:MapNode,p:Pt):Boolean = n.kind==NodeKind.INK &&
+        p.x in n.x+8..n.x+n.width-8 && p.y in n.y+8..n.y+n.height-(if(n.sources.isEmpty()) 8 else 28)
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if(!isEnabled) return true
+        if(inkInput.active) {
+            inkInput.handle(e,{x,y->point(x,y)},{false});invalidate();return true
+        }
+        if(e.actionMasked==MotionEvent.ACTION_DOWN) suppressRemainingTouch=false
+        if(e.actionMasked in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_POINTER_DOWN)) {
+            val i=e.actionIndex
+            if(e.getToolType(i) in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER,MotionEvent.TOOL_TYPE_MOUSE)) {
+                val n=hit(e.getX(i),e.getY(i))
+                if(n!=null && inkBody(n,point(e.getX(i),e.getY(i)))) {
+                    // Only detector-local cancellation; the original MotionEvent is never changed.
+                    val cancel=MotionEvent.obtain(e)
+                    try {cancel.action=MotionEvent.ACTION_CANCEL;gestures.onTouchEvent(cancel);scaleDetector.onTouchEvent(cancel)} finally {cancel.recycle()}
+                    cancelGesture();pointer=-1;suppressRemainingTouch=true
+                    if(inkOwner!=n.id) inkInput.clearSelection()
+                    inkOwner=n.id
+                    selected=n.id;onSelect(n.id);inkInput.ink=n.ink
+                    val capturedScale=scale;val px=panX;val py=panY;val nx=n.x;val ny=n.y
+                    inkInput.handle(e,{x,y->Pt(((x-px)/capturedScale).toDouble()-nx,((y-py)/capturedScale).toDouble()-ny)},{true})
+                    invalidate();return true
+                }
+            }
+        }
+        if(suppressRemainingTouch) return true
+        if(e.actionMasked==MotionEvent.ACTION_DOWN && e.getToolType(0)==MotionEvent.TOOL_TYPE_FINGER) {
+            val n=hit(e.x,e.y)
+            if(n!=null && inkBody(n,point(e.x,e.y))) {
+                scaleDetector.onTouchEvent(e);gestures.onTouchEvent(e)
+                cancelGesture();pointer=-1;selected=n.id;onSelect(n.id);return true
+            }
+        }
         val stylus = (0 until e.pointerCount).any { e.getToolType(it) == MotionEvent.TOOL_TYPE_STYLUS || e.getToolType(it) == MotionEvent.TOOL_TYPE_ERASER }
         // A second pointer while the pen owns a drag is a palm, never a pinch or a new drag.
         if (pointer >= 0 && e.findPointerIndex(pointer) >= 0 && e.getToolType(e.findPointerIndex(pointer)) in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER)) {
@@ -157,5 +227,9 @@ class MindMapView(context: Context) : View(context) {
             cancelled=true;dragged=null;onSources(node.id)
         }
     }
-    override fun onDetachedFromWindow() { cancelGesture(); super.onDetachedFromWindow() }
+    override fun onWindowFocusChanged(hasWindowFocus:Boolean) {
+        if(!hasWindowFocus) {inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
+        super.onWindowFocusChanged(hasWindowFocus)
+    }
+    override fun onDetachedFromWindow() { inkInput.cancel(); cancelGesture(); super.onDetachedFromWindow() }
 }

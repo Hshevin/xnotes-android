@@ -22,6 +22,13 @@ class MapPainter {
     private val strokes = IdentityHashMap<MapInk, Stroke>()
     private val layouts = hashMapOf<Pair<String, Int>, StaticLayout>()
     var sourceLabel: (Int) -> String = { it.toString() }
+    internal var geometryBuildCount=0; private set
+    /** Retain shared immutable strokes; evict only last frame's temporary ink previews. */
+    fun retainInk(stable:List<MapInk>) {
+        val keep=IdentityHashMap<MapInk,Boolean>()
+        stable.forEach {keep[it]=true}
+        strokes.keys.removeAll { !keep.containsKey(it) }
+    }
     fun clear() { strokes.clear(); layouts.clear() }
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null) {
         val bg = if (dark) Color.BLACK else Color.WHITE
@@ -103,7 +110,7 @@ class MapPainter {
     fun drawInk(canvas: Canvas, ink: List<MapInk>, color: Int = Color.BLACK) {
         val renderer = AndroidRenderer(canvas)
         for (s in ink) {
-            val stroke = strokes.getOrPut(s) { s.toStroke() }
+            val stroke = strokes.getOrPut(s) { geometryBuildCount++; s.toStroke() }
             stroke.config = stroke.config.copy(rgba = Rgba(Color.red(color), Color.green(color), Color.blue(color), 255))
             stroke.paint(renderer)
         }

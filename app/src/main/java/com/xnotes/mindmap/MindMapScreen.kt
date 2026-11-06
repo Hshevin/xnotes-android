@@ -22,12 +22,15 @@ import com.xnotes.settings.LiveSettings
 import com.xnotes.settings.SettingsRepository
 import com.xnotes.ui.theme.*
 
+internal val LocalInkBusy=staticCompositionLocalOf {false}
+
 @Composable
 fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
     val context = LocalContext.current
     val appearance = remember { LiveSettings.get(SettingsRepository(context)).prefs.uiAppearance }
     val dark = when (appearance) { "light" -> false; "dark", "oled" -> true; else -> isSystemInDarkTheme() }
     XnotesTheme(monochromePalette(dark)) {
+      CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
         var sourcesFor by remember { mutableStateOf<String?>(null) }
         var pendingSourceNode by remember { mutableStateOf<String?>(null) }
         var graphTools by remember { mutableStateOf(false) }
@@ -40,6 +43,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         }
         var view by remember { mutableStateOf<MindMapView?>(null) }
         var editing by remember { mutableStateOf<String?>(null) }
+        var propertiesFor by remember {mutableStateOf<String?>(null)}
         var deleting by remember { mutableStateOf(false) }
         var choosing by remember { mutableStateOf(false) }
         var reparenting by remember { mutableStateOf(false) }
@@ -48,9 +52,15 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             if (uri != null) session.saveCopy(uri) {}
         }
         val close = { if (session.document == null) onClose() else session.save(onClose) }
-        BackHandler { if (!session.closing) close() }
+        BackHandler {
+            if(editing!=null) editing=null
+            else if(session.inkContact) view?.inkInput?.cancel()
+            else if (!session.closing) close()
+        }
         val palette = LocalPalette.current
+        val enlarged=editing?.let { id -> session.document?.nodes?.any {it.id==id && it.kind==NodeKind.INK} } == true
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
+          CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged)) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8), verticalAlignment = Alignment.CenterVertically) {
                     MapButton(R.string.map_close, enabled = !session.closing) { close() }
@@ -86,13 +96,20 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.map_add_text, enabled = node != null && !session.closing) { add(NodeKind.TEXT, false) }
                         MapButton(R.string.map_add_ink, enabled = node != null && !session.closing) { add(NodeKind.INK, false) }
                         MapButton(R.string.map_add_sibling, enabled = node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
-                        MapButton(R.string.map_edit, enabled = node != null && !session.closing) { editing = node?.id }
+                        MapButton(if(node?.kind==NodeKind.INK) R.string.ink_enlarge else R.string.map_edit, enabled = node != null && !session.closing) { editing = node?.id }
                         MapButton(if (node?.collapsed == true) R.string.map_expand else R.string.map_collapse, enabled = node != null && doc.children(node.id).isNotEmpty()) {
                             node?.let { session.operate { d -> MapLayout.arrange(d.update(it.id) { n -> n.copy(collapsed = !n.collapsed) }) } }
                         }
                         MapButton(R.string.delete, enabled = node != null && node.id != doc.root.id && !session.closing) { deleting = true }
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
+                    }
+                    run {
+                        MapInkTools(session)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                            MapButton(R.string.ink_fit_content,enabled=node?.kind==NodeKind.INK){node?.let {n->session.operate {it.update(n.id) {it.fitInkContent()}}}}
+                            MapButton(R.string.ink_properties,enabled=node?.kind==NodeKind.INK){propertiesFor=node?.id}
+                        }
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         MapButton(R.string.graph_free) { addFree=true }
@@ -108,23 +125,16 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         Text(node?.text.orEmpty().take(80), fontSize = TextSize.body, modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
                     }
                 }
-                val problem = when {
-                    session.sourceFailed -> R.string.graph_source_error
-                    session.conflict -> R.string.map_conflict
-                    session.saveFailed -> R.string.map_recovery_notice
-                    session.recovered -> R.string.map_recovered
-                    session.limitError -> R.string.map_limit
-                    session.copySaved -> R.string.map_copy_saved
-                    else -> null
-                }
-                problem?.let {
-                    Text(stringResource(it), fontSize = TextSize.body, modifier = Modifier.fillMaxWidth().padding(Space.s12))
-                    if (session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) { onClose() }
-                }
+                val problem = session.problemText()
                 HorizontalDivider()
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
                         doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize(), update = { v ->
+                            v.isEnabled=!enlarged && !session.closing
+                            v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
+                            v.onInkContact={session.inkContact=it};v.onInkLimit=session::reportInkLimit;v.onInk={id,old,next ->
+                                session.commitInk(id,old,next).also { accepted -> if(accepted) session.document?.let {v.document=it} }
+                            }
                             v.document = proposed ?: doc; v.dark = dark; v.selected = session.selected
                             v.contentDescription = context.getString(R.string.map_canvas_description)
                             v.onSelect = { session.selected = it }; v.onSources={sourcesFor=it}; v.onEdit = { if (!session.closing) { if(doc.node(it).kind==NodeKind.REFERENCE) sourcesFor=it else editing = it } }; v.onChange = { session.commit(it) }
@@ -132,13 +142,21 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
                     }
+                    problem?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
+                        Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
+                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
+                    } }
+                    editing?.let { id -> doc?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.INK}?.let { n ->
+                        MapInkEditor(session,n) {editing=null}
+                    } }
                 }
                 Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
+          }
         }
-        editing?.let { id -> session.document?.nodes?.firstOrNull { it.id == id }?.let { node ->
-            MapNodeDialog(node, onDismiss = { editing = null }, onConfirm = { edited ->
-                session.operate { d -> val updated=d.update(id) { edited }; if(edited.free) updated else MapLayout.arrange(updated) }.also { if (it) editing = null }
+        (propertiesFor ?: editing)?.let { id -> session.document?.nodes?.firstOrNull { it.id == id && (propertiesFor!=null || it.kind!=NodeKind.INK) }?.let { node ->
+            MapNodeDialog(node, onDismiss = { editing = null;propertiesFor=null }, onConfirm = { edited ->
+                session.editNodeProperties(id,edited).also { if (it) {editing = null;propertiesFor=null} }
             })
         } }
         if(addFree) AlertDialog(onDismissRequest={addFree=false},title={Text(stringResource(R.string.graph_free),fontSize=TextSize.heading)},text={Column {
@@ -190,6 +208,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text(stringResource(R.string.map_help), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.map_help_text), fontSize = TextSize.body) },
             confirmButton = { MapButton(R.string.map_done) { help = false } })
+      }
     }
 }
 
@@ -197,7 +216,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
 internal fun MapButton(label: Int, enabled: Boolean = true, selected: Boolean = false, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val fg = palette.text.toComposeColor(); val bg = palette.panel.toComposeColor()
-    TextButton(onClick, enabled = enabled, modifier = Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget)
+    TextButton(onClick, enabled = enabled && !LocalInkBusy.current, modifier = Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget)
         .then(if (selected) Modifier.background(fg) else Modifier),
         colors = ButtonDefaults.textButtonColors(contentColor = if (selected) bg else fg)) {
         Text(stringResource(label), fontSize = TextSize.body)

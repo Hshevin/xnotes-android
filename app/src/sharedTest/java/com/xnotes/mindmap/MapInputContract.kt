@@ -158,4 +158,96 @@ abstract class MapInputContract {
         assertEquals("root",opened);assertEquals(0,commits);assertEquals(doc,v.document)
     }
 
+    @Test fun inlineInkLocksNodeAndKeepsSamplesOutsideItsFrame() = ui { context ->
+        val n=MapNode(id="ink",parent=null,kind=NodeKind.INK)
+        val v=MindMapView(context).apply {document=MindMapDocument(nodes=listOf(n));layout(0,0,500,400);fit()}
+        var commits=0
+        v.onChange={commits++;v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,250f,200f)
+        send(v,MotionEvent.ACTION_MOVE,1200f,900f)
+        send(v,MotionEvent.ACTION_UP,1400f,1000f)
+        assertEquals(1,commits)
+        val result=v.document.root
+        assertEquals(n.x,result.x,.001);assertEquals(n.y,result.y,.001)
+        assertEquals(n.width,result.width,.001);assertEquals(n.height,result.height,.001)
+        assertTrue(result.ink.single().points.last().x>n.width)
+        assertTrue(result.ink.single().points.last().y>n.height)
+        assertEquals(v.document,MapCodec.decode(MapCodec.encode(v.document)))
+    }
+    @Test fun fingerOnInkBodyDoesNotMoveNode() = ui { context ->
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="ink",parent=null,kind=NodeKind.INK)))
+        val v=MindMapView(context).apply {document=doc;layout(0,0,500,400);fit()}
+        var commits=0;v.onChange={commits++}
+        send(v,MotionEvent.ACTION_DOWN,250f,200f,type=MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_MOVE,300f,230f,type=MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,300f,230f,type=MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(0,commits);assertEquals(doc,v.document)
+    }
+    @Test fun nodeInkLostFocusDiscardsOnlyLiveStroke() = ui { context ->
+        val v=pad(context)
+        send(v,MotionEvent.ACTION_DOWN);send(v,MotionEvent.ACTION_UP,40f,40f)
+        val old=v.ink
+        send(v,MotionEvent.ACTION_DOWN);send(v,MotionEvent.ACTION_MOVE,60f,60f)
+        v.onWindowFocusChanged(false)
+        send(v,MotionEvent.ACTION_UP,80f,80f)
+        assertEquals(old,v.ink)
+    }
+    @Test fun enlargedInkAlsoPreservesOutOfFrameSamples() = ui { context ->
+        val v=pad(context)
+        send(v,MotionEvent.ACTION_DOWN)
+        send(v,MotionEvent.ACTION_MOVE,-40f,250f)
+        send(v,MotionEvent.ACTION_UP,-70f,300f)
+        assertEquals(-70.0,v.ink.single().points.last().x,.001)
+        assertEquals(300.0,v.ink.single().points.last().y,.001)
+    }
+
+    @Test fun fullInkBudgetStillAllowsErasingAndCancellingErase() = ui { context ->
+        val v=pad(context)
+        val ink=listOf(MapInk(List(MindMapDocument.MAX_POINTS) {InkPoint(30.0,30.0)}))
+        v.ink=ink;v.mode=InkMode.ERASER
+        send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_CANCEL)
+        assertEquals(ink,v.ink)
+        send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_UP,30f,30f)
+        assertTrue(v.ink.isEmpty())
+    }
+    @Test fun successfulLassoMoveKeepsSelectionForAnotherMoveAndCancel() = ui { context ->
+        val v=pad(context)
+        v.ink=listOf(MapInk(listOf(InkPoint(20.0,20.0),InkPoint(40.0,40.0))))
+        v.mode=InkMode.LASSO
+        send(v,MotionEvent.ACTION_DOWN,10f,10f);send(v,MotionEvent.ACTION_MOVE,60f,10f)
+        send(v,MotionEvent.ACTION_MOVE,60f,60f);send(v,MotionEvent.ACTION_MOVE,10f,60f);send(v,MotionEvent.ACTION_UP,10f,10f)
+        send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_UP,80f,80f)
+        val once=v.ink
+        send(v,MotionEvent.ACTION_DOWN,80f,80f);send(v,MotionEvent.ACTION_MOVE,100f,100f);send(v,MotionEvent.ACTION_CANCEL)
+        assertEquals(once,v.ink)
+        send(v,MotionEvent.ACTION_DOWN,80f,80f);send(v,MotionEvent.ACTION_UP,100f,100f)
+        assertEquals(90.0,v.ink.single().points.first().x,.001)
+    }
+
+    @Test fun quickInlineStrokesDoNotTriggerDoubleTapEditingAndFreezeViewport() = ui { context ->
+        val v=MindMapView(context).apply {document=MindMapDocument(nodes=listOf(MapNode(id="ink",parent=null,kind=NodeKind.INK)));layout(0,0,500,400);fit()}
+        var edits=0;v.onEdit={edits++};v.onChange={v.document=it}
+        val camera=v.viewport()
+        send(v,MotionEvent.ACTION_DOWN,250f,200f)
+        v.zoomBy(2f);v.fit();v.centerOn("ink")
+        send(v,MotionEvent.ACTION_UP,260f,210f)
+        send(v,MotionEvent.ACTION_DOWN,250f,200f);send(v,MotionEvent.ACTION_UP,270f,220f)
+        assertEquals(2,v.document.root.ink.size);assertEquals(0,edits);assertEquals(camera,v.viewport())
+    }
+
+    @Test fun deferredHostInkUpdatePreservesMovedSelection() = ui { context ->
+        val v=pad(context)
+        v.ink=listOf(MapInk(listOf(InkPoint(20.0,20.0),InkPoint(40.0,40.0))))
+        var pending:List<MapInk>?=null
+        v.onCommitChecked={_,next->pending=next;true}
+        v.mode=InkMode.LASSO
+        send(v,MotionEvent.ACTION_DOWN,10f,10f);send(v,MotionEvent.ACTION_MOVE,60f,10f)
+        send(v,MotionEvent.ACTION_MOVE,60f,60f);send(v,MotionEvent.ACTION_MOVE,10f,60f);send(v,MotionEvent.ACTION_UP,10f,10f)
+        send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_UP,80f,80f)
+        v.ink=requireNotNull(pending)
+        send(v,MotionEvent.ACTION_DOWN,80f,80f);send(v,MotionEvent.ACTION_UP,100f,100f)
+        v.ink=requireNotNull(pending)
+        assertEquals(90.0,v.ink.single().points.first().x,.001)
+    }
+
 }

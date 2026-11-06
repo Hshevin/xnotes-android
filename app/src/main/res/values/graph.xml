@@ -34,4 +34,9 @@
     <string name="graph_status_deleted">Referenced content deleted</string>
     <string name="graph_status_empty">Region currently empty</string>
     <string name="graph_status_trashed">Source in trash</string>
+    <string name="ink_fit_content">Fit paper to ink</string>
+    <string name="ink_enlarge">Enlarge edit</string>
+    <string name="ink_properties">Node properties</string>
+    <string name="ink_live_hint">Each stroke is saved to the graph. Back restores the graph view; undo works across both views.</string>
+    <string name="ink_properties_hint">Edit the name or paper size here. Write directly in the node or use Enlarge edit. Resizing paper does not scale ink.</string>
 </resources>

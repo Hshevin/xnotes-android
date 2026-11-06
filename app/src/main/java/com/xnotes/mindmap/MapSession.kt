@@ -13,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -26,6 +27,21 @@ private object MapSaves {
 }
 
 class MapSession : ViewModel() {
+    var inkContact by mutableStateOf(false)
+    var inkMode by mutableStateOf(InkMode.PEN)
+    var inkWidth by mutableStateOf(3.0)
+    fun commitInk(id:String, expected:List<MapInk>, next:List<MapInk>):Boolean {
+        val doc=document ?: return false
+        val n=doc.nodes.firstOrNull {it.id==id} ?: return false
+        if(n.kind!=NodeKind.INK || n.ink!=expected) return false
+        return commit(doc.update(id) {it.copy(ink=next)})
+    }
+    fun editNodeProperties(id:String, proposed:MapNode):Boolean = operate { doc ->
+        if(doc.nodes.none {it.id==id}) return@operate doc
+        val updated=doc.update(id) { current -> current.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height) }
+        if(updated==doc || proposed.kind==NodeKind.INK || doc.node(id).free) updated else MapLayout.arrange(updated)
+    }
+    fun reportInkLimit() {limitError=true}
     var document by mutableStateOf<MindMapDocument?>(null); private set
     var selected by mutableStateOf<String?>(null)
     var loading by mutableStateOf(true); private set
@@ -78,12 +94,14 @@ class MapSession : ViewModel() {
         return true
     }
     fun operate(block: (MindMapDocument) -> MindMapDocument): Boolean {
+        if(inkContact) return false
         val doc = document ?: return false
         return try { commit(block(doc)) } catch (_: IllegalArgumentException) { limitError = true; false }
     }
-    fun undo() { if (!closing) history?.let { it.undo(); if (it.document != document) publish(it) } }
-    fun redo() { if (!closing) history?.let { it.redo(); if (it.document != document) publish(it) } }
+    fun undo() { if (!closing && !inkContact) history?.let { it.undo(); if (it.document != document) publish(it) } }
+    fun redo() { if (!closing && !inkContact) history?.let { it.redo(); if (it.document != document) publish(it) } }
     private fun publish(h: MapHistory) {
+        limitError=false
         document = h.document
         if (h.document.nodes.none { it.id == selected }) selected = h.document.root.id
         canUndo = h.canUndo; canRedo = h.canRedo; dirty = true; copySaved = false; revision++
@@ -119,6 +137,7 @@ class MapSession : ViewModel() {
             val source=withContext(Dispatchers.IO) { runCatching { MapSourceAccess.inspect(app,uri) } }
             sourceFailed=source.isFailure
             source.getOrNull()?.let { s ->
+                androidx.compose.runtime.snapshotFlow {inkContact}.first { !it }
                 if(document?.nodes?.any { it.id==nodeId } == true) operate { it.update(nodeId) { n -> n.copy(sources=n.sources+s) } }
             }
         }

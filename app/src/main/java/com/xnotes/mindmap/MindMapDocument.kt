@@ -112,7 +112,7 @@ data class MindMapDocument(
                 pointCount += stroke.points.size
                 require(pointCount <= MAX_POINTS)
                 for (p in stroke.points) {
-                    require(p.x.isFinite() && p.x in 0.0..n.width && p.y.isFinite() && p.y in 0.0..n.height)
+                    require(p.x.isFinite() && abs(p.x) <= MAX_COORD && p.y.isFinite() && abs(p.y) <= MAX_COORD)
                     require(p.pressure.isFinite() && p.pressure in 0.0..2.0 && p.time.isFinite() && p.time >= 0.0)
                 }
             }

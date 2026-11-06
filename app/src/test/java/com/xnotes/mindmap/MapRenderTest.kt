@@ -69,4 +69,22 @@ class MapRenderTest {
         assertEquals(600, thumb.width)
         thumb.recycle()
     }
+    @Test fun livePreviewEvictionKeepsCompletedInkGeometryCached() {
+        val p=MapPainter()
+        val completed=MapInk(List(20000) {i->InkPoint((i%300).toDouble(),(i/300).toDouble(),.7,i.toDouble())})
+        val image=Bitmap.createBitmap(400,300,Bitmap.Config.ARGB_8888)
+        val canvas=Canvas(image)
+        p.drawInk(canvas,listOf(completed))
+        assertEquals(1,p.geometryBuildCount)
+        repeat(8) {frame->
+            p.retainInk(listOf(completed))
+            val live=MapInk(listOf(InkPoint(20.0,20.0),InkPoint(30.0+frame,35.0)))
+            p.drawInk(canvas,listOf(completed,live))
+        }
+        assertEquals(9,p.geometryBuildCount)
+        p.retainInk(listOf(completed));p.drawInk(canvas,listOf(completed))
+        assertEquals(9,p.geometryBuildCount)
+        image.recycle()
+    }
+
 }

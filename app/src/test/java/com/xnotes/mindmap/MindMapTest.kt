@@ -76,4 +76,19 @@ class MindMapTest {
             listOf(MapNode(id = "r", parent = null, x = Double.NaN))
         )) assertThrows(IllegalArgumentException::class.java) { MindMapDocument(nodes = nodes).validate() }
     }
+    @Test fun fitPaperPreservesWorldInkAndUndoRestoresOriginalCoordinates() {
+        val original=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,kind=NodeKind.INK,x=200.0,y=100.0,
+            ink=listOf(MapInk(listOf(InkPoint(-30.0,-20.0,.75,123.0),InkPoint(400.0,270.0,.9,150.0)))))))
+        original.validate()
+        val fitted=original.update("r") {it.fitInkContent()}
+        val old=original.root;val next=fitted.root
+        assertTrue(next.width>old.width);assertTrue(next.height>old.height)
+        for((a,b) in old.ink.single().points.zip(next.ink.single().points)) {
+            assertEquals(a.x+old.x,b.x+next.x,.001);assertEquals(a.y+old.y,b.y+next.y,.001)
+            assertEquals(a.pressure,b.pressure,0.0);assertEquals(a.time,b.time,0.0)
+        }
+        val h=MapHistory(original);h.commit(fitted);h.undo();assertEquals(original,h.document)
+        h.redo();assertEquals(fitted,MapCodec.decode(MapCodec.encode(h.document)))
+    }
+
 }

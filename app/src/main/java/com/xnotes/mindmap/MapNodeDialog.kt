@@ -49,30 +49,12 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = TextSize.bodyLarge),
                     modifier = if (current.kind == NodeKind.TEXT) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().heightIn(min = MinTouchTarget),
                     maxLines = if (current.kind == NodeKind.TEXT) Int.MAX_VALUE else 2)
-                if (current.kind == NodeKind.INK) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                        MapButton(R.string.map_pen, selected = mode == InkMode.PEN) { mode = InkMode.PEN }
-                        MapButton(R.string.map_eraser, selected = mode == InkMode.ERASER) { mode = InkMode.ERASER }
-                        MapButton(R.string.map_lasso, selected = mode == InkMode.LASSO) { mode = InkMode.LASSO }
-                        MapButton(R.string.undo, enabled = undo) { history.undo(); refresh() }
-                        MapButton(R.string.redo, enabled = redo) { history.redo(); refresh() }
-                        MapButton(R.string.map_clear, enabled = current.ink.isNotEmpty()) { commit(current.copy(ink = emptyList())) }
-                        MapButton(R.string.map_larger, enabled = current.width < 4096 && current.height < 4096) {
-                            commit(current.copy(width = (current.width * 1.5).coerceAtMost(4096.0), height = (current.height * 1.5).coerceAtMost(4096.0)))
-                        }
+                if(current.kind==NodeKind.INK) {
+                    Text(stringResource(R.string.ink_properties_hint),fontSize=TextSize.body)
+                    MapButton(R.string.map_larger,enabled=current.width<4096 && current.height<4096) {
+                        commit(current.copy(width=(current.width*1.5).coerceAtMost(4096.0),height=(current.height*1.5).coerceAtMost(4096.0)))
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
-                        Text(stringResource(R.string.map_pen_width), fontSize = TextSize.body, modifier = Modifier.padding(top = Space.s12))
-                        Slider(value = width, onValueChange = { width = it }, valueRange = 1f..8f, modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget))
-                    }
-                    AndroidView(factory = { InkPadView(it) }, modifier = Modifier.fillMaxWidth().weight(1f)
-                        .border(Space.s2, LocalPalette.current.text.toComposeColor()), update = { v ->
-                        v.nodeWidth = current.width; v.nodeHeight = current.height; v.ink = current.ink; v.mode = mode; v.penWidth = width.toDouble()
-                        v.contentDescription = text
-                        v.onCommit = { commit(current.copy(ink = it)) }
-                        v.invalidate()
-                    })
-                    Text(stringResource(R.string.map_ink_hint), fontSize = TextSize.caption)
+                    Spacer(Modifier.weight(1f))
                 }
                 if (problem) Text(stringResource(R.string.map_limit), fontSize = TextSize.body)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
