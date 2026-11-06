@@ -75,7 +75,7 @@ internal fun FilePreview(b: ExplorerBody, e: BrowseEntry, where: String?, action
     val palette = LocalPalette.current
     val kind = b.kind(e)
     val pages = b.pages(e)
-    val landscape = kind == EntryKind.CANVAS
+    val landscape = kind == EntryKind.CANVAS || kind == EntryKind.MIND_MAP
     Column(modifier.verticalScroll(rememberScrollState()).padding(Space.s24), verticalArrangement = Arrangement.spacedBy(Space.s24)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val stacked = maxWidth < 440.dp

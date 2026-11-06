@@ -396,6 +396,11 @@ private fun EditorScreen(
     // The pane whose page indices await a SAF "Save as" destination (side-panel page export).
     var pendingExportPages by remember { mutableStateOf<PendingPages?>(null) }
     val scope = rememberCoroutineScope()
+    val mindMapLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data?.toString()
+        editor.refreshStoredFile(uri)
+        editor.secondary?.refreshStoredFile(uri)
+    }
     val storageProblemPane = listOfNotNull(editor, editor.secondary).firstOrNull { it.storageProblemUri != null }
     var relinkPane by remember { mutableStateOf<com.xnotes.ui.Editor?>(null) }
     var relinking by remember { mutableStateOf(false) }
@@ -794,6 +799,7 @@ private fun EditorScreen(
      *  types share the explorer but not much else. Reads off-thread behind the "Opening note…"
      *  spinner so a big embedded PDF doesn't freeze the UI. */
     suspend fun openInto(requested: Editor, uriStr: String): Editor? {
+        if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) return null
         if (requested.noteOpen && requested.visibleDocumentUri?.let { requested.isSameDocument(it, uriStr) } == true) return requested
         // Keep a shared document's save owner alive. Replace its borrowed view instead, then
         // exchange visual slots so the requested pane still opens the new file in place.
@@ -1141,7 +1147,9 @@ private fun EditorScreen(
                 },
                 onImportPdf = { importPdfPane = target; importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri ->
-                    if (target == null) guardedAll { discarded -> openTreeFile(uri, discarded) }
+                    if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) {
+                        mindMapLauncher.launch(com.xnotes.mindmap.MindMapActivity.intent(context, uri, stemOf(uri)))
+                    } else if (target == null) guardedAll { discarded -> openTreeFile(uri, discarded) }
                     else guarded(target) {
                         val toolsFrom = editor.active
                         scope.launch {
@@ -1176,7 +1184,7 @@ private fun EditorScreen(
                 onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
                 onShareFiles = { uris -> shareFiles(uris) },
                 onOpenBeside = { uri ->
-                    editor.currentUri?.takeIf { target == null && !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
+                    if (kindOf(uri) == com.xnotes.core.util.DocumentKind.MIND_MAP) null else editor.currentUri?.takeIf { target == null && !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
                 },
                 onExportPdfs = { picked, name, onStarted ->
                     pendingPdfs = PendingPdfs(picked, onStarted)

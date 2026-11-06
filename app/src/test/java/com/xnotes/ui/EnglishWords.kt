@@ -33,6 +33,7 @@ internal object EnglishWords : ExplorerWords {
         EntryKind.NOTE -> "Notes"
         EntryKind.PDF -> "PDF notes"
         EntryKind.CANVAS -> "Canvases"
+        EntryKind.MIND_MAP -> "Mind maps"
         EntryKind.SPLIT -> "Splits"
     }
     override fun hue(h: Hue) = h.name.lowercase().replaceFirstChar { it.uppercase() }

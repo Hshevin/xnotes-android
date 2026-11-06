@@ -169,6 +169,7 @@ internal class ExplorerBody(
 
 internal fun entryKind(e: BrowseEntry, meta: DocMetaStore.Meta?): EntryKind = when {
     e.isDir -> EntryKind.FOLDER
+    DocumentKind.ofName(e.name) == DocumentKind.MIND_MAP -> EntryKind.MIND_MAP
     DocumentKind.ofName(e.name) == DocumentKind.SPLIT -> EntryKind.SPLIT
     DocumentKind.ofName(e.name) == DocumentKind.CANVAS -> EntryKind.CANVAS
     meta?.pdf == true -> EntryKind.PDF
@@ -180,6 +181,7 @@ internal fun kindIcon(k: EntryKind): ImageVector = when (k) {
     EntryKind.NOTE -> XnotesIcons.file
     EntryKind.PDF -> XnotesIcons.pdf
     EntryKind.CANVAS -> XnotesIcons.canvas
+    EntryKind.MIND_MAP -> XnotesIcons.file
     EntryKind.SPLIT -> XnotesIcons.split
 }
 
@@ -189,6 +191,7 @@ internal fun kindLabel(k: EntryKind): String = when (k) {
     EntryKind.NOTE -> stringResource(R.string.kind_note)
     EntryKind.PDF -> stringResource(R.string.kind_pdf_note)
     EntryKind.CANVAS -> stringResource(R.string.kind_canvas)
+    EntryKind.MIND_MAP -> stringResource(R.string.map_title)
     EntryKind.SPLIT -> stringResource(R.string.split_workspace)
 }
 

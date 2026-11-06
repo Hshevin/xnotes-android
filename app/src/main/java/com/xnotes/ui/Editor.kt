@@ -704,6 +704,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var treeVersion by mutableStateOf(0)
         private set
 
+    /** An independent editor returned; reload file metadata and previews without touching open notes. */
+    fun refreshStoredFile(uri: String?) {
+        uri?.let { invalidateThumb(it) }
+        treeVersion++
+    }
+
     /** Bumped on every preferences change so open panes refresh (e.g. after an .scm import). */
     var prefsVersion by mutableStateOf(0)
         private set
@@ -4279,7 +4285,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The square tile for the document at [uri], whichever kind it is. */
     suspend fun tileThumbnail(uri: String, name: String): ImageBitmap? =
-        if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.CANVAS) {
+        if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP) {
+            withContext(thumbDispatcher) { runCatching { com.xnotes.mindmap.MapFiles.thumbnail(appContext, uri, tilePx, tilePx).asImageBitmap() }.getOrNull() }
+        } else if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.CANVAS) {
             canvasTileThumbnail(uri)
         } else {
             noteTileThumbnail(uri)
@@ -4337,6 +4345,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * with them when the document changes.
      */
     suspend fun pageThumbnail(uri: String, name: String): ImageBitmap? {
+        if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP) return withContext(thumbDispatcher) {
+            runCatching { com.xnotes.mindmap.MapFiles.thumbnail(appContext, uri, (pageThumbPx * 1.414).roundToInt(), pageThumbPx).asImageBitmap() }.getOrNull()
+        }
         val generation = thumbnailGeneration
         val key = pageThumbKey(uri)
         synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }
@@ -4374,7 +4385,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The first [max] pages of the note at [uri], each [heightPx] tall, for a preview's page strip; empty for a canvas. */
     suspend fun pageStrip(uri: String, name: String, max: Int, heightPx: Int): List<ImageBitmap> {
         val generation = thumbnailGeneration
-        if (DocumentKind.ofName(name) == DocumentKind.CANVAS) return emptyList()
+        if (DocumentKind.ofName(name) in listOf(DocumentKind.CANVAS, DocumentKind.MIND_MAP)) return emptyList()
         return withContext(thumbDispatcher) {
             val doc = runCatching {
                 appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir, imageDir) }
@@ -4752,6 +4763,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, uri) }
             null
         }
+    }
+
+    /** Creates an independent native mind map; never touches notebook identities or bundles. IO. */
+    fun createBlankMindMapFile(treeUri: String, parentDocId: String, rawName: String): String? {
+        val name = uniqueDocumentName(treeUri, parentDocId, rawName, DocumentKind.MIND_MAP)
+        val doc = com.xnotes.mindmap.MindMapDocument(nodes = listOf(com.xnotes.mindmap.MapNode(parent = null, text = appContext.getString(R.string.map_topic))))
+        return createNoteFile(treeUri, parentDocId, name) { it.write(com.xnotes.mindmap.MapCodec.encode(doc)) }
     }
 
     /** Creates a blank `.xcanvas` under [parentDocId]; returns its URI, or null. IO — call off-thread. */
@@ -5189,7 +5207,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             android.provider.DocumentsContract.copyDocument(appContext.contentResolver, src, target)
         }.getOrNull()
         if (direct != null) {
-            if (DocumentKind.ofName(srcName) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS) || appContext.contentResolver.getType(direct) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
+            if (DocumentKind.ofName(srcName) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS, DocumentKind.MIND_MAP) || appContext.contentResolver.getType(direct) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
                 try { identifyCopiedTree(direct,treeUri) }
                 catch (e: Exception) { runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, direct) }; throw e }
             }
@@ -5211,8 +5229,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 } ?: false
             }.getOrDefault(false)
             if (!copied) { runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, newUri) }; return@runCatching null }
-            if (DocumentKind.ofName(srcName) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS)) {
-                try { notebookStorage.assignCopy(newUri.toString()) }
+            if (DocumentKind.ofName(srcName) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS, DocumentKind.MIND_MAP)) {
+                try { identifyCopiedTree(newUri, treeUri) }
                 catch (e: Exception) { runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, newUri) }; throw e }
             }
             queryDisplayName(newUri) ?: newName
@@ -5223,7 +5241,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (appContext.contentResolver.getType(uri) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
             val tree = android.net.Uri.parse(grantedTree)
             childDocumentUris(tree.toString(),android.provider.DocumentsContract.getDocumentId(uri)).forEach { identifyCopiedTree(it,grantedTree) }
-        } else if (DocumentKind.ofName(queryDisplayName(uri).orEmpty()) in listOf(DocumentKind.NOTE,DocumentKind.CANVAS)) notebookStorage.assignCopy(uri.toString())
+        } else if (DocumentKind.ofName(queryDisplayName(uri).orEmpty()) == DocumentKind.MIND_MAP) com.xnotes.mindmap.MapFiles.assignCopy(appContext, uri)
+        else if (DocumentKind.ofName(queryDisplayName(uri).orEmpty()) in listOf(DocumentKind.NOTE,DocumentKind.CANVAS)) notebookStorage.assignCopy(uri.toString())
     }
 
     /** Copies [entries] into [targetParentDocId], colour codes included; returns how many were copied. IO. */
@@ -6230,7 +6249,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val kind = DocumentKind.ofName(entry.name) ?: return null
         val key = documentKey(entry.documentUri)
         docMeta.get(key, entry.modified)?.let { return it }
-        val meta = if (kind == DocumentKind.SPLIT) {
+        val meta = if (kind == DocumentKind.SPLIT || kind == DocumentKind.MIND_MAP) {
             com.xnotes.platform.DocMetaStore.Meta(0, false, entry.modified)
         } else if (kind == DocumentKind.CANVAS) {
             val peek = peekFile(entry.documentUri, { canvasCodec.peek(it) }, { canvasCodec.peek(it) }) ?: return null
@@ -6570,6 +6589,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Exports a self-contained bundle, embedding the referenced PDF without re-encoding ink. */
     fun copyFileTo(srcUri: String, out: OutputStream, newIdentity: Boolean = false) {
+        if (DocumentKind.ofName(queryDisplayName(android.net.Uri.parse(srcUri)).orEmpty()) == DocumentKind.MIND_MAP) {
+            if (newIdentity) out.write(com.xnotes.mindmap.MapCodec.encode(com.xnotes.mindmap.MapFiles.read(appContext, srcUri).copy(id = java.util.UUID.randomUUID().toString())))
+            else checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use { it.copyTo(out) }
+            return
+        }
         val source = java.io.File.createTempFile("portable-", ".zip", saveTmpDir)
         try {
             checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use { input -> source.outputStream().use { input.copyTo(it) } }
@@ -6597,6 +6621,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     ) {
         val name = queryDisplayName(android.net.Uri.parse(srcUri)).orEmpty()
         val title = com.xnotes.core.util.Paths.stem(name)
+        if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP) {
+            onProgress(0, 1)
+            com.xnotes.mindmap.MapFiles.exportPdf(appContext, srcUri, out, isCancelled)
+            onProgress(1, 1)
+            return
+        }
         if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.CANVAS) {
             exportCanvasFileToPdf(srcUri, out, onProgress, isCancelled, title)
             return

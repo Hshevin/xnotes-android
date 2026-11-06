@@ -169,7 +169,7 @@ import com.xnotes.ui.theme.TextSize
 enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH }
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
-private enum class CreateMode { NONE, FILE, CANVAS, FOLDER }
+private enum class CreateMode { NONE, FILE, CANVAS, MIND_MAP, FOLDER }
 
 /** Entries copied or cut in the explorer; each remembers the folder it was listed in. */
 private data class ClipItem(val entries: List<BrowseEntry>, val isCut: Boolean)
@@ -921,6 +921,7 @@ private fun NewItemMenuItems(
     )
     item(XnotesIcons.edit, stringResource(R.string.new_note_menu)) { onCreateMode(CreateMode.FILE) }
     item(XnotesIcons.canvas, stringResource(R.string.new_canvas_menu)) { onCreateMode(CreateMode.CANVAS) }
+    item(XnotesIcons.file, stringResource(R.string.map_new)) { onCreateMode(CreateMode.MIND_MAP) }
     item(XnotesIcons.importDoc, stringResource(R.string.import_pdf)) { onImportPdf() }
     item(XnotesIcons.newFolder, stringResource(R.string.new_folder_menu)) { onCreateMode(CreateMode.FOLDER) }
 }
@@ -1496,6 +1497,7 @@ private fun ExplorerSection(
                 EntryKind.FOLDER -> stringResource(R.string.kind_no_folders)
                 EntryKind.NOTE -> stringResource(R.string.kind_no_notes)
                 EntryKind.CANVAS -> stringResource(R.string.kind_no_canvases)
+                EntryKind.MIND_MAP -> stringResource(R.string.map_no_documents)
                 EntryKind.SPLIT -> stringResource(R.string.split_no_documents)
             },
             EmptyArt.SEARCH,
@@ -1559,7 +1561,7 @@ private fun ExplorerSection(
                             val k = kindFilter
                             ExplorerChip(k?.let { words.kinds(it) } ?: stringResource(R.string.all_kinds), k != null, icon = XnotesIcons.filter, trailing = XnotesIcons.chevronDown, labelled = labelled) { kindOpen = true }
                             DropdownMenu(expanded = kindOpen, onDismissRequest = { kindOpen = false }) {
-                                (listOf<EntryKind?>(null) + listOf(EntryKind.NOTE, EntryKind.PDF, EntryKind.CANVAS)).forEach { option ->
+                                (listOf<EntryKind?>(null) + listOf(EntryKind.NOTE, EntryKind.PDF, EntryKind.CANVAS, EntryKind.MIND_MAP)).forEach { option ->
                                     ChoiceMenuItem(option == kindFilter, onClick = { kindOpen = false; kindFilter = option }) { fg ->
                                         Text(option?.let { words.kinds(it) } ?: stringResource(R.string.all_kinds), color = fg)
                                     }
@@ -1728,6 +1730,7 @@ private fun ExplorerSection(
                     EmptyPane(empty.text, empty.art, if (!empty.offersCreate) null else { {
                         PrimaryButton(XnotesIcons.edit, stringResource(R.string.new_note_menu)) { onCreateMode(CreateMode.FILE) }
                         PrimaryButton(XnotesIcons.canvas, stringResource(R.string.new_canvas_menu)) { onCreateMode(CreateMode.CANVAS) }
+                        PrimaryButton(XnotesIcons.file, stringResource(R.string.map_new)) { onCreateMode(CreateMode.MIND_MAP) }
                         PrimaryButton(XnotesIcons.importDoc, stringResource(R.string.import_pdf), onClick = calls.importPdf)
                     } })
                 }
@@ -1888,7 +1891,7 @@ private fun ExplorerSection(
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
                     if (selection.size == 1) ExplorerIcon(XnotesIcons.edit, stringResource(R.string.rename), fg) { renaming = selection.first(); selection.clear() }
-                    val pair = files.map { it.documentUri }.distinct().takeIf { it.size == 2 && files.size == selection.size && files.none { e -> DocumentKind.ofName(e.name) == DocumentKind.SPLIT } }
+                    val pair = files.map { it.documentUri }.distinct().takeIf { it.size == 2 && files.size == selection.size && files.all { e -> DocumentKind.ofName(e.name) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS) } }
                     if (calls.allowSplits && pair != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) { selection.clear(); calls.openSplit(pair[0], pair[1]) }
                     ExplorerIcon(XnotesIcons.moveToFolder, stringResource(R.string.move_to_folder), fg) { moving = selection.toList() }
                     ExplorerIcon(XnotesIcons.copy, stringResource(R.string.copy), fg) { clipboard = ClipItem(selection.toList(), false); selection.clear() }
@@ -2015,11 +2018,11 @@ private fun ExplorerSection(
     }
     // Name entry for a new canvas, new folder, or a pending PDF import. Hidden while an import is
     // actually being written, so only the "Importing…" dialog shows.
-    if ((createMode == CreateMode.CANVAS || createMode == CreateMode.FOLDER || pendingImport != null) && !editor.importing) {
+    if ((createMode == CreateMode.CANVAS || createMode == CreateMode.MIND_MAP || createMode == CreateMode.FOLDER || pendingImport != null) && !editor.importing) {
         val isFolder = pendingImport == null && createMode == CreateMode.FOLDER
         val default = when {
             pendingImport != null -> pendingImport.defaultName // import names default to the source file
-            createMode == CreateMode.FILE || createMode == CreateMode.CANVAS ->
+            createMode == CreateMode.FILE || createMode == CreateMode.CANVAS || createMode == CreateMode.MIND_MAP ->
                 nextUntitled(editor, editor.cachedChildren(root, currentDocId))
             else -> "" // new folder
         }
@@ -2027,6 +2030,7 @@ private fun ExplorerSection(
             title = when {
                 pendingImport != null -> stringResource(R.string.import_title)
                 isFolder -> stringResource(R.string.new_folder)
+                createMode == CreateMode.MIND_MAP -> stringResource(R.string.map_new)
                 createMode == CreateMode.CANVAS -> stringResource(R.string.new_canvas)
                 else -> stringResource(R.string.new_note)
             },
@@ -2052,6 +2056,11 @@ private fun ExplorerSection(
                     isFolder -> scope.launch {
                         val ok = withContext(Dispatchers.IO) { editor.createFolder(root, currentDocId, n) }
                         if (ok) { onCreateMode(CreateMode.NONE); refreshKey++ } else fieldError = context.getString(R.string.err_create_folder)
+                    }
+                    createMode == CreateMode.MIND_MAP -> scope.launch {
+                        val uri = withContext(Dispatchers.IO) { editor.createBlankMindMapFile(root, currentDocId, n) }
+                        if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++; calls.openFile(uri) }
+                        else fieldError = context.getString(R.string.map_create_error)
                     }
                     createMode == CreateMode.CANVAS -> scope.launch {
                         val uri = withContext(Dispatchers.IO) { editor.createBlankCanvasFile(root, currentDocId, n) }

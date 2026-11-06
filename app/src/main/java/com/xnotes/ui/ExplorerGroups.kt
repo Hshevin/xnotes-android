@@ -14,7 +14,7 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 /** What an explorer entry is, for badges, the kind filter and grouping by kind. */
-internal enum class EntryKind { FOLDER, NOTE, PDF, CANVAS, SPLIT }
+internal enum class EntryKind { FOLDER, NOTE, PDF, CANVAS, MIND_MAP, SPLIT }
 
 /** The plain name of a colour nobody has named, from its hue. */
 internal enum class Hue { BLACK, WHITE, GREY, RED, ORANGE, YELLOW, GREEN, TEAL, BLUE, PURPLE, PINK }
