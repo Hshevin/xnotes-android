@@ -23,16 +23,53 @@ import com.xnotes.core.model.Rgba
  * The input hooks deliberately mirror `canvas.CanvasView`'s, so the same interaction layer and the
  * same hard-won device-specific stylus handling drive either canvas.
  */
-class InfiniteCanvasView @JvmOverloads constructor(
+class InfiniteCanvasView private constructor(
     context: Context,
-    attrs: AttributeSet? = null,
+    attrs: AttributeSet?,
+    /** Kept across host changes: the interaction controller holds this same object. */
+    val viewport: CanvasViewport,
+    private val glRenderer: GlRenderer,
 ) : GLSurfaceView(context, attrs) {
 
-    private val configChooser = MsaaConfigChooser()
-    private val glRenderer = GlRenderer()
+    @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) :
+        this(context, attrs, CanvasViewport(), GlRenderer())
 
-    /** The view onto the canvas. Main-thread owned; snapshotted for the GL thread by [publish]. */
-    val viewport = CanvasViewport()
+    private val configChooser = MsaaConfigChooser()
+
+    /** True only after GLSurfaceView has synchronously stopped its old GL thread. */
+    var detachedFromWindow = false
+        private set
+
+    /**
+     * A different AndroidView host gets a fresh native View/Surface to avoid carrying old native
+     * host/clip state across a split change. Call after removing the container from its old host.
+     * Keep the scene's context generations increasing, but never reuse after-frame callbacks:
+     * those callbacks queue work on this View's now-exited GL thread.
+     */
+    fun replacementForAttach(): InfiniteCanvasView {
+        check(detachedFromWindow && !isAttachedToWindow)
+        return InfiniteCanvasView(context, null, viewport, GlRenderer(glRenderer.contextGen)).also {
+            it.background = background
+            it.paperColor = paperColor
+            it.darkAppearance = darkAppearance
+            it.minimapVisible = minimapVisible
+            it.contentBounds = contentBounds
+            it.accent = accent
+            it.scene = scene
+            it.input = input
+            it.hover = hover
+            it.genericMotion = genericMotion
+            it.onKey = onKey
+            it.afterLayout = afterLayout
+            it.onContextReady = onContextReady
+            it.onInputLost = onInputLost
+            it.onFourFingerTap = onFourFingerTap
+            it.onTwoFingerTap = onTwoFingerTap
+            it.onThreeFingerTap = onThreeFingerTap
+            it.crossPaneTouchGate.shouldBlock = crossPaneTouchGate.shouldBlock
+            it.setEraserCursor(cursorAt, cursorRadius)
+        }
+    }
 
     var background: CanvasBackground = CanvasBackground()
         set(value) {
@@ -227,6 +264,7 @@ class InfiniteCanvasView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        detachedFromWindow = false
         // A frame count only means something next to the rate the panel can actually show.
         glRenderer.displayHz = (display?.refreshRate ?: 60f).toDouble()
     }
@@ -237,6 +275,7 @@ class InfiniteCanvasView @JvmOverloads constructor(
         onInputLost?.invoke()
         removeCallbacks(idleRunnable)
         super.onDetachedFromWindow()
+        detachedFromWindow = true
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
