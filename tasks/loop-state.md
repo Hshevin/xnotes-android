@@ -7,6 +7,6 @@
 最新代码提交：771d9ef5（shared in-place/enlarged ink transactions）。独立审核 review_input_plan 完成，全部必修已修复，详见 tasks/review.md。
 验证：tmp/ink-stage-verified.log 全量 2757 tests，0 failures/errors/skipped；compileDebugAndroidTestKotlin 成功。资源语言键与两套中文一致，diff 检查通过。
 运行作业：无已知 Gradle 作业（最后会话85452已输出 BUILD SUCCESSFUL）；不得仅因日志存在重跑旧作业。
-接下来：B1b 文本原位编辑，先独立审核宿主／软键盘／草稿事务计划，再实现原位输入及完成后布局；随后 B2 稳定页／对象身份、C1/C2 引用闭环、D 网络。A2 残余（无中心、连接入口、多选等）仍保留。
+接下来：B1b 文本原位编辑，独立计划审核已完成（tasks/review.md 和 tasks/plan.md），实现尚未开始；复用 ui/TextEditorOverlay.kt + TextEditHost + canvas/EditingField，保留默认 NoBringIntoView，新增可选文本接受策略与光标宿主像素回报，导图宿主草稿/事务合并提交与相机可见性适配；随后 B2 稳定页／对象身份、C1/C2 引用闭环、D 网络。A2 残余（无中心、连接入口、多选等）仍保留。
 未执行：真实 Compose 宿主仪器测试（已新增且编译），真实 SAF、目标硬件、GPU／延迟、完整 UI／无障碍。全目标未完成，未得出 blocker；不标记 complete/blocked。
-提交状态：代码已本地提交，阶段文档同步另行本地提交。不得把本阶段主机验证扩展为真机验收。
+提交状态：代码771d9ef5、阶段文档50feaf66已本地提交；本恢复点和 B1b 审核结果继续本地提交。不得把本阶段主机验证扩展为真机验收。

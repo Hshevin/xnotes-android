@@ -8,3 +8,9 @@
 - 复核修复：放大层内独立错误覆盖，不改变输入区尺寸；手绘属性不自动整理；底图键盘／触摸与图工具在放大期间禁用；属性草稿只合并 text/kind/width/height，不覆盖后来来源、笔迹和位置。
 - 证据：先行回归日志 tmp/inline-red.log、tmp/ink-review-red.log、tmp/deferred-ink-red.log 重现问题；最终 tmp/ink-stage-verified.log 全量 2757 项通过、Android 仪器测试源码编译通过。2 万采样背景的 8 帧临时预览只增加 8 次临时几何构造，原稳定笔迹复用；这不是硬件帧率保证。
 - 未执行：真实 Compose 宿主仪器测试（已新增 MapInkEditingHostTest 并接入 PenTestRunner，仅编译）、真实设备与 SAF、GPU／延迟、完整无障碍和软键盘验收。文本原位与完整引用闭环仍未完成。
+
+## B1b 文本原位计划审核（2026-11-06）
+
+独立代理 review_input_plan 只读审阅计划和既有 TextEditorOverlay / TextEditHost / EditingField。计划通过，以下约束全部接受，尚未实施：优先复用现有组件而非第二条 BasicTextField；明确 viewport px 与未缩放内容 px 的单位，不重复 Density 转换；独立编辑事务 ID 和稳定 key，草稿与选择跟随事务保存；提交核对初始文本／类型且按当前宽度测高，只合并文本字段；输入超限在共享字段接受前明确拒绝，默认策略不影响笔记／画布；光标回报含 rotation 的宿主局部几何，宿主只在遮挡时平移相机，保留 NoBringIntoView；进入前取消原图输入，退出统一屏蔽迟到 IME 回调，待 IME/宿主尺寸稳定后恢复视口／选择；编辑期间工具栏压缩，避免键盘挤空图区域。
+
+需要验证：中文组合输入、emoji、多行、空文本、超限、光标／手动拖动、键盘与横竖屏、多 density/fontScale/zoom、并发来源、旧文本冲突、取消零历史、完成一步撤销，以及旧笔记／画布默认不自动平移。真实 UI 与设备验证不能用模型测试替代。
