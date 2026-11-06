@@ -61,3 +61,4 @@
 
 - 用户于 2026-11-06 要求推送远端：推送本地 `master`（含关闭 / 切换文档误删私有 PDF 原件的修复、重新关联与仅笔迹副本）到 `origin/master`。此授权仅限本次，不包含打包 APK、安装或 GitHub Release。
 - 用户随后于 2026-11-06 提供本机构建的 Release 95 APK 并要求发布：补提交 versionCode 95，推送 `master` 与标签 `v0.9.8-movinkpad.95`，发布 GitHub Release（附 APK 与 SHA256SUMS.txt）。仅限本次，不包含设备安装。
+- 用户于 2026-11-06 要求合并到主分支：将 `worktree-ai-markdown-latex`（`e49b612e`，AI 回答 LaTeX 公式排版）与 `worktree-ai-pdf-native-tools`（`d716ef7e`，AI 读取 PDF 改为原生工具调用）以 `--no-ff` 合入本地 `master`，保留两条原分支。合并后全部 JVM 单元测试（2720 项）通过、仪器测试可编译。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release。
