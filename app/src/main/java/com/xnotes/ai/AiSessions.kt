@@ -321,6 +321,7 @@ class AiSessions(
                 val failures = mutableListOf<String>()
                 var offerWeb = useSearch
                 var unsupported = ""
+                var thinkingDropped = false
                 var rounds = 0
                 var lastSave = System.nanoTime()
                 val append: suspend (String) -> Unit = { chunk ->
@@ -358,6 +359,7 @@ class AiSessions(
                         }
                         continue
                     }
+                    if (reply.thinkingDropped) thinkingDropped = true
                     if (reply.calls.isEmpty() || choice != "auto") break
                     rounds++
                     // Each call goes to the tool set that was offered; anything else is answered, not run.
@@ -386,7 +388,7 @@ class AiSessions(
                     c.copy(turns = c.turns.dropLast(1) + c.turns.last().let { it.copy(user = it.user.copy(searchContext = evidence.joinToString("\n\n").take(AiWebTools.EVIDENCE_MAX))) })
                 }?.let { persist(it) }
                 check(chats[id]?.turns?.lastOrNull()?.answer?.isNotBlank() == true) { AiText.t(AiMsg.NO_TEXT_RETURNED) }
-                finish(id, "已完成", listOfNotNull(unsupported.ifEmpty { null }, failures.firstOrNull()?.let { AiText.t(AiMsg.WEB_TOOL_FAILED, it) }).joinToString(" · "))
+                finish(id, "已完成", listOfNotNull(unsupported.ifEmpty { null }, AiText.t(AiMsg.THINKING_UNSUPPORTED).takeIf { thinkingDropped }, failures.firstOrNull()?.let { AiText.t(AiMsg.WEB_TOOL_FAILED, it) }).joinToString(" · "))
             } catch (e: CancellationException) {
                 if (started) finish(id, "已停止", AiText.t(AiMsg.STOPPED_BY_USER))
                 throw e

@@ -102,6 +102,7 @@ internal fun AiMsg.resId(): Int = when (this) {
     AiMsg.IMAGE_MODEL_REQUIRED -> R.string.ai_msg_image_model_required
     AiMsg.IMAGE_INVALID_REPLY -> R.string.ai_msg_image_invalid_reply
     AiMsg.IMAGE_TOO_LARGE -> R.string.ai_msg_image_too_large
+    AiMsg.THINKING_UNSUPPORTED -> R.string.ai_msg_thinking_unsupported
 }
 
 /** Routes AI backend messages through Android resources so they follow the app locale. */

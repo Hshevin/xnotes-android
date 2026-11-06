@@ -100,7 +100,8 @@ enum class AiMsg(val zh: String) {
     CONFIG_IMAGE_MODEL_INVALID("图像模型名称无效"),
     IMAGE_MODEL_REQUIRED("请先在 AI 设置中设置图像模型"),
     IMAGE_INVALID_REPLY("图像接口未返回可用的图片"),
-    IMAGE_TOO_LARGE("生成的图片过大");
+    IMAGE_TOO_LARGE("生成的图片过大"),
+    THINKING_UNSUPPORTED("当前模型不支持所选的思考设置，本次按模型默认回答");
 }
 
 object AiText {

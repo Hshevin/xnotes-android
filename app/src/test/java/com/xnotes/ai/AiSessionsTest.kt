@@ -141,6 +141,13 @@ class AiSessionsTest {
         val model = ToolModel(listOf({ _, tools, _ -> assertNull(tools); AiReply("直接回答") }))
         ask(model, false) { sessions, id -> assertEquals("直接回答", sessions.chats[id]!!.turns.single().answer) }
     }
+    @Test fun anAnswerSentWithoutTheChosenThinkingLevelSaysSo() = runBlocking {
+        val model = ToolModel(listOf({ _, _, _ -> AiReply("没有思考的回答", thinkingDropped = true) }))
+        ask(model, false) { sessions, id ->
+            val turn = sessions.chats[id]!!.turns.single()
+            assertEquals("已完成", turn.state); assertTrue(turn.error.contains("不支持所选的思考设置"))
+        }
+    }
     @Test fun modelWithoutToolCallingAnswersWithoutSearchAndSaysSo() = runBlocking {
         val model = ToolModel(listOf(
             { _, tools, _ -> assertNotNull(tools); throw AiToolsUnsupported(400) },
