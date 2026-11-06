@@ -225,6 +225,29 @@ class AiSessionsTest {
             assertEquals("论文讲注意力", turn.answer); assertEquals("已完成", turn.state); assertEquals("", turn.error)
         }
     }
+    @Test fun aModelWithoutPictureInputGoesOnInTextWhenPageImagesAreRefused() = runBlocking {
+        val pages = Pages()
+        val id = "b".repeat(64)
+        val model = ToolModel(listOf(
+            { _, _, _ -> AiReply(calls = listOf(AiToolCall("v", "pdf_view_page", """{"attachment_id":"$id","page":2}"""))) },
+            { tail, _, _ -> assertTrue(tail.any(AiPdfTools::isImageMessage)); throw AiToolsUnsupported(400, "image input is not supported") },
+            { tail, _, _ ->
+                assertFalse(tail.any(AiPdfTools::isImageMessage))
+                assertTrue(tail.last().getString("content").contains(AiPdfTools.IMAGES_REFUSED))
+                AiReply(calls = listOf(AiToolCall("v2", "pdf_view_page", """{"attachment_id":"$id","page":3}"""), AiToolCall("r", "pdf_read", """{"attachment_id":"$id","start_page":2}""")))
+            },
+            { tail, _, _ ->
+                assertTrue(tail.first { it.optString("tool_call_id") == "v2" }.getString("content").contains(AiPdfTools.IMAGES_REFUSED))
+                assertFalse(tail.any(AiPdfTools::isImageMessage))
+                AiReply("按文字作答")
+            },
+        ))
+        askPdf(model, false, pages) { sessions, id2 ->
+            val turn = sessions.chats[id2]!!.turns.single()
+            assertEquals("按文字作答", turn.answer); assertEquals("已完成", turn.state)
+            assertEquals(listOf(2), pages.read)
+        }
+    }
     @Test fun pdfAndWebToolsAreOfferedTogetherAndRoutedByName() = runBlocking {
         val pages = Pages()
         val model = ToolModel(listOf(

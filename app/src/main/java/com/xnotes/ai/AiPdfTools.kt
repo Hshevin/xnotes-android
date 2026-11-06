@@ -77,10 +77,31 @@ object AiPdfTools {
     /** A round's tool results in call order, and one user message carrying its page images, which tool messages cannot. */
     class Round(val messages: List<JSONObject>, val images: JSONObject?)
 
+    /** What the model is told when its provider would not take the page images. */
+    const val IMAGES_REFUSED = "当前模型或接口不接受图片输入，页图未能发送。请改用 pdf_read 或 pdf_search 读取文字作答，并说明哪些页只能看到文字。"
+
+    /** Whether [message] is a round's page-image message (a user turn whose parts include an image). */
+    fun isImageMessage(message: JSONObject): Boolean {
+        if (message.optString("role") != "user") return false
+        val parts = message.opt("content") as? JSONArray ?: return false
+        return (0 until parts.length()).any { parts.optJSONObject(it)?.optString("type") == "image_url" }
+    }
+
+    /**
+     * [tail] with every page-image message replaced by [IMAGES_REFUSED], for a provider that refused a
+     * request carrying them; null when there were none, so the refusal had another cause.
+     */
+    fun withoutImages(tail: List<JSONObject>): List<JSONObject>? {
+        if (tail.none(::isImageMessage)) return null
+        return tail.map { if (isImageMessage(it)) JSONObject().put("role", "user").put("content", "（$IMAGES_REFUSED）") else it }
+    }
+
     /** One answer's reads: the page images and characters it has used so far. */
     class Reader(private val files: Map<String, AiPdf>, private val access: AiPdfAccess) {
         private var images = 0
         private var used = 0
+        /** Set once the provider refused a request carrying page images: the model reads text from then on. */
+        var imagesOff = false
 
         suspend fun run(calls: List<AiToolCall>, progress: suspend (String) -> Unit): Round {
             val messages = mutableListOf<JSONObject>()
@@ -97,6 +118,7 @@ object AiPdfTools {
                         SEARCH -> search(pdf, args, progress)
                         VIEW -> {
                             val page = int(args, "page")
+                            require(!imagesOff) { IMAGES_REFUSED }
                             require(page != null && page in 1..pdf.pageCount) { AiText.t(AiMsg.PDF_TOOL_READ_RANGE_INVALID) + "（共 ${pdf.pageCount} 页）" }
                             require(images < MAX_IMAGES) { AiText.t(AiMsg.PDF_TOOL_IMAGE_LIMIT) }
                             progress(AiText.t(AiMsg.PROGRESS_VIEWING_PAGE, pdf.name, page))

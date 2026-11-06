@@ -340,6 +340,14 @@ class AiSessions(
                     val reply = try {
                         withContext(Dispatchers.IO) { client.complete(settings, history + prepared, tail, offered, choice ?: "auto", append) }
                     } catch (e: AiToolsUnsupported) {
+                        // A model that takes no pictures refuses the request carrying page images: drop them,
+                        // tell it so, and go on reading text. Only once, so another cause still ends the turn.
+                        val textOnly = if (reader != null && !reader.imagesOff) AiPdfTools.withoutImages(tail) else null
+                        if (textOnly != null) {
+                            reader!!.imagesOff = true
+                            tail.clear(); tail += textOnly
+                            continue
+                        }
                         // Only the first request can be refused for offering tools; later ones already carry tool rounds.
                         if (choice == null || tail.isNotEmpty()) throw IllegalStateException(e.message)
                         if (offerWeb) { offerWeb = false; unsupported = AiText.t(AiMsg.TOOLS_UNSUPPORTED); progress(id, unsupported) }
