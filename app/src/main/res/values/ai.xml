@@ -184,4 +184,20 @@
     <string name="ai_preset_zhipu">Zhipu AI (GLM)</string>
     <string name="ai_preset_siliconflow">SiliconFlow</string>
     <string name="ai_preset_gemini">Google Gemini</string>
+
+    <!-- In-app template generation -->
+    <string name="ai_tpl_gen_title">Generate here</string>
+    <string name="ai_tpl_gen_about">When you tap Generate, your request and the xtemplate format guide are sent to %1$s · %2$s. The result is checked and added to your templates.</string>
+    <string name="ai_tpl_gen_hint">Describe the template, e.g. a habit tracker with seven columns</string>
+    <string name="ai_tpl_gen_button">Generate</string>
+    <string name="ai_tpl_gen_writing">Writing the template… %1$d characters</string>
+    <string name="ai_tpl_gen_fixing">Fixing the template (try %1$d of %2$d)… %3$d characters</string>
+    <string name="ai_tpl_gen_checking">Checking the template…</string>
+    <string name="ai_tpl_gen_no_provider">Add a model provider in AI settings to generate templates here.</string>
+    <string name="ai_tpl_gen_cover_note">Covers made here are drawn with shapes and text only. For a cover with a photo or painting, use another AI assistant below.</string>
+    <string name="ai_tpl_gen_examples">Examples (tap to fill in)</string>
+    <string name="ai_tpl_external">Use another AI assistant</string>
+    <string name="ai_tpl_external_about">For covers with pictures: give the format guide to ChatGPT, Claude or another assistant, then import the file it makes.</string>
+    <string name="ai_prompt_cover_frame">A cover template: a deep navy background in an adjustable colour, a thin gold double-line frame 12 mm in from the edges, and a cream title label a third of the way down.</string>
+    <string name="ai_prompt_cover_stripes">A cover template with diagonal pinstripes over an adjustable base colour and a white title label near the bottom.</string>
 </resources>

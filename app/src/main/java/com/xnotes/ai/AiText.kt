@@ -92,7 +92,10 @@ enum class AiMsg(val zh: String) {
     NO_TEXT_RETURNED("模型未返回文字"),
     STOPPED_BY_USER("已主动停止生成"),
     REQUEST_FAILED("请求失败"),
-    NETWORK_ERROR("网络或响应异常，请检查配置");
+    NETWORK_ERROR("网络或响应异常，请检查配置"),
+    TEMPLATE_GEN_EMPTY("请先描述想要的模板"),
+    TEMPLATE_GEN_TOO_LONG("要求不能超过 %1\$d 个字符"),
+    TEMPLATE_GEN_FAILED("AI 多次生成的模板仍无法使用：%1\$s");
 }
 
 object AiText {

@@ -8977,6 +8977,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** Add a template the AI made in the new-note screen to the library, and select it as an imported one is. */
+    fun importTemplateText(text: String) = adoptTemplate { TemplateLibrary.importText(text) }
+
     /** Add a template this note carries, but the library lacks, to the library. */
     fun keepNoteTemplate(key: String) {
         val pkg = state.document.templatePackages[key]
