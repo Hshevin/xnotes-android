@@ -56,11 +56,16 @@ data class MindMapDocument(
         require(nodes.size < MAX_NODES)
         node(parent)
         val added = MapNode(parent = parent, kind = kind, text = text)
-        val doc = update(parent) { it.copy(collapsed = false) }.copy(nodes = update(parent) { it.copy(collapsed = false) }.nodes + added)
+        val expanded = update(parent) { it.copy(collapsed = false) }
+        val doc = expanded.copy(nodes = expanded.nodes + added)
         doc.validate()
         return MapLayout.arrange(doc) to added.id
     }
-    fun delete(id: String): MindMapDocument = if (id == root.id) this else copy(nodes = nodes.filter { it.id !in descendants(id) })
+    fun delete(id: String): MindMapDocument {
+        if (id == root.id) return this
+        val removed = descendants(id)
+        return copy(nodes = nodes.filter { it.id !in removed })
+    }
     fun reparent(id: String, parent: String): MindMapDocument {
         if (id == root.id || parent in descendants(id) || nodes.none { it.id == parent }) return this
         val doc = update(id) { it.copy(parent = parent) }.update(parent) { it.copy(collapsed = false) }
