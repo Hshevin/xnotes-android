@@ -24,9 +24,13 @@ data class AiProvider(
     val name: String = "", val url: String = "", val key: String = "",
     val models: List<String> = emptyList(),
     val thinkingFormat: String = AiThinking.AUTO,
+    /** Models this provider paints pictures with (its Images API), kept apart from the chat [models]. */
+    val imageModels: List<String> = emptyList(),
 ) {
-    /** The saved models in the user's order, trimmed and without repeats. */
+    /** The saved chat models in the user's order, trimmed and without repeats. */
     val modelChoices: List<String> get() = models.map(String::trim).filter(String::isNotEmpty).distinct()
+    /** The saved image models, likewise. */
+    val imageChoices: List<String> get() = imageModels.map(String::trim).filter(String::isNotEmpty).distinct()
     /** The label, else the endpoint host, so an unnamed provider still reads as something. */
     val label: String get() = name.trim().ifEmpty { runCatching { java.net.URI(url.trim()).host }.getOrNull().orEmpty().ifEmpty { url.trim() } }
 }
@@ -79,9 +83,10 @@ data class AiConfig(
      * moves to the first provider and its first model, so settings never save a dangling default.
      */
     fun withValidDefault(): AiConfig {
-        // A picture model whose provider is gone is dropped with it, never moved to another provider.
-        val image = if (providerOf(imageProvider) == null) copy(imageProvider = "", imageModel = "") else this
-        val p = providerOf(provider) ?: providers.firstOrNull() ?: return image.copy(provider = "", model = "", url = "", key = "", models = emptyList())
+        // A picture model whose provider is gone, or no longer lists it, is dropped, never moved to another provider.
+        val image = if (providerOf(imageProvider)?.imageChoices?.contains(imageModel.trim()) != true) copy(imageProvider = "", imageModel = "") else this
+        val p = providerOf(provider) ?: providers.firstOrNull { it.modelChoices.isNotEmpty() } ?: providers.firstOrNull()
+            ?: return image.copy(provider = "", model = "", url = "", key = "", models = emptyList())
         return image.route(p.id, model.trim().takeIf { it in p.modelChoices } ?: p.modelChoices.firstOrNull().orEmpty())
     }
     /** The provider a model picked before providers existed belongs to: the default's if it lists it. */
@@ -142,7 +147,8 @@ class AiConfigStore(context: Context) {
             val list = org.json.JSONArray()
             providers.forEach { p ->
                 list.put(JSONObject().put("id", p.id).put("name", p.name.trim()).put("url", p.url.trim()).put("key", p.key.trim())
-                    .put("models", org.json.JSONArray(p.modelChoices)).put("thinkingFormat", p.thinkingFormat))
+                    .put("models", org.json.JSONArray(p.modelChoices)).put("thinkingFormat", p.thinkingFormat)
+                    .put("imageModels", org.json.JSONArray(p.imageChoices)))
             }
             val model = config.model.trim()
             val defaultModels = current?.modelChoices.orEmpty()
@@ -161,16 +167,23 @@ class AiConfigStore(context: Context) {
             fun strings(from: JSONObject) = from.optJSONArray("models")?.let { list -> (0 until list.length()).mapNotNull { list.opt(it) as? String } } ?: emptyList()
             fun format(from: JSONObject) = from.optString("thinkingFormat", AiThinking.AUTO).takeIf { it in AiThinking.FORMATS } ?: AiThinking.AUTO
             val model = json.optString("model", "")
-            val providers = json.optJSONArray("providers")?.let { list ->
+            var providers = json.optJSONArray("providers")?.let { list ->
                 (0 until list.length()).mapNotNull { list.optJSONObject(it) }.mapNotNull { p ->
                     val id = (p.opt("id") as? String)?.takeIf(String::isNotBlank) ?: return@mapNotNull null
-                    AiProvider(id, p.optString("name", ""), p.optString("url", ""), p.optString("key", ""), strings(p), format(p))
+                    val images = p.optJSONArray("imageModels")?.let { list -> (0 until list.length()).mapNotNull { list.opt(it) as? String } } ?: emptyList()
+                    AiProvider(id, p.optString("name", ""), p.optString("url", ""), p.optString("key", ""), strings(p), format(p), images)
                 }.distinctBy { it.id }
             } ?: run {
                 val url = json.optString("url", ""); val key = json.optString("key", "")
                 val legacyModels = strings(json).let { if (model.isBlank() || model in it) it else listOf(model) + it }
                 if (url.isBlank() && key.isBlank() && legacyModels.isEmpty()) emptyList()
                 else listOf(AiProvider(LEGACY_PROVIDER, "", url, key, legacyModels, format(json)))
+            }
+            // An image model saved before providers listed their own joins its provider's image list.
+            val imageProviderId = json.optString("imageProvider", "")
+            val savedImageModel = json.optString("imageModel", "").trim()
+            if (savedImageModel.isNotEmpty()) providers = providers.map { p ->
+                if (p.id == imageProviderId && savedImageModel !in p.imageChoices) p.copy(imageModels = p.imageChoices + savedImageModel) else p
             }
             val provider = json.optString("provider", "").takeIf { id -> providers.any { it.id == id } } ?: providers.firstOrNull()?.id.orEmpty()
             val config = AiConfig(searchKey = json.optString("searchKey", ""),
@@ -189,9 +202,11 @@ class AiConfigStore(context: Context) {
         /** What one provider needs before it can be kept: an HTTPS endpoint, a key and at least one model. */
         fun validateProvider(p: AiProvider) {
             AiProtocol.endpoint(p.url)
-            require(p.key.isNotBlank() && p.modelChoices.isNotEmpty()) { AiText.t(AiMsg.CONFIG_MODEL_KEY_REQUIRED) }
+            // A provider may serve chat, pictures or both; it needs at least one model of either kind.
+            require(p.key.isNotBlank() && (p.modelChoices.isNotEmpty() || p.imageChoices.isNotEmpty())) { AiText.t(AiMsg.CONFIG_MODEL_KEY_REQUIRED) }
             require(!p.key.contains('\n') && !p.key.contains('\r')) { AiText.t(AiMsg.CONFIG_KEY_INVALID) }
-            require(p.modelChoices.size <= AiProtocol.MAX_MODELS) { AiText.t(AiMsg.CONFIG_TOO_MANY_MODELS, AiProtocol.MAX_MODELS) }
+            require(p.modelChoices.size <= AiProtocol.MAX_MODELS && p.imageChoices.size <= AiProtocol.MAX_MODELS) { AiText.t(AiMsg.CONFIG_TOO_MANY_MODELS, AiProtocol.MAX_MODELS) }
+            require((p.modelChoices + p.imageChoices).all { it.length <= 200 && it.none { c -> c == '\n' || c == '\r' } }) { AiText.t(AiMsg.CONFIG_IMAGE_MODEL_INVALID) }
             require(p.thinkingFormat in AiThinking.FORMATS) { AiText.t(AiMsg.CONFIG_THINKING_INVALID) }
         }
 
@@ -214,8 +229,9 @@ class AiConfigStore(context: Context) {
             require(config.effort in AiThinking.LEVELS) { AiText.t(AiMsg.CONFIG_THINKING_INVALID) }
             val imageModel = config.imageModel.trim()
             if (imageModel.isNotEmpty()) {
-                require(config.providerOf(config.imageProvider) != null) { AiText.t(AiMsg.CONFIG_IMAGE_PROVIDER_REQUIRED) }
-                require(imageModel.length <= 200 && imageModel.none { it == '\n' || it == '\r' }) { AiText.t(AiMsg.CONFIG_IMAGE_MODEL_INVALID) }
+                val p = config.providerOf(config.imageProvider)
+                require(p != null) { AiText.t(AiMsg.CONFIG_IMAGE_PROVIDER_REQUIRED) }
+                require(imageModel in p.imageChoices) { AiText.t(AiMsg.CONFIG_IMAGE_MODEL_INVALID) }
             }
         }
     }

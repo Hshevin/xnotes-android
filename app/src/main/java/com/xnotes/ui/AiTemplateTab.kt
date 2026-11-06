@@ -53,7 +53,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Stable
 import com.xnotes.ai.AiSessions
 import kotlinx.coroutines.launch
@@ -98,8 +101,15 @@ private val PICTURE_GEN_PROMPTS = listOf(R.string.ai_prompt_cover_paint_pines, R
 internal class TemplateGenState(val scope: CoroutineScope, coversOnly: Boolean) {
     var kind by mutableStateOf(if (coversOnly) TemplateKind.COVER else TemplateKind.PAGE)
     var request by mutableStateOf("")
-    /** Whether a cover gets a painted picture, when an image model is set up. */
-    var paint by mutableStateOf(true)
+    /** Whether a cover gets a painted picture; null follows whether AI settings set up an image model. */
+    var paint by mutableStateOf<Boolean?>(null)
+    /**
+     * The models picked on the form for this screen, apart from the defaults in AI settings: the text
+     * model as provider ID and model, the image model's provider and name. Null follows the default.
+     */
+    var textModel by mutableStateOf<Pair<String, String>?>(null)
+    var imageProvider by mutableStateOf<String?>(null)
+    var imageModel by mutableStateOf<String?>(null)
     var stage by mutableStateOf<AiTemplateGen.Stage?>(null)
     var error by mutableStateOf<String?>(null)
     var job by mutableStateOf<Job?>(null)
@@ -161,15 +171,19 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
     val dim = palette.textDim.toComposeColor()
     var settings by remember { mutableStateOf(false) }
     if (settings) AiSettings { settings = false }
-    // The image model's route, when one is set up; a cover then gets a painted picture unless switched off.
-    val painter = remember(config) { config?.imageRoute() }
+    // The models this form sends to: picked here, else the defaults in AI settings.
+    val routes = config?.let { AiTemplateGen.routes(it, gen.textModel, gen.imageProvider, gen.imageModel) }
+    val writer = routes?.first
+    val painter = routes?.second
     val running = gen.running
     var kind by gen::kind
     var request by gen::request
-    var paint by gen::paint
+    // A cover is painted when asked to, or by default when AI settings set up an image model.
+    val paint = gen.paint ?: (config?.imageRoute() != null)
+    val picture = kind == TemplateKind.COVER && paint
 
     fun generate() {
-        val c = config ?: return
+        val c = writer ?: return
         val made = kind
         val ask = request
         val picture = painter.takeIf { made == TemplateKind.COVER && paint }
@@ -203,10 +217,33 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
             return@Column
         }
         val c = config ?: return@Column
+        val w = writer ?: return@Column
         Text(
-            stringResource(R.string.ai_tpl_gen_about, c.providerOf(c.provider)?.label ?: runCatching { java.net.URI(c.url).host }.getOrNull().orEmpty(), c.model),
+            stringResource(R.string.ai_tpl_gen_about, routeLabel(w), w.model),
             color = dim, fontSize = TextSize.label, lineHeight = 17.sp,
         )
+        // The text model for this screen; the defaults in AI settings stay as they are.
+        ModelPicker(
+            stringResource(R.string.ai_tpl_gen_text_model),
+            listOfNotNull(routeLabel(w).takeIf { c.providers.size > 1 }, w.model).joinToString(" · "),
+            enabled = !running,
+        ) { close ->
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.ai_tpl_gen_default, listOfNotNull(c.providerOf(c.provider)?.label?.takeIf { c.providers.size > 1 }, c.model).joinToString(" · "))) },
+                onClick = { gen.textModel = null; close() },
+                trailingIcon = { if (gen.textModel == null) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) },
+            )
+            c.providers.filter { it.modelChoices.isNotEmpty() }.forEach { p ->
+                Text(p.label, Modifier.padding(horizontal = Space.s16, vertical = Space.s4), color = dim, fontSize = TextSize.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                p.modelChoices.forEach { name ->
+                    DropdownMenuItem(
+                        text = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        onClick = { gen.textModel = p.id to name; close() },
+                        trailingIcon = { if (gen.textModel == (p.id to name)) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) },
+                    )
+                }
+            }
+        }
         if (!coversOnly) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
                 for ((k, label) in listOf(TemplateKind.PAGE to R.string.ai_page_templates, TemplateKind.COVER to R.string.ai_cover_templates)) {
@@ -229,18 +266,45 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
             enabled = !running, minLines = 3, maxLines = 8,
             placeholder = { Text(stringResource(R.string.ai_tpl_gen_hint), fontSize = TextSize.body) },
         )
-        val picture = kind == TemplateKind.COVER && painter != null && paint
         if (kind == TemplateKind.COVER) {
-            if (painter != null) {
-                val host = painter.providerOf(painter.provider)?.label ?: runCatching { java.net.URI(painter.url).host }.getOrNull().orEmpty()
-                AiSwitchRow(stringResource(R.string.ai_tpl_gen_picture, painter.model), stringResource(R.string.ai_tpl_gen_picture_note, host, painter.model), paint, enabled = !running) {
-                    paint = it
+            AiSwitchRow(
+                stringResource(R.string.ai_tpl_gen_picture_title),
+                if (painter != null) stringResource(R.string.ai_tpl_gen_picture_note, routeLabel(painter), painter.model) else stringResource(R.string.ai_tpl_gen_cover_note),
+                paint, enabled = !running,
+            ) { gen.paint = it }
+            if (paint) {
+                // The image model for this screen, from the image models the providers list.
+                val painters = c.providers.filter { it.imageChoices.isNotEmpty() }
+                val picked = gen.imageProvider != null && gen.imageModel != null
+                if (painters.isNotEmpty()) ModelPicker(
+                    stringResource(R.string.ai_tpl_gen_image_model),
+                    painter?.let { listOfNotNull(routeLabel(it).takeIf { c.providers.size > 1 }, it.model).joinToString(" · ") }.orEmpty(),
+                    enabled = !running,
+                ) { close ->
+                    c.imageRoute()?.let { default ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.ai_tpl_gen_default, listOfNotNull(routeLabel(default).takeIf { c.providers.size > 1 }, default.model).joinToString(" · "))) },
+                            onClick = { gen.imageProvider = null; gen.imageModel = null; close() },
+                            trailingIcon = { if (!picked) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) },
+                        )
+                    }
+                    painters.forEach { p ->
+                        Text(p.label, Modifier.padding(horizontal = Space.s16, vertical = Space.s4), color = dim, fontSize = TextSize.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        p.imageChoices.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { gen.imageProvider = p.id; gen.imageModel = name; close() },
+                                trailingIcon = { if (picked && gen.imageProvider == p.id && gen.imageModel == name) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) },
+                            )
+                        }
+                    }
                 }
-            }
-            if (!picture) Text(stringResource(R.string.ai_tpl_gen_cover_note), color = dim, fontSize = TextSize.label, lineHeight = 17.sp)
-            // No image model yet: the place to set one up is a tap away.
-            if (painter == null) TextButton(onClick = { settings = true }, enabled = !running, contentPadding = PaddingValues(horizontal = Space.s4)) {
-                Text(stringResource(R.string.ai_tpl_gen_open_settings), fontSize = TextSize.body)
+                if (painter == null) {
+                    Text(stringResource(R.string.ai_tpl_gen_image_model_needed), color = dim, fontSize = TextSize.label, lineHeight = 17.sp)
+                    TextButton(onClick = { settings = true }, enabled = !running, contentPadding = PaddingValues(horizontal = Space.s4)) {
+                        Text(stringResource(R.string.ai_tpl_gen_open_settings), fontSize = TextSize.body)
+                    }
+                }
             }
         }
         Text(stringResource(R.string.ai_tpl_gen_examples), color = dim, fontSize = TextSize.label)
@@ -269,7 +333,7 @@ private fun GenerateHere(config: AiConfig?, ready: Boolean, coversOnly: Boolean,
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
             FilledTonalButton(
                 onClick = { if (running) gen.stop() else generate() },
-                enabled = running || request.isNotBlank(),
+                enabled = running || (request.isNotBlank() && !(picture && painter == null)),
                 modifier = Modifier.heightIn(min = MinTouchTarget),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = palette.selectionBackground.toComposeColor(),
@@ -444,5 +508,29 @@ private fun Action(icon: ImageVector, title: String, about: String, onClick: () 
             Text(title, color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
             Text(about, color = palette.textDim.toComposeColor(), fontSize = TextSize.label, lineHeight = 17.sp)
         }
+    }
+}
+
+/** A route's provider as people know it: its name, else its endpoint's host. */
+private fun routeLabel(route: AiConfig): String =
+    route.providerOf(route.provider)?.label ?: runCatching { java.net.URI(route.url).host }.getOrNull().orEmpty()
+
+/** A labelled row showing the current [choice] that opens a menu of [items]; picking one calls the given close. */
+@Composable
+private fun ModelPicker(title: String, choice: String, enabled: Boolean, items: @Composable (close: () -> Unit) -> Unit) {
+    val palette = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
+                .clickable(enabled = enabled, role = Role.DropdownList) { open = true }.padding(horizontal = Space.s4),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s8),
+        ) {
+            Text(title, Modifier.weight(1f), color = palette.text.toComposeColor(), fontSize = TextSize.body)
+            Text(choice, Modifier.weight(1f, fill = false), color = palette.text.toComposeColor(), fontSize = TextSize.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(XnotesIcons.chevronDown, null, Modifier.size(16.dp), tint = palette.textDim.toComposeColor())
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 420.dp)) { items { open = false } }
     }
 }

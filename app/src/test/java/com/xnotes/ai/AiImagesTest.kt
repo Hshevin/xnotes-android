@@ -17,7 +17,7 @@ class AiImagesTest {
     private val jpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0)
     private fun reply(bytes: ByteArray) = """{"created":1,"data":[{"b64_json":"${Base64.getEncoder().encodeToString(bytes)}"}]}"""
 
-    private val openai = AiProvider("p1", "OpenAI", "https://api.openai.com/v1", "sk-test-0123456789", listOf("gpt-text"))
+    private val openai = AiProvider("p1", "OpenAI", "https://api.openai.com/v1", "sk-test-0123456789", listOf("gpt-text"), imageModels = listOf("gpt-image-1"))
     private val other = AiProvider("p2", "Other", "https://api.deepseek.com", "ds-key", listOf("deepseek-chat"))
     private val config = AiConfig(providers = listOf(openai, other), provider = "p2", imageProvider = "p1", imageModel = "gpt-image-1").route("p2", "deepseek-chat")
 
