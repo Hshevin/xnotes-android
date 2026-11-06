@@ -320,3 +320,31 @@ PDF 笔记、普通笔记、无限画布可混合并排；同一 PDF／分页笔
 已实施，独立审核发现的入口、尺寸刷新与重建比例问题已修复；最终独立复核已完成，未发现仍需先处理的确定性代码错误。2770 项主机测试通过、Android 仪器源码编译通过，真实 IME／宿主／设备验收未运行。复用 ui/TextEditorOverlay.kt 的 TextEditHost 和 canvas/EditingField；通过默认 no-op 的光标几何回报和默认不限制的文本接受策略适配导图，旧笔记／画布默认行为不变。Graph 适配器只编辑事务草稿，屏蔽底图文字与输入；完成时校验初始文本，按当前宽度测高，合并保留来源等字段，整次更新／分支布局一步撤销。无改动不重排；取消不改模型。编辑事务 key 不随相机/IME/来源更新重建。
 
 EditingField.x/y 是宿主 viewport 物理 px，width/height/fontPx 是内容 px，zoom 为图实际比例；直接沿用既有 Density 与 graphicsLayer。内容原点和度量须来自 MapPainter（16px 内距、width-32、18px 字体），不把整个节点当文字框。光标回报映射 rotation 的四角；仅图相机响应遮挡，防止系统窗口额外平移和反馈抖动。图工具栏编辑时压缩以给 IME 留出可编辑区域。进入前释放图手势；结束统一拒绝迟到回调，待 IME/尺寸稳定后恢复原相机和选择。验收与风险见 tasks/review.md。
+
+### B2 分拆及 B2a 待审核计划：原始 manifest 字节保真锚点升级
+
+B1b 本地提交 c5d0d4ac。B2 不以进程 Page.uid 或 GlueIds 的位置序号冒充稳定身份，分为三步：B2a 升级基础，B2b 模型／编解码／快照／复制与显式存储接入，B2c 碎片等确定后继和删除／移动／撤销语义。C1 对象引用必须等依赖完成，不能提前按位置匹配。
+
+B2a 输入是已具有 BundleIdentity 的原生 .xnote/.xcanvas；输出为独立暂存并校验的候选文件。本步不自动接到打开／保存／注册路径，不重编码任何模型或采样。计划在 manifest 的每个直接 page 对象与其直接 item 对象、canvas 根 items 的直接对象中追加独立 UUID `reference_id`。已有 ID 原样保留且严格验证、不随位置重建；同文档内重复 UUID、非字符串／无效 UUID 或部分对象缺 ID 均拒绝，以后由显式修复处理。仅完整旧格式（所有可锚定对象都缺 ID）允许首次生成；未知 item 也取得 ID，未知嵌套 extensions 中同名 pages/items 不误处理。
+
+复用 JsonPull 识别精确结构，不经 JSON DOM／模型重新输出。给该内部 parser 增加消费字符位置（UTF-16 code units）与严格末尾检查，不改变现有默认读写行为。第一次只读取并记录新增字段的插入位置／UUID；第二次严格 UTF-8 解码、原字符片段流式复制和插入，再 UTF-8 编码。合法 UTF-8 原字节往返不变，数字字面量、空格、未知字段、笔压／时间字符串和原 PDF 不重新序列化。需核实 JsonPull 跳过值的严格性，对此升级路径增加必要的词法／深度／容量校验，拒绝尾随垃圾／畸形输入／取消。原 JSON 大内容不整份驻留内存；只保留对象ID和插入点。
+
+ZIP 在新候选文件中复制全部原条目，manifest 以插入结果替换；可优先复用 ZipTail 追加并替换中心目录记录，否则流式重封装且逐条 SHA-256 保留所有非 manifest 原始解压负载，包括 PDF、音频和未知扩展。拒绝重复 ZIP 名称。候选 fsync、再读校验 ID 与生成 manifest 的摘要；所有非 manifest 摘要须相同；来源摘要未变化才允许原子本地发布。SAF 仍用既有 MigrationPublication 的恢复发布而非直接覆盖，留到 B2b 显式接入。本步骤本身不开放 SAF 写入。
+
+验收：独立 JSON 解析验证只新增预期路径字段；移除本次插入字段后与原 manifest 字节完全一致；UTF-8 中文／emoji／转义、非标准数字拼写保真、16KiB 缓冲边界、大样本流、未知嵌套、空页、幂等、合法原ID／重复／缺失／损坏／截断／尾随垃圾、取消、ZIP未知／PDF载荷、发布前来源修改、失败保留原件。主机与 Android org.json 平台差异分开；该基础优先纯 JVM，后续存储行为保留仪器测试。
+
+下一步 B2b 在 Page 和各 CanvasItem 增加持久 ID，正常新增／深拷贝取得新 ID，autosave snapshot 保持原 ID 并冻结归属；编解码不按加载成功后的列表索引配对，直接读取对象字段。先确保已有 BundleIdentity 的源升级候选被安全持久化，再允许创建外部引用。身份丢失不能把新生成的 ID 当成旧来源恢复，已知升级状态／引用失效由登记与 C2 显式修复路径处理。B2c 再保存确切后继图，不按几何相似度猜测；这两步需各自独立计划审核。
+
+B2a 计划审核修订（已接受）：候选同时带独立 `xnotes-anchors.json` 版本标记（format=xnotes-object-anchors，version=1，documentId须与BundleIdentity一致），不靠“全缺ID”推断升级状态。准备API额外接收可信 expectedAnchored 状态，登记层已知升级过但标记／全部ID被剥离时拒绝重建；源内标记存在时任何应有ID缺失都拒绝。首次合法空画布仍写标记，重开零对象有效，之后出现无ID对象属于损坏而非再次旧格式升级。标记与字段同时被外部旧写入器移除、且无可信登记记录时无法离线推断旧身份，此边界不能冒充已恢复旧引用。新增测试覆盖标记+全缺、expectedAnchored+标记也缺、空画布幂等与新增缺ID。候选同时验证版本标记，非manifest载荷比较仅排除本次新增 anchors 条目；已有标记不重写。
+
+JsonPull 现有 skipValue 容忍部分数字与未转义控制符，根结束也不会检查尾随内容。实现须使用显式strict模式（默认false保持原笔记读取兼容），strict模式校验JSON数字词法、字符串控制符、深度与末尾；迁移始终开启。字符消费位置独立于Reader预读位置，覆盖buffer refill和EOF。格式字段可能晚于pages/items：先短扫描确认format，再完整严格结构扫描，最后按字符位流式插入；所有扫描均只读且带取消，输入使用严格UTF-8解码，最终候选在新文件中完整校验。
+
+B2a 容器审核修订（已接受）：本步骤**不使用在中心目录前追加替代 manifest 的 ZipTail 手法**；旧 local manifest 即使从中心目录过滤，ZipInputStream 仍先读到旧条目。统一流式重封装候选的所有条目，非manifest解压载荷逐字保留。源和候选分别校验 ZipFile 中心目录与 ZipInputStream 顺序枚举的名称、唯一性和负载摘要一致；拒绝原容器中两种读取方式不一致的孤立／重复local记录。候选只能有一份实际local manifest，并保留manifest后面的未知条目／identity／PDF。新增非尾manifest、尾随扩展、孤立旧local manifest回归；不以ZipFile单独验证替代应用实际顺序读取验证。
+
+B2a 严格性／资源审核修订（已接受）：完整主扫描拒绝所有对象的重复键（按JSON反转义后的键名），包括format/version/pages/items/reference_id，短扫描得到的format须与完整扫描一致。只升级当前已支持的manifest版本；要求对应pages/items容器与直接元素类型正确，不把未来版本或损坏容器当旧格式。未知item kind及其所有字段保留，不对不认识的kind作模型解释。数字保真指合法JSON但未规范化的字面量（如-0、1.2500e+02），不接受非法JSON数字。
+
+strict读取路径明确限制单token最多1,048,576个字符、JSON嵌套256层、manifest最多512MiB、锚点对象及插入点最多200,000个；拒绝超限保留原件，不静默截断。JsonPull严格模式在token分段累积时检查容量，读取缓冲／结构扫描／复制循环均检查取消；旧默认解析不加此限制。此容量边界不是支持任意大旧笔记的承诺；B2a暂不自动接入口，后续接入须有清楚的失败提示与只读恢复。无需为了跳过未知值而整份构建DOM。
+
+B2a 最终计划审核已完成，全部建议接受。补充同一快照约束：先复制原件到独立暂存文件并核对快照 SHA-256 与预先取得的来源摘要相同，所有格式短扫、结构扫描、字符复制及 ZIP 校验只打开这份快照，防止跨遍 A→B→A 对应错位。最终发布仍核对原件摘要。UTF-8 decoder 与 encoder 均使用 REPORT，持续一个 Reader/Writer 跨所有字符块，禁止每块单独编码；计数使用 Long 且只计已消费 UTF-16 单元。新增 1 字符短读与代理对跨缓冲测试。
+
+B2a 实现复核修订：前置ZIP摘要即按名称限流，manifest 512MiB、anchors和BundleIdentity条目各4096字节，同时检查声明／实际解压字节；不能先完整摘要再限流。重复键去重另外限制单键1024字符、活动递归链8192键／262144字符，单对象仍最多4096键，退出兄弟对象释放预算。均有主机回归。实现与测试细节见 docs/movinkpad/reference-anchors-2026-11-07.md；本阶段仍不接文档打开／SAF。

@@ -23,3 +23,11 @@
 主机回归新增 8 项事务与 5 项几何测试；最终 tmp/text-stage-verified.log 全量 2770 项通过，Android 仪器源码编译通过。新增 MapTextEditingHostTest 编译覆盖实际输入连接、resize 与 Activity 重建，但未在设备／模拟器执行。最终独立复核进行中，不将主机几何结果等同平台 IME 验收。
 
 复核建议已补入仪器源码：resize 前等待相机稳定，验证实际字段回报的光标在新可视区；返回同时断言相机内容中心、比例和选择。新增内部几何诊断只保留字段最近的宿主像素回报。最后 tmp/text-host-compile-final.log 再次编译通过；这些仪器断言仍未运行。
+
+## B2a 原始字节保真锚点计划审核（2026-11-07）
+
+独立代理 review_input_plan 只读审核。已接受全部必修：持久版本标记与可信expectedAnchored状态（包括空画布）；拒绝重复反转义结构键／未来版本／错误容器；严格词法、token／总字节／深度／对象容量与取消；同一份预先校验的不可变快照做所有扫描；连续REPORT UTF8编解码与已消费字符Long计数。改用流式重封装，严禁只在中心目录替代manifest留下旧local记录；同时校验ZipFile与ZipInputStream的唯一条目及负载摘要。详见tasks/plan.md完整B2a计划。B2b模型/编解码/快照/存储接入与B2c后继另审；本步骤暂不触发实际打开文件升级。
+
+B2a 实现独立审核发现并修复：前置ZIP摘要先于reader限制导致超大条目完整解压；改为中央目录和顺序视图均检查声明尺寸及实际字节，清单512MiB、marker/BundleIdentity各4096。重复键HashSet可持有大量字符串；增加短键及活动祖先累计预算，补嵌套超限和兄弟对象释放测试。超限拒绝与取消清理不放宽。孤立local测试首次因有ZIP注释而不能用ZipTail构造，保留其他带注释夹具，仅该反例用无注释容器，并先独立断言中心目录与顺序清单确有不同。tmp/anchor-bundle-green.log保留该夹具失败证据；tmp/anchor-bundle-fixed.log和tmp/anchor-budget-focused.log均通过。首次全量tmp/anchor-stage-full.log 2788项通过，最后身份条目限流补充后继续全量验证，不把旧结果冒充最后结果。
+
+B2a 最终复核完成，身份条目同样前置限流的漏项已修复；独立代理未发现剩余确定性必修。tmp/anchor-stage-verified.log 全量2789项通过、Android仪器源码编译成功，diff检查通过。未运行仪器／设备／真实SAF；内部staging尚未接入口。

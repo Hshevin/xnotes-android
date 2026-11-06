@@ -11,7 +11,7 @@ internal class JsonPullException(message: String) : Exception(message)
  * straight off the zip stream: the old org.json DOM held a boxed wrapper for every
  * number, which cost a 58 MB manifest ~150 MB of heap and tens of seconds to open.
  */
-internal class JsonPull(private val reader: Reader) {
+internal class JsonPull(private val reader: Reader,private val strict:Boolean=false,private val tokenLimit:Int=1_048_576) {
 
     enum class Token { BEGIN_OBJECT, END_OBJECT, BEGIN_ARRAY, END_ARRAY, NAME, STRING, NUMBER, BOOLEAN, NULL, END_DOCUMENT }
 
@@ -19,6 +19,9 @@ internal class JsonPull(private val reader: Reader) {
     private var pos = 0
     private var limit = 0
     private var eof = false
+    private var consumedBeforeBuffer=0L
+    /** Consumed UTF-16 units, excluding Reader prefetch; valid across short reads and EOF. */
+    val position:Long get()=consumedBeforeBuffer+pos
 
     private var stack = BooleanArray(32) // true = object, false = array
     private var had = BooleanArray(32) // container has parsed at least one entry
@@ -87,7 +90,7 @@ internal class JsonPull(private val reader: Reader) {
         // number straddling the buffer edge) falls through to the general path below.
         var i = pos
         while (i < limit && isNumberChar(buf[i])) i++
-        if (i < limit) {
+        if (!strict && i < limit) {
             val v = fixedPoint(pos, i)
             if (v != null) {
                 pos = i
@@ -163,7 +166,7 @@ internal class JsonPull(private val reader: Reader) {
     fun nextSample(out: DoubleArray): Int {
         expect(Token.BEGIN_ARRAY)
         for (i in out.indices) out[i] = Double.NaN
-        val fast = scanTuple(out)
+        val fast = if(strict) -1 else scanTuple(out)
         if (fast >= 0) {
             startValue()
             return fast
@@ -224,6 +227,7 @@ internal class JsonPull(private val reader: Reader) {
         expect(Token.NUMBER)
         val t = scanNumber()
         startValue()
+        if(strict) return t.toIntOrNull() ?: throw JsonPullException("Expected an integer")
         return t.toIntOrNull() ?: try {
             t.toDouble().toInt()
         } catch (_: NumberFormatException) {
@@ -299,6 +303,7 @@ internal class JsonPull(private val reader: Reader) {
     }
 
     private fun push(isObject: Boolean) {
+        if(strict && depth>=256) throw JsonPullException("JSON nesting limit exceeded")
         if (depth == stack.size) {
             stack = stack.copyOf(depth * 2)
             had = had.copyOf(depth * 2)
@@ -311,6 +316,7 @@ internal class JsonPull(private val reader: Reader) {
     private fun doPeek(): Token {
         skipWs()
         if (depth == 0) {
+            if(strict && rootConsumed && ensure()) throw JsonPullException("Trailing JSON content")
             if (rootConsumed || !ensure()) return Token.END_DOCUMENT
             return valueTokenAt(buf[pos])
         }
@@ -364,10 +370,12 @@ internal class JsonPull(private val reader: Reader) {
             var i = pos
             while (i < limit) {
                 val c = buf[i]
+                if(strict && c<' ') throw JsonPullException("Unescaped control character")
                 if (c == '"' || c == '\\') break
                 i++
             }
             sb.append(buf, pos, i - pos)
+            checkTokenLimit()
             pos = i
             if (pos < limit) {
                 if (buf[pos] == '"') {
@@ -376,6 +384,7 @@ internal class JsonPull(private val reader: Reader) {
                 }
                 pos++
                 sb.append(readEscape())
+                checkTokenLimit()
             } else if (!ensure()) {
                 throw JsonPullException("Unterminated string")
             }
@@ -414,11 +423,17 @@ internal class JsonPull(private val reader: Reader) {
             var i = pos
             while (i < limit && isNumberChar(buf[i])) i++
             sb.append(buf, pos, i - pos)
+            checkTokenLimit()
             pos = i
             if (i < limit || !ensure()) break
         }
         if (sb.isEmpty()) throw JsonPullException("Malformed number")
-        return sb.toString()
+        val literal=sb.toString()
+        if(strict && !JSON_NUMBER.matches(literal)) throw JsonPullException("Malformed JSON number")
+        return literal
+    }
+    private fun checkTokenLimit() {
+        if(strict && sb.length>tokenLimit) throw JsonPullException("JSON token limit exceeded")
     }
 
     private companion object {
@@ -427,6 +442,7 @@ internal class JsonPull(private val reader: Reader) {
 
         /** Powers of ten that are themselves exact doubles; past 1e22 they are not. */
         private val POW10 = DoubleArray(23) { java.math.BigDecimal.TEN.pow(it).toDouble() }
+        private val JSON_NUMBER=Regex("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
     }
 
     private fun isNumberChar(c: Char): Boolean =
@@ -447,6 +463,7 @@ internal class JsonPull(private val reader: Reader) {
     private fun ensure(): Boolean {
         if (pos < limit) return true
         if (eof) return false
+        consumedBeforeBuffer+=pos
         var n = reader.read(buf)
         while (n == 0) n = reader.read(buf)
         pos = 0

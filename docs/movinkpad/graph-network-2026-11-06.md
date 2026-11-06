@@ -100,3 +100,8 @@ D 文件关系网络 UI 和可重建反向索引尚未实现。不得从同一�
 验证：tmp/text-green.log 先验证草稿事务；tmp/text-geometry.log 验证几何与事务；tmp/text-stage-verified.log 全量 **2770 项主机测试，0 failures/errors/skipped**，compileDebugAndroidTestKotlin 成功。新增 8 项事务测试与 5 项几何测试覆盖组合值、emoji、多行、空值、超限、并发来源／宽度、旧正文冲突、迟到回调、一步撤销、恢复等待、旋转／缩放光标、极小可视区幂等避让和新尺寸／density 下相机中心恢复。
 
 MapTextEditingHostTest 已接入 PenTestRunner：使用实际 Compose InputConnection 的组合输入、确认／取消、仅宿主 resize、Activity 重建保持事务与比例。**仅编译，未执行**；不能据此宣称软键盘、旋转或真实平台宿主验收通过。目标设备笔输入、GPU、真实 SAF 和全引用闭环仍未验收；没有打包、安装、推送或合并。下一源码阶段 B2 为稳定页／对象身份与字节保真迁移，再推进 C1/C2/D；A2 剩余需求继续保留。
+
+
+### B2a 锚点升级基础（2026-11-07）
+
+已实现内部原始清单片段插入和安全候选准备，新增稳定页／对象UUID与独立版本标记，保留旧笔迹及所有非清单ZIP负载原字节，不借模型升级。源与候选双ZIP读取视图校验、不可变暂存快照、摘要冲突、取消、资源限流和异常清理有回归。全量2789项主机测试通过、Android仪器源码编译通过、独立复核完成。**尚未接入Page／CanvasItem、打开／保存／SAF，不构成对象引用功能完成**。实现和限制见[锚点升级基础](reference-anchors-2026-11-07.md)，继续B2b/B2c及C/D。
