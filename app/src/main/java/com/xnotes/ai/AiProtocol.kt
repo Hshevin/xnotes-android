@@ -119,9 +119,36 @@ object AiProtocol {
             items.put(JSONObject().put("role", message.role).put("content", content))
         }
         tail.forEach(items::put)
-        return JSONObject().put("model", model).put("stream", true).put("max_tokens", config.maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)).put("messages", items)
+        return JSONObject().put("model", model).put("stream", true).put(tokenField(config.url), config.maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)).put("messages", items)
             .also { AiThinking.apply(it, config.effort, config.thinkingFormat, config.url) }
             .also { if (tools != null) it.put("tools", tools).put("tool_choice", toolChoice) }
+    }
+
+    /**
+     * OpenAI's own API has replaced `max_tokens` with `max_completion_tokens` and rejects the old
+     * field on its reasoning models (o-series, GPT-5 and later) with HTTP 400. Other OpenAI-compatible
+     * providers mostly still read only `max_tokens`, so the newer field goes to OpenAI alone.
+     */
+    fun tokenField(url: String): String {
+        val host = runCatching { URI(url.trim()).host.orEmpty().lowercase() }.getOrDefault("")
+        return if (host == "api.openai.com") "max_completion_tokens" else "max_tokens"
+    }
+
+    /** Longest provider error message shown with a failed request. */
+    const val ERROR_DETAIL_MAX = 300
+
+    /**
+     * The message of an OpenAI-style error body (`{"error":{"message":…}}`, or `error` / `message` as a
+     * string), on one line, bounded, and with [key] masked in case a provider echoes it; "" when the
+     * body is not such JSON, so HTML pages and other noise are never shown.
+     */
+    fun providerError(body: String, key: String): String {
+        val json = runCatching { JSONObject(body.trim()) }.getOrNull() ?: return ""
+        val error = json.opt("error")
+        val raw = (error as? JSONObject)?.opt("message") as? String ?: error as? String ?: json.opt("message") as? String ?: return ""
+        var text = raw.replace(Regex("\\s+"), " ").trim()
+        if (key.length >= 8) text = text.replace(key, "***")
+        return if (text.length <= ERROR_DETAIL_MAX) text else text.take(ERROR_DETAIL_MAX - 1) + "…"
     }
     fun delta(json: String): String {
         // Android optString coerces JSONObject.NULL to "null". Only actual text is a delta.

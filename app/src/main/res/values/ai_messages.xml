@@ -10,6 +10,7 @@
     <string name="ai_msg_search_response_too_large">Search response is too large</string>
     <string name="ai_msg_request_too_large">Screenshot or chat is too large. Start a new chat and use a smaller screenshot.</string>
     <string name="ai_msg_request_http_failed">Request failed (HTTP %1$d). Check the endpoint, key, model and quota.</string>
+    <string name="ai_msg_request_http_failed_detail">Request failed (HTTP %1$d): %2$s</string>
     <string name="ai_msg_answer_too_long">Answer exceeds the length limit</string>
     <string name="ai_msg_provider_error">The provider returned an error. Check the model settings.</string>
     <string name="ai_msg_connection_ended_early">Connection ended early. Try again.</string>

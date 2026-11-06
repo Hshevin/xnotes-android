@@ -125,6 +125,7 @@
 - 供应商被删除的会话不得回退到其他供应商发送，须显示「选择模型」并拒绝发送。仅支持 OpenAI Chat Completions。详见 `docs/movinkpad/ai-providers-2026-11-05.md`。
 - 自定义提示词与思考深度只用于回答请求（回答中的联网与 PDF 工具调用同样使用会话设置）；仅在不支持工具调用时退回的 PDF JSON 读取步骤使用 `AiConfig.forTools()`。会话内的模型 / 深度选择存于会话记录，缺省跟随默认。
 - 上限（如 200 个模型）在添加时拒绝并提示，保存时校验失败，不得静默截断。
+- 输出上限字段按主机区分：OpenAI 官方 `api.openai.com` 发 `max_completion_tokens`（其推理模型拒绝 `max_tokens`），其他兼容接口仍发 `max_tokens`。请求失败时附上供应商错误体中的 `error.message`（单行、限长、遮蔽 API Key），非 JSON 错误页不显示。详见 `docs/movinkpad/ai-openai-http400-2026-11-07.md`。
 
 ### 联网搜索
 
