@@ -25,11 +25,245 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.PI
 
 /** Real EGL scene/queue tests; these do not exercise a window, front-buffer handoff, or target GPU compatibility. */
 class CanvasSceneSnapshotTest {
+    @Test fun sharedRasterSourceSurvivesGeometryAndSameBindingRebuildUntilLastRemoval() = withPbuffer {
+        val files = mutableListOf<File>()
+        try {
+            withScene { scene, decodes ->
+                val source = quadrantImage(files, 0)
+                val a = ImageItem(source, Rect(8.0, 8.0, 20.0, 20.0))
+                val b = ImageItem(source, Rect(32.0, 8.0, 20.0, 20.0))
+                val binding = Any()
+                scene.batch {
+                    scene.reset(binding)
+                    scene.upsertImage(a, a.paintBounds())
+                    scene.upsertImage(b, b.paintBounds())
+                }
+                drawScene(scene)
+                assertEquals(1, decodes.pending.size)
+                assertEquals(1, scene.textures.pendingCount)
+                a.translate(0.0, 4.0)
+                scene.upsertImage(a, a.paintBounds())
+                scene.remove(b)
+                drawScene(scene)
+                assertEquals("geometry/shared-member removal must retain the request", 1, decodes.pending.size)
+                scene.batch {
+                    scene.reset(binding)
+                    scene.upsertImage(a, a.paintBounds())
+                }
+                drawScene(scene)
+                assertEquals("same-binding full rebuild retains the source", 1, decodes.pending.size)
+                scene.remove(a)
+                drawScene(scene)
+                assertEquals(0, scene.textures.pendingCount)
+                scene.upsertImage(a, a.paintBounds())
+                drawScene(scene)
+                assertEquals("reentry gets a new request", 2, decodes.pending.size)
+                decodes.finishPending()
+                drawScene(scene)
+                assertEquals(0, scene.textures.pendingCount)
+                assertEquals(1, scene.textures.textureCount)
+            }
+        } finally { files.forEach { it.delete() } }
+    }
+
+    @Test fun newDocumentBindingRejectsReadyDecodeEvenWithTheSameImageData() = withPbuffer {
+        val files = mutableListOf<File>()
+        try {
+            withScene { scene, decodes ->
+                val image = ImageItem(quadrantImage(files, 0), Rect(8.0, 8.0, 40.0, 40.0))
+                scene.batch { scene.reset(Any()); scene.upsertImage(image, image.paintBounds()) }
+                drawScene(scene)
+                decodes.finishPending() // A's bitmap is ready, but has never been uploaded.
+                scene.batch { scene.reset(Any()); scene.upsertImage(image, image.paintBounds()) }
+                drawScene(scene)
+                assertEquals("A's result cannot satisfy B", 0, scene.textures.textureCount)
+                assertEquals(1, scene.textures.pendingCount)
+                assertEquals(1, decodes.pending.size)
+                decodes.finishPending()
+                drawScene(scene)
+                assertEquals(1, scene.textures.textureCount)
+                assertEquals(0, scene.textures.pendingCount)
+            }
+        } finally { files.forEach { it.delete() } }
+    }
+
+    @Test fun rasterFailuresAndRejectedSubmissionsSettleWithBoundedRetries() = withPbuffer {
+        for (throws in listOf(false, true)) {
+            var decoded = 0
+            withTextureCache({ _, _ ->
+                decoded++
+                if (throws) error("decode failed") else null
+            }) { cache, image ->
+                val work = ArrayDeque<Runnable>()
+                repeat(2) {
+                    assertEquals(0, cache.textureFor(image, 128) { work.addLast(it) })
+                    work.removeFirst().run()
+                    cache.uploadPending()
+                    assertEquals(0, cache.pendingCount)
+                }
+                repeat(20) { cache.textureFor(image, 128) { work.addLast(it) } }
+                assertTrue(work.isEmpty())
+                assertEquals(2, decoded)
+                // No GPU name exists here. This tests the recovery notification, not physical
+                // context destruction (the separate halo fixture exercises actual recreation).
+                cache.onContextCreated(2)
+                cache.textureFor(image, 128) { work.addLast(it) }
+                assertEquals(1, work.size)
+                cache.close()
+                work.removeFirst().run()
+                assertEquals(2, decoded)
+            }
+        }
+        withTextureCache({ _, _ -> error("Rejected work must not decode") }) { cache, image ->
+            var attempts = 0
+            repeat(20) {
+                cache.textureFor(image, 128) {
+                    attempts++
+                    throw java.util.concurrent.RejectedExecutionException()
+                }
+                cache.uploadPending()
+                assertEquals(0, cache.pendingCount)
+            }
+            assertEquals(2, attempts)
+        }
+    }
+
+    @Test fun lateLowResolutionBitmapCannotReplaceHighResolutionOrClearItsPending() = withPbuffer {
+        val started = CountDownLatch(1)
+        val finish = CountDownLatch(1)
+        val low = AtomicReference<Bitmap?>()
+        val high = AtomicReference<Bitmap?>()
+        val failure = AtomicReference<Throwable?>()
+        withTextureCache({ _, edge ->
+            val bitmap = solidBitmap()
+            if (edge == 128) {
+                low.set(bitmap)
+                started.countDown()
+                try {
+                    check(finish.await(5, TimeUnit.SECONDS))
+                } catch (error: Throwable) {
+                    failure.set(error) // TextureCache handles decoder exceptions; keep fixture failures visible.
+                    bitmap.recycle()
+                    throw error
+                }
+            } else high.set(bitmap)
+            bitmap
+        }) { cache, image ->
+            val work = ArrayDeque<Runnable>()
+            cache.textureFor(image, 128) { work.addLast(it) }
+            val first = work.removeFirst()
+            val worker = Thread { try { first.run() } catch (error: Throwable) { failure.set(error) } }
+            worker.start()
+            try {
+                assertTrue(started.await(5, TimeUnit.SECONDS))
+                cache.textureFor(image, 512) { work.addLast(it) }
+                work.removeFirst().run()
+                cache.uploadPending()
+                val uploaded = cache.textureFor(image, 512) { work.addLast(it) }
+                assertTrue(uploaded != 0)
+                assertTrue(checkNotNull(high.get()).isRecycled)
+                finish.countDown()
+                worker.join(5_000)
+                assertFalse(worker.isAlive)
+                failure.get()?.let { throw AssertionError(it) }
+                assertTrue(checkNotNull(low.get()).isRecycled)
+                cache.uploadPending()
+                assertEquals(uploaded, cache.textureFor(image, 512) { work.addLast(it) })
+                assertEquals(1, cache.textureCount)
+                assertEquals(0, cache.pendingCount)
+                assertTrue(work.isEmpty())
+            } finally {
+                finish.countDown()
+                worker.join(5_000)
+            }
+        }
+    }
+
+    @Test fun validCpuResultsSurviveContextNotificationBeforeAndAfterCompletion() = withPbuffer {
+        for (completeFirst in listOf(false, true)) {
+            val bitmap = AtomicReference<Bitmap?>()
+            withTextureCache({ _, _ -> solidBitmap().also(bitmap::set) }) { cache, image ->
+                val work = ArrayDeque<Runnable>()
+                cache.textureFor(image, 128) { work.addLast(it) }
+                if (completeFirst) work.removeFirst().run()
+                // There are no GPU entries to abandon: exercise CPU ownership across the context
+                // callback while using this pbuffer solely for the eventual real GL upload.
+                cache.onContextCreated(2)
+                if (!completeFirst) work.removeFirst().run()
+                assertFalse(checkNotNull(bitmap.get()).isRecycled)
+                cache.uploadPending()
+                assertTrue(checkNotNull(bitmap.get()).isRecycled)
+                assertTrue(cache.textureFor(image, 128) { work.addLast(it) } != 0)
+                assertEquals(0, cache.pendingCount)
+                assertTrue(work.isEmpty())
+            }
+        }
+    }
+
+    @Test fun failedUploadKeepsExistingTextureAndRecyclesTheNewBitmap() = withPbuffer {
+        val decoded = ArrayList<Bitmap>()
+        withTextureCache({ _, _ -> solidBitmap().also(decoded::add) }) { cache, image ->
+            val work = ArrayDeque<Runnable>()
+            cache.textureFor(image, 128) { work.addLast(it) }
+            work.removeFirst().run()
+            cache.uploadPending()
+            val low = cache.textureFor(image, 128) { work.addLast(it) }
+            assertTrue(GLES30.glIsTexture(low))
+            val bytes = cache.residentBytes
+            cache.textureFor(image, 512) { work.addLast(it) }
+            work.removeFirst().run()
+            // Inject a GL error, forcing the upload validation path to reject its new name.
+            GLES30.glBindTexture(-1, 0)
+            cache.uploadPending()
+            assertEquals(GLES30.GL_NO_ERROR, GLES30.glGetError())
+            assertTrue(decoded.all { it.isRecycled })
+            assertEquals(bytes, cache.residentBytes)
+            assertEquals(1, cache.textureCount)
+            assertTrue(GLES30.glIsTexture(low))
+            assertEquals(low, cache.textureFor(image, 128) { work.addLast(it) })
+            assertEquals(0, cache.pendingCount)
+        }
+    }
+
+    @Test fun closeRecyclesReadyBitmapAndCannotBeReopenedByContextNotification() = withPbuffer {
+        val bitmap = AtomicReference<Bitmap?>()
+        withTextureCache({ _, _ -> solidBitmap().also(bitmap::set) }) { cache, image ->
+            val work = ArrayDeque<Runnable>()
+            cache.textureFor(image, 128) { work.addLast(it) }
+            work.removeFirst().run()
+            cache.close()
+            assertTrue(checkNotNull(bitmap.get()).isRecycled)
+            cache.onContextCreated(2)
+            cache.retainSources(Any(), listOf(image))
+            cache.uploadPending()
+            assertEquals(0, cache.textureFor(image, 128) { work.addLast(it) })
+            assertTrue(work.isEmpty())
+            assertEquals(0, cache.pendingCount)
+        }
+    }
+
+    private fun solidBitmap() = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.GRAY) }
+
+    private fun withTextureCache(decode: (ImageData, Int) -> Bitmap?, block: (TextureCache, ImageData) -> Unit) {
+        val cache = TextureCache(decode = decode)
+        try {
+            cache.onContextCreated(1)
+            // The injected decoder does not read/create this file; image dimensions permit the
+            // fixture's two distinct quality requests without allocating large Android bitmaps.
+            val image = ImageData(File(PenTestRunner.instance.targetContext.cacheDir, "unused-decode-source"), 1024, 1024)
+            cache.retainSources(Any(), listOf(image))
+            block(cache, image)
+        } finally { cache.release() }
+    }
+
     @Test fun queuedImageFieldsStayFrozenUntilAnotherUpsert() = withPbuffer {
         val files = mutableListOf<File>()
         try {
@@ -342,16 +576,7 @@ class CanvasSceneSnapshotTest {
 
     private fun drawReady(scene: CanvasScene, decodes: Decodes) {
         repeat(MAX_DECODE_PASSES) {
-            GLES30.glViewport(0, 0, SIZE, SIZE)
-            GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
-            GLES30.glDisable(GLES30.GL_STENCIL_TEST)
-            GLES30.glColorMask(true, true, true, true)
-            GLES30.glDepthMask(true)
-            GLES30.glStencilMask(0xff)
-            GLES30.glClearColor(1f, 1f, 1f, 1f)
-            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT or GLES30.GL_STENCIL_BUFFER_BIT)
-            scene.drawContent(FRAME)
-            assertEquals(GLES30.GL_NO_ERROR, GLES30.glGetError())
+            drawScene(scene)
             if (decodes.pending.isEmpty()) {
                 assertEquals("all requested image decodes completed", 0, scene.textures.pendingCount)
                 return
@@ -359,6 +584,19 @@ class CanvasSceneSnapshotTest {
             decodes.finishPending()
         }
         fail("Image did not settle within $MAX_DECODE_PASSES controlled draws")
+    }
+
+    private fun drawScene(scene: CanvasScene) {
+        GLES30.glViewport(0, 0, SIZE, SIZE)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glDisable(GLES30.GL_STENCIL_TEST)
+        GLES30.glColorMask(true, true, true, true)
+        GLES30.glDepthMask(true)
+        GLES30.glStencilMask(0xff)
+        GLES30.glClearColor(1f, 1f, 1f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT or GLES30.GL_STENCIL_BUFFER_BIT)
+        scene.drawContent(FRAME)
+        assertEquals(GLES30.GL_NO_ERROR, GLES30.glGetError())
     }
 
     private fun withScene(block: (CanvasScene, Decodes) -> Unit) {
@@ -371,8 +609,9 @@ class CanvasSceneSnapshotTest {
             block(scene, decodes)
         } finally {
             decodes.pending.clear() // Unstarted tasks own no decoded bitmap.
+            // Final release also recycles any unreceived bitmap left by a failed draw/assertion.
             scene.textures.release()
-            // Also recycles a decoded bitmap still in the ready queue if a draw/assertion failed.
+            // A later context notification cannot reopen the closed cache.
             scene.textures.onContextCreated(2)
             store.release()
             // The enclosing EGL context owns the scene's other programs and transient buffers.

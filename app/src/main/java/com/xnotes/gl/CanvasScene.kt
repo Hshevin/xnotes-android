@@ -15,6 +15,7 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.SyncMark
 import java.util.IdentityHashMap
+import com.xnotes.core.model.ImageData
 import kotlin.math.floor
 
 /** Which part of the item under the pen a batch of triangles is. */
@@ -96,7 +97,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
         class Reserve(val vertices: Long, val indices: Long) : Edit()
-        object Reset : Edit()
+        class Reset(val binding: Any?) : Edit()
     }
 
     private val pending = SceneUpdateQueue<Edit>(::withReservations)
@@ -120,6 +121,9 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     private var tailParts: List<Part> = emptyList()
     private var wetBounds = Rect(0.0, 0.0, 0.0, 0.0)
     private val records = IdentityHashMap<CanvasItem, Record>()
+    private val imageSources = IdentityHashMap<ImageData, Int>()
+    private var imageBinding: Any = Any()
+    private var imageSourcesChanged = false
 
     /**
      * The selection under a drag. Its triangles stay exactly where they were tessellated and the
@@ -268,8 +272,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         post(Edit.Lift(ArrayList(items), at))
     }
 
-    fun reset() {
-        post(Edit.Reset)
+    fun reset(documentBinding: Any? = null) {
+        post(Edit.Reset(documentBinding))
     }
 
     /** Publish the whole successful batch at once; [afterCommit] runs on the producer afterwards. */
@@ -283,7 +287,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         var start = 0
         while (start < edits.size) {
             var end = start + 1
-            while (end < edits.size && edits[end] !== Edit.Reset) end++
+            while (end < edits.size && edits[end] !is Edit.Reset) end++
             var firstUpsert = -1
             var vertices = 0L
             var indices = 0L
@@ -1098,8 +1102,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                     is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
                     is Edit.SyncChanged -> for ((item, mark) in edit.marks) records[item]?.sync = mark
                     is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
-                    Edit.Reset -> applyReset()
+                    is Edit.Reset -> applyReset(edit.binding)
                 }
+            }
+            // Reset/rebuild and same-source geometry replacement must not revoke a source in
+            // the middle of an atomic update. Shared images survive until their last record exits.
+            if (imageSourcesChanged) {
+                textures.retainSources(imageBinding, imageSources.keys)
+                imageSourcesChanged = false
             }
         }
         reportMemory()
@@ -1121,7 +1131,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         // An item edited in place keeps its depth: only a structural change reorders, and that
         // arrives as its own message.
         val previousZ = records[edit.item]?.z
-        applyRemove(edit.item)
+        val previousSource = records[edit.item]?.image?.source
+        applyRemove(edit.item, updateImages = false)
         val parts = ArrayList<Part>(edit.parts.size)
         for (part in edit.parts) {
             // A translucent run accumulates at full alpha and gets its alpha back at cover time,
@@ -1130,9 +1141,17 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             val slice = store.put(part.mesh, baked) ?: continue
             parts.add(Part(slice, part.pass, part.color.withAlpha(255), part.color.a / 255.0, part.glow, part.covers))
         }
-        if (parts.isEmpty() && edit.image == null) return
+        if (parts.isEmpty() && edit.image == null) {
+            previousSource?.let(::removeImageSource)
+            return
+        }
         val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image, edit.sync)
         records[edit.item] = record
+        val source = edit.image?.source
+        if (previousSource !== source) {
+            previousSource?.let(::removeImageSource)
+            source?.let(::addImageSource)
+        }
         fileRecord(record)
     }
 
@@ -1201,9 +1220,10 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         tailParts = emptyList()
     }
 
-    private fun applyRemove(item: CanvasItem) {
+    private fun applyRemove(item: CanvasItem, updateImages: Boolean = true) {
         revision++
         val record = records.remove(item) ?: return
+        if (updateImages) record.image?.source?.let(::removeImageSource)
         unfileRecord(record)
         for (part in record.parts) store.free(part.slice)
     }
@@ -1215,14 +1235,31 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         for (i in items.indices) records[items[i]]?.z = i
     }
 
-    private fun applyReset() {
+    private fun applyReset(binding: Any?) {
         revision++
+        if (binding != null) imageBinding = binding
+        imageSources.clear()
+        imageSourcesChanged = true
         nextZ = 0
         lifted.clear()
         records.clear()
         buckets.clear()
         oversized.clear()
         store.clear()
+    }
+
+    private fun addImageSource(image: ImageData) {
+        val count = imageSources[image] ?: 0
+        imageSources[image] = count + 1
+        if (count == 0) imageSourcesChanged = true
+    }
+
+    private fun removeImageSource(image: ImageData) {
+        val count = checkNotNull(imageSources[image]) { "Missing scene image source" }
+        if (count == 1) {
+            imageSources.remove(image)
+            imageSourcesChanged = true
+        } else imageSources[image] = count - 1
     }
 
     // --- culling ---
