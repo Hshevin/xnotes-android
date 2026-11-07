@@ -1543,7 +1543,7 @@ private fun Modifier.endsPageSelection(editor: Editor): Modifier = pointerInput(
  * window. Each callback takes the pane it is acting for, because in a split there are two of them
  * and a picker's result has to come back to the one that opened it.
  */
-private class PaneActions(
+internal class PaneActions(
     val onToggleFullscreen: () -> Unit,
     val onMainMenu: () -> Unit,
     val onSaveSplit: () -> Unit,
@@ -1621,9 +1621,8 @@ private val SwallowTouches = Modifier.pointerInput(Unit) {
  * leaves the backstage showing.
  *
  * The panes are placed by offset and size inside one Box rather than by a Row that becomes a Column,
- * so direction changes need not replace the outer pane node. The toolbar's single/split branches
- * can still replace the inner AndroidView host: retained editor views are detached and reattached,
- * which restarts a GLSurfaceView's GL thread/context. This layout does not guarantee GL continuity.
+ * so normal layout changes retain each logical pane's host. Surface/EGL recreation is still
+ * managed by Android; keeping the View attached does not guarantee that its GPU context survives.
  */
 private data class SplitTitleDrag(val source: Editor, val origin: Offset, val point: Offset, val returning: Boolean = false)
 
@@ -1636,7 +1635,7 @@ private fun Editor.toolbarDocuments(): Set<com.xnotes.core.tools.ToolbarDocument
 }.toSet()
 
 @Composable
-private fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit, home: @Composable (Editor) -> Unit) {
+internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit, home: @Composable (Editor) -> Unit) {
     val second = editor.secondary
     val primaryVisible = editor.noteOpen || com.xnotes.ui.Pane.PRIMARY in homes
     val secondVisible = second != null && (second.noteOpen || com.xnotes.ui.Pane.SECONDARY in homes)
@@ -1741,26 +1740,26 @@ private fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnote
         if (primaryVisible) {
             if (com.xnotes.ui.Pane.PRIMARY in homes) Box(animatedPosition(primaryPosition)
                 .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent))) { home(editor) }
-            else EditorPane(
+            else androidx.compose.runtime.key(editor, editor.canvasOpen) { EditorPane(
                 editor = editor,
                 app = editor,
                 actions = actions,
                 closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
                 modifier = animatedPosition(primaryPosition)
                     .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent)),
-            )
+            ) }
         }
         if (secondVisible && second != null) {
             if (com.xnotes.ui.Pane.SECONDARY in homes) Box(animatedPosition(secondaryPosition)
                 .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent))) { home(second) }
-            else EditorPane(
+            else androidx.compose.runtime.key(second, second.canvasOpen) { EditorPane(
                 editor = second,
                 app = editor,
                 actions = actions,
                 closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
                 modifier = animatedPosition(secondaryPosition)
                     .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent)),
-            )
+            ) }
         }
         // Composed last so it sits over both panes and catches the drag before either of them.
         if (split) {
@@ -1851,11 +1850,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.PaneToolbarAround(
     onCover: (Double, Double, Double, Double) -> Unit,
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
-    if (show) ToolbarAround(bar, onCover, content)
-    else {
-        SideEffect { onCover(0.0, 0.0, 0.0, 0.0) }
-        Box(Modifier.weight(1f).fillMaxWidth()) { content {} }
-    }
+    ToolbarAround(bar, onCover, showToolbar = show, content = content)
 }
 
 /**
