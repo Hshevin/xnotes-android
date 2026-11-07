@@ -35,6 +35,7 @@
 
 - [版本更新与验证记录](docs/movinkpad/release-2026-11-02.md) · [早期开发记录](docs/movinkpad/development-history.md)
 - [源码构建与测试](docs/movinkpad/server-build.md)（JDK 21） · [MovinkPad 适配与验证范围](MOVINKPAD.md)
+- [渲染诊断与 Surface 捕获回迁](docs/movinkpad/render-diagnostics-backport-2026-11-07.md)（保留主线 View／湿墨层替换；仅增加诊断能力，本轮未编译运行，不代表黑屏已解决）
 - [无限画布退出分屏黑屏：排查与只读取证](docs/movinkpad/infinite-split-audit-2026-11-06.md)（根因未确认，尚无真机验证的修复）
 - [MovinkPad 正式版左右分屏黑区候选修复](docs/movinkpad/canvas-split-black-2026-11-07.md)（黑区从画布旧宽度边界开始；已实现跨宿主替换绘制表面，效果待真机验证）
 
