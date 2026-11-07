@@ -356,3 +356,13 @@
 - [ ] C2 来源往返、双窗格定位、反向引用、失效修复及备份语义。
 - [ ] D 局部／筛选／全库文件关系网络及加入手工画布。
 - [ ] MovinkPad Android 15 / Pro Pen 3、真实 SAF、杀进程、GPU 和完整 UI 验收。
+
+## 渲染诊断回迁待修（2026-11-07）
+
+- [ ] D-1～D-7：正式版逐帧诊断开销、捕获在新帧时失效、捕获预算泄漏、画布关闭未释放捕获、诊断 token 遗漏与版本号重复递增。后续渲染回迁／合并完成后一起修，详见 docs/movinkpad/render-diagnostics-review-2026-11-07.md。
+
+## 渲染回迁合并后审查与冒烟测试待修（2026-11-07）
+
+- [x] 已修（分支 `worktree-fix-render-followups`，2843 项 JVM 通过，仪器／真机未运行）：B6-1/2/3/5 图片显示倒退、P-1/P-5、S-1/S-2/S-3/S-6、D-1/D-3、U-1 剪贴板提示、P-6 整理、U-4 新建画布直接打开。
+- [ ] 未修：P-2/P-3/P-4（需窗口测试配合）、S-4、D-4～D-7、U-2/U-3、B5-1～B5-8、B6-4/6/7。D-2 经用户决定保持现状。原因与提交见 docs/movinkpad/render-backport-review-followups-2026-11-07.md。
+- [x] S-5 的 SVG worker 可变源文件读取：第五批在生产线程冻结 ImageDrawSnapshot，worker 只读请求；源码编译及 2817 项 JVM 通过，详见 docs/movinkpad/scene-batch-backport-2026-11-07.md。实际编辑器 SVG 调度／跨文档迟到结果及窗口、目标 GPU 运行验证仍待安排。

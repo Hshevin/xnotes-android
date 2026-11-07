@@ -44,3 +44,7 @@ B2b1 实现复核完成：模型基本契约无必修；补竞争与线程异常
 独立代理review_input_plan只读审核，全部要求接受并落tasks/plan.md：旧位置UUID变更不能静默重登记；覆盖BundlePdf/portable/newIdentity所有入口及同一快照；恢复在写入／清journal前检查契约；文件→DB→清pending可恢复顺序；in-place拒绝不能降级覆盖；初次保存外层截断前检查，空目标必须显式新建。Header需有界压缩、尺寸／CRC、absent/unsupported区分和从头回退。整包复制保留成员ID而改变doc UUID的作用域定义经认可。实施分a1格式层与a2登记／恢复／UI保存保护，所有必修继续保留；活模型绑定另审。
 
 B2b2a1 helper局部实现复核：修复File/Channel容器校验差异、CD加密位、普通DD、per-entry ZIP64回退与暂存文件落盘摘要。tmp/bundle-header-review-red.log三项真实失败已修，tmp/bundle-header-boundaries.log 12项定向通过。独立局部复核未发现剩余确定性必修；未涉及writer，最新helper未做全量／Android验证。用户现已暂停，后续先按新渲染架构重新核对接口再续。
+
+## 2026-11-08 R0 新渲染基线同步
+
+独立review_input_plan只读复核：B1b文本、snapshot冻结、ink-only计数及分屏拒绝契约保留。唯一必修CanvasScene.WET_KEY缺旧ReferenceIdentity接口，主代理补空容器（不assign）后完整编译/JVM重跑通过2964项。页面级计划接受其意见：计数独立于身份、整包副本换页面ID、对象数不占页面限额、来源范围同步及坏对象多页/pending测试。实际Android/真机未运行。

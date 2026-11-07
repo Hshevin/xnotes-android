@@ -401,3 +401,8 @@ B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64K
 ### 用户暂停（2026-11-07）
 
 用户准备重构渲染架构，本目标已暂停，不自动继续实施。已保存B2b2a1的Header/Snapshot局部源码与12项定向验证，writer接入未开始，最新helper未全量验证。恢复时先根据新的渲染／模型／输入／宿主接口重新检查既有B1及后续计划，不直接沿用旧渲染接法。完整交接见docs/movinkpad/mind-map-rendering-handoff-2026-11-07.md；所有未完成需求保留。
+
+### 2026-11-08 按新渲染基线恢复
+
+用户已恢复并授权同步 master54f05b0f。采用主线已回迁的快照、完整场景批次、解码来源身份和 View/湿墨层替换接口，不移入原重构分支完整Session体系。导图继续原生Canvas/共享笔迹几何/TextEditHost。实施顺序 R0～R5、接口边界与验收见 docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。
+页面级决定覆盖原B2b1对象身份和B2b2a1“整包副本保留成员ID”的计划；另存/导出副本应生成新页面UUID。B2c取消，其余功能和安全要求保留。

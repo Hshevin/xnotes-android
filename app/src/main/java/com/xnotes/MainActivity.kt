@@ -795,6 +795,15 @@ private fun EditorScreen(
         }
     }
 
+    /**
+     * The kind of the stored document at [uriStr], read from its file name, falling back to a note
+     * for anything unrecognizable. Every place that has to name a copy of that file goes through
+     * here: spelling an extension at the call site is how an `.xcanvas` ended up shared as `.xnote`.
+     */
+    fun kindOf(uriStr: String): com.xnotes.core.util.DocumentKind =
+        com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty())
+            ?: com.xnotes.core.util.DocumentKind.NOTE
+
     /** Read the file at [uriStr] into [target]. The extension picks the surface: the two document
      *  types share the explorer but not much else. Reads off-thread behind the "Opening note…"
      *  spinner so a big embedded PDF doesn't freeze the UI. */
@@ -808,6 +817,12 @@ private fun EditorScreen(
         // exchange visual slots so the requested pane still opens the new file in place.
         val target = if (requested.isSharedView && requested.documentOwner === requested)
             requested.sibling ?: requested else requested
+        // A canvas never shares the screen: refuse it while the other pane holds a document or its home.
+        val paired = target.sibling?.takeIf { it.noteOpen || it.pane in paneHomes }
+        if (paired != null && (paired.canvasOpen || kindOf(uriStr) == com.xnotes.core.util.DocumentKind.CANVAS)) {
+            editor.message = context.getString(R.string.split_canvas_unsupported)
+            return null
+        }
         if (target.noteOpen && target.visibleDocumentUri != null && !target.flushSplitDocument()) return null
         if (!target.saveCanvasBeforeReplacement()) return null
         val retainedPosition = if (target !== requested) target.readingPosition() else null
@@ -871,9 +886,13 @@ private fun EditorScreen(
 
     /** Open two picked files together, one per pane, and start the split focused on the first. */
     fun openSplit(firstUri: String, secondUri: String) {
-        // Refuse before creating the second pane, so a mind map leaves no empty split behind.
-        if (listOf(firstUri, secondUri).any { com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(it)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP }) {
+        // Refuse unsupported types before creating or replacing any pane.
+        if (listOf(firstUri, secondUri).any { kindOf(it) == com.xnotes.core.util.DocumentKind.MIND_MAP }) {
             editor.message = context.getString(R.string.map_split_unsupported)
+            return
+        }
+        if (kindOf(firstUri) == com.xnotes.core.util.DocumentKind.CANVAS || kindOf(secondUri) == com.xnotes.core.util.DocumentKind.CANVAS) {
+            editor.message = context.getString(R.string.split_canvas_unsupported)
             return
         }
         editor.secondaryPane()
@@ -896,15 +915,6 @@ private fun EditorScreen(
 
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
-
-    /**
-     * The kind of the stored document at [uriStr], read from its file name, falling back to a note
-     * for anything unrecognizable. Every place that has to name a copy of that file goes through
-     * here: spelling an extension at the call site is how an `.xcanvas` ended up shared as `.xnote`.
-     */
-    fun kindOf(uriStr: String): com.xnotes.core.util.DocumentKind =
-        com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty())
-            ?: com.xnotes.core.util.DocumentKind.NOTE
 
     /** What the export dialog counts for the stored document at [uriStr]: a note's pages, a canvas's items. */
     fun countingOf(uriStr: String): String = ExportProgress.countingFor(kindOf(uriStr))
@@ -1192,7 +1202,11 @@ private fun EditorScreen(
                 onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
                 onShareFiles = { uris -> shareFiles(uris) },
                 onOpenBeside = { uri ->
-                    if (kindOf(uri) == com.xnotes.core.util.DocumentKind.MIND_MAP) null else editor.currentUri?.takeIf { target == null && !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
+                    editor.currentUri?.takeIf {
+                        target == null && !editor.canvasOpen && !editor.isSameDocument(it, uri) &&
+                            kindOf(uri) != com.xnotes.core.util.DocumentKind.CANVAS &&
+                            kindOf(uri) != com.xnotes.core.util.DocumentKind.MIND_MAP
+                    }?.let { first -> { guardedAll { openSplit(first, uri) } } }
                 },
                 onExportPdfs = { picked, name, onStarted ->
                     pendingPdfs = PendingPdfs(picked, onStarted)
@@ -1253,7 +1267,7 @@ private fun EditorScreen(
                     }
                 },
                 onSplitDocument = { pane ->
-                    if (!editor.inSplit && !pane.stylusInContact) {
+                    if (!editor.inSplit && !pane.canvasOpen && !pane.stylusInContact) {
                         if (editor.browseRoot == null) editor.useInternalStorage()
                         val slot = if (pane === editor) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
                         editor.secondaryPane()
@@ -1546,7 +1560,7 @@ private fun Modifier.endsPageSelection(editor: Editor): Modifier = pointerInput(
  * window. Each callback takes the pane it is acting for, because in a split there are two of them
  * and a picker's result has to come back to the one that opened it.
  */
-private class PaneActions(
+internal class PaneActions(
     val onToggleFullscreen: () -> Unit,
     val onMainMenu: () -> Unit,
     val onSaveSplit: () -> Unit,
@@ -1624,9 +1638,11 @@ private val SwallowTouches = Modifier.pointerInput(Unit) {
  * leaves the backstage showing.
  *
  * The panes are placed by offset and size inside one Box rather than by a Row that becomes a Column,
- * so direction changes need not replace the outer pane node. The toolbar's single/split branches
- * can still replace the inner AndroidView host: retained editor views are detached and reattached,
- * which restarts a GLSurfaceView's GL thread/context. This layout does not guarantee GL continuity.
+ * so normal layout changes retain each logical pane's host. A pane switching between its file home
+ * and its editor, a change of document kind in a pane, and the main-menu round trip still dispose
+ * and remount the native View, so the `surfacesForAttach()` replacement stays required. Surface/EGL
+ * recreation is still managed by Android; keeping the View attached does not guarantee that its
+ * GPU context survives.
  */
 private data class SplitTitleDrag(val source: Editor, val origin: Offset, val point: Offset, val returning: Boolean = false)
 
@@ -1639,7 +1655,7 @@ private fun Editor.toolbarDocuments(): Set<com.xnotes.core.tools.ToolbarDocument
 }.toSet()
 
 @Composable
-private fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit, home: @Composable (Editor) -> Unit) {
+internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit, home: @Composable (Editor) -> Unit) {
     val second = editor.secondary
     val primaryVisible = editor.noteOpen || com.xnotes.ui.Pane.PRIMARY in homes
     val secondVisible = second != null && (second.noteOpen || com.xnotes.ui.Pane.SECONDARY in homes)
@@ -1744,26 +1760,26 @@ private fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnote
         if (primaryVisible) {
             if (com.xnotes.ui.Pane.PRIMARY in homes) Box(animatedPosition(primaryPosition)
                 .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent))) { home(editor) }
-            else EditorPane(
+            else androidx.compose.runtime.key(editor, editor.canvasOpen) { EditorPane(
                 editor = editor,
                 app = editor,
                 actions = actions,
                 closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
                 modifier = animatedPosition(primaryPosition)
                     .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent)),
-            )
+            ) }
         }
         if (secondVisible && second != null) {
             if (com.xnotes.ui.Pane.SECONDARY in homes) Box(animatedPosition(secondaryPosition)
                 .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent))) { home(second) }
-            else EditorPane(
+            else androidx.compose.runtime.key(second, second.canvasOpen) { EditorPane(
                 editor = second,
                 app = editor,
                 actions = actions,
                 closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
                 modifier = animatedPosition(secondaryPosition)
                     .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent)),
-            )
+            ) }
         }
         // Composed last so it sits over both panes and catches the drag before either of them.
         if (split) {
@@ -1813,7 +1829,8 @@ private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, sha
         val automatic = editor.view.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         app.splitSideBySide = !(app.splitSideBySide ?: automatic)
     }) else null
-    val split: (() -> Unit)? = if (!app.inSplit && !shared) ({ actions.onSplitDocument(editor) }) else null
+    // Canvases are for sketching on their own; only paged documents start a split.
+    val split: (() -> Unit)? = if (!app.inSplit && !shared && !editor.canvasOpen) ({ actions.onSplitDocument(editor) }) else null
     if (editor.canvasOpen) {
         val renameFailed = stringResource(R.string.err_rename_note)
         com.xnotes.ui.InfiniteToolbar(
@@ -1853,11 +1870,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.PaneToolbarAround(
     onCover: (Double, Double, Double, Double) -> Unit,
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
-    if (show) ToolbarAround(bar, onCover, content)
-    else {
-        SideEffect { onCover(0.0, 0.0, 0.0, 0.0) }
-        Box(Modifier.weight(1f).fillMaxWidth()) { content {} }
-    }
+    ToolbarAround(bar, onCover, showToolbar = show, content = content)
 }
 
 /**
@@ -2002,7 +2015,10 @@ private fun EditorPane(
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
                             AndroidView(
-                                factory = { detached(canvas.surfaces) },
+                                factory = {
+                                    detached(canvas.surfaces)
+                                    canvas.surfacesForAttach()
+                                },
                                 modifier = Modifier.fillMaxSize(),
                                 update = { canvas.view.publish() },
                             )
