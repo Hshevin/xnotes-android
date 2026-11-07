@@ -11,6 +11,7 @@ import com.xnotes.core.model.ConnectorEnd
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.CutEdge
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.bindLoadedReferenceScope
 import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.model.ImageCrop
 import com.xnotes.core.model.ImageData
@@ -980,6 +981,7 @@ class DocumentCodec(
                 if(doc.hasReferenceAnchors) doc.enableReferenceAnchors()
                 doc.dirty=true
             }
+            if(doc.hasReferenceAnchors && !independentCopy) doc.bindLoadedReferenceScope()
             return doc
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.

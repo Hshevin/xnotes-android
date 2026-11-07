@@ -449,3 +449,11 @@ R2b1b计划进一步修订（接受审核）：受管Target.write接收已观察
 普通现有note/canvas save及restore/keep验证、v3用途+摘要、DB/pin时序、canonical/已知别名日志、单一PDF资源所有权和受管原子替换已接通。Editor失败/取消finally及canvas在途保存关窗等待已修，3086项JVM/Android源码编译/独立复核通过；平台未运行。详见reference-native-save-2026-11-08.md。
 
 下一阶段R2b2：另存输出打开前显式目标证明、save/fork/merge的文档scope与新页面ID、会话/撤销对账。已有pending的Save按钮重试需先证明新快照与暂存候选的关系（不能无条件resume别的模型后覆盖）；恢复UI要保留当前未保存模型。保存部分成功后“放弃修改”语义已向用户异步询问，等待期间不实现依赖该决定的清理/回退。legacy v1/坏记录的native keep-current目前保留证据，独立副本/身份修复界面继续补齐。之后才正接页锚点激活与C1/C2/D，A2未取消。
+
+### R2b2a 计划待审：活模型页复制上下文
+
+已检查ReferenceIdentity/Page/Clone/ForkLedger/Editor所有UUID变更以及SessionStore。先做显式scope API和确定性新页身份/冻结投影/成功后采用，保留原Page对象、历史、PDF指纹；生产Save-As/fork/merge不半接。规格reference-copy-scope-2026-11-08.md；接着补会话配对/代次，再接创建上下文与原生入口，最后激活页引用。复制旧快照不能每次铸造不同页UUID，writer不得补ID。
+
+R2b2a计划审核已通过。显式API/volatile页binding/严格owner与父scope/延迟undo重基已实现；18新增回归，全量3104项与Android源码编译通过；代码复核中。scope的runtime信息不冒充持久会话来源证据，生产另存接线仍待R2b2b/c。
+
+R2b2a源码独立复核通过，修复空容器共享导致部分采用，新增20项，最后289套件3106项/Android源码编译成功，待本地提交后继续R2b2b。

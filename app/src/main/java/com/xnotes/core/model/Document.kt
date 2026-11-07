@@ -56,6 +56,10 @@ class Document(
     /** True only for a new model explicitly enabled, or a complete validated anchor bundle. */
     var hasReferenceAnchors:Boolean=false
         internal set
+    /** Runtime-only provenance; session persistence must bind it to its own frozen body. */
+    internal var pageReferenceScope:PageReferenceScope?=null
+    internal var snapshotOwnerToken:Any=Any()
+    internal var isWriteSnapshot:Boolean=false
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
 

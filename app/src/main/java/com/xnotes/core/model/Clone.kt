@@ -100,11 +100,16 @@ fun Document.deepCopy(measurer: TextMeasurer): Document = Document(
  */
 fun Document.snapshot(): Document {
     prepareReferenceAnchors()
-    return Document(
+    return copyWriteSnapshot()
+}
+
+/** Copy a frozen writer view without assigning IDs or consulting its original owner. */
+internal fun Document.copyWriteSnapshot():Document = Document(
     pages = pages.mapTo(mutableListOf()) { p ->
         Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also {
             it.cover = p.cover
             p.referenceIdentity.id?.let {id->it.referenceIdentity.restore(id)}
+            it.referenceBinding=PageReferenceBinding(it.referenceIdentity,p.referenceBinding.scope)
             it.layers.restore(p.layers.entries, p.layers.activeId)
             it.savedLayerIds = p.items.associateWith { item -> p.layerIdForWrite(item) }
         }
@@ -122,5 +127,7 @@ fun Document.snapshot(): Document {
     templates = templates,
     templatePackages = templatePackages,
     newPageSize = newPageSize,
-).also { it.bodyStartPage = bodyStartPage; it.identity = identity;it.hasReferenceAnchors=hasReferenceAnchors }
+).also {
+    it.bodyStartPage=bodyStartPage;it.identity=identity;it.hasReferenceAnchors=hasReferenceAnchors
+    it.pageReferenceScope=pageReferenceScope;it.snapshotOwnerToken=snapshotOwnerToken;it.isWriteSnapshot=true
 }

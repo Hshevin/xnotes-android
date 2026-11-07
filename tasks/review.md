@@ -82,3 +82,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b1b 普通保存与配套恢复
 
 计划/代码独立复核要求真实target拼接先保护原件（本片撤除）、kind绑定、已有anchored正登记、move前重核、migration pin时序及所有权唯一、同record目的、当前B保护、legacy容量不退化、Editor取消dirty/finally、历史stage SHA可信证明及PDF恢复例外。反例逐项补齐，旧v1恢复candidate仅call-time证明明确；native keep无可靠SHA故意保留证据。最终修复available PDF仍先pin与在途保存dirty=false不早关画布，窄复核无新阻断。288套件3086项与Android源码编译通过，实际仪器/SAF/目标设备未运行。完整边界reference-native-save-2026-11-08.md；pending下当前模型协调/另存/激活/来源闭环未完成。
+
+## R2b2a 模型复制上下文
+
+计划独立审核通过，精确父scope/owner、先全量校验再采用、已显式scope的UUID错配拒绝全部采纳。源码复核发现空ReferenceIdentity容器共享会使第二次restore失败并留下部分采用，两个反例先失败后修，增加容器IdentityHashMap预检；最终窄复核无未处理点。新增20项，289套件3106项全通过/Android源码编译成功。旧生产SaveAs/fork/merge/session不在此片完成范围，平台/真机未运行。

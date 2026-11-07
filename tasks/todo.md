@@ -377,3 +377,7 @@
 
 - [x] R2b1b普通note/canvas保存与配套恢复：kind/UUID/页/PDF契约、v3目的+SHA、DB/pin时序、受管原子替换、当前B保护、可信历史、legacy恢复、Editor取消dirty及canvas在途关窗保护；3086项JVM/Android源码编译/独立复核通过。
 - [ ] R2b2另存前目标证明、活模型saveAs/fork/merge新页scope、session/历史；pending保存重试/恢复时保留当前模型，放弃语义待用户答复。
+
+- [x] R2b2a：显式页复制scope、冻结投影、live采用及历史恢复；3106项主机/Android源码编译/独立复核通过。
+- [ ] R2b2b：会话正文/metadata完整绑定、请求代次、来源凭据及主线程快照/IO发布。
+- [ ] R2b2c：另存创建证明与save/fork/merge接复制scope；页激活/来源闭环及网络继续保留。

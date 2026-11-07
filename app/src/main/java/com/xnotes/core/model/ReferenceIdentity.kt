@@ -23,14 +23,18 @@ class ReferenceIdentity {
 object ReferenceAnchors {
     const val MAX_TARGETS=200_000
     internal fun validateForWrite(doc:Document) {
+        doc.pageReferenceScope?.takeIf {it.parent!=null}?.let {scope->
+            check(doc.identity.documentId==scope.documentId) {"Document identity differs from its copy scope"}
+            if(doc.hasReferenceAnchors) require(doc.pages.all {it.referenceBinding.scope===scope}) {"Pages must be prepared before writing a copied document"}
+        }
         if(!doc.hasReferenceAnchors) return
         require(doc.pages.isNotEmpty()) {"Referenced note must contain a page"}
-        prepare(doc.pages,false)
+        validatePages(doc.pages)
     }
-    internal fun prepare(pages:List<Page>,assign:Boolean) {
+    private fun validatePages(pages:List<Page>) {
         val seen=hashSetOf<String>()
         for(page in pages) {
-            val id=if(assign) page.referenceIdentity.assign() else requireNotNull(page.referenceIdentity.id) {"Missing page reference identity"}
+            val id=requireNotNull(page.referenceIdentity.id) {"Missing page reference identity"}
             require(seen.add(id)) {"Duplicate page reference identity or membership"}
             require(seen.size<=MAX_TARGETS) {"Page reference limit exceeded"}
         }
@@ -38,7 +42,11 @@ object ReferenceAnchors {
 }
 
 /** Existing files require a byte-preserving upgrade before enabling page identities. */
-internal fun Document.enableReferenceAnchors() {ReferenceAnchors.prepare(pages,true);hasReferenceAnchors=true}
+internal fun Document.enableReferenceAnchors() {prepareScopedReferenceAnchors();hasReferenceAnchors=true}
 
 /** Model owner prepares new pages before freezing a save; the IO writer never assigns live IDs. */
-internal fun Document.prepareReferenceAnchors() {if(hasReferenceAnchors) ReferenceAnchors.prepare(pages,true)}
+internal fun Document.prepareReferenceAnchors() {
+    pageReferenceScope?.takeIf {it.parent!=null}?.let {check(identity.documentId==it.documentId) {"Document identity differs from its copy scope"}}
+    if(hasReferenceAnchors) prepareScopedReferenceAnchors()
+    else if(pageReferenceScope==null) pageReferenceScope=PageReferenceScope.root(identity.documentId)
+}
