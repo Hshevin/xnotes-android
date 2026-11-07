@@ -37,6 +37,7 @@
 - [源码构建与测试](docs/movinkpad/server-build.md)（JDK 21） · [MovinkPad 适配与验证范围](MOVINKPAD.md)
 - [渲染诊断与 Surface 捕获回迁](docs/movinkpad/render-diagnostics-backport-2026-11-07.md)（保留主线 View／湿墨层替换；仅增加诊断能力，不代表黑屏已解决；后续验证见第二批记录）
 - [稳定工具栏与窗格布局回迁](docs/movinkpad/stable-pane-layout-backport-2026-11-07.md)（减少工具栏变化导致的不必要重挂；主线真实重挂保护保留，验证进度见记录）
+- [光晕缓存重建失效回迁](docs/movinkpad/halo-cache-backport-2026-11-07.md)（context／缓冲重建后撤销旧缓存；验证进度与 GPU 验收边界见记录）
 - [无限画布退出分屏黑屏：排查与只读取证](docs/movinkpad/infinite-split-audit-2026-11-06.md)（根因未确认，尚无真机验证的修复）
 - [MovinkPad 正式版左右分屏黑区候选修复](docs/movinkpad/canvas-split-black-2026-11-07.md)（黑区从画布旧宽度边界开始；已实现跨宿主替换绘制表面，效果待真机验证）
 
