@@ -790,6 +790,15 @@ private fun EditorScreen(
         }
     }
 
+    /**
+     * The kind of the stored document at [uriStr], read from its file name, falling back to a note
+     * for anything unrecognizable. Every place that has to name a copy of that file goes through
+     * here: spelling an extension at the call site is how an `.xcanvas` ended up shared as `.xnote`.
+     */
+    fun kindOf(uriStr: String): com.xnotes.core.util.DocumentKind =
+        com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty())
+            ?: com.xnotes.core.util.DocumentKind.NOTE
+
     /** Read the file at [uriStr] into [target]. The extension picks the surface: the two document
      *  types share the explorer but not much else. Reads off-thread behind the "Opening note…"
      *  spinner so a big embedded PDF doesn't freeze the UI. */
@@ -799,6 +808,12 @@ private fun EditorScreen(
         // exchange visual slots so the requested pane still opens the new file in place.
         val target = if (requested.isSharedView && requested.documentOwner === requested)
             requested.sibling ?: requested else requested
+        // A canvas never shares the screen: refuse it while the other pane holds a document or its home.
+        val paired = target.sibling?.takeIf { it.noteOpen || it.pane in paneHomes }
+        if (paired != null && (paired.canvasOpen || kindOf(uriStr) == com.xnotes.core.util.DocumentKind.CANVAS)) {
+            editor.message = context.getString(R.string.split_canvas_unsupported)
+            return null
+        }
         if (target.noteOpen && target.visibleDocumentUri != null && !target.flushSplitDocument()) return null
         if (!target.saveCanvasBeforeReplacement()) return null
         val retainedPosition = if (target !== requested) target.readingPosition() else null
@@ -862,6 +877,10 @@ private fun EditorScreen(
 
     /** Open two picked files together, one per pane, and start the split focused on the first. */
     fun openSplit(firstUri: String, secondUri: String) {
+        if (kindOf(firstUri) == com.xnotes.core.util.DocumentKind.CANVAS || kindOf(secondUri) == com.xnotes.core.util.DocumentKind.CANVAS) {
+            editor.message = context.getString(R.string.split_canvas_unsupported)
+            return
+        }
         editor.secondaryPane()
         scope.launch {
             // Either picked file may already be open in the other pane: settle both before reading.
@@ -882,15 +901,6 @@ private fun EditorScreen(
 
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
-
-    /**
-     * The kind of the stored document at [uriStr], read from its file name, falling back to a note
-     * for anything unrecognizable. Every place that has to name a copy of that file goes through
-     * here: spelling an extension at the call site is how an `.xcanvas` ended up shared as `.xnote`.
-     */
-    fun kindOf(uriStr: String): com.xnotes.core.util.DocumentKind =
-        com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty())
-            ?: com.xnotes.core.util.DocumentKind.NOTE
 
     /** What the export dialog counts for the stored document at [uriStr]: a note's pages, a canvas's items. */
     fun countingOf(uriStr: String): String = ExportProgress.countingFor(kindOf(uriStr))
@@ -1176,7 +1186,10 @@ private fun EditorScreen(
                 onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
                 onShareFiles = { uris -> shareFiles(uris) },
                 onOpenBeside = { uri ->
-                    editor.currentUri?.takeIf { target == null && !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
+                    editor.currentUri?.takeIf {
+                        target == null && !editor.canvasOpen && !editor.isSameDocument(it, uri) &&
+                            kindOf(uri) != com.xnotes.core.util.DocumentKind.CANVAS
+                    }?.let { first -> { guardedAll { openSplit(first, uri) } } }
                 },
                 onExportPdfs = { picked, name, onStarted ->
                     pendingPdfs = PendingPdfs(picked, onStarted)
@@ -1237,7 +1250,7 @@ private fun EditorScreen(
                     }
                 },
                 onSplitDocument = { pane ->
-                    if (!editor.inSplit && !pane.stylusInContact) {
+                    if (!editor.inSplit && !pane.canvasOpen && !pane.stylusInContact) {
                         if (editor.browseRoot == null) editor.useInternalStorage()
                         val slot = if (pane === editor) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
                         editor.secondaryPane()
@@ -1797,7 +1810,8 @@ private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, sha
         val automatic = editor.view.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         app.splitSideBySide = !(app.splitSideBySide ?: automatic)
     }) else null
-    val split: (() -> Unit)? = if (!app.inSplit && !shared) ({ actions.onSplitDocument(editor) }) else null
+    // Canvases are for sketching on their own; only paged documents start a split.
+    val split: (() -> Unit)? = if (!app.inSplit && !shared && !editor.canvasOpen) ({ actions.onSplitDocument(editor) }) else null
     if (editor.canvasOpen) {
         val renameFailed = stringResource(R.string.err_rename_note)
         com.xnotes.ui.InfiniteToolbar(

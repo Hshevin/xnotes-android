@@ -9785,6 +9785,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }.getOrNull()
         }
         if (json == null) { say(appContext.getString(R.string.split_invalid_file)); return false }
+        // Refused before detaching, so the current workspace stays as it is.
+        if (splitIncludesCanvas(json)) { say(appContext.getString(R.string.split_canvas_saved_unsupported)); return false }
         if (!detachWorkspaceForOpen(explicitlyDiscarded)) return false
         return openSavedSplit(json).also { if (it) persist() }
     }
@@ -9891,6 +9893,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val json = splitWorkspace.read()
         if (!json.optBoolean("secondOpen")) return
         if (json.optBoolean("primaryOpen") && restoredPagedSession) noteOpen = true
+        // An older workspace that paired a canvas reopens only the primary pane's own session.
+        if (splitIncludesCanvas(json)) return
         splitReversed = json.optBoolean("reversed")
         splitRatio = json.optDouble("ratio", 0.5).toFloat().coerceIn(0.18f, 0.82f)
         splitSideBySide = if (json.has("sideBySide")) json.optBoolean("sideBySide") else null
@@ -9951,6 +9955,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The pane that keyboard shortcuts and the file/export actions act on. */
     var focusedPane by mutableStateOf(Pane.PRIMARY)
+
+    /** The infinite canvas is a sketching surface that only opens on its own; saved splits from
+     *  before that rule may still name one, and are not restored as splits. */
+    private fun splitIncludesCanvas(json: org.json.JSONObject): Boolean =
+        json.optBoolean("primaryCanvas") || json.optBoolean("secondCanvas")
 
     /** True while two panes are open together. */
     val inSplit: Boolean get() = secondary?.noteOpen == true && noteOpen
