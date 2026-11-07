@@ -5,6 +5,7 @@ import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.SurfaceHolder
 import com.xnotes.core.infinite.CanvasBackground
 import com.xnotes.core.infinite.CanvasViewport
 import com.xnotes.core.model.Rgba
@@ -28,11 +29,15 @@ class InfiniteCanvasView private constructor(
     attrs: AttributeSet?,
     /** Kept across host changes: the interaction controller holds this same object. */
     val viewport: CanvasViewport,
-    private val glRenderer: GlRenderer,
+    initialContextGen: Int,
 ) : GLSurfaceView(context, attrs) {
 
     @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) :
-        this(context, attrs, CanvasViewport(), GlRenderer())
+        this(context, attrs, CanvasViewport(), 0)
+
+    /** Observational identity belongs to this native View, not to its retained document. */
+    val renderDiagnostics = RenderDiagnostics()
+    private val glRenderer = GlRenderer(initialContextGen, renderDiagnostics)
 
     private val configChooser = MsaaConfigChooser()
 
@@ -48,7 +53,7 @@ class InfiniteCanvasView private constructor(
      */
     fun replacementForAttach(): InfiniteCanvasView {
         check(detachedFromWindow && !isAttachedToWindow)
-        return InfiniteCanvasView(context, null, viewport, GlRenderer(glRenderer.contextGen)).also {
+        return InfiniteCanvasView(context, null, viewport, glRenderer.contextGen).also {
             it.background = background
             it.paperColor = paperColor
             it.darkAppearance = darkAppearance
@@ -263,6 +268,7 @@ class InfiniteCanvasView private constructor(
     fun onGlThread(work: () -> Unit) = queueEvent(work)
 
     override fun onAttachedToWindow() {
+        renderDiagnostics.attached()
         super.onAttachedToWindow()
         detachedFromWindow = false
         // A frame count only means something next to the rate the panel can actually show.
@@ -272,6 +278,7 @@ class InfiniteCanvasView private constructor(
     var onInputLost: (() -> Unit)? = null
 
     override fun onDetachedFromWindow() {
+        renderDiagnostics.detached()
         onInputLost?.invoke()
         removeCallbacks(idleRunnable)
         super.onDetachedFromWindow()
@@ -279,11 +286,29 @@ class InfiniteCanvasView private constructor(
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        renderDiagnostics.layoutChanged(w, h)
         super.onSizeChanged(w, h, oldw, oldh)
         viewport.widthPx = w
         viewport.heightPx = h
         afterLayout?.invoke()
         publish()
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        renderDiagnostics.surfaceCreated()
+        super.surfaceCreated(holder)
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        val frame = holder.surfaceFrame
+        renderDiagnostics.surfaceChanged(frame.width(), frame.height())
+        super.surfaceChanged(holder, format, width, height)
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        // Observe invalidation before GLSurfaceView waits for its worker.
+        renderDiagnostics.surfaceDestroyed()
+        super.surfaceDestroyed(holder)
     }
 
     /**
