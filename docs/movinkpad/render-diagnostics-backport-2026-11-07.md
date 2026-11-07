@@ -43,3 +43,7 @@ SurfaceCapture 仅在显式调用 `captureSurface` 时按需创建，使用 Pixe
 诊断 TargetToken 仅表示应用观察到的状态，不能识别所有同尺寸原生 buffer queue 变化；latestFrame 是 draw 回调完成信息，不是 swap／显示证明。捕获 SUCCESS 表示复制成功且前后观察状态相同，仍不能证明与系统截图原子同帧。稳定的尺寸错配或缺失帧信息会作为诊断证据保留。
 
 本轮按用户要求不编译、不运行 JVM／Android 测试、不打包或安装。源码静态审查与差异检查不替代运行结果；后续软件回归及 MovinkPad／天玑 Android 16 验收单独安排。
+
+## 合并后审查
+
+合并后审查与待修清单（未修复，待后续合并完成后一起处理）见 [render-diagnostics-review-2026-11-07.md](render-diagnostics-review-2026-11-07.md)。
