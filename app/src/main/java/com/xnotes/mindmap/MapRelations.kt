@@ -3,7 +3,7 @@ package com.xnotes.mindmap
 import com.xnotes.core.geometry.Rect
 import java.util.UUID
 
-enum class SourceScope { FILE, PAGE, PDF_REGION, OBJECTS, REGION }
+enum class SourceScope { FILE, PAGE }
 enum class SourceStatus { UNVERIFIED, CURRENT, STALE, UNAVAILABLE, PARTIALLY_DELETED, DELETED, EMPTY, TRASHED }
 /** Cached display fields never participate in source identity. Preview keys are opaque asset IDs. */
 data class MapSource(
@@ -12,31 +12,25 @@ data class MapSource(
     val fileName: String = "",
     val scope: SourceScope = SourceScope.FILE,
     val pageId: String? = null,
-    val objectIds: List<String> = emptyList(),
+    /** Optional page-local locator hint; never an object selection or a separate reference target. */
     val region: Rect? = null,
     val note: String = "",
     val status: SourceStatus = SourceStatus.UNVERIFIED,
     val previewKey: String? = null,
     val sourceVersion: String? = null,
-    val includeAnnotations: Boolean = false,
 ) {
     fun validate() {
         require(id.isNotBlank() && id.length <= 128)
         require(UUID.fromString(documentId).toString() == documentId)
         require(fileName.length <= 4096 && note.length <= 20_000)
-        require(pageId == null || pageId.isNotBlank() && pageId.length <= 128)
-        require(objectIds.size <= 10000 && objectIds.distinct().size == objectIds.size && objectIds.all { it.isNotBlank() && it.length <= 128 })
+        require(pageId == null || UUID.fromString(pageId).toString() == pageId)
         require(previewKey == null || previewKey.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(sourceVersion == null || sourceVersion.length <= 512)
         region?.let { r -> require(listOf(r.x,r.y,r.w,r.h).all { it.isFinite() && kotlin.math.abs(it) <= MindMapDocument.MAX_COORD } && r.w > 0 && r.h > 0) }
         when(scope) {
-            SourceScope.FILE -> require(pageId == null && region == null && objectIds.isEmpty())
-            SourceScope.PAGE -> require(pageId != null && region == null && objectIds.isEmpty())
-            SourceScope.PDF_REGION -> require(pageId != null && region != null && objectIds.isEmpty())
-            SourceScope.OBJECTS -> require(objectIds.isNotEmpty() && region == null)
-            SourceScope.REGION -> require(region != null && objectIds.isEmpty())
+            SourceScope.FILE -> require(pageId == null && region == null)
+            SourceScope.PAGE -> require(pageId != null)
         }
-        require(!includeAnnotations || scope == SourceScope.PDF_REGION)
     }
 }
 enum class RelationKind { RELATED, REFERENCED_FROM, BELONGS_TO, DEPENDS_ON }

@@ -23,7 +23,7 @@ class GraphModelTest {
     }
     @Test fun multiSourceEditsAndUndoPreserveBodyAndIndependentRanges() {
         val a=MapSource(documentId="00000000-0000-0000-0000-000000000001",fileName="Original",note="first")
-        val b=a.copy(id="second",scope=SourceScope.PAGE,pageId="page-one",note="second")
+        val b=a.copy(id="second",scope=SourceScope.PAGE,pageId="00000000-0000-0000-0000-000000000002",note="second")
         val d=doc().update("r") { it.copy(sources=listOf(a,b),primarySource=b.id) }
         val h=MapHistory(d)
         h.commit(d.update("r") { it.copy(sources=it.sources.reversed()) })

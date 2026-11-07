@@ -27,3 +27,13 @@ Android仪器源码保留实际PNG/损坏PNG、平台JSON路径；只编译不�
 R1b：BundleMigration/BundlePdf/Editor.copyFileTo等整包复制或另存时，除新文档UUID外也重铸页面UUID，必须按原字节转换而不是重编码笔迹；同一文档便携导出与独立副本需区分。此前“改docUUID保留成员ID”的旧方案已撤销。
 
 R1c：.xmap来源契约撤除对象/固定区域身份，页面可附可选矩形定位提示；画布只整份文档。R2登记/SAF/pending安全激活仍未接入，R3页面来源选择、多来源预览、跳转/返回、反向引用与R4/R5网络继续。未向用户文件自动启用此格式，未宣称完成可用闭环。
+
+## R1c 来源范围契约
+
+.xmap 的 MapSource 现在仅有 FILE/PAGE；PAGE 必须为 canonical UUID，可附页面局部矩形，修改提示不改变引用身份/主要来源/正文。撤除 objectIds 与 includeAnnotations 模型属性；来源不再把对象范围、固定区域或含糊批注上下文当成目标。
+
+读取旧v2的FILE来源兼容缺失或空objectIds、缺失或布尔false的includeAnnotations；显式null、错误类型、非空对象列表及旧OBJECTS/REGION/PDF_REGION范围拒绝，不猜测重定向。写入仍为v2，旧开发版读取器要求旧字段，不能保证读取新版来源；v1无来源读取保持不变。本分支从未打包，此调整不声称提供对象实验格式兼容。
+
+新增6项PageSourceFormatTest，初始3个反例在旧代码上失败（tmp/page-source-format-red.log）。覆盖FILE/PAGE有无hint及旧字段缺失组合、wrong type/null、UUID、多个来源metadata/顺序/主要预览保持；Android仪器增平台JSONObject.NULL用例，只编译。专项通过后全量 tmp/page-source-format-full.log：275套件2977项通过，失败/错误/跳过均为0，Android测试源码编译通过。独立只读复核未发现阻断或兼容遗漏。
+
+页面实际是否属于该文档、是否仍存在、画布禁止PAGE来源以及跳转，仍由后续真实来源解析负责，不能把本片JSON模型验证当成来源已可用。

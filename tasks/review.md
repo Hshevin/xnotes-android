@@ -52,3 +52,7 @@ B2b2a1 helper局部实现复核：修复File/Channel容器校验差异、CD加�
 ## 2026-11-08 R1a 页面级身份
 
 review_input_plan只读复核：发现抢救未知layer仍整份失败及提前过滤即时对象破坏pending索引两项必修。分别新增红灯回归tmp/page-bad-layer-red.log与tmp/page-pending-order-red.log；修为抢救时略去坏层对象、pending完成后统一过滤、Glue限定最终成员。最终复核确认解决，无新确定性阻断。主代理执行全量274套件2971项、Android源码编译通过（tmp/page-reference-full.log）。真实Android/SAF/设备未运行，整包副本新页面ID未纳入本片。
+
+## 2026-11-08 R1c 来源范围
+
+计划与代码独立复核均完成。接受意见：严格识别旧字段真实类型、补PAGE hint及两字段各自缺失组合、canonicalUUID/FILE越界、完整多来源与平台NULL。生产diff与测试无阻断；tmp/page-source-format-full.log全量2977项及Android源码编译通过，仪器未实际执行。页面归属/存在性及导航不纳入此格式层结论。

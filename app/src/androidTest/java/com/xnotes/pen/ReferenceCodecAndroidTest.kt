@@ -22,6 +22,19 @@ import org.junit.Test
 
 /** Real platform image header/JSON behavior. Compile-only evidence does not mean these tests ran. */
 class ReferenceCodecAndroidTest {
+    @Test fun platformJsonDistinguishesMissingSourceFieldsFromExplicitNull() {
+        val source=com.xnotes.mindmap.MapSource(documentId="00000000-0000-0000-0000-000000000001",
+            scope=com.xnotes.mindmap.SourceScope.PAGE,pageId="00000000-0000-0000-0000-000000000002",
+            region=Rect(1.0,2.0,30.0,40.0))
+        val doc=com.xnotes.mindmap.MindMapDocument(nodes=listOf(com.xnotes.mindmap.MapNode(parent=null,sources=listOf(source))))
+        val encoded=com.xnotes.mindmap.MapCodec.encode(doc)
+        assertEquals(doc,com.xnotes.mindmap.MapCodec.decode(encoded))
+        for(key in listOf("objectIds","includeAnnotations")) {
+            val j=org.json.JSONObject(String(encoded))
+            j.getJSONArray("nodes").getJSONObject(0).getJSONArray("sources").getJSONObject(0).put(key,org.json.JSONObject.NULL)
+            try {com.xnotes.mindmap.MapCodec.decode(j.toString().toByteArray());fail("explicit null is not an absent legacy field")} catch(_:IllegalArgumentException) {}
+        }
+    }
     @Test fun realPngRoundTripKeepsPageIdentityAndRecoveryReportsBadImage() {
         val root=File(PenTestRunner.instance.targetContext.cacheDir,"reference-codec-${UUID.randomUUID()}").apply {mkdirs()}
         try {
