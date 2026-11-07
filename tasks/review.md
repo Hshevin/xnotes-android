@@ -62,3 +62,7 @@ review_input_plan只读复核：发现抢救未知layer仍整份失败及提前�
 独立计划及源码复核完成，无阻断；接受完整字面量位置、输出ID集合、新旧集合不相交、编辑范围预检、skip中取消/所有权和生成阶段取消建议。新增7项行为/字节回归，红灯日志page-copy-literals-red与page-copy-generation-red，最后全量2984项与Android源码编译通过。仅格式工具，整包writer/marker/Snapshot接入未完成。
 
 R1b0尾部生成取消guard经独立复核确认正确。R1b1整包writer计划复核的sameUUID完整页验证、PDF prepare原身份核对、全链路取消与File/Stream证据边界意见全部接受，已写入继续规格，生产接线未开始。
+
+## 2026-11-08 R1b1 整包复制/导出
+
+按已有审核规格实施，review_input_plan独立只读复核发现Header回退限流过晚、锚定external+embedded歧义及legacy大前缀取消，全部写反例后修正。主代理又补源记录指纹不可随target参数/文件替换的反例并修正。最终复核无新确定性阻断，JVM2999项/Android源码编译通过；未执行SAF/实际仪器/设备。活模型UUID切换与R2保护尚未交付，原始整包路径的完成不扩大为这些范围已完成。

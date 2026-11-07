@@ -27,27 +27,45 @@ internal class BundleHeader private constructor(
         private const val MAX_BYTES=4096L
         private const val MAX_COMPRESSED=65536L
         private const val U32=0xffffffffL
-        fun read(file:File):BundleHeader {
-            FileInputStream(file).use {input->read(input.channel)?.let {return it}}
+        fun read(file:File,cancelled:()->Boolean={false}):BundleHeader {
+            check(!cancelled()) {"Bundle header cancelled"}
+            FileInputStream(file).use {input->read(input.channel,cancelled)?.let {return it}}
             // Standard-library fallback for commented/ZIP64 layouts. Read local metadata too,
             // so a permissive central-directory reader cannot accept conflicting physical entries.
             return ZipFile(file).use {zip->
                 val metadata=linkedMapOf<String,Pair<ZipEntry,ByteArray>>()
-                for(entry in zip.entries().asSequence()) if(entry.name==BundleIdentity.ENTRY || entry.name==AnchorMetadata.ENTRY) {
+                for(entry in zip.entries().asSequence()) {
+                    check(!cancelled())
+                    if(entry.name==BundleIdentity.ENTRY || entry.name==AnchorMetadata.ENTRY) {
                     require(entry.name !in metadata) {"Duplicate bundle metadata"}
                     checkSizes(entry.size,entry.compressedSize)
-                    metadata[entry.name]=entry to zip.getInputStream(entry).use {readBytes(it,entry.size,entry.crc)}
+                    metadata[entry.name]=entry to guarded(zip.getInputStream(entry),cancelled).use {readBytes(it,entry.size,entry.crc)}
+                    }
+                }
+                val anchored=AnchorMetadata.ENTRY in metadata
+                if(anchored) for(entry in zip.entries().asSequence()) {
+                    check(!cancelled())
+                    if(entry.name==BundleCopyPlan.MANIFEST) require(entry.size<0 || entry.size<=AnchorManifest.MAX_BYTES) {"ZIP declared manifest limit exceeded"}
                 }
                 val seen=hashSetOf<String>()
-                ZipInputStream(file.inputStream()).use {local->
+                ZipInputStream(guarded(file.inputStream(),cancelled)).use {local->
                     var entry=local.nextEntry
                     while(entry!=null) {
+                        check(!cancelled())
                         if(entry.name==BundleIdentity.ENTRY || entry.name==AnchorMetadata.ENTRY) {
                             require(seen.add(entry.name)) {"Duplicate local metadata"}
                             val expected=requireNotNull(metadata[entry.name]) {"Local metadata is absent from directory"}
                             // Reading to EOF validates ordinary/ZIP64 descriptors and populates their sizes.
                             val bytes=readBytes(local,expected.first.size,expected.first.crc)
                             require(entry.method==expected.first.method && entry.size==expected.first.size && entry.compressedSize==expected.first.compressedSize && entry.crc==expected.first.crc && bytes.contentEquals(expected.second)) {"Local metadata disagrees with directory"}
+                        } else if(anchored && entry.name==BundleCopyPlan.MANIFEST) {
+                            require(entry.size<0 || entry.size<=AnchorManifest.MAX_BYTES) {"ZIP declared manifest limit exceeded"}
+                            val buffer=ByteArray(65536);var total=0L
+                            while(true) {
+                                check(!cancelled())
+                                val n=local.read(buffer);if(n<0) break
+                                total+=n;require(total<=AnchorManifest.MAX_BYTES) {"ZIP actual manifest limit exceeded"}
+                            }
                         }
                         local.closeEntry();entry=local.nextEntry
                     }
@@ -57,13 +75,16 @@ internal class BundleHeader private constructor(
             }
         }
         /** Does not own or reposition the channel. Unsupported directory layouts require the File API. */
-        fun read(channel:FileChannel):BundleHeader? {
+        fun read(channel:FileChannel,cancelled:()->Boolean={false}):BundleHeader? {
+            check(!cancelled()) {"Bundle header cancelled"}
             val directory=ZipTail.read(channel) ?: return null
+            check(!cancelled())
             val identities=directory.entries.filter {it.name==BundleIdentity.ENTRY}
             val anchors=directory.entries.filter {it.name==AnchorMetadata.ENTRY}
             require(identities.size<=1 && anchors.size<=1) {"Duplicate bundle metadata"}
             if((identities+anchors).any {it.method!=ZipEntry.STORED && it.method!=ZipEntry.DEFLATED}) return null
             for(entry in identities+anchors) {
+                check(!cancelled())
                 val central=ByteBuffer.wrap(entry.record).order(ByteOrder.LITTLE_ENDIAN)
                 if(entry.size==U32 || (central.getInt(20).toLong() and U32)==U32 || entry.localOffset==U32) return null
                 val local=ByteBuffer.wrap(readAt(channel,entry.localOffset,30)).order(ByteOrder.LITTLE_ENDIAN)
@@ -80,6 +101,7 @@ internal class BundleHeader private constructor(
                 }
             }
             fun bytes(entry:ZipTail.Entry?):ByteArray? = entry?.let {e->
+                check(!cancelled())
                 val central=ByteBuffer.wrap(e.record).order(ByteOrder.LITTLE_ENDIAN)
                 val compressed=central.getInt(20).toLong() and U32
                 val crc=central.getInt(16).toLong() and U32
@@ -101,6 +123,7 @@ internal class BundleHeader private constructor(
                     var consumed=0L
                     override fun read():Int {val one=ByteArray(1);return if(read(one,0,1)<0) -1 else one[0].toInt() and 255}
                     override fun read(b:ByteArray,off:Int,len:Int):Int {
+                        check(!cancelled())
                         if(len==0) return 0
                         if(consumed==compressed) return -1
                         val n=channel.read(ByteBuffer.wrap(b,off,minOf(len.toLong(),compressed-consumed).toInt()),start+consumed)
@@ -140,6 +163,7 @@ internal class BundleHeader private constructor(
             while(buffer.hasRemaining()) require(channel.read(buffer,start+buffer.position())>0) {"Metadata header is truncated"}
             return bytes
         }
+        private fun guarded(input:InputStream,cancelled:()->Boolean):InputStream = BundleEntries.cancellable(input,cancelled)
         private fun readBytes(input:InputStream,size:Long,crc:Long):ByteArray {
             val out=ByteArrayOutputStream();val sum=CRC32();val buffer=ByteArray(512)
             while(true) {

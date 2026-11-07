@@ -14,7 +14,7 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import org.json.JSONObject
 
-/** Separate schema: migration never parses or rewrites the ink manifest. */
+/** Identity metadata is separate; page identity copies use lossless manifest edits, never model encoding. */
 data class BundleIdentity(val documentId: String = UUID.randomUUID().toString(), val pdfResource: String? = null, val externalPdf: Boolean = false) {
     init {
         require(UUID.fromString(documentId).toString() == documentId) { "Invalid document UUID" }
@@ -52,65 +52,57 @@ data class BundleIdentity(val documentId: String = UUID.randomUUID().toString(),
 /** Prepare and verify on a separate file. Publishing is a distinct, atomic operation for local files. */
 object BundleMigration {
     data class Prepared(val file: File, val identity: BundleIdentity, val sourceHash: String)
-    fun prepare(source: File, directory: File, copy: Boolean = false, cancelled: () -> Boolean = { false }): Prepared {
-        val existing = BundleIdentity.read(source)
-        val identity = if (copy) BundleIdentity(pdfResource = existing?.pdfResource, externalPdf = existing?.externalPdf ?: false) else existing ?: BundleIdentity()
-        val sourceHash = hash(source, cancelled)
-        val candidate = File.createTempFile("identity-", ".zip", directory)
-        val tail = File.createTempFile("identity-tail-", ".zip", directory)
-        try {
-            // Reject duplicate names: otherwise readers could disagree about the authoritative payload.
-            val before = fingerprints(source, cancelled)
-            require("manifest.json" in before) { "Missing note manifest" }
-            ZipFile(source).use { zip -> zip.getInputStream(zip.getEntry("manifest.json")).use { input ->
-                val parser = JsonPull(java.io.InputStreamReader(input, Charsets.UTF_8))
-                parser.beginObject()
-                var format: String? = null
-                while (parser.hasNext()) {
-                    if (parser.nextName() == "format") { format = parser.nextString(); break } else parser.skipValue()
-                }
-                require(format in listOf("xnote", "xcanvas")) { "Not a supported note bundle" }
-            } }
-            FileOutputStream(candidate).use { out -> source.inputStream().use { copyStream(it, out, cancelled) }; out.fd.sync() }
-            if (existing != null && !copy) {
-                check(hash(candidate, cancelled) == sourceHash && hash(source, cancelled) == sourceHash)
-                return Prepared(candidate, identity, sourceHash)
-            }
-            FileOutputStream(tail).use { out -> ZipOutputStream(out).use { identity.write(it) } }
-            val raw = RandomAccessFile(candidate, "rw").use { dest ->
-                FileInputStream(tail).use { extra ->
-                    val dir = ZipTail.read(dest.channel)
-                    val addition = ZipTail.read(extra.channel)
-                    if (existing != null || dir == null || addition == null) false
-                    else {
-                        check(ZipTail.splice(dest.channel, dir.offset, dir.entries.filter { it.name != BundleIdentity.ENTRY }, extra.channel, addition) >= 0) { "Cannot append identity metadata" }
-                        dest.fd.sync(); true
-                    }
-                }
-            }
-            if (!raw) {
-                // Zip64/commented bundles: retain each uncompressed entry byte, including unknown extensions.
-                ZipFile(source).use { zip ->
-                    FileOutputStream(candidate).use { out ->
-                        ZipOutputStream(out).use { dest ->
-                            dest.setLevel(1)
-                            zip.entries().asSequence().filter { it.name != BundleIdentity.ENTRY }.forEach { entry ->
-                                dest.putNextEntry(ZipEntry(entry.name).apply { time = entry.time })
-                                zip.getInputStream(entry).use { copyStream(it, dest, cancelled) }; dest.closeEntry()
+    fun prepare(source: File, directory: File, copy: Boolean = false, cancelled: () -> Boolean = { false }): Prepared =
+        BundleSnapshot.take(source,directory,cancelled).use { snapshot ->
+            val existing=BundleHeader.read(snapshot.file,cancelled).identity
+            val identity=if(copy) BundleIdentity(pdfResource=existing?.pdfResource,externalPdf=existing?.externalPdf ?: false) else existing ?: BundleIdentity()
+            BundleCopyPlan.prepare(snapshot,identity,directory,cancelled).use { plan ->
+                val candidate=File.createTempFile("identity-",".zip",directory)
+                val tail=File.createTempFile("identity-tail-",".zip",directory)
+                try {
+                    FileOutputStream(candidate).use {out->snapshot.file.inputStream().use {copyStream(it,out,cancelled)};out.fd.sync()}
+                    if(existing==null || copy) {
+                        FileOutputStream(tail).use {out->ZipOutputStream(out).use {identity.write(it)}}
+                        val raw=RandomAccessFile(candidate,"rw").use {dest->FileInputStream(tail).use {extra->
+                            val dir=ZipTail.read(dest.channel);val addition=ZipTail.read(extra.channel)
+                            if(existing!=null || dir==null || addition==null) false else {
+                                check(!cancelled())
+                                check(ZipTail.splice(dest.channel,dir.offset,dir.entries,extra.channel,addition)>=0) {"Cannot append identity metadata"}
+                                dest.fd.sync();true
                             }
-                            identity.write(dest)
+                        }}
+                        if(!raw) {
+                            ZipFile(snapshot.file).use {zip->FileOutputStream(candidate).use {out->
+                                ZipOutputStream(out).use {dest->
+                                    dest.setLevel(1);zip.comment?.let(dest::setComment)
+                                    for(entry in zip.entries().asSequence()) {
+                                        check(!cancelled())
+                                        if(entry.name==BundleIdentity.ENTRY) continue
+                                        val replacement=entry.name==BundleCopyPlan.MANIFEST && plan.manifest!=null || entry.name==AnchorMetadata.ENTRY
+                                        dest.putNextEntry(ZipEntry(entry.name).apply {
+                                            time=entry.time
+                                            if(!replacement && entry.method==ZipEntry.STORED) {method=ZipEntry.STORED;size=entry.size;crc=entry.crc}
+                                        })
+                                        when(entry.name) {
+                                            AnchorMetadata.ENTRY -> dest.write(requireNotNull(plan.marker))
+                                            BundleCopyPlan.MANIFEST -> (plan.manifest?.inputStream() ?: zip.getInputStream(entry)).use {copyStream(it,dest,cancelled)}
+                                            else -> zip.getInputStream(entry).use {copyStream(it,dest,cancelled)}
+                                        }
+                                        dest.closeEntry()
+                                    }
+                                    identity.write(dest)
+                                    dest.finish();dest.flush();out.fd.sync()
+                                }
+                            }}
                         }
                     }
-                }
-                RandomAccessFile(candidate, "rw").use { it.fd.sync() }
+                    plan.verify(candidate,cancelled)
+                    check(hash(source,cancelled)==snapshot.sourceHash) {"Source changed during migration"}
+                    Prepared(candidate,identity,snapshot.sourceHash)
+                } catch(error:Throwable) {candidate.delete();throw error}
+                finally {tail.delete()}
             }
-            check(fingerprints(candidate, cancelled).filterKeys { it != BundleIdentity.ENTRY } == before.filterKeys { it != BundleIdentity.ENTRY }) { "Migration changed note payload" }
-            check(BundleIdentity.read(candidate) == identity)
-            check(hash(source, cancelled) == sourceHash) { "Source changed during migration" }
-            return Prepared(candidate, identity, sourceHash)
-        } catch (e: Throwable) { candidate.delete(); throw e }
-        finally { tail.delete() }
-    }
+        }
     fun publish(prepared: Prepared, destination: File) {
         check(hash(destination) == prepared.sourceHash) { "Source changed before migration commit" }
         Files.move(prepared.file.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)

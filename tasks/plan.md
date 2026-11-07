@@ -410,3 +410,7 @@ B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64K
 R1a模型/codec/原字节升级已通过2971项主机与Android源码编译。抢救计数与页面身份独立；坏层对象过滤发生于pending全数插入之后，Glue限定最终成员。R1c先收紧.xmap范围避免保留对象级产品接口；R1b整包副本新页面UUID、R2安全激活仍未完成，完整来源闭环继续。
 
 R1c已提交55d64a4e，R1b0原字节page UUID替换工具已提交9d3547f2，全量2984项/Android源码编译通过。R1b1整包writer计划已独立审核（sameUUID也完整验证页契约，PDF prepare核对snapshot原身份；完整前置/验收见page-reference-implementation-2026-11-08.md末节），尚未实施。R2～R5/A2均保留，overall complete=false。
+
+### 2026-11-08 持续推进：R1b1完成
+
+原始整包writer已接Snapshot/Header/新页面UUID/marker，保持源指纹和共享PDF约束。Header回退限流/歧义PDF/legacy取消经红灯修正，最后2999项全量及Android源码编译、独立复核通过。详细证据reference-bundle-copy-2026-11-08.md。接续R2a登记页契约；活模型另存/分叉/合并需另审会话和历史身份，不能修改已建立页面身份后又由旧快照写回。

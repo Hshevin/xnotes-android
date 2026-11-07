@@ -6612,17 +6612,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             else checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use { it.copyTo(out) }
             return
         }
-        val source = java.io.File.createTempFile("portable-", ".zip", saveTmpDir)
-        try {
-            checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use { input -> source.outputStream().use { input.copyTo(it) } }
-            val original = com.xnotes.format.BundleIdentity.read(source) ?: com.xnotes.format.BundleIdentity()
-            val identity = if (newIdentity) original.copy(documentId = java.util.UUID.randomUUID().toString()) else original
-            val resources = com.xnotes.storage.PdfResources.get(appContext)
-            val pdf = if (identity.externalPdf) resources.resolve(requireNotNull(identity.pdfResource)) else null
-            val lease = pdf?.let { resources.hold(setOf(it.nameWithoutExtension)) }
-            try { com.xnotes.format.BundlePdf.write(source, out, identity, pdf, external = false) }
-            finally { lease?.close() }
-        } finally { source.delete() }
+        val input=checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri)))
+        com.xnotes.format.BundleSnapshot.fromInput(input,saveTmpDir).use {snapshot->
+            val original=com.xnotes.format.BundleHeader.read(snapshot.file).identity ?: com.xnotes.format.BundleIdentity()
+            val identity=if(newIdentity) original.copy(documentId=java.util.UUID.randomUUID().toString()) else original
+            val resources=com.xnotes.storage.PdfResources.get(appContext)
+            val pdf=if(identity.externalPdf) resources.resolve(requireNotNull(identity.pdfResource)) else null
+            val lease=pdf?.let {resources.hold(setOf(it.nameWithoutExtension))}
+            try {com.xnotes.format.BundlePdf.write(snapshot,out,identity,pdf,external=false)}
+            finally {lease?.close()}
+        }
     }
 
     /**

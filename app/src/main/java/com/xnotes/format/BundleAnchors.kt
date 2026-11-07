@@ -4,17 +4,14 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /** Explicit staging only. Storage/editor integration is a later step; no SAF or source writes here. */
 internal object BundleAnchors {
     const val ENTRY=AnchorMetadata.ENTRY
     private const val MANIFEST="manifest.json"
-    private const val MAX_MARKER_BYTES=AnchorMetadata.MAX_BYTES
     data class Prepared(val file:File,val identity:BundleIdentity,val sourceHash:String,val anchorCount:Int)
 
     fun prepare(source:File,directory:File,expectedAnchored:Boolean=false,cancelled:()->Boolean={false}):Prepared {
@@ -25,7 +22,7 @@ internal object BundleAnchors {
             val snapshot=temp("anchor-source-",".zip")
             FileOutputStream(snapshot).use {out->source.inputStream().use {copy(it,out,cancelled)};out.fd.sync()}
             check(BundleMigration.hash(snapshot,cancelled)==sourceHash && BundleMigration.hash(source,cancelled)==sourceHash) {"Source changed while taking anchor snapshot"}
-            val before=verifyViews(snapshot,cancelled)
+            val before=BundleEntries.digests(snapshot,cancelled,boundedManifest=true)
             require(MANIFEST in before) {"Missing anchor manifest"}
             val identity=requireNotNull(BundleIdentity.read(snapshot)) {"Document identity required before anchor upgrade"}
             val manifest=temp("anchor-manifest-",".json")
@@ -61,7 +58,7 @@ internal object BundleAnchors {
                     }
                 }
             }
-            val after=verifyViews(candidate,cancelled)
+            val after=BundleEntries.digests(candidate,cancelled,boundedManifest=true)
             require(after.keys==before.keys+ENTRY) {"Anchor upgrade changed bundle entries"}
             require(after.filterKeys {it!=MANIFEST && it!=ENTRY}==before.filterKeys {it!=MANIFEST && it!=ENTRY}) {"Anchor upgrade changed original payload"}
             before[ENTRY]?.let {require(after[ENTRY]==it) {"Anchor marker changed"}}
@@ -80,29 +77,6 @@ internal object BundleAnchors {
     /** Local atomic replacement only, with the same source conflict protection as identity migration. */
     fun publish(prepared:Prepared,destination:File) = BundleMigration.publish(BundleMigration.Prepared(prepared.file,prepared.identity,prepared.sourceHash),destination)
 
-    /** Validate the same local-entry view consumed by DocumentCodec, not just ZipFile's directory. */
-    private fun verifyViews(file:File,cancelled:()->Boolean):Map<String,String> {
-        val central=linkedMapOf<String,String>()
-        ZipFile(file).use {zip->for(entry in zip.entries().asSequence()) {
-            check(!cancelled());require(entry.name !in central) {"Duplicate directory ZIP entry"}
-            val limit=limitFor(entry.name)
-            require(entry.size<0 || entry.size<=limit) {"ZIP declared payload limit exceeded"}
-            central[entry.name]=zip.getInputStream(entry).use {digest(it,cancelled,limit)}
-        }}
-        val sequential=linkedMapOf<String,String>()
-        ZipInputStream(file.inputStream()).use {zip->
-            var entry=zip.nextEntry
-            while(entry!=null) {
-                check(!cancelled());require(entry.name !in sequential) {"Duplicate local ZIP entry"}
-                val limit=limitFor(entry.name)
-                require(entry.size<0 || entry.size<=limit) {"ZIP declared payload limit exceeded"}
-                sequential[entry.name]=digest(zip,cancelled,limit);zip.closeEntry();entry=zip.nextEntry
-            }
-        }
-        require(central.keys.toList()==sequential.keys.toList() && central==sequential) {"ZIP local entries disagree with the directory"}
-        return central
-    }
-    private fun limitFor(name:String)=when(name) {MANIFEST->AnchorManifest.MAX_BYTES;ENTRY,BundleIdentity.ENTRY->MAX_MARKER_BYTES;else->Long.MAX_VALUE}
     private fun markerBytes(identity:BundleIdentity)=AnchorMetadata(identity.documentId).bytes()
     private fun readMarker(input:InputStream,identity:BundleIdentity) {
         require(AnchorMetadata.read(input).documentId==identity.documentId) {"Anchor metadata belongs to another document"}
@@ -110,11 +84,5 @@ internal object BundleAnchors {
     private fun copy(input:InputStream,out:OutputStream,cancelled:()->Boolean) {
         val buffer=ByteArray(65536)
         while(true) {check(!cancelled()) {"Anchor upgrade cancelled"};val n=input.read(buffer);if(n<0) break;out.write(buffer,0,n)}
-    }
-    private fun digest(input:InputStream,cancelled:()->Boolean,limit:Long):String {
-        val digest=MessageDigest.getInstance("SHA-256");val buffer=ByteArray(65536)
-        var bytes=0L
-        while(true) {check(!cancelled());val n=input.read(buffer);if(n<0) break;bytes+=n;require(bytes<=limit) {"ZIP actual payload limit exceeded"};digest.update(buffer,0,n)}
-        return digest.digest().joinToString("") {"%02x".format(it)}
     }
 }

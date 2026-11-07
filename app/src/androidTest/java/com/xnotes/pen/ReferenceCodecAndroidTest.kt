@@ -22,6 +22,29 @@ import org.junit.Test
 
 /** Real platform image header/JSON behavior. Compile-only evidence does not mean these tests ran. */
 class ReferenceCodecAndroidTest {
+    @Test fun platformBundleCopyKeepsInkAndRebindsDocumentAndPageIdentities() {
+        val root=File(PenTestRunner.instance.targetContext.cacheDir,"page-copy-${UUID.randomUUID()}").apply {mkdirs()}
+        try {
+            val codec=DocumentCodec(AndroidImageCodec(),AndroidTextMeasurer())
+            val doc=Document.blank().apply {enableReferenceAnchors()}
+            val originalPage=doc.pages.single().referenceIdentity.id
+            doc.pages.single().items.add(Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(10.0,20.0,.5))))
+            val source=File(root,"original.xnote").apply {outputStream().use {codec.write(doc.snapshot(),it)}}
+            val before=source.readBytes()
+            val copy=com.xnotes.format.BundleMigration.prepare(source,root,copy=true)
+            try {
+                val read=copy.file.inputStream().use {codec.read(it)}
+                assertNotEquals(doc.identity.documentId,read.identity.documentId)
+                assertNotEquals(originalPage,read.pages.single().referenceIdentity.id)
+                assertEquals((doc.pages.single().items.single() as Stroke).samples,(read.pages.single().items.single() as Stroke).samples)
+            } finally {copy.file.delete()}
+            val portable=File(root,"portable.xnote")
+            portable.outputStream().use {com.xnotes.format.BundlePdf.write(source,it,doc.identity,null,false)}
+            val same=portable.inputStream().use {codec.read(it)}
+            assertEquals(doc.identity,same.identity);assertEquals(originalPage,same.pages.single().referenceIdentity.id)
+            assertTrue(before.contentEquals(source.readBytes()))
+        } finally {root.deleteRecursively()}
+    }
     @Test fun platformJsonDistinguishesMissingSourceFieldsFromExplicitNull() {
         val source=com.xnotes.mindmap.MapSource(documentId="00000000-0000-0000-0000-000000000001",
             scope=com.xnotes.mindmap.SourceScope.PAGE,pageId="00000000-0000-0000-0000-000000000002",
