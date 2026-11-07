@@ -46,3 +46,7 @@
 - 合并后应用／测试源码和构建配置与已验证回迁分支完全一致；主线原有诊断审查两文档及 tasks/todo 原样保留。独立增量复核无新增必修项，`git diff --check` 通过；没有因仅文档差异重复运行测试。
 - 保留 `codex/render-lifecycle` 与两个回迁分支；本批不反向合入原重构分支，不启动 RF01 修正或后续批次。
 - 没有生成 APK、启动模拟器、安装、推送或发布。原黑块效果未获真机验证。
+
+## 合并后审查
+
+合并后审查待修项 P-1～P-6（未修复）见 [render-backport-review-followups-2026-11-07.md](render-backport-review-followups-2026-11-07.md)。
