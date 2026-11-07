@@ -51,7 +51,6 @@ class Stroke(
      *  the default for anything built without a pen. */
     val smoothScale: Double = 1.0,
 ) : CanvasItem {
-    override val referenceIdentity = ReferenceIdentity()
 
 
     override val kind = KIND

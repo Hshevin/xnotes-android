@@ -81,7 +81,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     class WriteCancelled : Exception()
 
     fun write(doc: InfiniteDocument, out: OutputStream, isCancelled: () -> Boolean = { false }) {
-        com.xnotes.core.model.ReferenceAnchors.validateForWrite(doc)
         // Named up front by the same walk the manifest makes, so the entries can go in before it.
         val assets = imageAssets(doc)
         val audio = audioAssets(doc)
@@ -94,7 +93,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             // Each image streams straight from its temp file into the bundle, never as a byte[].
             for ((name, file) in assets + audio) zos.putStored(name, file, isCancelled)
             doc.identity.write(zos)
-            if(doc.hasReferenceAnchors) AnchorMetadata(doc.identity.documentId).write(zos)
             // The manifest streams straight into the deflater, so a dense canvas's JSON is never
             // materialized as a DOM, a String, or a byte[].
             zos.putNextEntry(ZipEntry("manifest.json").apply { method = ZipEntry.DEFLATED })
@@ -157,7 +155,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val nextAsset = intArrayOf(0)
         val nextAudio = intArrayOf(0)
         val ids = GlueIds.of(doc.items)
-        for (item in doc.items) writeItem(j, item, assets, nextAsset, audio, nextAudio, ids, doc.layerIdForWrite(item), if(doc.hasReferenceAnchors) doc.referenceIdForWrite(item) else null)
+        for (item in doc.items) writeItem(j, item, assets, nextAsset, audio, nextAudio, ids, doc.layerIdForWrite(item))
         j.endArray()
         j.endObject()
     }
@@ -171,19 +169,18 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         nextAudio: IntArray,
         ids: Map<CanvasItem, Int>,
         layerId: String?,
-        referenceId: String?,
     ) {
         when (item) {
-            is Stroke -> writeStroke(j, item, layerId = layerId, referenceId = referenceId)
+            is Stroke -> writeStroke(j, item, layerId = layerId)
             is ImageItem -> {
                 // The name was decided by [imageAssets]' walk of these same items; taking it from
                 // there keeps the entry and the manifest agreeing by construction.
-                assets.getOrNull(nextAsset[0]++)?.let { writeImage(j, item, it.first, ids[item], layerId = layerId, referenceId = referenceId) }
+                assets.getOrNull(nextAsset[0]++)?.let { writeImage(j, item, it.first, ids[item], layerId = layerId) }
             }
-            is AudioItem -> audio.getOrNull(nextAudio[0]++)?.let { writeAudio(j, item, it.first, layerId = layerId, referenceId = referenceId) }
-            is ShapeItem -> writeShape(j, item, ids[item], layerId = layerId, referenceId = referenceId)
-            is ConnectorItem -> writeConnector(j, item, ids, layerId = layerId, referenceId = referenceId)
-            is TapeItem -> writeTape(j, item, layerId = layerId, referenceId = referenceId)
+            is AudioItem -> audio.getOrNull(nextAudio[0]++)?.let { writeAudio(j, item, it.first, layerId = layerId) }
+            is ShapeItem -> writeShape(j, item, ids[item], layerId = layerId)
+            is ConnectorItem -> writeConnector(j, item, ids, layerId = layerId)
+            is TapeItem -> writeTape(j, item, layerId = layerId)
             else -> {} // text and any unrecognized kind: not written, the canvas has none
         }
     }
@@ -224,7 +221,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         j.endObject()
     }
 
-    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId, referenceId: String? = null) {
+    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId) {
         // Per-sample time is only meaningful to the speed pen, so it's written as an optional
         // 4th element only then; every other stroke serializes without it.
         val withTime = s.config.speedStrength > 0.0
@@ -279,11 +276,10 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId, referenceId: String? = null) {
+    private fun writeImage(j: JsonWrite, item: ImageItem, assetName: String, id: Int?, layerId: String? = item.layerId) {
         j.beginObject()
         j.name("kind").value(ImageItem.KIND)
         // Only on an item a connector glues to.
@@ -300,11 +296,10 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (item.locked) j.name("locked").value(true)
         item.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId, referenceId: String? = null) {
+    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String, layerId: String? = a.layerId) {
         j.beginObject()
         j.name("kind").value(AudioItem.KIND)
         j.name("asset").value(assetName)
@@ -316,7 +311,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (a.locked) j.name("locked").value(true)
         a.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -326,7 +320,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         j.name("rec_ms").value(m.ms)
     }
 
-    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId, referenceId: String? = null) {
+    private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?, layerId: String? = s.layerId) {
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
         val standIn = s.legacyOutline()
         val drawn = standIn?.let { Rect.bounding(it) }
@@ -395,7 +389,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -405,7 +398,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
      * route. Its style and label are a shape's.
      */
     /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
-    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId, referenceId: String? = null) {
+    private fun writeTape(j: JsonWrite, t: TapeItem, layerId: String? = t.layerId) {
         val s = t.shape
         j.beginObject()
         j.name("kind").value(TapeItem.KIND)
@@ -420,11 +413,10 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
-    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId, referenceId: String? = null) {
+    private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>, layerId: String? = c.layerId) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
         j.beginObject()
@@ -482,7 +474,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (c.locked) j.name("locked").value(true)
         c.group?.let { j.name("group").value(it) }
         layerId?.takeUnless { it == com.xnotes.core.model.DrawingLayers.DEFAULT }?.let { j.name("layer").value(it) }
-        referenceId?.let { j.name("reference_id").value(it) }
         j.endObject()
     }
 
@@ -513,18 +504,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         try {
             var manifest: ParsedManifest? = null
             var identity: BundleIdentity? = null
-            var anchorMarker:AnchorMetadata?=null
-            val entryNames=hashSetOf<String>();var duplicateEntry=false
             val imageFiles = HashMap<String, File>()
             val audioFiles = HashMap<String, File>()
             ZipInputStream(input).use { zis ->
                 var entry: ZipEntry? = zis.nextEntry
                 while (entry != null) {
-                    if(!entryNames.add(entry.name)) duplicateEntry=true
                     if (!entry.isDirectory) {
                         val name = entry.name
                         if(name==AnchorMetadata.ENTRY) {
-                            require(anchorMarker==null) {"Duplicate anchor metadata"};anchorMarker=AnchorMetadata.read(zis)
+                            throw IllegalArgumentException("Page anchor metadata does not belong to a canvas")
                         } else if (name == BundleIdentity.ENTRY) {
                             require(identity == null) { "Duplicate document identity" }
                             identity = BundleIdentity.read(zis)
@@ -576,13 +564,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             var dropped = 0
             for (spec in m.images) {
                 val item = when (spec) {
-                    is PendingImage -> materializeImage(spec, imageFiles, anchorMarker!=null)
+                    is PendingImage -> materializeImage(spec, imageFiles)
                     is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
                 }
                 if (item == null) {
                     dropped++
                 } else {
-                    m.anchors.bind(item.referenceIdentity,spec.referenceId)
                     items.add(spec.index - dropped, item)
                     if (spec is PendingImage) m.glue.named(item, spec.id)
                 }
@@ -595,8 +582,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             doc.layers.restore(m.layers.entries, m.layers.activeId)
             require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
             doc.addAll(items)
-            require(anchorMarker==null || !duplicateEntry) {"Duplicate anchored ZIP entries"}
-            doc.hasReferenceAnchors=m.anchors.complete(anchorMarker,identity,doc.items.asSequence().map {it.referenceIdentity})
             return doc
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
@@ -645,7 +630,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
 
     private class ParsedManifest {
-        val anchors=AnchorReadState()
         var formatOk = false
         var writer = 0
         var created: Long? = null
@@ -660,7 +644,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
 
     /** An item parsed before its asset entry has streamed out of the zip, and the slot it goes back to. */
-    private sealed class Pending(val index: Int, val asset: String, val referenceId:String?)
+    private sealed class Pending(val index: Int, val asset: String)
 
     private class PendingImage(
         index: Int,
@@ -677,8 +661,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val group: Int? = null,
         val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
         val part: Rect? = null,
-        referenceId:String?=null,
-    ) : Pending(index, asset, referenceId)
+    ) : Pending(index, asset)
 
     private class PendingAudio(
         index: Int,
@@ -691,16 +674,14 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val locked: Boolean,
         val group: Int? = null,
         val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
-        referenceId:String?=null,
-    ) : Pending(index, asset, referenceId)
+    ) : Pending(index, asset)
 
     private fun parseManifest(p: JsonPull): ParsedManifest {
         val m = ParsedManifest()
-        p.beginObject();val anchorKeys=hashSetOf<String>()
+        p.beginObject()
         while (p.hasNext()) {
-            val key=p.nextName();m.anchors.key(anchorKeys,key)
+            val key=p.nextName()
             when (key) {
-                "version" -> m.anchors.version(p)
                 "format" -> {
                     if (stringOr(p, "") != FORMAT) throw XCanvasFormatException(NOT_XCANVAS)
                     m.formatOk = true
@@ -712,12 +693,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "layers" -> m.layers = LayerJson.read(p)
                 "view" -> m.view = parseWaypoint(p, named = false)
                 "waypoints" -> parseWaypoints(p, m.waypoints)
-                "items" -> parseItems(p, m.items, m.images, m.glue, m.anchors)
+                "items" -> parseItems(p, m.items, m.images, m.glue)
                 else -> p.skipValue()
             }
         }
         p.endObject()
-        m.anchors.root(anchorKeys,"items")
         return m
     }
 
@@ -777,17 +757,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         return Waypoint(if (named) Waypoint.sanitizeName(name) else "", cx, cy, zoom)
     }
 
-    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead, anchors:AnchorReadState) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {anchors.invalid();return p.skipValue()}
+    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
+        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
         p.beginArray()
-        while (p.hasNext()) parseItem(p, items, pending, glue, anchors)
+        while (p.hasNext()) parseItem(p, items, pending, glue)
         p.endArray()
     }
 
     /** Union of every kind's fields, so an item parses in one pass whatever its key order. */
     private class ItemScratch {
-        var referenceId:String?=null
-        var referenceSeen=false
         var locked = false
         var group: Int? = null
         var layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT
@@ -859,16 +837,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var highlighterInverse: Boolean? = null
     }
 
-    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead, anchors:AnchorReadState) {
-        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {anchors.invalid();anchors.observe(null);return p.skipValue()}
+    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
+        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) return p.skipValue()
         val s = ItemScratch()
         p.beginObject()
         while (p.hasNext()) {
             when (p.nextName()) {
-                "reference_id" -> {
-                    require(!s.referenceSeen) {"Duplicate reference identity field"};s.referenceSeen=true
-                    s.referenceId=p.nextString().also {com.xnotes.core.model.ReferenceIdentity.requireUuid(it)}
-                }
                 "kind" -> s.kind = stringOr(p, "")
                 "id" -> s.id = intOrNull(p)
                 "connector" -> s.connector = parseConnector(p)
@@ -924,7 +898,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             }
         }
         p.endObject()
-        anchors.observe(s.referenceId)
         val before = items.size
         val sync = s.rec?.let { SyncMark(it, s.recMs) }
         when (s.kind) {
@@ -935,7 +908,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part, s.referenceId,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
                         ),
                     )
                 }
@@ -943,7 +916,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             AudioItem.KIND -> {
                 val asset = s.asset
                 if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId, s.referenceId))
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
                 }
             }
             ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
@@ -953,7 +926,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // text and any unrecognized kind: skipped (forgiving)
         }
-        if(items.size>before) anchors.bind(items[before].referenceIdentity,s.referenceId)
         if (items.size > before) items[before].layerId = s.layerId
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every canvas written before locking existed, which reads back as unlocked.
@@ -1226,9 +1198,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         return out
     }
 
-    private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>, anchored:Boolean=false): ImageItem? {
+    private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>): ImageItem? {
         val file = imageFiles[spec.asset] ?: return null
-        if(anchored && imageCodec.probeFile(file.path)==null) return null
         var w = spec.srcW
         var h = spec.srcH
         if (w <= 0 || h <= 0) {

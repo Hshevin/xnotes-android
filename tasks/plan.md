@@ -406,3 +406,5 @@ B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64K
 
 用户已恢复并授权同步 master54f05b0f。采用主线已回迁的快照、完整场景批次、解码来源身份和 View/湿墨层替换接口，不移入原重构分支完整Session体系。导图继续原生Canvas/共享笔迹几何/TextEditHost。实施顺序 R0～R5、接口边界与验收见 docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。
 页面级决定覆盖原B2b1对象身份和B2b2a1“整包副本保留成员ID”的计划；另存/导出副本应生成新页面UUID。B2c取消，其余功能和安全要求保留。
+
+R1a模型/codec/原字节升级已通过2971项主机与Android源码编译。抢救计数与页面身份独立；坏层对象过滤发生于pending全数插入之后，Glue限定最终成员。R1c先收紧.xmap范围避免保留对象级产品接口；R1b整包副本新页面UUID、R2安全激活仍未完成，完整来源闭环继续。

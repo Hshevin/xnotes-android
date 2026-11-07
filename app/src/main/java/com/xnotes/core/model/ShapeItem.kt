@@ -70,7 +70,6 @@ class ShapeItem(
     var headStart: Head = shape.defaultHeadStart,
     var headEnd: Head = shape.defaultHeadEnd,
 ) : CanvasItem, Resizable, Labelled {
-    override val referenceIdentity = ReferenceIdentity()
 
 
     override val kind = KIND

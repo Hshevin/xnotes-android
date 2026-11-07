@@ -18,7 +18,7 @@ internal object AnchorManifest {
     private const val MAX_ACTIVE_KEY_CHARS=262144
     data class Insertion(val position:Long,val text:String)
     data class Plan(val format:String,val insertions:List<Insertion>,val identities:Set<String>)
-    private enum class Place { ROOT,PAGE,ITEM,OTHER }
+    private enum class Place { ROOT,PAGE,OTHER }
 
     fun reader(input:InputStream,cancelled:()->Boolean={false}):InputStreamReader {
         val limited=object:FilterInputStream(input) {
@@ -43,7 +43,7 @@ internal object AnchorManifest {
                 check(!cancelled())
                 if(p.nextName()=="format") {found=p.nextString();break} else p.skipValue()
             }
-            require(found=="xnote" || found=="xcanvas") {"Unsupported anchor manifest format"};found!!
+            require(found=="xnote") {"Unsupported anchor manifest format"};found!!
         }
         val insertions=ArrayList<Insertion>()
         val ids=linkedSetOf<String>()
@@ -61,7 +61,7 @@ internal object AnchorManifest {
                 when(p.peek()) {
                     JsonPull.Token.BEGIN_OBJECT -> {
                         p.beginObject();val names=hashSetOf<String>();var hasId=false;var keyChars=0
-                        if(place==Place.PAGE || place==Place.ITEM) {targets++;require(targets<=MAX_ANCHORS) {"Anchor count limit exceeded"}}
+                        if(place==Place.PAGE) {targets++;require(targets<=MAX_ANCHORS) {"Anchor count limit exceeded"}}
                         while(p.hasNext()) {
                             check(!cancelled())
                             val key=p.nextName()
@@ -73,8 +73,7 @@ internal object AnchorManifest {
                                 place==Place.ROOT && key=="format" -> require(p.nextString()==format) {"Manifest format changed"}
                                 place==Place.ROOT && key=="version" -> require(p.nextInt()==1) {"Unsupported anchor manifest version"}
                                 place==Place.ROOT && key=="pages" && format=="xnote" -> array(Place.PAGE,::value)
-                                (place==Place.PAGE && key=="items") || (place==Place.ROOT && key=="items" && format=="xcanvas") -> array(Place.ITEM,::value)
-                                (place==Place.PAGE || place==Place.ITEM) && key=="reference_id" -> {
+                                (place==Place.PAGE) && key=="reference_id" -> {
                                     val id=p.nextString()
                                     require(UUID.fromString(id).toString()==id) {"Invalid anchor UUID"}
                                     require(ids.add(id)) {"Duplicate anchor UUID"};existing++;hasId=true
@@ -82,8 +81,8 @@ internal object AnchorManifest {
                                 else -> value(Place.OTHER)
                             }
                         }
-                        if(place==Place.ROOT) require(names.containsAll(listOf("format","version",if(format=="xnote") "pages" else "items"))) {"Missing anchor manifest structure"}
-                        if((place==Place.PAGE || place==Place.ITEM) && !hasId) {
+                        if(place==Place.ROOT) require(names.containsAll(listOf("format","version","pages"))) {"Missing anchor manifest structure"}
+                        if((place==Place.PAGE) && !hasId) {
                             require(!anchored) {"Upgraded document lost an anchor identity"}
                             missing++;val id=UUID.randomUUID().toString();check(ids.add(id))
                             insertions+=Insertion(p.position,(if(names.isEmpty()) "" else ",")+"\"reference_id\":\"$id\"")
@@ -98,6 +97,7 @@ internal object AnchorManifest {
             require(p.peek()==JsonPull.Token.BEGIN_OBJECT);value(Place.ROOT)
             require(p.peek()==JsonPull.Token.END_DOCUMENT)
         }
+        require(targets>0) {"A referenced note must have a page"}
         require(existing==0 || missing==0) {"Partially missing anchor identities require explicit recovery"}
         return Plan(format,insertions.toList(),ids.toSet())
     }

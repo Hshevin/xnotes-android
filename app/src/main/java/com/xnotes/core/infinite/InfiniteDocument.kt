@@ -1,6 +1,5 @@
 package com.xnotes.core.infinite
 
-import com.xnotes.core.model.prepareReferenceAnchors
 
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
@@ -58,14 +57,6 @@ class InfiniteDocument(
     /** When the canvas was created (epoch ms), or null for files written before this was recorded. */
     var created: Long? = null,
 ) {
-    var hasReferenceAnchors:Boolean=false
-        internal set
-    internal var savedReferenceIds:Map<CanvasItem,String?>?=null
-    internal fun referenceIdForWrite(item:CanvasItem):String? {
-        val frozen=savedReferenceIds ?: return item.referenceIdentity.id
-        require(frozen.containsKey(item)) {"Object is outside the save snapshot"}
-        return frozen[item]
-    }
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
 
@@ -134,11 +125,8 @@ class InfiniteDocument(
      * drawn or edited.
      */
     fun snapshotForWrite(): InfiniteDocument {
-        prepareReferenceAnchors()
         val copy = InfiniteDocument(dpi, path, displayName, dirty, background, waypoints.toMutableList(), lastView, created)
         copy.identity = identity
-        copy.hasReferenceAnchors=hasReferenceAnchors
-        copy.savedReferenceIds=if(hasReferenceAnchors) items.associateWith {referenceIdForWrite(it)} else null
         copy.layers.restore(layers.entries, layers.activeId)
         copy.savedLayerIds = items.associateWith { layerIdForWrite(it) }
         copy.backing.addAll(backing)

@@ -12,7 +12,7 @@ import java.util.zip.ZipOutputStream
 
 class BundleHeaderTest {
     private val id=BundleIdentity("00000000-0000-0000-0000-000000000001")
-    private val marker=""" { "version":1, "documentId":"${id.documentId}", "format":"xnotes-object-anchors" } 
+    private val marker=""" { "version":1, "documentId":"${id.documentId}", "format":"xnotes-page-anchors" }
 """.toByteArray()
     private fun directory(block:(File)->Unit) {val dir=Files.createTempDirectory("header-").toFile();try {block(dir)} finally {dir.deleteRecursively()}}
     private fun fixture(dir:File,stored:Boolean=false,comment:Boolean=false,withIdentity:Boolean=true,withMarker:Boolean=true):File = File.createTempFile("header-",".zip",dir).also {file->

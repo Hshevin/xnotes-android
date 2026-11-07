@@ -105,7 +105,6 @@ fun Document.snapshot(): Document {
         Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also {
             it.cover = p.cover
             p.referenceIdentity.id?.let {id->it.referenceIdentity.restore(id)}
-            it.savedReferenceIds=if(hasReferenceAnchors) p.items.associateWith {item->p.referenceIdForWrite(item)} else null
             it.layers.restore(p.layers.entries, p.layers.activeId)
             it.savedLayerIds = p.items.associateWith { item -> p.layerIdForWrite(item) }
         }

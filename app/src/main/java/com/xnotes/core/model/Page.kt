@@ -22,12 +22,6 @@ class Page(
     @Volatile var rooms: List<Room> = emptyList(),
 ) {
     val referenceIdentity=ReferenceIdentity()
-    internal var savedReferenceIds:Map<CanvasItem,String?>?=null
-    internal fun referenceIdForWrite(item:CanvasItem):String? {
-        val frozen=savedReferenceIds ?: return item.referenceIdentity.id
-        require(frozen.containsKey(item)) {"Object is outside the save snapshot"}
-        return frozen[item]
-    }
     /** Membership frozen with an autosave snapshot; live edits cannot retarget its objects. */
     var savedLayerIds: Map<CanvasItem, String?>? = null
         internal set

@@ -26,7 +26,6 @@ class TextItem(
     var face: FontFace = DEFAULT_FACE,
     private val measurer: TextMeasurer,
 ) : CanvasItem, Resizable {
-    override val referenceIdentity = ReferenceIdentity()
 
 
     override val kind = KIND

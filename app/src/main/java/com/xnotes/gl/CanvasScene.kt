@@ -1383,7 +1383,6 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         /** Identity for the wet item's stand-in record; never filed or drawn as itself. */
         private val WET_KEY: CanvasItem = object : CanvasItem {
-            override val referenceIdentity = com.xnotes.core.model.ReferenceIdentity()
             override val kind = "wet"
             override val resizable = false
             override var locked = false

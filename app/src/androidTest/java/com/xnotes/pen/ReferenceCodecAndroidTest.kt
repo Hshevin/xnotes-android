@@ -22,7 +22,7 @@ import org.junit.Test
 
 /** Real platform image header/JSON behavior. Compile-only evidence does not mean these tests ran. */
 class ReferenceCodecAndroidTest {
-    @Test fun realPngAndNativeIdentityRoundTripInBothCodecsAndBadPngCannotLoseItsObjectSilently() {
+    @Test fun realPngRoundTripKeepsPageIdentityAndRecoveryReportsBadImage() {
         val root=File(PenTestRunner.instance.targetContext.cacheDir,"reference-codec-${UUID.randomUUID()}").apply {mkdirs()}
         try {
             val source=File(root,"original.png")
@@ -31,16 +31,16 @@ class ReferenceCodecAndroidTest {
             fun members():List<CanvasItem> = listOf(ImageItem(ImageData(source,2,2),Rect(0.0,0.0,20.0,20.0)),
                 Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(10.0,20.0,.7))))
             val image=AndroidImageCodec();val text=AndroidTextMeasurer();val note=DocumentCodec(image,text);val canvas=CanvasCodec(image,text)
-            val doc=Document.blank().apply {pages.first().items.addAll(members());enableReferenceAnchors()}
+            val doc=Document.blank().apply {pages.first().items.addAll(members())}
             val bytes=ByteArrayOutputStream().also {note.write(doc.snapshot(),it)}.toByteArray()
             val reopened=note.read(bytes.inputStream(),imageDir=root)
             assertTrue(reopened.hasReferenceAnchors);assertEquals(doc.identity,reopened.identity)
             assertEquals(doc.pages.first().referenceIdentity.id,reopened.pages.first().referenceIdentity.id)
-            assertEquals(doc.pages.first().items.map {it.referenceIdentity.id},reopened.pages.first().items.map {it.referenceIdentity.id})
-            val board=InfiniteDocument().apply {addAll(members());enableReferenceAnchors()}
+            assertEquals(2,reopened.pages.first().items.size)
+            val board=InfiniteDocument().apply {addAll(members())}
             val canvasBytes=ByteArrayOutputStream().also {canvas.write(board.snapshotForWrite(),it)}.toByteArray()
             val loaded=canvas.read(canvasBytes.inputStream(),root)
-            assertTrue(loaded.hasReferenceAnchors);assertEquals(board.items.map {it.referenceIdentity.id},loaded.items.map {it.referenceIdentity.id})
+            assertEquals(board.identity,loaded.identity);assertEquals(2,loaded.items.size)
             val damaged=ByteArrayOutputStream().also {out->ZipOutputStream(out).use {dest->ZipInputStream(bytes.inputStream()).use {input->
                 var e=input.nextEntry
                 while(e!=null) {
@@ -50,8 +50,13 @@ class ReferenceCodecAndroidTest {
                 }
             }}}.toByteArray()
             val failed=File(root,"failed-read").apply {mkdirs()}
-            try {note.read(damaged.inputStream(),imageDir=failed);fail("invalid encoded image must not become a partial writable model")} catch(_:IllegalArgumentException) {}
-            assertTrue(failed.list()!!.isEmpty());assertEquals(2,image.probeFile(source.path)!!.width)
+            val partial=note.read(damaged.inputStream(),imageDir=failed)
+            assertEquals(doc.pages.first().referenceIdentity.id,partial.pages.first().referenceIdentity.id)
+            assertEquals(1,partial.pages.first().items.size)
+            val rescue=note.readInkCopy(damaged.inputStream(),imageDir=failed)
+            assertEquals(1,rescue.omittedOnCopy);assertEquals(1,rescue.pages.first().items.size)
+            assertNotEquals(doc.pages.first().referenceIdentity.id,rescue.pages.first().referenceIdentity.id)
+            assertEquals(2,image.probeFile(source.path)!!.width)
         } finally {root.deleteRecursively()}
     }
 }

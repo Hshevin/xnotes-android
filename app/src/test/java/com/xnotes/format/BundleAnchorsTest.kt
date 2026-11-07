@@ -47,7 +47,7 @@ class BundleAnchorsTest {
         assertArrayEquals(before,source.readBytes())
         assertEquals(fingerprints.filterKeys {it!="manifest.json"},BundleMigration.fingerprints(staged.file).filterKeys {it!="manifest.json" && it!=BundleAnchors.ENTRY})
         val manifest=bytes(staged.file,"manifest.json")
-        assertTrue(String(manifest).contains("reference_id"));assertEquals(2,staged.anchorCount)
+        assertTrue(String(manifest).contains("reference_id"));assertEquals(1,staged.anchorCount)
         val sequential=mutableListOf<String>()
         ZipInputStream(staged.file.inputStream()).use {z->var e=z.nextEntry;while(e!=null) {sequential+=e.name;if(e.name=="manifest.json") assertArrayEquals(manifest,z.readBytes());z.closeEntry();e=z.nextEntry}}
         assertEquals(1,sequential.count {it=="manifest.json"});assertTrue("future/payload.bin" in sequential)
@@ -57,12 +57,14 @@ class BundleAnchorsTest {
         assertArrayEquals(manifest,bytes(second.file,"manifest.json"));assertArrayEquals(bytes(source,BundleAnchors.ENTRY),bytes(second.file,BundleAnchors.ENTRY));second.file.delete()
         assertEquals(listOf(source.name),dir.list()!!.toList())
     }
-    @Test fun markerTracksEmptyCanvasAndKnownMissingIdentitiesNeverBecomeANewLegacyUpgrade() = directory {dir->
-        val empty=bundle(dir,canvas=true);val staged=BundleAnchors.prepare(empty,dir)
-        assertEquals(0,staged.anchorCount);val marker=bytes(staged.file,BundleAnchors.ENTRY);staged.file.delete()
-        val lost=bundle(dir,marker=marker)
-        try {BundleAnchors.prepare(lost,dir);fail("marker with missing IDs must fail")} catch(_:IllegalArgumentException) {}
-        try {BundleAnchors.prepare(empty,dir,expectedAnchored=true);fail("trusted known upgrade missing marker")} catch(_:IllegalArgumentException) {}
+    @Test fun canvasesNeedNoPageUpgradeAndKnownMissingPageIdentitiesAreRejected() = directory {dir->
+        val empty=bundle(dir,canvas=true);val before=empty.readBytes()
+        try {BundleAnchors.prepare(empty,dir);fail("canvas has no page anchors")} catch(_:IllegalArgumentException) {}
+        assertArrayEquals(before,empty.readBytes())
+        val lost=bundle(dir,marker=AnchorMetadata(identity.documentId).bytes())
+        try {BundleAnchors.prepare(lost,dir);fail("marker with missing page IDs must fail")} catch(_:IllegalArgumentException) {}
+        val legacy=bundle(dir)
+        try {BundleAnchors.prepare(legacy,dir,expectedAnchored=true);fail("known upgrade missing marker")} catch(_:IllegalArgumentException) {}
     }
     @Test fun cancellationAndExternalChangeKeepSourceAndRecoveryCandidate() = directory {dir->
         val source=bundle(dir);val before=source.readBytes()

@@ -31,33 +31,28 @@ class ReferenceIdentityTest {
         assertEquals(id,identity.id);assertEquals(id,identity.assign())
         try {ReferenceIdentity().restore("bad-id");fail("invalid id")} catch(_:IllegalArgumentException) {}
     }
-    @Test fun snapshotKeepsIdsAndMembershipWhileCopyStartsIndependentIdentities() {
-        val doc=Document.blank();val page=doc.pages.first();val stroke=ink().also {page.items.add(it)}
-        assertNull(stroke.referenceIdentity.id);doc.enableReferenceAnchors()
-        val saved=doc.snapshot();val pageId=page.referenceIdentity.id;val itemId=stroke.referenceIdentity.id
-        assertTrue(saved.hasReferenceAnchors);assertEquals(pageId,saved.pages.first().referenceIdentity.id)
-        assertEquals(itemId,saved.pages.first().referenceIdForWrite(stroke))
-        val later=ink().also {page.items.add(it)};assertNull(later.referenceIdentity.id)
-        doc.snapshot();assertNotNull(later.referenceIdentity.id);assertEquals(listOf(stroke),saved.pages.first().items)
-        val copied=page.deepCopy(FakeTextMeasurer());val independent=Document(pages=mutableListOf(copied));independent.enableReferenceAnchors()
-        assertNotEquals(pageId,copied.referenceIdentity.id);assertNotEquals(itemId,copied.items.first().referenceIdentity.id)
-        assertTrue(copied.items.map {it.referenceIdentity.id}.toSet().intersect(page.items.map {it.referenceIdentity.id}.toSet()).isEmpty())
+    @Test fun snapshotKeepsPageIdsWhilePageCopiesAndNewPagesGetNewIds() {
+        val doc=Document.blank();val page=doc.pages.single();val stroke=ink().also {page.items.add(it)}
+        doc.enableReferenceAnchors();val id=page.referenceIdentity.id;val saved=doc.snapshot()
+        val later=Page(100.0,100.0).also {doc.pages.add(it)}
+        assertNull(later.referenceIdentity.id);doc.snapshot();assertNotNull(later.referenceIdentity.id)
+        assertEquals(id,saved.pages.single().referenceIdentity.id)
+        assertSame(stroke,saved.pages.single().items.single())
+        val copy=page.deepCopy(FakeTextMeasurer());val independent=Document(pages=mutableListOf(copy));independent.enableReferenceAnchors()
+        assertNotEquals(id,copy.referenceIdentity.id)
     }
-    @Test fun transferLayerAndUndoKeepObjectIdentityWhileNewCanvasMembersGetNewIdsAtSnapshot() {
-        val doc=Document.blank();val from=doc.pages.first();val to=Page(100.0,100.0).also {doc.pages.add(it)}
-        val item=ink().also {from.items.add(it)};doc.enableReferenceAnchors();val id=item.referenceIdentity.id
-        to.layers.create("Destination")
-        val command=TransferItems(listOf(TransferItems.Transfer(from,to,item,10.0,10.0)))
-        command.redo();assertEquals(id,item.referenceIdentity.id);assertTrue(item in to.items)
-        command.undo();assertEquals(id,item.referenceIdentity.id);assertTrue(item in from.items)
-        val canvas=InfiniteDocument();val a=ink().also(canvas::add);canvas.enableReferenceAnchors()
-        val saved=canvas.snapshotForWrite();val b=ink().also(canvas::add);canvas.snapshotForWrite()
-        assertNotEquals(a.referenceIdentity.id,b.referenceIdentity.id);assertEquals(listOf(a),saved.items)
-        assertEquals(a.referenceIdentity.id,saved.referenceIdForWrite(a))
+    @Test fun reorderAndUndoKeepTheOriginalPageIdentity() {
+        val a=Page(100.0,100.0);val b=Page(100.0,100.0)
+        val doc=Document(pages=mutableListOf(a,b));doc.enableReferenceAnchors()
+        val original=doc.pages.map {it.referenceIdentity.id}
+        doc.pages.reverse();assertEquals(original.reversed(),doc.snapshot().pages.map {it.referenceIdentity.id})
+        doc.pages.reverse();assertEquals(original,doc.snapshot().pages.map {it.referenceIdentity.id})
+        doc.pages.remove(a);assertEquals(listOf(original[1]),doc.snapshot().pages.map {it.referenceIdentity.id})
+        doc.pages.add(0,a);assertEquals(original,doc.snapshot().pages.map {it.referenceIdentity.id})
     }
-    @Test fun duplicateObjectOrPageMembershipAndUnknownCopyAreRejected() {
+    @Test fun duplicatePagesAreRejectedButObjectAliasesHaveNoReferenceIdentityConstraint() {
         val item=ink();val first=Page(100.0,100.0,mutableListOf(item));val second=Page(100.0,100.0,mutableListOf(item))
-        try {Document(pages=mutableListOf(first,second)).enableReferenceAnchors();fail("same object twice")} catch(_:IllegalArgumentException) {}
+        Document(pages=mutableListOf(first,second)).enableReferenceAnchors()
         try {Document(pages=mutableListOf(first,first)).enableReferenceAnchors();fail("same page twice")} catch(_:IllegalArgumentException) {}
         val unknown=object:CanvasItem by ink() {}
         try {unknown.deepCopy(FakeTextMeasurer());fail("independent copy cannot alias original")} catch(_:IllegalArgumentException) {}
@@ -80,11 +75,11 @@ class ReferenceIdentityTest {
         val layer=page.layers.create("Later");item.layerId=layer.id
         val twice=once.snapshot()
         assertEquals(once.pages.first().layerIdForWrite(item),twice.pages.first().layerIdForWrite(item))
-        assertEquals(once.pages.first().referenceIdForWrite(item),twice.pages.first().referenceIdForWrite(item))
-        val board=InfiniteDocument();val ink=ink().also(board::add);board.enableReferenceAnchors()
+        assertEquals(once.pages.first().referenceIdentity.id,twice.pages.first().referenceIdentity.id)
+        val board=InfiniteDocument();val ink=ink().also(board::add)
         val first=board.snapshotForWrite();ink.layerId=board.layers.create("Later").id
         val second=first.snapshotForWrite()
-        assertEquals(first.layerIdForWrite(ink),second.layerIdForWrite(ink));assertEquals(first.referenceIdForWrite(ink),second.referenceIdForWrite(ink))
+        assertEquals(first.layerIdForWrite(ink),second.layerIdForWrite(ink))
     }
 
 }

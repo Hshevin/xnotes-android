@@ -48,3 +48,7 @@ B2b2a1 helper局部实现复核：修复File/Channel容器校验差异、CD加�
 ## 2026-11-08 R0 新渲染基线同步
 
 独立review_input_plan只读复核：B1b文本、snapshot冻结、ink-only计数及分屏拒绝契约保留。唯一必修CanvasScene.WET_KEY缺旧ReferenceIdentity接口，主代理补空容器（不assign）后完整编译/JVM重跑通过2964项。页面级计划接受其意见：计数独立于身份、整包副本换页面ID、对象数不占页面限额、来源范围同步及坏对象多页/pending测试。实际Android/真机未运行。
+
+## 2026-11-08 R1a 页面级身份
+
+review_input_plan只读复核：发现抢救未知layer仍整份失败及提前过滤即时对象破坏pending索引两项必修。分别新增红灯回归tmp/page-bad-layer-red.log与tmp/page-pending-order-red.log；修为抢救时略去坏层对象、pending完成后统一过滤、Glue限定最终成员。最终复核确认解决，无新确定性阻断。主代理执行全量274套件2971项、Android源码编译通过（tmp/page-reference-full.log）。真实Android/SAF/设备未运行，整包副本新页面ID未纳入本片。

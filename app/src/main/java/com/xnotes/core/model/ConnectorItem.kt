@@ -83,7 +83,6 @@ class ConnectorItem(
     var neon: Boolean = false,
     var neonStrength: Double = 0.6,
 ) : CanvasItem, Labelled {
-    override val referenceIdentity = ReferenceIdentity()
 
 
     override val kind = KIND

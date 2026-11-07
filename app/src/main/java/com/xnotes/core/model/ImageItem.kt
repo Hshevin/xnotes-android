@@ -31,7 +31,6 @@ class ImageItem(
     /** The share of [image] that fills [rect], as fractions of the image as stored (left, top, right, bottom); null for all of it. */
     var part: Rect? = null,
 ) : CanvasItem, Resizable {
-    override val referenceIdentity = ReferenceIdentity()
 
 
     override val kind = KIND
