@@ -1,7 +1,7 @@
 # 第四批渲染回迁：图片绘制与录音关联快照（2026-11-07）
 
 用户要求：继续下一批回迁，保留主线 View／湿墨层替换保护，独立审查并通过编译和 JVM 测试后合并；窗口测试另行安排。
-状态：独立静态审查完成；生产与仪器源码编译通过，全量 2799 项 JVM 测试通过；尚未本地合并，EGL／窗口及目标 GPU 验收未执行。
+状态：独立静态审查完成；生产与仪器源码编译通过，全量 2799 项 JVM 测试通过；已通过 `2f960218` 合入本地 master。EGL／窗口及目标 GPU 验收未执行。
 本轮边界：仅回迁图片绘制参数与录音关联信息的入队快照，以及录音打点／解除关联的通知闭环；执行源码编译、JVM 测试及本地合并，不运行 EGL／窗口仪器，不打包、安装、推送或发布。
 
 ## 来源与范围
@@ -33,3 +33,10 @@
 - `InfiniteEditor` 仅局部改动 modelListener、history.onPush 和 unlinkSelectedAudio；surfacesForAttach、主线回调重绑、MainActivity、Editor、InfiniteCanvasView、GlWetPad、GlRenderer、TextureCache、GeometryStore 和 GlowTarget 均未改变。CanvasScene 的第三批光晕失效两入口保留。
 - 源码／JVM 验证不代替 InfiniteEditor 真实录音打点与前缓冲运行接线、GPU 像素、窗口、目标设备或原黑块效果验收。文件寿命、异步任务来源、帧／播放进度版本配对仍属后续范围。
 - 保存点：生产闭环与历史 9 项 JVM 为 `e53e458e`，6 项真实队列回归为 `5cf679ef`；EGL 源码及本文随后单独保存。
+
+## 本地合并结果
+
+- `codex/render-snapshot-backport` 的 `e53e458e`、`5cf679ef` 和 EGL／记录 `6d93cf42` 通过 `2f960218` 以 `--no-ff` 合入本地 master；合并前为 `af42ec49`、工作树干净，合并无冲突。
+- 合并后应用／测试源码及构建配置与已验证回迁分支完全一致，`git diff --check` 通过；主线 native View／pad 替换、第三批光晕修正、master test2 的历史失败及分屏夹具修复记录均保留。没有对无源码变化的合并重复运行测试。
+- 保留原渲染分支及四条回迁分支，不反向合入原重构分支，不顺带处理 RF01／诊断待修项或下一批。
+- 本轮未生成 APK、运行 EGL／窗口仪器、启动模拟器、安装、推送或发布。窗口与目标 GPU 验收另行安排，原黑块效果未获真机验证。
