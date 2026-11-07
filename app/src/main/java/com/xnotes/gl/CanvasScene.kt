@@ -15,7 +15,6 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.SyncMark
 import java.util.IdentityHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.floor
 
 /** Which part of the item under the pen a batch of triangles is. */
@@ -100,10 +99,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         object Reset : Edit()
     }
 
-    private val pending = ConcurrentLinkedQueue<Edit>()
-
-    /** Edits held back by [batch], to be queued behind one reservation for the lot. */
-    private var staged: ArrayList<Edit>? = null
+    private val pending = SceneUpdateQueue<Edit>(::withReservations)
 
     /**
      * The stroke under the pen lives in its own buffers, kept apart from the committed geometry so
@@ -218,7 +214,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     // --- main-thread API ---
 
     fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect, clearsWet: Boolean = false) {
-        post(Edit.Upsert(item, parts, bounds, item.sync, clearsWet = clearsWet))
+        post(Edit.Upsert(item, parts.toList(), bounds, item.sync, clearsWet = clearsWet))
     }
 
     /** File a placed image. It carries no geometry: the renderer draws it as a textured quad. */
@@ -254,17 +250,17 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     /** Publish an in-progress item made of several runs, which is what a filled shape is. An empty
      *  list clears the whole wet buffer, settled runs included. */
     fun setWetParts(parts: List<MeshPart>, bounds: Rect) {
-        post(Edit.Wet(parts, bounds, WetKind.WHOLE))
+        post(Edit.Wet(parts.toList(), bounds, WetKind.WHOLE))
     }
 
     /** Add a run of the stroke under the pen that has stopped moving; it is never rewritten. */
     fun appendWetRun(parts: List<MeshPart>, bounds: Rect) {
-        post(Edit.Wet(parts, bounds, WetKind.SETTLED))
+        post(Edit.Wet(parts.toList(), bounds, WetKind.SETTLED))
     }
 
     /** Replace the run still moving under the nib, leaving the settled ones where they are. */
     fun setWetTail(parts: List<MeshPart>, bounds: Rect) {
-        post(Edit.Wet(parts, bounds, WetKind.TAIL))
+        post(Edit.Wet(parts.toList(), bounds, WetKind.TAIL))
     }
 
     /** Draw [items] displaced by [at] until this is called again with an empty list. */
@@ -276,32 +272,36 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         post(Edit.Reset)
     }
 
-    /** Queue what [block] publishes behind one reservation, so a whole load grows the buffers once. */
-    fun batch(block: () -> Unit) {
-        if (staged != null) return block()
-        val edits = ArrayList<Edit>()
-        staged = edits
-        try {
-            block()
-        } finally {
-            staged = null
+    /** Publish the whole successful batch at once; [afterCommit] runs on the producer afterwards. */
+    fun batch(afterCommit: (() -> Unit)? = null, block: () -> Unit) = pending.batch(afterCommit, block)
+
+    private fun post(edit: Edit) = pending.post(edit)
+
+    /** Preserve edit order, reserving each reset-delimited segment before its first upsert. */
+    private fun withReservations(edits: List<Edit>): List<Edit> {
+        val reserved = ArrayList<Edit>(edits.size + 1)
+        var start = 0
+        while (start < edits.size) {
+            var end = start + 1
+            while (end < edits.size && edits[end] !== Edit.Reset) end++
+            var firstUpsert = -1
             var vertices = 0L
             var indices = 0L
-            for (edit in edits) {
-                if (edit !is Edit.Upsert) continue
+            for (i in start until end) {
+                val edit = edits[i] as? Edit.Upsert ?: continue
+                if (firstUpsert < 0) firstUpsert = i
                 for (part in edit.parts) {
-                    vertices += part.mesh.vertexCount
-                    indices += part.mesh.indices.size
+                    vertices = Math.addExact(vertices, part.mesh.vertexCount.toLong())
+                    indices = Math.addExact(indices, part.mesh.indices.size.toLong())
                 }
             }
-            pending.add(Edit.Reserve(vertices, indices))
-            pending.addAll(edits)
+            for (i in start until end) {
+                if (i == firstUpsert) reserved.add(Edit.Reserve(vertices, indices))
+                reserved.add(edits[i])
+            }
+            start = end
         }
-    }
-
-    private fun post(edit: Edit) {
-        val batch = staged
-        if (batch != null) batch.add(edit) else pending.add(edit)
+        return reserved
     }
 
     // --- GL thread ---
@@ -1088,15 +1088,18 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     private fun drainEdits() {
         while (true) {
-            when (val edit = pending.poll() ?: break) {
-                is Edit.Upsert -> applyUpsert(edit)
-                is Edit.Wet -> applyWet(edit)
-                is Edit.Lift -> applyLift(edit)
-                is Edit.Remove -> applyRemove(edit.item)
-                is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
-                is Edit.SyncChanged -> for ((item, mark) in edit.marks) records[item]?.sync = mark
-                is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
-                Edit.Reset -> applyReset()
+            val update = pending.poll() ?: break
+            for (edit in update.edits) {
+                when (edit) {
+                    is Edit.Upsert -> applyUpsert(edit)
+                    is Edit.Wet -> applyWet(edit)
+                    is Edit.Lift -> applyLift(edit)
+                    is Edit.Remove -> applyRemove(edit.item)
+                    is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
+                    is Edit.SyncChanged -> for ((item, mark) in edit.marks) records[item]?.sync = mark
+                    is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
+                    Edit.Reset -> applyReset()
+                }
             }
         }
         reportMemory()

@@ -66,6 +66,7 @@ import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.vector.VectorMesher
 import com.xnotes.gl.CanvasScene
+import com.xnotes.gl.ImageDrawSnapshot
 import com.xnotes.gl.InfiniteCanvasView
 import com.xnotes.ui.theme.Palette
 
@@ -370,13 +371,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private var committingWetStroke = false
 
     /** Tessellate [item] and hand the triangles to the renderer, or drop it if it draws nothing. */
-    private fun pushItem(item: CanvasItem) {
+    private fun pushItem(item: CanvasItem, vectorJobs: MutableList<VectorMeshRequest>? = null) {
         if (!document.layers.visible(item)) { scene.remove(item); return }
         // Held back while the front buffer is still the only thing showing this stroke. The
         // document and the history already have it; only its triangles wait.
         for (h in heldItems) if (h === item) return
         if (item is ImageItem) {
-            if (!pushVectorImage(item)) scene.upsertImage(item, item.paintBounds())
+            if (!pushVectorImage(item, vectorJobs)) scene.upsertImage(item, item.paintBounds())
             return
         }
         val started = System.nanoTime()
@@ -388,6 +389,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         scene.upsert(item, meshed.parts, meshed.bounds, committingWetStroke)
     }
+
+    private class VectorMeshRequest(val item: ImageItem, val drawing: ImageDrawSnapshot, val bounds: Rect)
 
     /**
      * A placed SVG becomes triangles like everything else, so it stays sharp at any zoom instead of
@@ -401,23 +404,29 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      *
      * Returns false for a raster image, which takes the texture path as before.
      */
-    private fun pushVectorImage(item: ImageItem): Boolean {
+    private fun pushVectorImage(item: ImageItem, vectorJobs: MutableList<VectorMeshRequest>?): Boolean {
         if (!com.xnotes.platform.ImageDecoder.isVector(item.image.file.path)) return false
         val bounds = item.paintBounds()
+        val request = VectorMeshRequest(item, ImageDrawSnapshot.capture(item), bounds)
         scene.upsert(item, vectorPlaceholder(bounds), bounds)
+        if (vectorJobs == null) startVectorMesh(request) else vectorJobs.add(request)
+        return true
+    }
+
+    /** Register only after the placeholder's complete scene update has been committed. */
+    private fun startVectorMesh(request: VectorMeshRequest) {
+        val item = request.item
+        val drawing = request.drawing
         val token = vectorMeshSeq.incrementAndGet()
         vectorMeshGen[item] = token
-        val rect = item.rect
-        val orientation = item.orientation
-        val angle = item.angle
-        val flip = item.flip
-        decodeExecutor.execute {
+        val work = Runnable {
             val started = System.nanoTime()
-            val parsed = com.xnotes.platform.VectorScenes.sceneFor(item.image.file)
+            val parsed = com.xnotes.platform.VectorScenes.sceneFor(drawing.source.file)
             val parts = if (parsed == null) {
                 emptyList()
             } else {
-                VectorMesher.mesh(parsed, rect, orientation, angle, StrokeTessellator.DEFAULT_TOLERANCE, flip)
+                VectorMesher.mesh(parsed, drawing.rect, drawing.orientation, drawing.angle,
+                    StrokeTessellator.DEFAULT_TOLERANCE, drawing.flip)
             }
             val ms = (System.nanoTime() - started) / 1_000_000.0
             // The mesher stops at a vertex ceiling; say so rather than silently drawing part of it.
@@ -425,7 +434,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 android.util.Log.w(
                     "InfiniteEditor",
                     "svg drawn only as far as the ${VectorMesher.MAX_VERTICES} vertex ceiling: " +
-                        item.image.file.path,
+                        drawing.source.file.path,
                 )
             }
             // Claimed and filed on the main thread, so this cannot land after a removal that was
@@ -433,11 +442,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             mainHandler.post {
                 if (!vectorMeshGen.remove(item, token) || parts.isEmpty() || !document.layers.visible(item)) return@post
                 scene.lastTessellateMs = ms
-                scene.upsert(item, parts, bounds)
+                scene.upsert(item, parts, request.bounds)
                 view.publish()
             }
         }
-        return true
+        try {
+            decodeExecutor.execute(work)
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            // The placeholder is already committed. Settle this request without undoing that
+            // update or preventing other jobs and the caller's final frame publication.
+            vectorMeshGen.remove(item, token)
+            android.util.Log.w("InfiniteEditor", "svg mesh task rejected", e)
+        }
     }
 
     /** The faint box that holds a vector image's place until its triangles land. */
@@ -453,10 +469,15 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Re-tessellate the whole document, after a load or a wholesale list replacement. */
     private fun rebuildScene() {
-        scene.reset()
-        vectorMeshGen.clear()
-        scene.batch { for (item in document.items) pushItem(item) }
-        publishLayerOrder()
+        val vectorJobs = ArrayList<VectorMeshRequest>()
+        scene.batch(afterCommit = {
+            vectorMeshGen.clear()
+            for (request in vectorJobs) startVectorMesh(request)
+        }) {
+            scene.reset()
+            for (item in document.items) pushItem(item, vectorJobs)
+            publishLayerOrder()
+        }
     }
 
     private fun publishLayerOrder() {
