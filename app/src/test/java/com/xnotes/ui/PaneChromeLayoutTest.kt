@@ -27,6 +27,19 @@ class PaneChromeLayoutTest {
         }
     }
 
+    @Test fun unboundedAxisSizesToContentInsteadOfFailing() {
+        // A toolbar docked across this axis adds its depth; one lying along it only sets a floor.
+        assertEquals(560, paneChromeUnboundedExtent(500, 60, toolbarAlongAxis = true, min = 0))
+        assertEquals(800, paneChromeUnboundedExtent(500, 800, toolbarAlongAxis = false, min = 0))
+        assertEquals(500, paneChromeUnboundedExtent(500, 60, toolbarAlongAxis = false, min = 0))
+        assertEquals("parent minimum is respected", 900, paneChromeUnboundedExtent(500, 60, toolbarAlongAxis = true, min = 900))
+        assertEquals("empty content still fits the toolbar", 60, paneChromeUnboundedExtent(0, 60, toolbarAlongAxis = true, min = 0))
+        // The resulting size feeds the same geometry as a bounded pane.
+        val height = paneChromeUnboundedExtent(500, 60, toolbarAlongAxis = true, min = 0)
+        assertEquals(PaneChromeGeometry(0, 60, 800, 500, 0, 0),
+            paneChromeGeometry(800, height, 800, 60, ToolbarPosition.TOP, true))
+    }
+
     @Test fun narrowAndZeroSizePanesNeverProduceNegativeContent() {
         for (width in listOf(0, 1, 59, 801)) {
             for (height in listOf(0, 1, 59, 603)) {
