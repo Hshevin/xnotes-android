@@ -340,4 +340,5 @@
 
 ## 渲染回迁合并后审查与冒烟测试待修（2026-11-07）
 
-- [ ] P-1～P-6（第二批稳定窗格布局）、S-1～S-6（第四批图片／录音快照）、U-1～U-4（test2 模拟器冒烟测试体验问题）。P-1、S-5 优先；其余与 D-1～D-7 一起在回迁收尾时处理，详见 docs/movinkpad/render-backport-review-followups-2026-11-07.md。
+- [ ] P-1～P-6（第二批稳定窗格布局）、S-1～S-4／S-6（第四批图片／录音快照）、U-1～U-4（test2 模拟器冒烟测试体验问题）。P-1 优先；其余与 D-1～D-7 一起在回迁收尾时处理，详见 docs/movinkpad/render-backport-review-followups-2026-11-07.md。
+- [x] S-5 的 SVG worker 可变源文件读取：第五批在生产线程冻结 ImageDrawSnapshot，worker 只读请求；源码编译及 2817 项 JVM 通过，详见 docs/movinkpad/scene-batch-backport-2026-11-07.md。实际编辑器 SVG 调度／跨文档迟到结果及窗口、目标 GPU 运行验证仍待安排。
