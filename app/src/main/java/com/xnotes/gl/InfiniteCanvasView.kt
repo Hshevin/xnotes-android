@@ -38,6 +38,25 @@ class InfiniteCanvasView private constructor(
     /** Observational identity belongs to this native View, not to its retained document. */
     val renderDiagnostics = RenderDiagnostics()
     private val glRenderer = GlRenderer(initialContextGen, renderDiagnostics)
+    private var captureRetired = false
+    private val diagnosticCapture = lazy {
+        SurfaceCapture.forView(this).also { if (captureRetired) it.close() }
+    }
+
+    /** Explicit diagnostic copy, not a redraw. The caller owns a successful result's bitmap. */
+    fun captureSurface(callback: (SurfaceCapture.Result) -> Unit) = diagnosticCapture.value.request(callback)
+
+    private fun retireCapture() {
+        captureRetired = true
+        if (!diagnosticCapture.isInitialized()) return
+        try {
+            diagnosticCapture.value.close()
+        } catch (_: Exception) {
+            // A diagnostic client's notification must not interrupt native-host replacement.
+            // close already revoked the callback; the native completion still owns cleanup.
+            android.util.Log.w("SurfaceCapture", "Retired capture callback failed")
+        }
+    }
 
     private val configChooser = MsaaConfigChooser()
 
@@ -53,6 +72,7 @@ class InfiniteCanvasView private constructor(
      */
     fun replacementForAttach(): InfiniteCanvasView {
         check(detachedFromWindow && !isAttachedToWindow)
+        retireCapture()
         return InfiniteCanvasView(context, null, viewport, glRenderer.contextGen).also {
             it.background = background
             it.paperColor = paperColor
