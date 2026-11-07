@@ -30,3 +30,7 @@
 ## 背景与优先级
 
 这批诊断原为排查「无限画布退出分屏黑区」准备。画布已取消分屏（`canvas-sketch-only-2026-11-07.md`），用途变小。修复时若决定只在 debug 启用（D-1），D-2 至 D-7 可按诊断工具实际使用需求取舍。
+
+## 修复进展
+
+D-1、D-3 已在 `b55822e4` 修复（分支 `worktree-fix-render-followups`），详见 [render-backport-review-followups-2026-11-07.md](render-backport-review-followups-2026-11-07.md#修复进展2026-11-07claude-code分支-worktree-fix-render-followups)。D-2 待用户决定，D-4～D-7 未修。
