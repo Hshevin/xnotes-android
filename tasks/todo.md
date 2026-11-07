@@ -343,3 +343,7 @@
 - [x] 已修（分支 `worktree-fix-render-followups`，2843 项 JVM 通过，仪器／真机未运行）：B6-1/2/3/5 图片显示倒退、P-1/P-5、S-1/S-2/S-3/S-6、D-1/D-3、U-1 剪贴板提示、P-6 整理、U-4 新建画布直接打开。
 - [ ] 未修：P-2/P-3/P-4（需窗口测试配合）、S-4、D-4～D-7、U-2/U-3、B5-1～B5-8、B6-4/6/7。D-2 经用户决定保持现状。原因与提交见 docs/movinkpad/render-backport-review-followups-2026-11-07.md。
 - [x] S-5 的 SVG worker 可变源文件读取：第五批在生产线程冻结 ImageDrawSnapshot，worker 只读请求；源码编译及 2817 项 JVM 通过，详见 docs/movinkpad/scene-batch-backport-2026-11-07.md。实际编辑器 SVG 调度／跨文档迟到结果及窗口、目标 GPU 运行验证仍待安排。
+
+## test3 模拟器冒烟测试发现（2026-11-08）
+
+- [ ] T3-1 分屏时一侧首页新建文件后，另一侧首页列表不刷新。T3-2 模拟器无前缓冲（预期，需真机确认）。T3-3 为测试环境收尾步骤问题，已改进。详见 docs/movinkpad/master-test3-emulator-smoke-2026-11-08.md。
