@@ -1,7 +1,7 @@
 # 导图适配渲染基线与页面引用续作（2026-11-08）
 
 用户要求：渲染重构基本完成，先检查新架构和接口，再继续思维导图与文件关系网络；保留已有进度及已确认需求。明确授权同步 master 54f05b0f（包括主线已有 AI、画布更新）。
-状态：实施中；主线同步验证与独立复核进行中，完整引用闭环未完成。
+状态：主线同步、R1a页面身份、R1c来源格式与R1b0原字节替换工具已实现并验证；完整引用闭环未完成。
 本轮边界：实现、验证、文档及本地提交；仅本次将指定 master 基线同步至 codex/mind-map，不打包、安装、推送或发布，不合入其他开发分支。
 
 ## 核实的新接口与适配原则
@@ -12,7 +12,7 @@
 - `SceneUpdateQueue` 单生产者暂存完整批次；嵌套失败不发布，afterCommit 发生在提交后。`CanvasScene.batch` 用于 reset/items/order 一起发布，但不代表模型历史或 GPU 帧的原子事务。
 - `DecodeMailbox` 绑定来源身份及请求；`CanvasScene.reset(documentBinding)` 区分换文档与同文档重建。CPU 位图领取与释放有单一所有者，context 重建不等于文档关闭。
 - `Editor.surfacesForAttach` 和 `InfiniteEditor.surfacesForAttach` 继续负责真实宿主替换；不复用旧 renderer 的帧回调。`PaneChromeLayout` 稳定工具栏尺寸，不代替重挂保护。
-- 现有导图 `MindMapView`/`MapPainter` 使用 Android Canvas 与不可变 MapDocument，不依赖 CanvasScene/GL；继续复用原生笔迹几何和 TextEditorOverlay/TextEditHost。没有必要为了“使用新架构”把导图改成第二套 GPU 编辑器。新增异步来源预览必须冻结输入并按文档/来源版本拒收迟到结果。
+- 现有导图 `MindMapView`/`MapPainter` 使用 Android Canvas 与不可变 MindMapDocument，不依赖 CanvasScene/GL；继续复用原生笔迹几何和 TextEditorOverlay/TextEditHost。没有必要为了“使用新架构”把导图改成第二套 GPU 编辑器。新增异步来源预览必须冻结输入并按文档/来源版本拒收迟到结果。
 - 原位与放大编辑继续共享 InkGestureController、工具和 MapHistory；笔落下锁定节点及变换。文本覆盖层的受控草稿、IME composition、光标反馈、视口恢复不得被主线旧版本覆盖。
 - 无限画布在主线已限定独立草稿模式，不重新开放分屏；后续导图窗格集成单独实现。
 
@@ -43,3 +43,9 @@ B2c 对象后继取消；其余已确认需求仍在 tasks/plan.md、todo.md 与
 - 日志 `tmp/render-baseline-verify.log`；当前全量 **273 套件、2964 项**，失败/错误/跳过均为0。首次编译发现上述匿名对象接口缺失，修正后重新完整执行通过。
 - 独立只读复核确认文本草稿/光标接口、再次 snapshot 图层冻结、readInkCopy 及遗漏提示保留，三处分屏预检保留。主代理修正唯一编译适配项并验证。
 - 未运行 Android 仪器、EGL、窗口、真实 SAF 或目标设备；不据此确认原黑块、前缓冲、笔延迟或 IME 真机行为。
+
+## 本轮保存点
+
+本地提交ebe3b182同步固定主线，661405a8完成页面级身份/抢救，55d64a4e完成来源范围，9d3547f2完成原字节页面ID替换工具。最终276套件2984项JVM通过，Android测试源码编译通过；独立阶段复核完成。没有打包、安装、推送、发布或向主线合并。
+
+下一片R1b1整包writer与Snapshot/Header接线已完成计划复核但尚未实现；细节见page-reference-implementation-2026-11-08.md末节。R2激活、R3来源入口/预览/往返、R4反向引用/恢复/双窗格、R5网络及A2剩余交互均保留，整体complete=false。

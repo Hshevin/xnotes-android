@@ -47,3 +47,18 @@ Insertion可带skip长度。writer先检查非负/溢出/重叠，然后连续�
 初始inspectCopy仅转发原校验时，新增字节/身份反例失败（tmp/page-copy-literals-red.log）；独立复核建议增加生成期取消，并以tmp/page-copy-generation-red.log复现后修复。7项AnchorCopyManifestTest覆盖全转义UUID、字段名、空白、单字节UTF-8长边界、精确字节oracle、坏来源、复制幂等输出、截断/取消/流所有权/非法编辑计划。tmp/page-copy-literals-full.log全量276套件2984项通过，失败/错误/跳过均0，Android测试源码编译通过。独立源码复核未发现阻断。
 
 本片只是转换工具，**未接BundleMigration/BundlePdf/Editor.copyFileTo**，不把其测试当作整包复制已正确或SAF激活已完成。下一片继续接入同一BundleSnapshot/Header，复制重铸页面ID并重绑marker，同文档便携导出保留身份及原marker字节。
+
+## R1b1 已审核的继续规格（待实施）
+
+下一片统一整包writer：BundleMigration.prepare、BundlePdf.write/prepare与Editor.copyFileTo只能从同一BundleSnapshot读取Header、manifest、PDF和其他负载。复用Header有界读取及raw marker重绑；双ZIP视图验证原件和候选，拒绝重复/孤立local条目。legacy原负载不强加锚定manifest的大小/词法限制。
+
+独立计划复核已完成，以下前置全部接受，实施不得遗漏：
+
+- 同UUID锚定导出也必须inspect(anchored=true)校验所有页面身份，保留原manifest和原marker字节；page marker配xcanvas、页面缺ID/重复ID必须拒绝。不能只在复制时校验。
+- 新UUID副本调用inspectCopy并重绑marker；重新读候选验证docUUID、页数/页面ID集合、新旧不相交及非身份负载原字节。独立复制与同一文档便携备份明确区分。
+- BundlePdf.prepare是同身份包装迁移，传入身份的documentId必须匹配snapshot Header；否则A换为共享相同PDF的B时可能把B正文绑定为A，PDF摘要相同并不足以接受。
+- File入口取snapshot前后/返回前复核来源摘要；InputStream入口只证明捕获快照一致，不宣称能检测之后URI变化。Editor直接fromInput避免第二次复制大型PDF包。
+- 取消贯穿Header回退扫描、双ZIP摘要、页面转换与PDF SHA/CRC/复制。失败只删私有candidate/temp，不删共享PDF；现有resolve+lease和SHA-256核对保留。
+- 整包writer尚未接通，本轮不启用用户文件页面身份；登记/pending/in-place/在openOutputStream之前预检属于R2，安全要求不取消。
+
+验收补同UUID损坏页契约导出拒绝、page marker+xcanvas拒绝、A→B共用PDF身份错配拒绝、外部变化/取消、legacy大token兼容、整包复制与便携导出身份语义、源和借用PDF不被修改。真正SAF、Android窗口及目标设备仍另列。

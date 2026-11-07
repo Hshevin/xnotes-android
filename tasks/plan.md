@@ -408,3 +408,5 @@ B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64K
 页面级决定覆盖原B2b1对象身份和B2b2a1“整包副本保留成员ID”的计划；另存/导出副本应生成新页面UUID。B2c取消，其余功能和安全要求保留。
 
 R1a模型/codec/原字节升级已通过2971项主机与Android源码编译。抢救计数与页面身份独立；坏层对象过滤发生于pending全数插入之后，Glue限定最终成员。R1c先收紧.xmap范围避免保留对象级产品接口；R1b整包副本新页面UUID、R2安全激活仍未完成，完整来源闭环继续。
+
+R1c已提交55d64a4e，R1b0原字节page UUID替换工具已提交9d3547f2，全量2984项/Android源码编译通过。R1b1整包writer计划已独立审核（sameUUID也完整验证页契约，PDF prepare核对snapshot原身份；完整前置/验收见page-reference-implementation-2026-11-08.md末节），尚未实施。R2～R5/A2均保留，overall complete=false。
