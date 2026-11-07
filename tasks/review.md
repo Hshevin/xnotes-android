@@ -86,3 +86,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b2a 模型复制上下文
 
 计划独立审核通过，精确父scope/owner、先全量校验再采用、已显式scope的UUID错配拒绝全部采纳。源码复核发现空ReferenceIdentity容器共享会使第二次restore失败并留下部分采用，两个反例先失败后修，增加容器IdentityHashMap预检；最终窄复核无未处理点。新增20项，289套件3106项全通过/Android源码编译成功。旧生产SaveAs/fork/merge/session不在此片完成范围，平台/真机未运行。
+
+## R2b2b0 共用会话事务组件
+
+独立计划审核通过，要求已观察head证据与回调票据明确。源码复核发现headTemp未重验、合法foreign head被当基准、陌生head误授权GC及UTF8替换，均红灯证明后修复；主代理另补current body损坏时不清理旧read body。最终窄复核确认GC/lease/短锁修复无剩余阻断。27项新增，290套件3133项全量/Android源码编译成功，2项新真实平台测试只编译未运行。b1生产适配器/Editor、b2native来源凭据仍未完成。

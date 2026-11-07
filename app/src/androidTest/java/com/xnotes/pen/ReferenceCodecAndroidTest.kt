@@ -67,7 +67,7 @@ class ReferenceCodecAndroidTest {
             fun members():List<CanvasItem> = listOf(ImageItem(ImageData(source,2,2),Rect(0.0,0.0,20.0,20.0)),
                 Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(10.0,20.0,.7))))
             val image=AndroidImageCodec();val text=AndroidTextMeasurer();val note=DocumentCodec(image,text);val canvas=CanvasCodec(image,text)
-            val doc=Document.blank().apply {pages.first().items.addAll(members())}
+            val doc=Document.blank().apply {pages.first().items.addAll(members());enableReferenceAnchors()}
             val bytes=ByteArrayOutputStream().also {note.write(doc.snapshot(),it)}.toByteArray()
             val reopened=note.read(bytes.inputStream(),imageDir=root)
             assertTrue(reopened.hasReferenceAnchors);assertEquals(doc.identity,reopened.identity)

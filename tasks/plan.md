@@ -457,3 +457,7 @@ R2b1b计划进一步修订（接受审核）：受管Target.write接收已观察
 R2b2a计划审核已通过。显式API/volatile页binding/严格owner与父scope/延迟undo重基已实现；18新增回归，全量3104项与Android源码编译通过；代码复核中。scope的runtime信息不冒充持久会话来源证据，生产另存接线仍待R2b2b/c。
 
 R2b2a源码独立复核通过，修复空容器共享导致部分采用，新增20项，最后289套件3106项/Android源码编译成功，待本地提交后继续R2b2b。
+
+### R2b2b0 已实现：会话事务组件
+
+reference-session-cache-2026-11-08.md独立计划/代码复核完成，immutable body+atomic head、已观察摘要CAS、reserve/clear代次、lease/GC均有反例。290套件3133项全通过/Android源码编译成功，未运行实际平台。接着b1接SessionStore/CanvasSessionStore/Editor和旧缓存，b2接native来源摘要/恢复决策，再R2b2c另存/fork/merge，其他来源闭环与网络需求保留。
