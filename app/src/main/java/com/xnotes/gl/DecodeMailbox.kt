@@ -11,11 +11,15 @@ import java.util.IdentityHashMap
 internal class DecodeMailbox<K : Any, V : Any>(
     private val dispose: (V) -> Unit,
     private val maxFailures: Int = 2,
+    private val now: () -> Long = System::nanoTime,
 ) {
     internal class Source<K : Any, V : Any>(val key: K) {
         var request: Request<K, V>? = null
-        val failures = HashMap<Int, Int>()
+        val failures = HashMap<Int, Failure>()
     }
+
+    /** Failed decodes of one target size, and when the latest one settled. */
+    internal class Failure(val count: Int, val at: Long)
 
     internal class Request<K : Any, V : Any>(val source: Source<K, V>, val target: Int) {
         var started = false
@@ -67,9 +71,12 @@ internal class DecodeMailbox<K : Any, V : Any>(
         var discarded: V? = null
         val request = synchronized(lock) {
             val source = sources[key]?.takeUnless { closed } ?: return@synchronized null
-            if ((source.failures[target] ?: 0) >= maxFailures) return@synchronized null
+            if (!mayRetry(source.failures[target])) return@synchronized null
             val old = source.request
             if (old != null && old.target >= target) return@synchronized null
+            // Work already underway is let finish, so a coarse image shows while the next size is
+            // decoded; only a request still waiting in the queue is superseded.
+            if (old != null && old.started) return@synchronized null
             val next = Request(source, target)
             if (old != null) {
                 ready.remove(old)
@@ -128,7 +135,7 @@ internal class DecodeMailbox<K : Any, V : Any>(
     fun finish(request: Request<K, V>, success: Boolean): Boolean = synchronized(lock) {
         if (!owns(request) || !request.receiving) return@synchronized false
         if (success) request.source.failures.remove(request.target)
-        else request.source.failures[request.target] = (request.source.failures[request.target] ?: 0) + 1
+        else request.source.failures[request.target] = Failure((request.source.failures[request.target]?.count ?: 0) + 1, now())
         request.source.request = null
         request.receiving = false
         true
@@ -153,6 +160,17 @@ internal class DecodeMailbox<K : Any, V : Any>(
         }
     }
 
+    /**
+     * A failure can be passing (memory pressure, a file still being written), so after the first
+     * [maxFailures] the size is retried with a doubling wait rather than given up on for good.
+     */
+    private fun mayRetry(failure: Failure?): Boolean {
+        if (failure == null || failure.count < maxFailures) return true
+        val doublings = (failure.count - maxFailures).coerceAtMost(MAX_BACKOFF_DOUBLINGS)
+        val wait = (RETRY_BACKOFF_NANOS shl doublings).coerceAtMost(MAX_RETRY_BACKOFF_NANOS)
+        return now() - failure.at >= wait
+    }
+
     private fun owns(source: Source<K, V>): Boolean = !closed && sources[source.key] === source
     private fun owns(request: Request<K, V>): Boolean = owns(request.source) && request.source.request === request
 
@@ -173,5 +191,12 @@ internal class DecodeMailbox<K : Any, V : Any>(
             }
         }
         failure?.let { throw it }
+    }
+
+    companion object {
+        /** First wait before retrying a size that failed [maxFailures] times. */
+        const val RETRY_BACKOFF_NANOS = 2_000_000_000L
+        const val MAX_RETRY_BACKOFF_NANOS = 60_000_000_000L
+        private const val MAX_BACKOFF_DOUBLINGS = 5
     }
 }

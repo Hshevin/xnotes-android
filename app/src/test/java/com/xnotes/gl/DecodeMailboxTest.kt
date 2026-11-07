@@ -15,7 +15,8 @@ class DecodeMailboxTest {
     private class Fixture {
         val key = Any()
         val binding = Any()
-        val mailbox = DecodeMailbox<Any, Value>(Value::release)
+        var clock = 0L
+        val mailbox = DecodeMailbox<Any, Value>(Value::release, now = { clock })
         init { mailbox.retainSources(binding, listOf(key)) }
         fun request(target: Int = 128) = checkNotNull(mailbox.request(key, target))
         fun complete(request: DecodeMailbox.Request<Any, Value>, value: Value? = Value()): Value? {
@@ -98,33 +99,39 @@ class DecodeMailboxTest {
         f.mailbox.close()
     }
 
-    @Test fun highResolutionSupersedesQueuedLowResolutionAndKeepsItsPending() {
+    @Test fun highResolutionSupersedesOnlyALowResolutionStillWaitingInTheQueue() {
         val f = Fixture()
         val low = f.request(128)
-        val lowValue = f.complete(low)!!
         val high = f.request(512)
-        assertEquals(1, lowValue.releases)
-        assertNull(f.mailbox.receive())
+        assertFalse("a queued request is superseded and never runs", f.mailbox.start(low))
         assertNull(f.mailbox.request(f.key, 128))
-        assertFalse(f.mailbox.finish(low, true))
+        assertEquals(1, f.mailbox.pendingCount)
         val highValue = f.complete(high)!!
         assertSame(high, checkNotNull(f.mailbox.receive()).request)
         assertTrue(f.mailbox.finish(high, true))
         highValue.release()
     }
 
-    @Test fun receivedLowResolutionCannotCommitAfterAHighResolutionRequest() {
-        val f = Fixture()
-        val low = f.request(128)
-        val value = f.complete(low)!!
-        assertSame(value, checkNotNull(f.mailbox.receive()).value)
-        val high = f.request(512)
-        assertEquals(0, value.releases)
-        assertFalse(f.mailbox.finish(low, true))
-        assertEquals(1, f.mailbox.pendingCount)
-        value.release()
-        assertTrue(f.mailbox.start(high))
-        f.mailbox.close()
+    @Test fun startedLowResolutionIsDeliveredBeforeAHighResolutionRequest() {
+        // Zooming into an image with no texture yet: each finished size shows, rather than the
+        // image staying blank until the pinch stops and the last decode lands.
+        for (stage in listOf("running", "completed", "received")) {
+            val f = Fixture()
+            val low = f.request(128)
+            assertTrue(f.mailbox.start(low))
+            val value = Value()
+            if (stage != "running") f.mailbox.complete(low, value)
+            if (stage == "received") assertSame(value, checkNotNull(f.mailbox.receive()).value)
+            assertNull("$stage: no larger request while the smaller one is underway", f.mailbox.request(f.key, 512))
+            assertEquals("$stage: the smaller result is kept", 0, value.releases)
+            if (stage == "running") f.mailbox.complete(low, value)
+            if (stage != "received") assertSame(value, checkNotNull(f.mailbox.receive()).value)
+            assertTrue(f.mailbox.finish(low, true))
+            value.release()
+            val high = checkNotNull(f.mailbox.request(f.key, 512)) { "$stage: next size once the first settled" }
+            assertTrue(f.mailbox.start(high))
+            f.mailbox.close()
+        }
     }
 
     @Test fun nullResultsHaveABoundedRetryBudgetWithExplicitRecovery() {
@@ -137,12 +144,44 @@ class DecodeMailboxTest {
             assertEquals(0, f.mailbox.pendingCount)
         }
         repeat(100) { assertNull(f.mailbox.request(f.key, 128)) }
+        f.clock += DecodeMailbox.RETRY_BACKOFF_NANOS - 1
+        assertNull("still inside the first backoff", f.mailbox.request(f.key, 128))
         f.mailbox.retryFailures()
         val recovered = f.request()
         val value = f.complete(recovered)!!
         f.mailbox.receive()
         assertTrue(f.mailbox.finish(recovered, true))
         value.release()
+    }
+
+    @Test fun repeatedFailuresAreRetriedAfterADoublingWaitNotNeverAgain() {
+        // A large photo can fail on a moment of memory pressure; it must not stay invisible
+        // until the GL context happens to be recreated.
+        val f = Fixture()
+        fun fail() {
+            val request = f.request()
+            f.complete(request, null)
+            f.mailbox.receive()
+            assertTrue(f.mailbox.finish(request, false))
+        }
+        repeat(2) { fail() }
+        var wait = DecodeMailbox.RETRY_BACKOFF_NANOS
+        repeat(8) { round ->
+            f.clock += wait - 1
+            assertNull("round $round: inside the wait", f.mailbox.request(f.key, 128))
+            f.clock += 1
+            fail()
+            wait = (wait * 2).coerceAtMost(DecodeMailbox.MAX_RETRY_BACKOFF_NANOS)
+        }
+        assertEquals("the wait is capped", DecodeMailbox.MAX_RETRY_BACKOFF_NANOS, wait)
+        f.clock += wait
+        val recovered = f.request()
+        val value = f.complete(recovered)!!
+        f.mailbox.receive()
+        assertTrue(f.mailbox.finish(recovered, true))
+        value.release()
+        assertNotNull("success clears the failures", f.mailbox.request(f.key, 128))
+        f.mailbox.close()
     }
 
     @Test fun schedulingRejectionSettlesButCannotOverrideAnAlreadyStartedTask() {

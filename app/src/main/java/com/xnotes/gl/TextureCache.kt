@@ -35,7 +35,8 @@ class TextureCache internal constructor(
         val height: Int,
         /** Longest edge, in pixels, this texture was decoded for. */
         val decodedFor: Int,
-        val source: DecodeMailbox.Source<ImageData, Bitmap>,
+        /** Adopted anew when the image leaves the scene and comes back in the same document. */
+        var source: DecodeMailbox.Source<ImageData, Bitmap>,
         var lastUsedFrame: Long,
     ) {
         val bytes: Long get() = width.toLong() * height * 4
@@ -45,6 +46,7 @@ class TextureCache internal constructor(
     private val requests = DecodeMailbox<ImageData, Bitmap>({ it.recycle() })
 
     private var contextGen = -1
+    private var sourceBinding: Any? = null
     private var frame = 0L
 
     /** Bytes the live textures occupy, for the debug readout. */
@@ -67,11 +69,21 @@ class TextureCache internal constructor(
 
     /** Consumer-only, after a complete scene update, with a current context for GPU eviction. */
     internal fun retainSources(binding: Any, images: Collection<ImageData>) {
+        val sameDocument = binding === sourceBinding
+        sourceBinding = binding
         requests.retainSources(binding, images)
         val iterator = entries.entries.iterator()
         while (iterator.hasNext()) {
-            val entry = iterator.next().value
+            val (image, entry) = iterator.next()
             if (requests.isCurrent(entry.source)) continue
+            if (sameDocument) {
+                // Deleted and undone, a crop undone, a layer hidden and shown: the same image is
+                // likely back soon, so keep its texture for the budget to evict like any unused
+                // one, and adopt its new source so it draws at once instead of blank until a
+                // fresh decode lands. Its pixels cannot have changed: ImageData is immutable.
+                requests.source(image)?.let { entry.source = it }
+                continue
+            }
             GLES30.glDeleteTextures(1, intArrayOf(entry.texture), 0)
             residentBytes -= entry.bytes
             iterator.remove()
@@ -113,7 +125,7 @@ class TextureCache internal constructor(
                 residentBytes += entry.bytes - (existing?.bytes ?: 0L)
                 if (existing != null) GLES30.glDeleteTextures(1, intArrayOf(existing.texture), 0)
             } catch (error: Throwable) {
-                android.util.Log.w("xnotes.gl", "Image texture upload failed")
+                android.util.Log.w("xnotes.gl", "Image texture upload failed", error)
                 if (error !is Exception) throw error
             } finally {
                 // A successful/stale finish is a no-op here; it never clears a newer request.

@@ -136,7 +136,7 @@ class CanvasSceneSnapshotTest {
         }
     }
 
-    @Test fun lateLowResolutionBitmapCannotReplaceHighResolutionOrClearItsPending() = withPbuffer {
+    @Test fun runningLowResolutionShowsFirstThenTheHigherResolutionReplacesIt() = withPbuffer {
         val started = CountDownLatch(1)
         val finish = CountDownLatch(1)
         val low = AtomicReference<Bitmap?>()
@@ -164,19 +164,22 @@ class CanvasSceneSnapshotTest {
             worker.start()
             try {
                 assertTrue(started.await(5, TimeUnit.SECONDS))
-                cache.textureFor(image, 512) { work.addLast(it) }
-                work.removeFirst().run()
-                cache.uploadPending()
-                val uploaded = cache.textureFor(image, 512) { work.addLast(it) }
-                assertTrue(uploaded != 0)
-                assertTrue(checkNotNull(high.get()).isRecycled)
+                assertEquals("nothing to draw yet", 0, cache.textureFor(image, 512) { work.addLast(it) })
+                assertTrue("a running decode is not superseded", work.isEmpty())
                 finish.countDown()
                 worker.join(5_000)
                 assertFalse(worker.isAlive)
                 failure.get()?.let { throw AssertionError(it) }
-                assertTrue(checkNotNull(low.get()).isRecycled)
                 cache.uploadPending()
-                assertEquals(uploaded, cache.textureFor(image, 512) { work.addLast(it) })
+                assertTrue(checkNotNull(low.get()).isRecycled)
+                val coarse = cache.textureFor(image, 512) { work.addLast(it) }
+                assertTrue("the finished smaller decode draws at once", coarse != 0)
+                assertEquals("then the larger size is asked for", 1, work.size)
+                work.removeFirst().run()
+                cache.uploadPending()
+                assertTrue(checkNotNull(high.get()).isRecycled)
+                val sharp = cache.textureFor(image, 512) { work.addLast(it) }
+                assertTrue(sharp != 0)
                 assertEquals(1, cache.textureCount)
                 assertEquals(0, cache.pendingCount)
                 assertTrue(work.isEmpty())
@@ -184,6 +187,26 @@ class CanvasSceneSnapshotTest {
                 finish.countDown()
                 worker.join(5_000)
             }
+        }
+    }
+
+    @Test fun sameDocumentRemovalKeepsTheTextureForReentryButANewDocumentDoesNot() = withPbuffer {
+        withTextureCache({ _, _ -> solidBitmap() }) { cache, image ->
+            val binding = Any()
+            cache.retainSources(binding, listOf(image))
+            val work = ArrayDeque<Runnable>()
+            cache.textureFor(image, 128) { work.addLast(it) }
+            work.removeFirst().run()
+            cache.uploadPending()
+            val texture = cache.textureFor(image, 128) { work.addLast(it) }
+            assertTrue(texture != 0)
+            cache.retainSources(binding, emptyList())
+            assertEquals("kept for undo or a layer shown again", 1, cache.textureCount)
+            cache.retainSources(binding, listOf(image))
+            assertEquals("draws at once on reentry", texture, cache.textureFor(image, 128) { work.addLast(it) })
+            assertTrue("and needs no new decode", work.isEmpty())
+            cache.retainSources(Any(), listOf(image))
+            assertEquals("another document never reuses it", 0, cache.textureCount)
         }
     }
 
