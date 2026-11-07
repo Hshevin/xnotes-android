@@ -13,6 +13,7 @@ import com.xnotes.core.infinite.MeshPart
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.SyncMark
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.floor
@@ -54,12 +55,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     }
 
     private class Record(
+        /** Identity only: no model properties may be read by the GL consumer. */
         val item: CanvasItem,
         val parts: List<Part>,
         var bounds: Rect,
         var z: Int,
         /** Set for a placed image, which is drawn as a texture rather than as coloured triangles. */
-        val image: ImageItem? = null,
+        val image: ImageDrawSnapshot? = null,
+        var sync: SyncMark? = null,
     )
 
     /** An edit handed over from the main thread. */
@@ -68,8 +71,9 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             val item: CanvasItem,
             val parts: List<MeshPart>,
             val bounds: Rect,
+            val sync: SyncMark?,
             /** Non-null for an image, which draws from a texture rather than from the parts. */
-            val image: ImageItem? = null,
+            val image: ImageDrawSnapshot? = null,
             /**
              * Set on the message that commits the stroke under the pen. Clearing the wet buffer
              * and adding the committed stroke have to land in the same message: as two, a frame
@@ -89,6 +93,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         class Remove(val item: CanvasItem) : Edit()
         class Order(val items: List<CanvasItem>, val activeLayerEnd: Int?) : Edit()
+        class SyncChanged(val marks: List<Pair<CanvasItem, SyncMark?>>) : Edit()
 
         /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
         class Reserve(val vertices: Long, val indices: Long) : Edit()
@@ -213,12 +218,17 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     // --- main-thread API ---
 
     fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect, clearsWet: Boolean = false) {
-        post(Edit.Upsert(item, parts, bounds, null, clearsWet))
+        post(Edit.Upsert(item, parts, bounds, item.sync, clearsWet = clearsWet))
     }
 
     /** File a placed image. It carries no geometry: the renderer draws it as a textured quad. */
     fun upsertImage(item: ImageItem, bounds: Rect) {
-        post(Edit.Upsert(item, emptyList(), bounds, item, false))
+        post(Edit.Upsert(item, emptyList(), bounds, item.sync, ImageDrawSnapshot.capture(item)))
+    }
+
+    /** Metadata only: never creates a missing record or changes its geometry. */
+    fun syncChanged(items: List<CanvasItem>) {
+        if (items.isNotEmpty()) post(Edit.SyncChanged(items.map { it to it.sync }))
     }
 
     fun remove(item: CanvasItem) {
@@ -390,12 +400,12 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 store.bindAttributes(program)
                 livePainted = true
             }
-            val faded = fade != null && fade.fades(record.item)
+            val faded = fade != null && fade.fadesSync(record.sync)
             if (record.image != null) {
                 flushRun(runStart, runCount)
                 runStart = -1
                 runCount = 0
-                drawImage(record, record.image, frame, alpha = if (faded) com.xnotes.core.audio.InkFade.ALPHA else 1.0)
+                drawImage(record.image, frame, alpha = if (faded) com.xnotes.core.audio.InkFade.ALPHA else 1.0)
                 rebind(program, frame, camChunkX, camChunkY)
                 store.bindForDraw(contextGen)
                 store.bindAttributes(program)
@@ -532,7 +542,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             val bounds = liftAt.bounds(record.bounds)
             if (!bounds.intersects(view)) continue
             if (record.image != null) {
-                drawImage(record, record.image, frame, liftAt)
+                drawImage(record.image, frame, liftAt)
                 applyView(program, frame, camChunkX, camChunkY, liftAt)
                 store.bindForDraw(contextGen)
                 store.bindAttributes(program)
@@ -712,13 +722,12 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
      * A placed image as one textured quad. The corners are worked out in double precision here and
      * handed over in clip space, so an image a long way from the origin is placed exactly.
      *
-     * Only the drag's shift is honoured, never its turn: an image's angle lives in the model, so a
-     * selection holding one is turned by the model rather than lifted. The stored angle is folded
-     * into the corners here, which is all a rotation costs on a quad.
+     * Only the drag's shift is honoured, never its turn: a selection holding an image turns the
+     * model rather than lifting it. That edit publishes a new snapshot whose angle is folded into
+     * the corners here, which is all a rotation costs on a quad.
      */
     private fun drawImage(
-        record: Record,
-        image: ImageItem,
+        image: ImageDrawSnapshot,
         frame: FrameState,
         lift: LiftTransform = LiftTransform.NONE,
         alpha: Double = 1.0,
@@ -728,7 +737,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         // Decode for the size the image actually occupies on screen right now; a slice of it, that much larger.
         val share = image.part?.let { minOf(it.w, it.h) }?.takeIf { it > 0.0 } ?: 1.0
         val onScreenEdge = (maxOf(rect.w, rect.h) / share * frame.zoom).toInt().coerceAtLeast(1)
-        val texture = textures.textureFor(image.image, onScreenEdge, decodeOn)
+        val texture = textures.textureFor(image.source, onScreenEdge, decodeOn)
         if (texture == 0) return
         val corners = FloatArray(8)
         // A mirrored picture lays each corner's texels on the opposite corner.
@@ -1085,6 +1094,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 is Edit.Lift -> applyLift(edit)
                 is Edit.Remove -> applyRemove(edit.item)
                 is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
+                is Edit.SyncChanged -> for ((item, mark) in edit.marks) records[item]?.sync = mark
                 is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                 Edit.Reset -> applyReset()
             }
@@ -1118,7 +1128,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             parts.add(Part(slice, part.pass, part.color.withAlpha(255), part.color.a / 255.0, part.glow, part.covers))
         }
         if (parts.isEmpty() && edit.image == null) return
-        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image)
+        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image, edit.sync)
         records[edit.item] = record
         fileRecord(record)
     }

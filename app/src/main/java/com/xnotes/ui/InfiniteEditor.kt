@@ -320,6 +320,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             view.publish()
         }
 
+        override fun onSyncChanged(items: List<CanvasItem>) {
+            itemsRevision++
+            scene.syncChanged(items)
+            view.publish()
+        }
+
         override fun onReset() {
             itemsRevision++
             rebuildScene()
@@ -348,7 +354,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         scene.onOutOfMemory = { short -> mainHandler.post { outOfMemory = short } }
         document.listener = modelListener
         // Whatever is added while this canvas records takes the recording's moment.
-        history.onPush = { command -> AudioRecording.stamp(this, command.added()) }
+        history.onPush = { command ->
+            val added = command.added()
+            val before = added.map { it.sync }
+            AudioRecording.stamp(this, added)
+            // add() already published the item's geometry before history stamped its recording.
+            document.syncChanged(added.filterIndexed { index, item -> item.sync != before[index] })
+        }
     }
 
     /**
@@ -2049,10 +2061,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             onMessage?.invoke(appContext.getString(com.xnotes.R.string.audio_nothing_linked), null)
             return
         }
-        val command = com.xnotes.core.history.UnlinkSync(marks)
+        val command = com.xnotes.core.infinite.OnCanvasSync(
+            document, com.xnotes.core.history.UnlinkSync(marks), marks.map { it.first },
+        )
         command.redo()
         history.push(command)
-        itemsRevision++
         markDirty()
         refresh()
         view.publish()
