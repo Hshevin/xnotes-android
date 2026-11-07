@@ -8,6 +8,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DocumentRegistryTest {
+    @Test fun platformPublicationRetainsRecoveryUntilRegistrationCompletesAndRetriesWithoutRewriting() = database {db,root->
+        val id=UUID.randomUUID().toString();val uri="content://example/document/published"
+        val current=File(root,"current.bin").apply {writeText("original")}
+        val next=File(root,"candidate.bin").apply {writeText("candidate")}
+        val journal=com.xnotes.storage.MigrationPublication(File(root,"pending-publication"))
+        journal.stage(current,next)
+        var writes=0
+        val target=object:com.xnotes.storage.MigrationPublication.Target {
+            override fun read()=current.inputStream()
+            override fun write(source:File) {
+                writes++
+                java.io.FileOutputStream(current).use {out->source.inputStream().use {it.copyTo(out)};out.fd.sync()}
+            }
+        }
+        try {
+            journal.publish(target,afterVerified={
+                db.register(id,"xnote","published",uri,pageReferences=true)
+                throw java.io.IOException("registration acknowledgement failed")
+            })
+            fail("must retain recovery after incomplete registration")
+        } catch(_:com.xnotes.storage.MigrationPublication.RecoveryRequired) {}
+        assertTrue(journal.pending);assertEquals("candidate",current.readText());assertEquals(1,writes)
+        journal.publish(target,afterVerified={db.register(id,"xnote","published",uri,pageReferences=true)})
+        assertFalse(journal.pending);assertEquals(1,writes);assertTrue(db.expectationForId(id).requiresPages)
+    }
     @Test fun platformSchemaUpgradeKeepsLocationsAndPersistsMonotonicPageContracts() = database {db,root->
         val id=UUID.randomUUID().toString();val uri="content://example/document/page-ref"
         db.register(id,"xnote","original",uri)

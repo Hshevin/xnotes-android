@@ -163,6 +163,11 @@ class AppStorageDocumentsProvider : DocumentsProvider() {
         private fun authority(context: Context): String = context.packageName + ".documents"
 
         /** The app's private notes directory (app-external, removed on uninstall); created on demand. */
+        /** Observation only: an unavailable external root must not switch to a new fallback root. */
+        internal fun recoveryRoot(context:Context):File? = try {
+            context.getExternalFilesDir(null)?.let {File(it,DIR_NAME)}
+        } catch(_:SecurityException) {null}
+
         fun rootDir(context: Context): File {
             val base = context.getExternalFilesDir(null) ?: context.filesDir
             return File(base, DIR_NAME).apply { if (!exists()) mkdirs() }

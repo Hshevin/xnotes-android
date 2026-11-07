@@ -70,3 +70,7 @@ R1b0尾部生成取消guard经独立复核确认正确。R1b1整包writer计划�
 ## R2a登记与header契约
 
 review_input_plan计划意见：必须有按UUID的独立契约查询，verifyWrite必须先验证current，均接受。最终schema/事务/查询/guard/三语言复核无先修项；主代理full 280套件3011项和Android源码编译通过。实际SQLite仪器未运行，生产保护接线未完成。
+
+## R2b0 发布与恢复事务
+
+review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混淆缺失、已解析记录与摘要竞争、瞬时候选IO误判和provider根回退，均补反例修正。最终无新阻断；全量282套件3034项和Android源码编译通过。实际SAF/仪器/设备未运行。生产ReferenceContract、登记、PDF持久pin仍需R2b1接线。

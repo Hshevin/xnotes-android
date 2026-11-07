@@ -418,3 +418,7 @@ R1c已提交55d64a4e，R1b0原字节page UUID替换工具已提交9d3547f2，全
 ### R2a登记契约组件已实现
 
 schema2新增按UUID单调页契约表，两种查询覆盖位置和外移UUID证据；typed header预检先验current再验candidate，无隐式新建/修复。独立计划/代码复核完成，3011项JVM与Android源码编译通过。生产正契约登记/保存接线仍待R2b，不能据此启用页面来源。详细reference-contract-registry-2026-11-08.md。
+
+### R2b0 已完成：恢复事务
+
+发布/恢复/保留当前均支持校验与DB回调，pending v2保存摘要，失败保留并可不重复写重试，受管恢复固定根路径且严格区分缺失与不可读。3034项JVM与Android源码编译通过、独立复核完成；详见reference-recovery-publication-2026-11-08.md。下一步R2b1生产存储校验和接线，不能把默认空回调当作已完成页契约保护。

@@ -23,13 +23,16 @@ class NotebookStorage private constructor(private val context: Context) {
         val id = java.security.MessageDigest.getInstance("SHA-256").digest(uri.toByteArray()).joinToString("") { "%02x".format(it) }
         return MigrationPublication(File(context.noBackupFilesDir, "migrations/$id"))
     }
-    private fun target(uri: String) = object : MigrationPublication.Target {
-        override fun read() = requireNotNull(context.contentResolver.openInputStream(Uri.parse(uri))) { StorageText.t(StorageMsg.NOTE_UNREADABLE) }
-        override fun write(source: File) {
-            val descriptor = requireNotNull(context.contentResolver.openFileDescriptor(Uri.parse(uri), "rwt")) { StorageText.t(StorageMsg.NOTE_NOT_WRITABLE) }
-            android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { out ->
-                source.inputStream().use { it.copyTo(out) }
-                out.flush(); out.fd.sync()
+    private fun target(uri:String):MigrationPublication.Target {
+        val parsed=Uri.parse(uri)
+        if(parsed.authority==context.packageName+".documents") return OwnedRecoveryTarget(context,DocumentsContract.getDocumentId(parsed))
+        return object:MigrationPublication.Target {
+            override fun read()=requireNotNull(context.contentResolver.openInputStream(parsed)) {StorageText.t(StorageMsg.NOTE_UNREADABLE)}
+            override fun write(source:File) {
+                val descriptor=requireNotNull(context.contentResolver.openFileDescriptor(parsed,"rwt")) {StorageText.t(StorageMsg.NOTE_NOT_WRITABLE)}
+                android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use {out->
+                    source.inputStream().use {it.copyTo(out)};out.flush();out.fd.sync()
+                }
             }
         }
     }
