@@ -1621,8 +1621,11 @@ private val SwallowTouches = Modifier.pointerInput(Unit) {
  * leaves the backstage showing.
  *
  * The panes are placed by offset and size inside one Box rather than by a Row that becomes a Column,
- * so normal layout changes retain each logical pane's host. Surface/EGL recreation is still
- * managed by Android; keeping the View attached does not guarantee that its GPU context survives.
+ * so normal layout changes retain each logical pane's host. A pane switching between its file home
+ * and its editor, a change of document kind in a pane, and the main-menu round trip still dispose
+ * and remount the native View, so the `surfacesForAttach()` replacement stays required. Surface/EGL
+ * recreation is still managed by Android; keeping the View attached does not guarantee that its
+ * GPU context survives.
  */
 private data class SplitTitleDrag(val source: Editor, val origin: Offset, val point: Offset, val returning: Boolean = false)
 

@@ -1100,7 +1100,11 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                     is Edit.Lift -> applyLift(edit)
                     is Edit.Remove -> applyRemove(edit.item)
                     is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
-                    is Edit.SyncChanged -> for ((item, mark) in edit.marks) records[item]?.sync = mark
+                    is Edit.SyncChanged -> {
+                        for ((item, mark) in edit.marks) records[item]?.sync = mark
+                        // Like every other record change, so a cache keyed on revision sees the fade.
+                        revision++
+                    }
                     is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                     is Edit.Reset -> applyReset(edit.binding)
                 }
