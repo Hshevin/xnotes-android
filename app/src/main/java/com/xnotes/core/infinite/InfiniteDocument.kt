@@ -138,7 +138,7 @@ class InfiniteDocument(
         layers.adopt(item)
         backing.add(item)
         index.insert(item)
-        invalidateDerived()
+        appendedDerived(item)
         listener?.onItemAdded(item)
         listener?.onOrderChanged()
     }
@@ -159,9 +159,9 @@ class InfiniteDocument(
             layers.adopt(item)
             backing.add(item)
             index.insert(item)
+            appendedDerived(item)
             listener?.onItemAdded(item)
         }
-        invalidateDerived()
         listener?.onOrderChanged()
     }
 
@@ -334,6 +334,16 @@ class InfiniteDocument(
         for (i in backing.indices) map[backing[i]] = i
         order = map
         return map
+    }
+
+    /**
+     * An item appended at the top shifts no other position, so the z map takes the one new entry
+     * instead of being dropped: pen-up while recording consults it right after each add, and a
+     * rebuild there is a pass over the whole canvas on the main thread.
+     */
+    private fun appendedDerived(item: CanvasItem) {
+        order?.put(item, backing.size - 1)
+        contentBoundsValid = false
     }
 
     private fun invalidateDerived() {
