@@ -33,4 +33,4 @@
 
 ## 修复进展
 
-D-1、D-3 已在 `b55822e4` 修复（分支 `worktree-fix-render-followups`），详见 [render-backport-review-followups-2026-11-07.md](render-backport-review-followups-2026-11-07.md#修复进展2026-11-07claude-code分支-worktree-fix-render-followups)。D-2 待用户决定，D-4～D-7 未修。
+D-1、D-3 已在 `b55822e4` 修复（分支 `worktree-fix-render-followups`），详见 [render-backport-review-followups-2026-11-07.md](render-backport-review-followups-2026-11-07.md#修复进展2026-11-07claude-code分支-worktree-fix-render-followups)。D-2 经用户决定保持现状，D-4～D-7 未修。
