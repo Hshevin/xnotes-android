@@ -1,7 +1,7 @@
 # 第二批渲染回迁：稳定工具栏与窗格布局（2026-11-07）
 
 用户要求：继续第二批稳定布局回迁，允许测试，审查验证后推进主分支合并。
-状态：生产改动与几何回归已完成独立静态审查；生产 Kotlin 编译通过，2779 项 JVM 测试通过；真实窗口回归仍在适配，尚未本地合并。
+状态：生产改动、几何及窗口回归已完成独立静态审查；生产及仪器 Kotlin 编译通过，2779 项 JVM 测试通过；窗口仪器尚未运行、尚未本地合并。
 本轮边界：只回迁稳定工具栏／窗格布局并保留主线 View／湿墨层替换，授权编译、测试及本地合并；不推送或发布。模拟器所需测试 APK 生成／安装尚待本轮明确确认。
 
 ## 来源与实现
@@ -22,9 +22,14 @@
 - `:app:compileDebugKotlin` 通过，日志 `tmp/stable-pane-compile.log`。
 - `:app:testDebugUnitTest` 全量 247 个套件、2779 项通过，失败／错误／跳过均为 0，日志 `tmp/stable-pane-unit.log`。包括 PaneChromeLayout 3、RenderDiagnostics 11、SurfaceCapture 10、InfiniteSurfaceAttach 4 项；不是沿用历史运行结果。
 - 三生产文件及 3 项几何测试独立静态复核无必修项。GL、两种 Editor 与第一批诊断／捕获实现相对基线未改变；两个 AndroidView factory 的主线替换调用保留。
+- 生产／几何验证切片保存为 `b3063ee2`。新增 2 项 PaneChromeHostTest 与 8 项 SplitHostLifecycleTest，Runner 保留全部原注册；窗口源码已独立静态复核，`:app:compileDebugAndroidTestKotlin` 通过。初次编译发现 PdfDocument 不实现 Closeable，测试夹具改用显式 finally.close 后重编通过；日志 `tmp/stable-pane-android-compile.log`、`tmp/stable-pane-android-compile-retry.log`。
 
-## 待完成的窗口验证
+## 待执行的窗口验证
 
-迁移历史真实窗口夹具，按当前产品范围覆盖单画布四边／浮动／停靠／显隐／输入，分页笔记与 PDF 的分屏、横纵方向、比例、交换及首页恢复。真正退出宿主再返回应按主线规则替换 View／pad，不以“任何操作都不重挂”为验收目标。第一批 Surface 捕获及既有仪器注册继续保留。
+已迁移历史真实窗口夹具，按当前产品范围覆盖单画布四边／浮动／停靠／输入、通用内容槽工具栏显隐，分页笔记与 PDF 的分屏、横纵方向、比例、交换、关闭任一侧及首页恢复。真正退出宿主再返回应按主线规则替换 View／pad，不以“任何操作都不重挂”为验收目标。第一批 Surface 捕获及既有仪器注册继续保留。
 
-软件与目标设备证据分开：模拟器即使通过，也不能代表 MovinkPad Android 15 或用户天玑 8350／Android 16 的 GPU 显示、笔延迟与原黑块效果。后续窗口编译、执行、修正及合并结果在本记录补齐。
+窗口输入用例通过 sendPointerSync 注入并核对 screen→content/page 坐标与实际目标文档；HOLD／SELECT 用例直接经过真实 View.dispatch，覆盖 HOLD 跨布局、SELECT 正常抬笔／取消，不声称已覆盖待提交 SELECT 跨布局。整体隐藏／显示 SplitHost 复用主菜单的组合边界，验证主线真实替换，不是 MainActivity 菜单按钮端到端验收。夹具使用独立本地目录并恢复全局引用，取消／等待相关 worker 后才删除文件。
+
+失败清理复核另外补齐：首次挂载前已启动的 GLThread 经现有容器真实 add/remove 退出；disposeComposition 抛出时仍执行 activity.finish。两处增量独立复核通过，最终仪器编译通过，日志 `tmp/stable-pane-android-compile-final.log`。真实重挂用例验证 View／pad 替换及编辑状态，不把布局帧等待当成新 EGL context／GL 绘制帧或像素验收。
+
+软件与目标设备证据分开：模拟器即使通过，也不能代表 MovinkPad Android 15 或用户天玑 8350／Android 16 的 GPU 显示、笔延迟与原黑块效果。后续窗口执行、修正及合并结果在本记录补齐。
