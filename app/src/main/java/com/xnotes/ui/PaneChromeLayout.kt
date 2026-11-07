@@ -63,22 +63,30 @@ internal fun PaneChromeLayout(
     CompositionLocalProvider(LocalToolbarCover provides cover) {
         Layout(modifier = modifier, content = {
             Box(propagateMinConstraints = true) {
-                content {
-                    if (floating) {
-                        Box(Modifier.align(edge).padding(Space.s8)) { bar() }
-                    }
-                }
+                // Docked or hidden, the slot gets one constant lambda, so a recomposition here does
+                // not hand the editor content a new parameter and recompose all of it.
+                content(if (floating) { { Box(Modifier.align(edge).padding(Space.s8)) { bar() } } } else NoFloatingBar)
             }
             Box { if (docked) bar() }
         }) { measurables, constraints ->
-            check(constraints.hasBoundedWidth && constraints.hasBoundedHeight) {
-                "PaneChromeLayout requires a bounded editor viewport"
-            }
-            val width = constraints.maxWidth
-            val height = constraints.maxHeight
             val toolbar = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+            val bounded = constraints.hasBoundedWidth && constraints.hasBoundedHeight
+            // Every caller gives a fixed pane. Should one ever measure this unbounded (a scrolling
+            // parent, an intrinsic pass), size to the content instead of failing the whole frame.
+            val unboundedEditor = if (bounded) null else {
+                val insetX = if (docked && position.vertical) toolbar.width else 0
+                val insetY = if (docked && !position.vertical) toolbar.height else 0
+                measurables[0].measure(Constraints(
+                    maxWidth = if (constraints.hasBoundedWidth) (constraints.maxWidth - insetX).coerceAtLeast(0) else Constraints.Infinity,
+                    maxHeight = if (constraints.hasBoundedHeight) (constraints.maxHeight - insetY).coerceAtLeast(0) else Constraints.Infinity,
+                ))
+            }
+            val width = if (constraints.hasBoundedWidth) constraints.maxWidth else paneChromeUnboundedExtent(
+                unboundedEditor!!.width, toolbar.width, docked && position.vertical, constraints.minWidth)
+            val height = if (constraints.hasBoundedHeight) constraints.maxHeight else paneChromeUnboundedExtent(
+                unboundedEditor!!.height, toolbar.height, docked && !position.vertical, constraints.minHeight)
             val geometry = paneChromeGeometry(width, height, toolbar.width, toolbar.height, position, docked)
-            val editor = measurables[0].measure(Constraints.fixed(geometry.contentWidth, geometry.contentHeight))
+            val editor = unboundedEditor ?: measurables[0].measure(Constraints.fixed(geometry.contentWidth, geometry.contentHeight))
             layout(width, height) {
                 // Physical left/right, matching ToolbarPosition and the canvas inset coordinates.
                 editor.place(geometry.contentX, geometry.contentY)
@@ -87,6 +95,15 @@ internal fun PaneChromeLayout(
         }
     }
 }
+
+private val NoFloatingBar: @Composable BoxScope.() -> Unit = {}
+
+/**
+ * One axis of an unbounded pane: the content plus a toolbar docked across that axis, otherwise
+ * whichever of content and toolbar is longer, never below the parent's minimum.
+ */
+internal fun paneChromeUnboundedExtent(content: Int, toolbar: Int, toolbarAlongAxis: Boolean, min: Int): Int =
+    maxOf(if (toolbarAlongAxis) content + toolbar else maxOf(content, toolbar), min)
 
 /** Pixel geometry shared by the measure policy and tests; sizes are already parent-constrained. */
 internal data class PaneChromeGeometry(

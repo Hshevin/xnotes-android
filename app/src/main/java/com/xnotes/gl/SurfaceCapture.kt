@@ -118,10 +118,11 @@ class SurfaceCapture internal constructor(
         handler.postDelayed(request.timeout, timeoutMs)
         try {
             copy(bitmap) { status -> complete(request, status) }
-        } catch (_: IllegalArgumentException) {
+        } catch (error: Throwable) {
+            // Any failure to submit means no native callback will come: release the budget and the
+            // busy slot now, or two such failures would block every capture until a restart.
             submissionFailed(request)
-        } catch (_: IllegalStateException) {
-            submissionFailed(request)
+            if (error !is Exception) throw error
         }
     }
 

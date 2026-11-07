@@ -37,7 +37,11 @@ class InfiniteCanvasView private constructor(
 
     /** Observational identity belongs to this native View, not to its retained document. */
     val renderDiagnostics = RenderDiagnostics()
-    private val glRenderer = GlRenderer(initialContextGen, renderDiagnostics)
+    // Per-frame observation takes a lock and allocates on the GL thread, and nothing in a release
+    // build reads it; debuggable builds (branch tests, instrumentation) keep the full record.
+    private val glRenderer = GlRenderer(initialContextGen, renderDiagnostics.takeIf {
+        context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+    })
     private var captureRetired = false
     private val diagnosticCapture = lazy {
         SurfaceCapture.forView(this).also { if (captureRetired) it.close() }

@@ -73,17 +73,8 @@ internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
  * Lays a pane out with its [bar] along the edge Preferences chose and [content] in the rest. A
  * floating bar is handed to [content] to lay over its canvas instead, and [onCover] learns how many
  * px of each edge (left, top, right, bottom) it covers so the canvas keeps its pages clear of it.
+ * [showToolbar] changes only chrome; the editor remains in the same native host.
  */
-@Composable
-internal fun ColumnScope.ToolbarAround(
-    bar: @Composable () -> Unit,
-    onCover: (Double, Double, Double, Double) -> Unit,
-    content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
-) {
-    ToolbarAround(bar, onCover, showToolbar = true, content = content)
-}
-
-/** [showToolbar] changes only chrome; the editor remains in the same native host. */
 @Composable
 internal fun ColumnScope.ToolbarAround(
     bar: @Composable () -> Unit,

@@ -169,7 +169,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         devicePxPerDp = { devicePxPerDp },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
-        hasPasteContent = { hasClipboardItems || clipboardHasImage },
+        // Asked on every touch-down: the clipboard description only, so no system paste notice.
+        hasPasteContent = { hasClipboardItems || com.xnotes.platform.SystemClipboard.mayHoldImage(appContext) },
         onToolChanged = { adoptTool(it) },
         onDoubleTap = { vp, toolType, selectedBefore -> onDoubleTap(vp, toolType, selectedBefore) },
         isEditingText = { editingLabel != null },
@@ -369,11 +370,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         document.listener = modelListener
         // Whatever is added while this canvas records takes the recording's moment.
         history.onPush = { command ->
-            val added = command.added()
-            val before = added.map { it.sync }
-            AudioRecording.stamp(this, added)
-            // add() already published the item's geometry before history stamped its recording.
-            document.syncChanged(added.filterIndexed { index, item -> item.sync != before[index] })
+            // Nothing is stamped unless this canvas is recording; skip the bookkeeping otherwise.
+            if (AudioRecording.markFor(this) != null) {
+                val added = command.added()
+                val before = added.map { it.sync }
+                AudioRecording.stamp(this, added)
+                // add() already published the item's geometry before history stamped its recording.
+                document.syncChanged(added.filterIndexed { index, item -> item.sync != before[index] })
+            }
         }
     }
 
@@ -2098,11 +2102,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         val command = com.xnotes.core.infinite.OnCanvasSync(
             document, com.xnotes.core.history.UnlinkSync(marks), marks.map { it.first },
         )
-        command.redo()
+        command.redo() // publishes through onSyncChanged
         history.push(command)
         markDirty()
         refresh()
-        view.publish()
         onMessage?.invoke(appContext.getString(com.xnotes.R.string.audio_unlinked), appContext.getString(com.xnotes.R.string.undo) to { undo() })
     }
 
