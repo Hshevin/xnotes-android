@@ -304,6 +304,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         minimapShader = null
         glowShader = null
         glowTarget.onContextCreated(contextGen)
+        invalidateHaloLayers()
         try {
             ink = InkShader(contextGen)
             cover = CoverShader(contextGen)
@@ -320,11 +321,18 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         tailStore.onContextCreated(contextGen)
     }
 
+    /** These keys describe pixels in GlowTarget, not the surviving CPU geometry. */
+    private fun invalidateHaloLayers() {
+        haloKey = null
+        liftHaloKey = null
+        liftHaloAt = LiftTransform.NONE
+    }
+
     override fun drawContent(frame: FrameState) {
         drainEdits()
         textures.beginFrame()
         textures.uploadPending()
-        glowTarget.resize(frame.widthPx, frame.heightPx, contextGen)
+        if (glowTarget.resize(frame.widthPx, frame.heightPx, contextGen)) invalidateHaloLayers()
         val program = ink ?: return
         if (program.contextGen != contextGen) return
         if (records.isEmpty() && wetParts.isEmpty() && tailParts.isEmpty()) {
