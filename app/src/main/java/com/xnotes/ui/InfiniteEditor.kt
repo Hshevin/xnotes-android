@@ -279,6 +279,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** The GL-side mirror of the document. Fed by [modelListener]; never reads the model itself. */
     private val scene = CanvasScene()
 
+    /** Decode ownership follows document installation, not the replaceable native surfaces. */
+    private var imageDecodeBinding: Any = Any()
+
     /** One low-priority thread decoding images, so a big photo never stalls a frame. */
     private val decodeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "xnotes-canvas-decode").apply {
@@ -336,6 +339,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     init {
+        scene.reset(imageDecodeBinding)
         interaction.canEditLayer = { document.layers.writable }
         view.input = { event -> beforePenInput(event); proPenInput.touch(event) { interaction.onTouch(event) } }
         view.crossPaneTouchGate.shouldBlock = { otherPenInContact() }
@@ -351,7 +355,16 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // Decoding reads a file and can take tens of milliseconds, so it never runs on the render
         // thread; the finished bitmap is uploaded at the start of the next frame, which the decode
         // asks for itself, since nothing else may be drawing.
-        scene.decodeOn = { work -> decodeExecutor.execute { work.run(); view.requestRender() } }
+        scene.decodeOn = { work ->
+            try {
+                decodeExecutor.execute {
+                    try { work.run() } finally { view.requestRender() }
+                }
+            } catch (error: Throwable) {
+                view.requestRender()
+                throw error
+            }
+        }
         scene.onOutOfMemory = { short -> mainHandler.post { outOfMemory = short } }
         document.listener = modelListener
         // Whatever is added while this canvas records takes the recording's moment.
@@ -474,7 +487,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             vectorMeshGen.clear()
             for (request in vectorJobs) startVectorMesh(request)
         }) {
-            scene.reset()
+            scene.reset(imageDecodeBinding)
             for (item in document.items) pushItem(item, vectorJobs)
             publishLayerOrder()
         }
@@ -2458,6 +2471,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         textBar = null
         document.listener = null
         document = next
+        imageDecodeBinding = Any()
         next.listener = modelListener
         selection = CanvasSelection(next)
         hasSelection = false
