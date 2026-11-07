@@ -55,3 +55,16 @@ head 候选在全部回调后、move 前重新核对 NOFOLLOW/64 KiB 上限/完�
 本片尚未替换原 SessionStore/CanvasSessionStore/Editor；b1/b2 接线、legacy 缓存恢复、来源版本冲突和保存部分成功后放弃的用户决策均保留，整体功能未完成。
 
 最终窄复核确认此前四项均已覆盖，未发现新的 GC/租约阻断；完整回归与仪器源码编译已完成。组件阶段验收通过，接续 b1 的实际入口改造。
+
+## R2b2b1a：接线前补可靠的正文变动计数（计划）
+
+检查实际 Editor 后确认不能把用于重绘的 contentVersion 直接用作缓存内容版本：例如 removeBookmark 只推进 bookmarkVersion 并置 dirty，未推进 contentVersion；native 保存还会提前清 dirty，布尔值不能代表期间有没有更新。若只比较重绘版本，view-only 会误复用过期正文。
+
+先给 Document/InfiniteDocument 增加内部、非序列化的 bodyRevision：每次 owner 置 dirty=true 时递增（包含已经为 true 的再次编辑），dirty=false 不递增。文档 identity 或 hasReferenceAnchors 的实际变化也递增，确保原字节身份激活/副本采用不会误复用此前正文。setter 不改原 dirty 语义、不写历史、不触碰渲染或几何；调用方仍须遵守原本编辑后标 dirty 的契约，不自动监视所有可变对象。快照携带捕获的 bodyRevision；副本在独立快照内的后续字段更新只改变快照版本，不改活模型。无限画布补同样的独立 owner token，快照保留 token，独立文档/深复制不共享 token。
+
+此小片验收：重复编辑、保存提前清 dirty、失败后重置 dirty、真实页增删/撤销、identity/marker 变化、snapshot 再 snapshot、画布快照和原模型隔离；路径/显示名/视图不推进正文版本。进入/退出编辑、选择和手势仍不写内容历史；未引入新模型 writer 或笔迹编码。此片先验证模型接口，b1b 再统一准备缓存票据/主线程快照/IO发布。
+
+接下来的实际 SessionStore/CanvasSessionStore/Editor 接线须和 b2 的 native 来源摘要一起审：仅修内部 head/body 配对仍无法判断外部同UUID文件是否更新，不能半接成“安全恢复后自动覆盖”。先补同源打开/保存凭据和迟到 owner 校验，再打开新的恢复入口。旧缓存保留/异常显式恢复、新建/另存的输出流打开前保护、fork/merge/copy scope仍全部保留，不用新会话代码绕过。
+
+
+R2b2b1a已实现/独立复核通过：`Document`/`InfiniteDocument` 增加内部 bodyRevision，dirty 布尔含义不变，identity/marker 同值不递增；快照构造完毕后复制捕获版本与 owner token。不改 codec 字节格式、历史、笔输入或渲染接口。9 项新回归，缺 API 红灯 `tmp/session-body-revision-red.log`；最终 `tmp/session-body-revision-full.log` 为 291 套件 / 3142 项，失败/错误/跳过 0，Android 仪器源码编译成功，实际平台未执行。画布 lastView 后续必须使用 cache metadata 恢复，SessionStore/Editor 接线仍未完成。

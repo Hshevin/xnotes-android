@@ -385,3 +385,5 @@
 - [x] R2b2b0：WorkingSessionCache事务基础，27新增回归/3133全量/Android源码编译及独立复核通过。
 - [ ] R2b2b1：两种会话适配器、Editor主线程快照与IO发布、旧缓存保留/恢复、迟到回调与模式切换。
 - [ ] R2b2b2：同源native摘要与会话恢复的来源冲突/在途保存对账。
+
+- [x] R2b2b1a：bodyRevision与画布snapshot owner，9新增/3142项全量/Android源码编译/独立复核完成。

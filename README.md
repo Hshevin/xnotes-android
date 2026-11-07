@@ -68,7 +68,7 @@
 
 保存使用 `.xmap` v2，兼容读取 v1；旧应用不能打开 v2。当前仍保留中心主题，来源列表尚无实际缩略图／来源跳转，手绘原位与占编辑区域放大已接入；文本原位已接入；页面引用（引用以页面及其上的笔记为单位，[决定记录](docs/movinkpad/reference-page-level-2026-11-07.md)）、反向引用和文件关系网络仍在后续阶段，**完整引用闭环未完成**。详见[扩展规格与阶段进度](docs/movinkpad/graph-network-2026-11-06.md)。2026-11-07 代码审查修复后 2828 项主机测试通过（[审查与修复记录](docs/movinkpad/mind-map-review-fixes-2026-11-07.md)），Android 仪器测试仅编译；未打包、安装、推送或合并，真机验收待执行。
 
-2026-11-08 开发分支已按授权同步 master54f05b0f 的新渲染基线，已有导图文本与手绘编辑保留（[接口检查与续作](docs/movinkpad/mind-map-rendering-resume-2026-11-08.md)）。页面引用基础调整为每页一个永久编号，画布仅使用文档身份；不再给每笔或图片分配引用编号。当前全量3133项主机测试及Android测试源码编译通过，实际仪器/目标设备未运行。[实现边界](docs/movinkpad/page-reference-implementation-2026-11-08.md)及[整包复制记录](docs/movinkpad/reference-bundle-copy-2026-11-08.md)说明了已接通的原字节复制/导出，以及待完成的活模型另存、SAF 激活和页面来源界面，不能视为页面引用闭环已可用。
+2026-11-08 开发分支已按授权同步 master54f05b0f 的新渲染基线，已有导图文本与手绘编辑保留（[接口检查与续作](docs/movinkpad/mind-map-rendering-resume-2026-11-08.md)）。页面引用基础调整为每页一个永久编号，画布仅使用文档身份；不再给每笔或图片分配引用编号。当前全量3142项主机测试及Android测试源码编译通过，实际仪器/目标设备未运行。[实现边界](docs/movinkpad/page-reference-implementation-2026-11-08.md)及[整包复制记录](docs/movinkpad/reference-bundle-copy-2026-11-08.md)说明了已接通的原字节复制/导出，以及待完成的活模型另存、SAF 激活和页面来源界面，不能视为页面引用闭环已可用。
 
 页面引用登记基础已加入数据库升级和单调身份契约，尚未接通生产保存/SAF与来源界面，见[登记契约与验证](docs/movinkpad/reference-contract-registry-2026-11-08.md)。
 

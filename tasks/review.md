@@ -90,3 +90,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b2b0 共用会话事务组件
 
 独立计划审核通过，要求已观察head证据与回调票据明确。源码复核发现headTemp未重验、合法foreign head被当基准、陌生head误授权GC及UTF8替换，均红灯证明后修复；主代理另补current body损坏时不清理旧read body。最终窄复核确认GC/lease/短锁修复无剩余阻断。27项新增，290套件3133项全量/Android源码编译成功，2项新真实平台测试只编译未运行。b1生产适配器/Editor、b2native来源凭据仍未完成。
+
+## R2b2b1a 正文版本
+
+独立计划/源码复核通过；保留owner标dirty契约、同值identity/marker不计数，快照最后复制版本/归属，画布lastView后续放cache metadata。9项新增，291套件3142项/Android源码编译成功，未实际运行平台测试；未接SessionStore，不宣称恢复闭环完成。

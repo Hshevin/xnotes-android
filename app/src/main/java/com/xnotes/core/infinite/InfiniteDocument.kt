@@ -49,7 +49,7 @@ class InfiniteDocument(
     var path: String? = null,
     /** Real file name from the storage provider, when known (overrides [path]-derived title). */
     var displayName: String? = null,
-    var dirty: Boolean = false,
+    dirty: Boolean = false,
     var background: CanvasBackground = CanvasBackground(),
     val waypoints: MutableList<Waypoint> = mutableListOf(),
     /** The view the canvas was last left at, restored on open. */
@@ -57,8 +57,21 @@ class InfiniteDocument(
     /** When the canvas was created (epoch ms), or null for files written before this was recorded. */
     var created: Long? = null,
 ) {
+    /** Owner-side body changes, separate from render versions and saved/unsaved presentation. */
+    internal var bodyRevision:Long=0L
+    var dirty:Boolean=dirty
+        set(value) {
+            if(value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
+    /** A writer snapshot keeps this token; a separate live model never inherits it implicitly. */
+    internal var snapshotOwnerToken:Any=Any()
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
+        set(value) {
+            if(field!=value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
 
 
     /** Something that must be patched when the item list changes: the GL geometry store. */
@@ -130,6 +143,9 @@ class InfiniteDocument(
         copy.layers.restore(layers.entries, layers.activeId)
         copy.savedLayerIds = items.associateWith { layerIdForWrite(it) }
         copy.backing.addAll(backing)
+        // Copy last: construction/identity setters are not edits of this frozen body.
+        copy.bodyRevision=bodyRevision
+        copy.snapshotOwnerToken=snapshotOwnerToken
         return copy
     }
 

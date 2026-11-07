@@ -130,4 +130,6 @@ internal fun Document.copyWriteSnapshot():Document = Document(
 ).also {
     it.bodyStartPage=bodyStartPage;it.identity=identity;it.hasReferenceAnchors=hasReferenceAnchors
     it.pageReferenceScope=pageReferenceScope;it.snapshotOwnerToken=snapshotOwnerToken;it.isWriteSnapshot=true
+    // Copy last: construction/identity/marker setters must not advance the captured revision.
+    it.bodyRevision=bodyRevision
 }

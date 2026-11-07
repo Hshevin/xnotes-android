@@ -10,4 +10,6 @@
 
 R2b2a模型scope/确定性新页ID/冻结投影/采用已实现，计划已独立审核；tmp/page-copy-scope-full.log 289套件3106项全通过、Android源码编译成功，代码独立复核通过，已提交bb40c14c。详细规格reference-copy-scope-2026-11-08.md。实际检查发现SessionStore正文/sidecar无绑定和代次，CanvasSession仍同步写活模型，需R2b2b处理；不要先把新scope半接到旧Save-As输出流。Document.deepCopy目前保留doc身份，泛用语义不轻改。
 
-R2b2b0共用WorkingSessionCache事务组件已实现，27新增测试，tmp/session-cache-full.log 290套件3133项全通过、Android源码编译成功；计划/代码独立复核均完成，待本地提交。详情reference-session-cache-2026-11-08.md。b1生产适配器/Editor、b2原生来源凭据继续保留，不半接尚未配套的旧会话。无运行作业。
+R2b2b0共用WorkingSessionCache事务组件已实现，27新增测试，tmp/session-cache-full.log 290套件3133项全通过、Android源码编译成功；计划/代码独立复核均完成，已提交aeccdc71。详情reference-session-cache-2026-11-08.md。b1生产适配器/Editor、b2原生来源凭据继续保留，不半接尚未配套的旧会话。无运行作业。
+
+R2b2b1a正文计数/画布owner token已实现，tmp/session-body-revision-full.log 291套件3142项全通过/Android源码编译/独立复核通过，待提交。详情reference-session-cache末节。已确认Editor.bookmarkVersion与重绘contentVersion并非统一正文计数；不要据此复用过时正文。实际会话接线与native来源摘要需一并审，不半接恢复后自动覆盖。
