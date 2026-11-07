@@ -148,6 +148,27 @@ class SurfaceCaptureTest {
         assertEquals(SurfaceCapture.Status.SUBMIT_FAILED, f.results.last().status)
     }
 
+    @Test fun anySubmissionFailureReleasesTheSharedBudgetAndBusySlot() {
+        for (thrown in listOf<Throwable>(SecurityException("denied"), NullPointerException(), AssertionError("fatal"))) {
+            val f = Fixture()
+            val budget = SurfaceCapture.Budget(maxPixels = 1000, maxRequests = 1)
+            var fail = true
+            val capture = SurfaceCapture(
+                readState = { SurfaceCapture.State.from(f.diagnostics.snapshot(), true) },
+                copy = { _, _ -> if (fail) throw thrown },
+                budget = budget,
+            )
+            val escaped = runCatching { capture.request(f.results::add) }.exceptionOrNull()
+            if (thrown is Exception) assertNull("$thrown is settled, not thrown", escaped)
+            else assertSame("an Error still propagates", thrown, escaped)
+            assertEquals(SurfaceCapture.Status.SUBMIT_FAILED, f.results.single().status)
+            fail = false
+            capture.request(f.results::add)
+            assertNull("$thrown: neither the budget nor the busy slot leaked", f.results.getOrNull(1)?.status)
+            assertTrue(budget.acquire(0).not())
+        }
+    }
+
     @Test fun timeoutBudgetSurvivesHostReplacementAndOldDuplicateDoesNotAffectNewRequest() {
         val budget = SurfaceCapture.Budget(maxPixels = 1000, maxRequests = 1)
         val a = Fixture(budget)
