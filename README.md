@@ -42,6 +42,7 @@
 - [光晕缓存重建失效回迁](docs/movinkpad/halo-cache-backport-2026-11-07.md)（context／缓冲重建后撤销旧缓存；验证进度与 GPU 验收边界见记录）
 - [图片绘制与录音关联快照回迁](docs/movinkpad/render-snapshot-backport-2026-11-07.md)（GL 使用入队快照，保留主线 View／湿墨层替换；验证范围见记录）
 - [完整场景批次发布回迁](docs/movinkpad/scene-batch-backport-2026-11-07.md)（失败批次不发布部分更新，SVG 在提交后调度；编译／JVM 已验证，窗口与目标 GPU 待验）
+- [图片解码结果与来源管理回迁](docs/movinkpad/image-decode-backport-2026-11-07.md)（失败请求结清、旧结果撤权，同文档重挂保留有效解码；编译／JVM 已验证，GPU 与窗口待验）
 - [无限画布退出分屏黑屏：排查与只读取证](docs/movinkpad/infinite-split-audit-2026-11-06.md)（根因未确认，尚无真机验证的修复）
 - [MovinkPad 正式版左右分屏黑区候选修复](docs/movinkpad/canvas-split-black-2026-11-07.md)（黑区从画布旧宽度边界开始；已实现跨宿主替换绘制表面，效果待真机验证）
 
