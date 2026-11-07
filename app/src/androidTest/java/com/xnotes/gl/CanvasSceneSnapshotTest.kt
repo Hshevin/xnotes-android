@@ -8,7 +8,10 @@ import com.xnotes.core.audio.InkFade
 import com.xnotes.core.geometry.Flip
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.infinite.CanvasBackground
+import com.xnotes.core.infinite.InkPass
 import com.xnotes.core.infinite.ItemMesher
+import com.xnotes.core.infinite.MeshBuilder
+import com.xnotes.core.infinite.MeshPart
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
@@ -131,6 +134,134 @@ class CanvasSceneSnapshotTest {
             assertGray("only an upsert creates the record", FADED_BLACK, grayAt(32, 44))
             assertGray("other missing record stayed absent", 255, grayAt(32, 20))
         }
+    }
+
+    @Test fun failedReplacementBatchPreservesTheDrawnScene() = withPbuffer {
+        for (caughtNestedFailure in listOf(false, true)) withScene { scene, decodes ->
+            val old = strokeAt(20.0)
+            val next = strokeAt(44.0)
+            val oldMesh = checkNotNull(ItemMesher.mesh(old))
+            val nextMesh = checkNotNull(ItemMesher.mesh(next))
+            scene.upsert(old, oldMesh.parts, oldMesh.bounds)
+            drawReady(scene, decodes)
+            assertGray("old scene is initially drawn", 0, grayAt(32, 20))
+            val before = scene.describe(GlStats())
+            val failure = IllegalArgumentException("intentional batch failure")
+            var committed = 0
+
+            val thrown = runCatching {
+                scene.batch(afterCommit = { committed++ }) {
+                    scene.reset()
+                    if (caughtNestedFailure) {
+                        try {
+                            scene.batch {
+                                scene.upsert(next, nextMesh.parts, nextMesh.bounds)
+                                scene.setOrder(listOf(next))
+                                throw failure
+                            }
+                        } catch (caught: IllegalArgumentException) {
+                            assertSame(failure, caught)
+                        }
+                        // Returning normally cannot commit a batch poisoned by its nested work.
+                    } else {
+                        scene.upsert(next, nextMesh.parts, nextMesh.bounds)
+                        scene.setOrder(listOf(next))
+                        throw failure
+                    }
+                }
+            }.exceptionOrNull()
+            assertNotNull("failed batch must report failure (nested=$caughtNestedFailure)", thrown)
+            assertTrue("the original failure is retained", thrown === failure || thrown?.cause === failure)
+            assertEquals("failed batch must not start commit effects", 0, committed)
+            drawReady(scene, decodes)
+            assertSameGeometry(before, scene.describe(GlStats()))
+            assertGray("failed reset did not clear the old scene", 0, grayAt(32, 20))
+            assertGray("failed upsert did not reach the scene", 255, grayAt(32, 44))
+
+            scene.batch(afterCommit = { committed++ }) {
+                scene.reset()
+                scene.upsert(next, nextMesh.parts, nextMesh.bounds)
+                scene.setOrder(listOf(next))
+            }
+            assertEquals("a later successful batch still commits", 1, committed)
+            drawReady(scene, decodes)
+            assertGray("successful reset replaces old contents", 255, grayAt(32, 20))
+            assertGray("successful upsert is drawn", 0, grayAt(32, 44))
+        }
+    }
+
+    @Test fun partsContainersAreFrozenBeforeTheBatchFinishes() = withPbuffer {
+        for (entry in PartsEntry.entries) withScene { scene, decodes ->
+            val stroke = strokeAt(32.0)
+            val mesh = checkNotNull(ItemMesher.mesh(stroke))
+            val callerParts = ArrayList(mesh.parts)
+            scene.batch {
+                when (entry) {
+                    PartsEntry.UPSERT -> scene.upsert(stroke, callerParts, mesh.bounds)
+                    PartsEntry.WHOLE -> scene.setWetParts(callerParts, mesh.bounds)
+                    PartsEntry.SETTLED -> scene.appendWetRun(callerParts, mesh.bounds)
+                    PartsEntry.TAIL -> scene.setWetTail(callerParts, mesh.bounds)
+                }
+                // Copying only when the outer batch commits would already be too late.
+                callerParts.clear()
+            }
+            drawReady(scene, decodes)
+            assertGray("$entry retained the posted parts", 0, grayAt(32, 32))
+            val stats = scene.describe(GlStats())
+            if (entry == PartsEntry.UPSERT) {
+                assertEquals(1, stats.items)
+                assertTrue(stats.vertices > 0)
+                assertEquals(0, stats.wetVertices)
+            } else {
+                assertEquals(0, stats.items)
+                assertTrue("$entry retained wet vertices", stats.wetVertices > 0)
+            }
+        }
+    }
+
+    @Test fun reservationsFollowEachResetWithoutGrowingForDiscardedGeometry() = withPbuffer {
+        for (resetCount in listOf(1, 2)) withScene { scene, decodes ->
+            val old = strokeAt(16.0)
+            scene.upsert(old, densePartsAt(16.0), Rect(8.0, 12.0, 48.0, 8.0))
+            drawReady(scene, decodes)
+            val before = scene.describe(GlStats())
+            assertEquals(DENSE_VERTICES, before.vertices)
+            assertEquals(8_192, before.vertexCapacity)
+            assertGray("dense old contents are drawn", 0, grayAt(32, 16))
+
+            scene.batch {
+                repeat(resetCount) { step ->
+                    val y = 32.0 + step * 16.0
+                    val next = strokeAt(y)
+                    scene.reset()
+                    scene.upsert(next, densePartsAt(y), Rect(8.0, y - 4.0, 48.0, 8.0))
+                    scene.setOrder(listOf(next))
+                }
+            }
+            drawReady(scene, decodes)
+            val after = scene.describe(GlStats())
+            assertEquals("only the final reset segment remains", 1, after.items)
+            assertEquals(DENSE_VERTICES, after.vertices)
+            assertEquals(before.indices, after.indices)
+            assertEquals("$resetCount reset(s): reserve must exclude discarded vertices",
+                before.vertexCapacity, after.vertexCapacity)
+            assertEquals(before.indexCapacity, after.indexCapacity)
+            assertEquals(before.geometryBytes, after.geometryBytes)
+            assertGray("reset removed old pixels", 255, grayAt(32, 16))
+            if (resetCount == 2) assertGray("second reset removed the first segment", 255, grayAt(32, 32))
+            assertGray("final segment is actually drawn", 0, grayAt(32, if (resetCount == 1) 32 else 48))
+        }
+    }
+
+    private enum class PartsEntry { UPSERT, WHOLE, SETTLED, TAIL }
+
+    /** Repeated opaque quads give an exact vertex load without involving stroke simplification. */
+    private fun densePartsAt(y: Double): List<MeshPart> {
+        val builder = MeshBuilder(DENSE_VERTICES, DENSE_VERTICES / 4 * 6)
+        repeat(DENSE_VERTICES / 4) { builder.rect(8.0, y - 4.0, 48.0, 8.0) }
+        val mesh = builder.build()
+        check(mesh.vertexCount == DENSE_VERTICES)
+        return listOf(MeshPart(mesh, Rgba(0, 0, 0), InkPass.OPAQUE))
     }
 
     private fun strokeAt(y: Double) = Stroke(
@@ -300,6 +431,7 @@ class CanvasSceneSnapshotTest {
         private const val FADED_BLACK = 191
         private const val MAX_DECODE_PASSES = 3
         private const val MAX_DECODE_TASKS = 4
+        private const val DENSE_VERTICES = 6_000
         private val FUTURE_MARK = SyncMark(RECORDING_ID, 1_000)
         private val FRAME = FrameState(1.0, 0.0, 0.0, SIZE, SIZE, CanvasBackground(), Rgba(255, 255, 255))
     }
