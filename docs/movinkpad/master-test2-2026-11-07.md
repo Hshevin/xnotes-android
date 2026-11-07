@@ -19,6 +19,7 @@
 - ARM64 构建成功（3 分 8 秒），2779 项 Debug JVM 测试通过，失败/错误/跳过均为 0；模拟器构建成功（2 分 42 秒）。
 - Android 15 / API 35 x86_64、SwiftShader、1600×1000 本机模拟器：首次 121 项、7 项失败；发现 System UI 无响应弹窗占据焦点。关闭该弹窗、确认 RenderHostTestActivity 获得焦点并清理测试包数据后重跑：121 项、2 项失败（119 项通过），不标为全量通过。
 - 仍失败：`PaneChromeHostTest.floatingToolbarInterceptsWindowStylusBeforeNativeContent` 在 `injectWindowStylus` 发生目标窗口 UID 不匹配的输入注入异常；`SplitEditorTest.savedSplitReopensFilesOrderRatioAndBothViewports` 在 `saveCurrentSplit()` 返回值断言失败。尚未确定是测试夹具还是产品问题，本轮不修改源码来绕过失败。
+- 后续诊断（同日，Claude Code）：`SplitEditorTest` 失败为测试夹具问题——画布取消分屏时该用例改为两份笔记，但两份写入同一文档，文档 ID 重复，第二窗格按重复身份被拒绝打开，分屏不成立。夹具已改为第二份写入独立 `Document.blank()`（`dcfc2eb9`），仅编译，待模拟器重跑。`PaneChromeHostTest` 的 UID 不匹配疑为焦点被其他窗口占用的环境问题，未确认。
 - 失败及重跑日志见 [首次](build-logs/master-test2/instrumentation-first.txt)、[最终](build-logs/master-test2/instrumentation.txt)。之前的窗口超时和截图像素断言在重跑中未再出现，不据此声称真机 GPU 验收通过。
 - 实际 APK `com.xnotes.movinkpad.branchtest.master` / `0.9.8-test-master-2` / versionCode 2，ARM64 Debug（debuggable），无 testOnly；与正式版包名不同，可并存。与主线 test1 原签名相同，证书 SHA-256 `a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451`，验签和 16 KiB ZIP 页对齐通过。
 - 文件 `build/branch-tests/master-test2/XNotes-master-eed318ac-test2-arm64.apk`，53,894,284 字节；SHA-256 `3ad2cc3aad8f2076aa92246312f89620e05b1bac021a9300b5bf738d4343acf1`。

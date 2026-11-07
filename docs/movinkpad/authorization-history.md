@@ -116,3 +116,7 @@
 - 用户要求「先推送远端，让服务器跑编译」，并说明会让服务器手动编译（仓库未配置 CI）。合并 `origin/master` 的 Release 98 记录 `b5175e8e`（仅本文件冲突，两侧均保留，`README.md`、`app/build.gradle.kts` 自动合并）后推送本地 `master` 到 `origin/master`。推送内容包括此前仅本地合并的无限画布取消分屏、第一批渲染诊断回迁与其合并后审查记录、第二批稳定窗格布局回迁；这些批次的窗口仪器测试与目标设备验收仍未运行。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
 
 - 用户要求拉取更新并打包测试版 APK，明确不要覆盖更新，并自动推送打包日志。本轮快进至 `eed318ac`，使用主线独立测试身份 `com.xnotes.movinkpad.branchtest.master` / versionCode 2，与正式版并存；原 master test1 如已安装则更新为 test2。仅本地交付 APK，推送本轮文档及日志，不发布 GitHub Release、不上传 APK、不安装用户设备。
+
+## 2026-11-07 测试夹具修复合并与推送
+
+- 用户要求「先合并远端推送」：将 `worktree-split-test-fix`（`dcfc2eb9`，`SplitEditorTest` 保存分屏用例改为两份不同文档，修正 master test2 中因文档 ID 重复导致的失败）合入，并合并 `origin/master` 的 master test2 打包记录 `fa796b89`（无冲突），然后推送本地 `master` 到 `origin/master`。一并推送此前仅本地合并的第三批光晕缓存失效回迁（`798bb008`，2784 项 JVM 通过，EGL／窗口仪器未运行）。夹具修复仅编译，模拟器重跑待执行。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
