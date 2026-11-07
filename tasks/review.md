@@ -74,3 +74,7 @@ review_input_plan计划意见：必须有按UUID的独立契约查询，verifyWr
 ## R2b0 发布与恢复事务
 
 review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混淆缺失、已解析记录与摘要竞争、瞬时候选IO误判和provider根回退，均补反例修正。最终无新阻断；全量282套件3034项和Android源码编译通过。实际SAF/仪器/设备未运行。生产ReferenceContract、登记、PDF持久pin仍需R2b1接线。
+
+## R2b1a 来源身份读取
+
+独立计划复核要求pending先拒绝自动发布、快读/snapshot变化拒绝、本地化错误；实施复核发现仪器Runner未注册、真实协程取消遗漏、外层catch吞取消及guard后取消窗口，均修复并补反例。最终复核无剩余阻断，284套件3051项/Android源码编译通过；仪器/SAF/目标设备未运行。来源读取不等于保存保护或正页契约激活完成。

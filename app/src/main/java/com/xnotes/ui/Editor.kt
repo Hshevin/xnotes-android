@@ -138,6 +138,7 @@ import com.xnotes.ui.theme.dynamicMaterialColors
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.roundToInt
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
@@ -865,10 +866,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private suspend fun registerForOpen(uri: String, name: String?, kind: String): Boolean {
         return try {
             withContext(Dispatchers.IO) {
-                val id = notebookStorage.ensure(uri, name ?: queryDisplayName(android.net.Uri.parse(uri)).orEmpty(), kind)
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val id = notebookStorage.ensure(uri, name ?: queryDisplayName(android.net.Uri.parse(uri)).orEmpty(), kind) {coroutine.ensureActive()}
                 check(notebookStorage.registry.locations(id.documentId).size <= 1) { appContext.getString(R.string.recovery_duplicate_id) }
             }
             true
+        } catch (e: java.util.concurrent.CancellationException) {throw e
         } catch (e: Exception) {
             storageCanRecover = withContext(Dispatchers.IO) { notebookStorage.hasRecovery(uri) }
             storageDuplicate = withContext(Dispatchers.IO) { notebookStorage.registry.idAt(uri)?.let { notebookStorage.registry.locations(it).size > 1 } == true }
@@ -1118,13 +1121,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return try {
             val uri=withContext(Dispatchers.IO) { notebookStorage.rediscover(missing.id,workspaceRoots()) }
             if(uri==null) { message=appContext.getString(R.string.missing_not_found); false } else relocateMissing(uri)
+        } catch(e: java.util.concurrent.CancellationException) {throw e
         } catch(e: Exception) { message=e.message ?: appContext.getString(R.string.missing_search_failed); false }
     }
     suspend fun relocateMissing(uri: String): Boolean {
         val missing = missingDocument ?: return false
         return try {
             withContext(Dispatchers.IO) {
-                val identity = notebookStorage.ensure(uri, "", if (missing.snapshot.optBoolean(missing.prefix + "Canvas")) "xcanvas" else "xnote")
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val identity = notebookStorage.ensure(uri, "", if (missing.snapshot.optBoolean(missing.prefix + "Canvas")) "xcanvas" else "xnote") {coroutine.ensureActive()}
                 require(missing.id.isBlank() || identity.documentId == missing.id) { appContext.getString(R.string.missing_wrong_file) }
                 if (missing.uri != uri) notebookStorage.registry.markUnavailable(missing.uri)
             }
@@ -1132,6 +1137,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (missingDocument != null) return false
             restorePanePosition(missing.snapshot,missing.prefix)
             true
+        } catch(e: java.util.concurrent.CancellationException) {throw e
         } catch (e: Exception) { message = e.message ?: appContext.getString(R.string.missing_relocate_failed); false }
     }
     private fun restorePanePosition(json: org.json.JSONObject, prefix: String) {

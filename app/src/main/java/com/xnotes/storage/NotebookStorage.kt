@@ -5,19 +5,39 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import com.xnotes.format.BundleIdentity
 import com.xnotes.format.BundleMigration
-import com.xnotes.format.ZipTail
+import com.xnotes.format.BundleHeader
 import com.xnotes.platform.AppStorageDocumentsProvider
 import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.ensureActive
 
 /** On-demand, IO-only registration. Never walks storage on startup or a drawing callback. */
-class NotebookStorage private constructor(private val context: Context) {
+class NotebookStorage internal constructor(private val context: Context) {
     val registry = DocumentRegistry(context)
     private val lock = Any()
-    fun identity(uri: String): BundleIdentity? = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")?.use { pfd ->
-        // Own only pfd, not a second close of the same file descriptor.
-        ZipTail.readEntry(FileInputStream(pfd.fileDescriptor).channel, BundleIdentity.ENTRY) { BundleIdentity.read(it) }
+    /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
+    fun identity(uri: String,checkActive:()->Unit={}): BundleIdentity? = synchronized(lock) {
+        try {
+            NativeReferenceReader.read(context.cacheDir,tryHeader={
+                val descriptor=try {context.contentResolver.openFileDescriptor(Uri.parse(uri),"r")}
+                    catch(_:UnsupportedOperationException) {null}
+                descriptor?.use {pfd->
+                    // Pipes/non-regular descriptors cannot be sought. Reopen a fresh input stream.
+                    if(pfd.statSize<0) null else BundleHeader.read(FileInputStream(pfd.fileDescriptor).channel) {checkActive();false}
+                }
+            },open={context.contentResolver.openInputStream(Uri.parse(uri))
+                ?: throw java.io.FileNotFoundException(StorageText.t(StorageMsg.NOTE_UNREADABLE))},checkActive=checkActive) {header->
+                ReferenceContract.verifyObserved(registry.expectationAt(uri),
+                    header.identity?.let {registry.expectationForId(it.documentId)},header)
+            }.header.identity
+        } catch(error:Exception) {
+            when(error) {
+                is ReferenceContractViolation,is java.util.concurrent.CancellationException -> throw error
+                is IllegalArgumentException,is IllegalStateException ->
+                    throw IllegalStateException(StorageText.t(StorageMsg.REFERENCE_METADATA_INVALID),error)
+                else -> throw IllegalStateException(StorageText.t(StorageMsg.NOTE_UNREADABLE),error)
+            }
+        }
     }
     private fun journal(uri: String): MigrationPublication {
         val id = java.security.MessageDigest.getInstance("SHA-256").digest(uri.toByteArray()).joinToString("") { "%02x".format(it) }
@@ -44,9 +64,11 @@ class NotebookStorage private constructor(private val context: Context) {
         try { target(uri).read().use { input -> temp.outputStream().use { input.copyTo(it) } }; BundleMigration.fingerprints(temp); journal(uri).keepCurrent() }
         finally { temp.delete() }
     }
-    fun ensure(uri: String, name: String, kind: String): BundleIdentity = synchronized(lock) {
-        if (journal(uri).pending) journal(uri).publish(target(uri))
-        val existing = identity(uri)
+    fun ensure(uri: String, name: String, kind: String,checkActive:()->Unit={}): BundleIdentity = synchronized(lock) {
+        if (journal(uri).pending) throw MigrationPublication.RecoveryRequired(
+            StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING),reason=StorageMsg.MIGRATION_RECOVERY_PENDING)
+        val existing = identity(uri,checkActive)
+        checkActive()
         val identity = compactPdf(uri, existing ?: migrate(uri, copy = false))
         registry.register(identity.documentId, kind, name, uri)
         for(old in registry.locations(identity.documentId)) if(old!=uri) {
@@ -138,6 +160,7 @@ class NotebookStorage private constructor(private val context: Context) {
     suspend fun rediscover(id: String, roots: List<String>): String? {
         require(id.isNotBlank()) { StorageText.t(StorageMsg.SPLIT_MISSING_DOCUMENT_ID) }
         val matches=linkedMapOf<String,String>()
+        val coroutine=kotlinx.coroutines.currentCoroutineContext()
         var inspected=0
         for(root in roots.distinct()) {
             val tree=Uri.parse(root)
@@ -156,7 +179,10 @@ class NotebookStorage private constructor(private val context: Context) {
                         if(c.getString(2)==DocumentsContract.Document.MIME_TYPE_DIR) queue.add(child)
                         else if(name.endsWith(".xnote",true)||name.endsWith(".xcanvas",true)) {
                             val uri=DocumentsContract.buildDocumentUriUsingTree(tree,child).toString()
-                            if(runCatching { identity(uri)?.documentId==id }.getOrDefault(false)) {
+                            val matchesId=try {identity(uri) {coroutine.ensureActive()}?.documentId==id}
+                                catch(error:java.util.concurrent.CancellationException) {throw error}
+                                catch(_:Exception) {false}
+                            if(matchesId) {
                                 registry.register(id,if(name.endsWith(".xcanvas",true)) "xcanvas" else "xnote",name,uri); matches["${tree.authority}|$child"]=uri
                             }
                         }

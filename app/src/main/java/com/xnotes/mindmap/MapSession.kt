@@ -11,6 +11,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
@@ -177,7 +179,12 @@ class MapSession : ViewModel() {
     }
     fun addSource(uri: Uri, nodeId: String) {
         viewModelScope.launch {
-            val source=withContext(Dispatchers.IO) { runCatching { MapSourceAccess.inspect(app,uri) } }
+            val source=withContext(Dispatchers.IO) {
+                val coroutine=currentCoroutineContext()
+                try {Result.success(MapSourceAccess.inspect(app,uri) {coroutine.ensureActive()})}
+                catch(error:java.util.concurrent.CancellationException) {throw error}
+                catch(error:Exception) {Result.failure(error)}
+            }
             sourceFailed=source.isFailure
             source.getOrNull()?.let { s ->
                 androidx.compose.runtime.snapshotFlow {inkContact}.first { !it }

@@ -422,3 +422,20 @@ schema2新增按UUID单调页契约表，两种查询覆盖位置和外移UUID�
 ### R2b0 已完成：恢复事务
 
 发布/恢复/保留当前均支持校验与DB回调，pending v2保存摘要，失败保留并可不重复写重试，受管恢复固定根路径且严格区分缺失与不可读。3034项JVM与Android源码编译通过、独立复核完成；详见reference-recovery-publication-2026-11-08.md。下一步R2b1生产存储校验和接线，不能把默认空回调当作已完成页契约保护。
+
+### R2b1a：原生来源只读身份检查
+
+真实入口NotebookStorage.identity先用BundleHeader读取，明确unsupported→从URI起点取得一个私有快照；读取/解析错误不当无身份。anchored输入必须在同一快照核验双ZIP和页面UUID，Header/页面集合来自该快照；快读与快照身份或marker有无不一致拒绝。返回前检查位置及UUID两种契约。legacy只读metadata、不主动升级或正登记页契约。ensure有pending时先报恢复待处理，不空hooks自动发布/清除。此片仅NOTE/CANVAS，不声称.xmap分支已有等价来源登记保护。
+验收：快读/unsupported/非seek回退，comment ZIP，marker绑定/页面UUID/重复条目，快读后身份改变或降级，位置/UUID契约失败不写不重登记，失败清私有快照。仪器源码补真实文件和pipe来源读取；实际Android仍未运行。R2b1b保存/恢复的完整guard、正登记、PDF持久保护和.xmap位置替换保护继续保留。
+
+### R2b1b 计划待审核：普通原生保存进入验证发布事务
+
+先覆盖现有文件的普通保存（.xnote/.xcanvas），不混入新文件、另存、复制或首次页编号激活。`publishNote` 从目标取不可变原件快照，源/候选完整ZIP及页面契约验证，禁止改变UUID、剥离/隐式新增页标记，原共享PDF身份保持。发布前依位置+UUID检查current；重试current已经等于candidate仍重新验证。所有目标（包括受管目录）走durable journal，受管文件写入使用同目录暂存/校验后原子替换。写后回读→PDF note pin及登记→清日志，登记失败保留原/候选可重试，不重复写。
+
+pending v3增加类型化操作目的（本片仅EXISTING_SAVE），SHA与目的由同一record解析、绑定并传入validation，旧1/2无目的不自动发布，明确恢复仍保留。ensure仅自动继续已验证EXISTING_SAVE，其他pending继续提示恢复。共享PDF先在固定migration owner下持久保护原/候选引用的并集，成功note pin+登记及清pending后解除；崩溃后无pending的遗留owner可保守回收，不能把仍有pending的资源清掉。日志按规范location_key定位并兼容旧URI日志；冲突记录拒绝，不选任意一份。
+
+Editor分页in-place只允许经当前身份/registry预检的无页锚点旧包，带页锚点/已知页契约或候选启用锚点强制完整事务；预检typed拒绝不能吞成fallback。画布也改用publishNote，不直接wt复制。保存顶层保留typed失败原因和dirty，不让异步异常误报成功。不在本片正登记页契约/开放页来源；完整打开/元数据迁移/显式恢复/SaveAs截断前保护及模型UUID切换仍需接续处理。
+
+验收：普通保存/保存重试、A→B/剥marker/隐式增加marker/损坏页ID拒绝且零写，当前已经降级不能借candidate修复；DB失败原候选pending/PDF pin保留；current==candidate重试零写；受管原子失败保留旧文件，SAF部分写入保留journal；取消/typed错误无full fallback；canvas真实入口；URI别名与冲突journal；共享PDF在待恢复/GC期间不丢失。JVM/Robolectric和Android仪器源码，实际SAF与目标设备仍单独验收。
+
+R2b1a实施/独立复核通过：284套件3051项及Android源码编译成功，reference-source-read-2026-11-08.md记录生产接线与取消边界。R2b1b审核必须修订：禁止真实目标无before-image的in-place后再靠full fallback修复；先选私有候选拼接或本片停用目标in-place，注入部分写入失败覆盖恢复证据。
