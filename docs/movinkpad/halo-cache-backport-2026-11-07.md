@@ -6,7 +6,7 @@
 
 ## 来源与范围
 
-从已含前两批回迁的本地 master `ac70658e` 建立 `codex/halo-cache-backport`，复用独立工作树，保留原渲染及前两批回迁分支。
+从已含前两批回迁的本地 master `ac70658e` 建立 `codex/halo-cache-backport`，复用独立工作树，保留原渲染及前两批回迁分支。合并前主线更新至 `eed318ac`（Release 98 版本／记录），已通过 `6840fd30` 同步到回迁分支；仅授权历史的追加冲突，两侧记录均保留。
 
 选择历史 `8fb67676` 中的 `CanvasScene.kt` 与 `GlowTarget.kt` 小补丁，不整文件复制原重构分支。主线现状是：context 重建会清空 GPU 缓冲，但 CPU 上的 haloKey／liftHaloKey 仍在；尺寸 A→B→A 若中间在光晕绘制前返回，也可能让新缓冲被旧键误认为已有内容。本批在 context 变化或缓冲实际重建时撤销这两个键及缓存绘制姿态，保留实际 liftAt、CPU 场景、文档、视口和编辑状态；同一取整后的缓冲尺寸继续复用。
 
@@ -22,7 +22,7 @@ RF01-F4 的「原位绘制中途失败后仍保留旧键」属于另一路，与
 
 ## 实际验证与审查
 
-- 环境：JDK 21.0.10、Gradle 8.13、AGP 8.12.3、SDK 36；应用及测试配置未改变。
+- 环境：JDK 21.0.10、Gradle 8.13、AGP 8.12.3、SDK 36；应用及测试配置与对应主线基线一致。后续同步保留主线的 versionCode 98，不自行更改安装身份或版本。
 - 新增 `CanvasHaloInvalidationTest` 5 项，通过实际 scene draw 建立两种光晕缓存，再验证正常／shader 创建失败的 context 变化、ink 缺失时的尺寸往返、取整尺寸相同的复用，以及 GlowTarget 外来代次／释放后的重建。确认 CPU records、几何计数、镜像对象及实际拖动状态保留，不用新 helper 代替生产入口。
 - 未应用生产补丁时，5 项中 3 项在“旧缓存键应为空”断言失败、2 项复用检查通过；应用补丁后 5 项全部通过。首次测试夹具编译发现 Stroke 构造参数不匹配，已按主线将颜色移至 ToolConfig.rgba，并设为直线以避免输入平滑缩短测试线段。初次编译失败不是缺陷复现；实际反例日志为 `tmp/halo-backport-red-retry.log`，原始失败 XML 保存为 `tmp/halo-backport-red-results.xml`。
 - `:app:compileDebugKotlin :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest` 通过。XML 汇总为 248 个套件、2784 项，失败／错误／跳过均为 0；日志 `tmp/halo-backport-validation.log`。包含前两批已有 JVM 测试，不借用历史运行结果。
@@ -30,3 +30,4 @@ RF01-F4 的「原位绘制中途失败后仍保留旧键」属于另一路，与
 - 两位审查者分别复核生产变化、JVM／EGL 夹具和资源清理，最终无必修项；主审复核测试失败位置、完整测试结果及主线保护。生产差异严格为两个文件的 17 行新增、5 行删除，MainActivity、两种 Editor、InfiniteCanvasView、GlWetPad、GlRenderer、GeometryStore 与基线完全一致。
 - 源码验证只证明缓存失效逻辑及编译兼容；不证明真实 GPU 分配、FBO 完整性、像素恢复、原黑块修复或笔延迟改善。
 - 生产补丁与 5 项 JVM 回归保存为 `5c662654`；EGL 源码及本文随后单独保存。
+- EGL 源码与初次证据保存为 `b25ca951`。同步最新主线后再次调用相同三项 Gradle 任务，结果成功；应用／测试源码未变，编译与 JVM 任务为 UP-TO-DATE，沿用上述实际运行结果，未冒称第二次执行 2784 项。日志 `tmp/halo-backport-current-master-validation.log`。Release 98 构建配置及历史交付日志与 `eed318ac` 完全一致，本轮没有执行历史记录中的打包或推送动作。
