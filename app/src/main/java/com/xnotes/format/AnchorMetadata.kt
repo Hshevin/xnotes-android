@@ -69,14 +69,34 @@ internal class AnchorReadState(private val independentCopy:Boolean=false) {
         if(id==null) return
         if(independentCopy) require(sourceIds!!.put(identity,id)==null) else identity.restore(id)
     }
+    /** Source targets a recovery copy could not materialize (bad image, unknown kind…); 0 for normal reads. */
+    var omitted=0; private set
     fun complete(marker:AnchorMetadata?,identity:BundleIdentity?,actual:Sequence<ReferenceIdentity>):Boolean {
         if(marker==null) {
             require(ids.isEmpty()) {"Reference identities require lossless metadata upgrade"}
-            if(independentCopy) require(!invalidStructure && (!versionPresent || supportedVersion) && actual.count()==targets) {"Cannot copy a partial document"}
+            if(independentCopy) {
+                require(!invalidStructure && (!versionPresent || supportedVersion)) {"Cannot copy an unrecognized document"}
+                // A recovery copy salvages what it can: it gets a new identity, so a missing object
+                // cannot pass for the original. The caller reports the count instead of hiding it.
+                omitted=(targets-actual.count()).coerceAtLeast(0)
+            }
             return false
         }
         require(identity!=null && marker.documentId==identity.documentId) {"Anchor metadata belongs to another document"}
         require(!invalidStructure && supportedVersion) {"Invalid anchored manifest structure or version"}
+        if(independentCopy) {
+            // Same salvage rule for an anchored source. Its copy receives fresh, disjoint identities,
+            // so only identity corruption (an unknown or repeated source id) still fails the copy.
+            require(targets<=com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS) {"Reference target limit exceeded"}
+            val materialized=hashSetOf<String>()
+            var count=0
+            for(item in actual) {
+                count++
+                sourceIds!![item]?.let {id -> require(id in ids && materialized.add(id)) {"Duplicate materialized identity"}}
+            }
+            omitted=(targets-count).coerceAtLeast(0)
+            return true
+        }
         require(missing==0 && targets<=com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS) {"Upgraded document lost a reference identity"}
         val materialized=hashSetOf<String>()
         for(item in actual) require(materialized.add(requireNotNull(if(independentCopy) sourceIds!![item] else item.id) {"Missing materialized identity"})) {"Duplicate materialized identity"}

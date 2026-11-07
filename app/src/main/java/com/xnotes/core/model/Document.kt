@@ -65,6 +65,9 @@ class Document(
     /** Transient: set by the codec when legacy ink was compacted at load (debug overlay readout). */
     var compactedOnLoad = false
 
+    /** Transient: source objects an ink-only recovery copy could not read and left out. */
+    var omittedOnCopy = 0
+
     /** Derived: the storage display name (or path) base name without extension, or "Untitled". */
     val title: String
         get() = displayName?.let { Paths.stem(it) }

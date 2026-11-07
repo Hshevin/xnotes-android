@@ -929,6 +929,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         storageProblemUri = null
         if (!saveCanvasBeforeReplacement()) return false
         replaceDocument(doc)
+        if (doc.omittedOnCopy > 0) say(appContext.resources.getQuantityString(R.plurals.recovery_ink_only_omitted, doc.omittedOnCopy, doc.omittedOnCopy))
         return true
     }
     suspend fun recoverStorageProblem(restore: Boolean = false, copy: Boolean = false): Boolean {
@@ -4282,10 +4283,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
         }
 
+    /**
+     * A mind map's tile or page thumbnail, kept in the memory cache under [key] like a canvas's, so
+     * scrolling does not re-read and re-render the whole .xmap. [refreshStoredFile] drops it when
+     * the editor returns, after its close has saved.
+     */
+    private suspend fun mindMapThumbnail(uri: String, key: String, width: Int, height: Int): ImageBitmap? {
+        val generation = thumbnailGeneration
+        synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }
+        return withContext(thumbDispatcher) {
+            delay(150)
+            if (!isActive || !isCurrentThumbnail(generation)) return@withContext null
+            synchronized(noteThumbs) { noteThumbs.get(key)?.let { return@withContext it } }
+            val bmp = runCatching { com.xnotes.mindmap.MapFiles.thumbnail(appContext, uri, width, height) }.getOrNull()
+                ?: return@withContext null
+            publishThumbnail(key, bmp, generation)
+        }
+    }
+
     /** The square tile for the document at [uri], whichever kind it is. */
     suspend fun tileThumbnail(uri: String, name: String): ImageBitmap? =
         if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP) {
-            withContext(thumbDispatcher) { runCatching { com.xnotes.mindmap.MapFiles.thumbnail(appContext, uri, tilePx, tilePx).asImageBitmap() }.getOrNull() }
+            mindMapThumbnail(uri, uri, tilePx, tilePx)
         } else if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.CANVAS) {
             canvasTileThumbnail(uri)
         } else {
@@ -4344,9 +4363,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * with them when the document changes.
      */
     suspend fun pageThumbnail(uri: String, name: String): ImageBitmap? {
-        if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP) return withContext(thumbDispatcher) {
-            runCatching { com.xnotes.mindmap.MapFiles.thumbnail(appContext, uri, (pageThumbPx * 1.414).roundToInt(), pageThumbPx).asImageBitmap() }.getOrNull()
-        }
+        if (DocumentKind.ofName(name) == DocumentKind.MIND_MAP)
+            return mindMapThumbnail(uri, pageThumbKey(uri), (pageThumbPx * 1.414).roundToInt(), pageThumbPx)
         val generation = thumbnailGeneration
         val key = pageThumbKey(uri)
         synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }

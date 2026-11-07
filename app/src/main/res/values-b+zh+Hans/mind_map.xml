@@ -14,6 +14,7 @@
     <string name="map_save_error">保存失败</string>
     <string name="map_save_copy">另存副本</string>
     <string name="map_copy_saved">副本已保存。原文档及其恢复状态保持不变。</string>
+    <string name="map_split_unsupported">思维导图在独立编辑页中打开，不能用于分屏。</string>
     <string name="map_help">帮助</string>
     <string name="map_add_text">文本子节点</string>
     <string name="map_add_ink">手绘子节点</string>
@@ -34,10 +35,13 @@
     <string name="map_larger">扩大绘图区</string>
     <string name="map_pen_width">笔宽</string>
     <string name="map_delete_confirm">删除此节点及其所有子节点？可通过撤销恢复。</string>
-    <string name="map_conflict">目标文件已变化或无法读取，本次保存未覆盖它。最新修改已保存在本地恢复副本中，请另存为新文件。</string>
+    <string name="map_conflict">目标文件已变化或无法读取，本次保存未覆盖它。最新修改已保存在本地恢复副本中。可保留当前版本覆盖文件、改用文件版本，或另存为新文件。</string>
     <string name="map_recovery_notice">保存失败。若恢复副本写入成功，下方可选择保留恢复副本并关闭；否则请保持此页打开，重试或另存副本。</string>
     <string name="map_recovered">已从本机恢复尚未保存的修改。可保存到原文件，或另存为新文件。</string>
     <string name="map_close_recovery">保留本地恢复副本并关闭</string>
+    <string name="map_conflict_keep">保留当前版本</string>
+    <string name="map_conflict_use_file">改用文件版本</string>
+    <string name="map_conflict_use_file_confirm">放弃本机恢复的修改，载入文件当前的内容？此操作无法撤销。如需保留这些修改，请先另存副本。</string>
     <string name="map_limit">修改超过文档上限：1000 个节点、128 层、25 万个笔迹采样点、每节点 2 万字或绘图区尺寸。请减少内容后重试。</string>
     <string name="map_canvas_description">思维导图画布，可使用工具栏编辑当前节点。</string>
     <string name="map_hint">点击选中 · 双击编辑 · 拖动节点移动分支 · 双指缩放</string>

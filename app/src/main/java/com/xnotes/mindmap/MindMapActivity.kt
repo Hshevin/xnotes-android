@@ -18,7 +18,8 @@ class MindMapActivity : ComponentActivity() {
         val title = intent.getStringExtra("title").orEmpty()
         setContent { MindMapScreen(session, title, onClose = ::finish) }
     }
-    override fun onStop() { session.save(); super.onStop() }
+    // Only unsaved edits are written; an untouched map must not raise a conflict on backgrounding.
+    override fun onStop() { if (session.dirty) session.save(); super.onStop() }
     companion object {
         fun intent(context: Context, uri: String, title: String): Intent =
             Intent(context, MindMapActivity::class.java).setData(android.net.Uri.parse(uri)).putExtra("title", title)

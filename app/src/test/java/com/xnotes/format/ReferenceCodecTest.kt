@@ -141,9 +141,17 @@ class ReferenceCodecTest {
             assertEquals(copy.identity,reopened.identity);assertEquals(copy.pages.first().referenceIdentity.id,reopened.pages.first().referenceIdentity.id)
             assertEquals(hash,BundleMigration.hash(file));assertEquals("%PDF-1.7 immutable",original.readText())
             val unknown=bundle("""{"format":"xnote","version":1,"has_pdf":true,"pages":[{"reference_id":"$page","items":[{"kind":"future","reference_id":"$item"}]}]}""")
-            try {note().readInkCopy(unknown.inputStream(),dir);fail("copy cannot lose unknown content")} catch(_:IllegalArgumentException) {}
+            // The ink-only copy is the rescue path: an unreadable object is left out and counted,
+            // never allowed to make the whole recovery fail. The copy's ids stay disjoint.
             val missingImage=bundle("""{"format":"xnote","version":1,"has_pdf":true,"pages":[{"reference_id":"$page","items":[{"kind":"image","asset":"assets/image-gone.png","reference_id":"$item"}]}]}""")
-            try {note().readInkCopy(missingImage.inputStream(),dir);fail("copy cannot lose an image")} catch(_:IllegalArgumentException) {}
+            for(partial in listOf(unknown,missingImage)) {
+                val salvaged=note().readInkCopy(partial.inputStream(),dir)
+                assertEquals(1,salvaged.omittedOnCopy);assertEquals(1,salvaged.pages.size);assertTrue(salvaged.pages.first().items.isEmpty())
+                assertTrue(salvaged.hasReferenceAnchors);assertNotEquals(page,salvaged.pages.first().referenceIdentity.id)
+                val saved=ByteArrayOutputStream().also {note().write(salvaged.snapshot(),it)}.toByteArray()
+                assertTrue(note().read(saved.inputStream(),imageDir=dir).hasReferenceAnchors)
+            }
+            assertEquals(0,copy.omittedOnCopy)
         } finally {dir.deleteRecursively()}
     }
     @Test fun borrowedResolvedPdfSurvivesAnyAnchoredValidationFailure() {
@@ -170,6 +178,17 @@ class ReferenceCodecTest {
         assertNull(copy.pdfFile);assertNull(copy.pages.first().pdfPage)
         val output=ByteArrayOutputStream().also {note().write(copy.snapshot(),it)}.toByteArray()
         assertFalse(note().read(output.inputStream()).hasReferenceAnchors)
+    }
+    @Test fun legacyInkRecoverySalvagesAroundUnreadableObjects() {
+        val bytes=bundle("""{"format":"xnote","version":1,"has_pdf":true,"pages":[{"pdf_page":0,"items":[{"kind":"stroke","samples":[[1,2,0.7],[3,4,0.8]]},{"kind":"future"},{"kind":"image","asset":"assets/image-gone.png"}]}]}""",marker=false)
+        val copy=note().readInkCopy(bytes.inputStream())
+        assertEquals(2,copy.omittedOnCopy)
+        assertEquals(1,copy.pages.first().items.size);assertTrue(copy.pages.first().items.first() is Stroke)
+        assertFalse(copy.hasReferenceAnchors)
+    }
+    @Test fun inkRecoveryStillRejectsAnUnrecognizedFormatVersion() {
+        val bytes=bundle("""{"format":"xnote","version":2,"pages":[{"items":[]}]}""",marker=false)
+        try {note().readInkCopy(bytes.inputStream());fail("unknown version")} catch(_:IllegalArgumentException) {}
     }
 
     @Test fun referenceOnlyPdfIdentityCannotBeOverriddenByUnexpectedEmbeddedBytes() {

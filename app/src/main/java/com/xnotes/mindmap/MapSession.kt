@@ -52,7 +52,8 @@ class MapSession : ViewModel() {
         if(draft.value.text!=draft.initialText) {
             val height=MapPainter().measuredHeight(draft.value.text,n.width)
             val updated=doc.update(n.id) {it.copy(text=draft.value.text,height=height)}
-            val next=try {if(n.free) updated else MapLayout.arrange(updated)} catch(_:IllegalArgumentException) {limitError=true;return false}
+            // Layout keeps free topics in place, so their branches reflow like the main tree's.
+            val next=try {MapLayout.arrange(updated)} catch(_:IllegalArgumentException) {limitError=true;return false}
             if(!commit(next)) return false
         }
         endText(draft)
@@ -80,7 +81,7 @@ class MapSession : ViewModel() {
     fun editNodeProperties(id:String, proposed:MapNode):Boolean = operate { doc ->
         if(doc.nodes.none {it.id==id}) return@operate doc
         val updated=doc.update(id) { current -> current.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height) }
-        if(updated==doc || proposed.kind==NodeKind.INK || doc.node(id).free) updated else MapLayout.arrange(updated)
+        if(updated==doc || proposed.kind==NodeKind.INK) updated else MapLayout.arrange(updated)
     }
     fun reportInkLimit() {limitError=true}
     var document by mutableStateOf<MindMapDocument?>(null); private set
@@ -149,7 +150,8 @@ class MapSession : ViewModel() {
         debounce?.cancel()
         debounce = viewModelScope.launch { delay(350); save() }
     }
-    fun save(onClosed: (() -> Unit)? = null) {
+    /** [overwrite] is the explicit conflict choice to keep this version over the destination's. */
+    fun save(onClosed: (() -> Unit)? = null, overwrite: Boolean = false) {
         val doc = document ?: return
         debounce?.cancel()
         if (onClosed != null) closing = true
@@ -158,7 +160,7 @@ class MapSession : ViewModel() {
         MapSaves.scope.launch {
             val result = withContext(Dispatchers.IO) {
                 lock.withLock {
-                    if (version != revision) null else runCatching { store.save(doc) }.also {
+                    if (version != revision) null else runCatching { if (overwrite) store.overwrite(doc) else store.save(doc) }.also {
                         if (store.journalReady) durableRevision = version
                     }
                 }
@@ -183,8 +185,26 @@ class MapSession : ViewModel() {
             }
         }
     }
+    /** Explicit conflict choice: discard the recovered edits and reload the destination's version. */
+    fun useFileVersion() {
+        if (closing || saving || inkContact || textDraft != null) return
+        debounce?.cancel()
+        saving = true
+        MapSaves.scope.launch {
+            val result = withContext(Dispatchers.IO) { lock.withLock { runCatching { store.discardRecovery() } } }
+            saving = false
+            result.onSuccess {
+                // A new revision drops any save still queued for the discarded edits.
+                revision++
+                history = MapHistory(it.document); document = it.document; selected = it.document.root.id
+                canUndo = false; canRedo = false
+                dirty = false; saveFailed = false; recovered = false; conflict = false; copySaved = false
+            }.onFailure { saveFailed = true }
+        }
+    }
+    /** A copy is a new document: it gets its own id so the registry never sees two files claim one. */
     fun saveCopy(uri: Uri, onComplete: () -> Unit) {
-        val doc = document ?: return
+        val doc = document?.copy(id = java.util.UUID.randomUUID().toString()) ?: return
         saving = true
         MapSaves.scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {

@@ -14,6 +14,7 @@
     <string name="map_save_error">Save failed</string>
     <string name="map_save_copy">Save a copy</string>
     <string name="map_copy_saved">Copy saved. The original and its recovery status are unchanged.</string>
+    <string name="map_split_unsupported">Mind maps open in their own editor and can\'t be used in split view.</string>
     <string name="map_help">Help</string>
     <string name="map_add_text">Text child</string>
     <string name="map_add_ink">Handwriting child</string>
@@ -34,10 +35,13 @@
     <string name="map_larger">Enlarge paper</string>
     <string name="map_pen_width">Pen width</string>
     <string name="map_delete_confirm">Delete this node and all its descendants? You can undo this operation.</string>
-    <string name="map_conflict">The destination changed or became unreadable. This save has not overwritten it. The latest edits are in the local recovery copy. Save a copy to a new file.</string>
+    <string name="map_conflict">The destination changed or became unreadable. This save has not overwritten it. The latest edits are in the local recovery copy. Keep this version to overwrite the file, use the file\'s version, or save a copy to a new file.</string>
     <string name="map_recovery_notice">Saving failed. If the recovery copy was written successfully, you can close with recovery below; otherwise keep this page open and retry or save a copy.</string>
     <string name="map_recovered">Recovered unsaved edits from this device. Save to commit them, or save a copy to a new file.</string>
     <string name="map_close_recovery">Close with local recovery</string>
+    <string name="map_conflict_keep">Keep this version</string>
+    <string name="map_conflict_use_file">Use file\'s version</string>
+    <string name="map_conflict_use_file_confirm">Discard the edits recovered on this device and load the file as it is now? This cannot be undone. Save a copy first to keep them.</string>
     <string name="map_limit">Document limit reached: 1,000 nodes, 128 levels, 250,000 ink points, 20,000 characters per node, or maximum paper size. Reduce the content and retry.</string>
     <string name="map_canvas_description">Mind map canvas. Use the toolbar to edit the selected node.</string>
     <string name="map_hint">Tap to select · Double-tap to edit · Drag a node to move its branch · Pinch to zoom</string>

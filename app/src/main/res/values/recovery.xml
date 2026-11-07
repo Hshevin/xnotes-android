@@ -28,4 +28,8 @@
     <string name="recovery_relink_pdf">Choose the original PDF or an older note file to re-link</string>
     <string name="recovery_open_ink_only">Open the ink only (without the PDF, as a copy to save)</string>
     <string name="recovery_ink_only_name">%1$s (ink only)</string>
+    <plurals name="recovery_ink_only_omitted">
+        <item quantity="one">Opened the ink-only copy. %d object could not be read and was left out; the original file is unchanged.</item>
+        <item quantity="other">Opened the ink-only copy. %d objects could not be read and were left out; the original file is unchanged.</item>
+    </plurals>
 </resources>

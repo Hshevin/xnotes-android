@@ -63,11 +63,34 @@ class MapStore(directory: File, key: String, private val target: MapTarget) {
             checkpoint(doc, pending = false)
             return
         }
-        if (currentHash != expectedHash) throw MapConflict()
+        if ((currentHash ?: ABSENT) != expectedHash) throw MapConflict()
         target.write(bytes)
         if (hash(target.read()) != hash(bytes)) throw IOException("Destination verification failed")
         expectedHash = hash(bytes)
         checkpoint(doc, pending = false)
+    }
+
+    /**
+     * Explicit conflict choice "keep this version": accept whatever the destination holds now as the
+     * base, then save normally, so the journal stays ahead of the write and verification still runs.
+     * Without this the base hash recorded at open never matches again and every save is a conflict.
+     */
+    fun overwrite(doc: MindMapDocument) {
+        expectedHash = runCatching { target.read() }.getOrNull()?.let(::hash) ?: ABSENT
+        save(doc)
+    }
+
+    /**
+     * Explicit conflict choice "use the file's version": drop the local recovery copy and reload the
+     * destination. An unreadable destination throws before the journal is touched, so it is kept.
+     */
+    fun discardRecovery(): Opened {
+        val remote = target.read()
+        val doc = MapCodec.decode(remote)
+        check(!journal.exists() || journal.delete()) { "Cannot remove the recovery journal" }
+        expectedHash = hash(remote)
+        journalReady = false
+        return Opened(doc)
     }
 
     private fun checkpoint(doc: MindMapDocument, pending: Boolean) {
@@ -84,6 +107,8 @@ class MapStore(directory: File, key: String, private val target: MapTarget) {
         } finally { staging.delete() }
     }
     companion object {
+        /** Base for a destination that could not be read; never equal to a content hash. */
+        private const val ABSENT = "absent"
         private fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     }
 }

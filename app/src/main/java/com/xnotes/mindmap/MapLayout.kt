@@ -40,6 +40,17 @@ object MapLayout {
                 top += h + V_GAP
             }
         }
+        // A free topic stays where the user put it; its branch is laid out beside it like the root's,
+        // otherwise children added under it would keep the default origin and land on the root.
+        for (f in doc.nodes) if (f.parent == null && f.free && !f.collapsed) {
+            val kids = children[f.id].orEmpty()
+            var top = f.y + f.height / 2 - (kids.sumOf { height(it) } + V_GAP * (kids.size - 1).coerceAtLeast(0)) / 2
+            for (c in kids) {
+                val h = height(c)
+                place(c, f.x + f.width + H_GAP, top + h / 2, true)
+                top += h + V_GAP
+            }
+        }
         return doc.copy(nodes = doc.nodes.map { placed[it.id] ?: it })
     }
 }

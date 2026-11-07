@@ -50,6 +50,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         var editing by remember { mutableStateOf<String?>(null) }
         var propertiesFor by remember {mutableStateOf<String?>(null)}
         var deleting by remember { mutableStateOf(false) }
+        var discardingRecovery by remember { mutableStateOf(false) }
         var choosing by remember { mutableStateOf(false) }
         var reparenting by remember { mutableStateOf(false) }
         var help by remember { mutableStateOf(false) }
@@ -210,6 +211,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                     problem?.takeIf {textDraft==null}?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
                         Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
                         if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
+                        if(session.conflict) {
+                            MapButton(R.string.map_conflict_keep, enabled = !session.saving) { session.save(overwrite = true) }
+                            MapButton(R.string.map_conflict_use_file, enabled = !session.saving) { discardingRecovery = true }
+                        }
                     } }
                 }
                 if(textDraft==null) Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
@@ -240,6 +245,11 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         sourcesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id==id }?.let { n ->
             GraphSourcesDialog(n, { edited -> session.operate { it.update(id) { edited } } }, { pendingSourceNode=id;sourcePicker.launch(arrayOf("application/octet-stream","application/zip")) }) { sourcesFor=null }
         } }
+        if (discardingRecovery) AlertDialog(onDismissRequest = { discardingRecovery = false },
+            title = { Text(stringResource(R.string.map_conflict_use_file), fontSize = TextSize.heading) },
+            text = { Text(stringResource(R.string.map_conflict_use_file_confirm), fontSize = TextSize.body) },
+            confirmButton = { MapButton(R.string.map_conflict_use_file) { session.useFileVersion(); discardingRecovery = false } },
+            dismissButton = { MapButton(R.string.cancel) { discardingRecovery = false } })
         if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.delete), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.map_delete_confirm), fontSize = TextSize.body) },
             confirmButton = { MapButton(R.string.delete) { session.selected?.let { id -> session.operate { d -> d.delete(id) } }; deleting = false } },

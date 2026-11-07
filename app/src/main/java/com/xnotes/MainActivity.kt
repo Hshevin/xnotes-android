@@ -799,7 +799,10 @@ private fun EditorScreen(
      *  types share the explorer but not much else. Reads off-thread behind the "Opening note…"
      *  spinner so a big embedded PDF doesn't freeze the UI. */
     suspend fun openInto(requested: Editor, uriStr: String): Editor? {
-        if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) return null
+        if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) {
+            editor.message = context.getString(R.string.map_split_unsupported)
+            return null
+        }
         if (requested.noteOpen && requested.visibleDocumentUri?.let { requested.isSameDocument(it, uriStr) } == true) return requested
         // Keep a shared document's save owner alive. Replace its borrowed view instead, then
         // exchange visual slots so the requested pane still opens the new file in place.
@@ -868,6 +871,11 @@ private fun EditorScreen(
 
     /** Open two picked files together, one per pane, and start the split focused on the first. */
     fun openSplit(firstUri: String, secondUri: String) {
+        // Refuse before creating the second pane, so a mind map leaves no empty split behind.
+        if (listOf(firstUri, secondUri).any { com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(it)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP }) {
+            editor.message = context.getString(R.string.map_split_unsupported)
+            return
+        }
         editor.secondaryPane()
         scope.launch {
             // Either picked file may already be open in the other pane: settle both before reading.

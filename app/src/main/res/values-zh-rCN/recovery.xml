@@ -28,4 +28,7 @@
     <string name="recovery_relink_pdf">选择原始 PDF 或旧笔记文件重新关联</string>
     <string name="recovery_open_ink_only">只打开笔迹（不含 PDF，另存为副本）</string>
     <string name="recovery_ink_only_name">%1$s（仅笔迹）</string>
+    <plurals name="recovery_ink_only_omitted">
+        <item quantity="other">已打开仅笔迹副本。%d 个对象无法读取，已略去；原文件未改变。</item>
+    </plurals>
 </resources>

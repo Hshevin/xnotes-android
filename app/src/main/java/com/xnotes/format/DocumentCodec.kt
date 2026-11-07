@@ -978,6 +978,7 @@ class DocumentCodec(
                 timing?.compactMs = (System.nanoTime() - compactStart) / 1_000_000L
             }
             if(independentCopy) {
+                doc.omittedOnCopy=m.anchors.omitted
                 doc.identity=BundleIdentity()
                 doc.pdfFile=null
                 for(page in doc.pages) {page.pdfPage=null;page.pdfTurn=0}

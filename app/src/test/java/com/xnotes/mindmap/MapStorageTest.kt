@@ -94,5 +94,72 @@ class MapStorageTest {
         assertTrue(recovery.recovered)
         assertTrue(recovery.conflict)
     }
+    private fun conflicted(target: Target): Pair<MindMapDocument, ByteArray> {
+        val store = MapStore(tmp.root, "uri", target)
+        val opened = store.open()
+        val edit = opened.document.update(opened.document.root.id) { it.copy(text = "mine") }
+        val external = MapCodec.encode(opened.document.update(opened.document.root.id) { it.copy(text = "theirs") })
+        target.bytes = external
+        assertThrows(MapConflict::class.java) { store.save(edit) }
+        return edit to external
+    }
+    @Test fun reopenedConflictStaysBlockedUntilTheUserChooses() {
+        val target = Target(MapCodec.encode(doc()))
+        val (edit, external) = conflicted(target)
+        val store = MapStore(tmp.root, "uri", target)
+        assertTrue(store.open().conflict)
+        val later = edit.update(edit.root.id) { it.copy(text = "mine, later") }
+        assertThrows(MapConflict::class.java) { store.save(later) }
+        assertArrayEquals("a plain save never overwrites", external, target.bytes)
+        assertEquals(later, MapStore(tmp.root, "uri", target).open().document)
+    }
+    @Test fun keepingThisVersionOverwritesOnceAndLaterSavesSucceed() {
+        val target = Target(MapCodec.encode(doc()))
+        val (edit, _) = conflicted(target)
+        val store = MapStore(tmp.root, "uri", target)
+        store.open()
+        store.overwrite(edit)
+        assertEquals(edit, MapCodec.decode(target.bytes))
+        val next = edit.update(edit.root.id) { it.copy(text = "next") }
+        store.save(next)
+        assertEquals(next, MapCodec.decode(target.bytes))
+        val reopened = MapStore(tmp.root, "uri", target).open()
+        assertFalse(reopened.conflict); assertFalse(reopened.recovered)
+    }
+    @Test fun keepingThisVersionReplacesADamagedDestination() {
+        val target = Target(MapCodec.encode(doc()))
+        val store = MapStore(tmp.root, "uri", target)
+        val opened = store.open()
+        val edit = opened.document.update(opened.document.root.id) { it.copy(text = "edited") }
+        target.failWrite = true
+        assertThrows(IOException::class.java) { store.save(edit) }
+        target.failWrite = false
+        val recovery = MapStore(tmp.root, "uri", target)
+        assertTrue(recovery.open().conflict)
+        recovery.overwrite(edit)
+        assertEquals(edit, MapCodec.decode(target.bytes))
+    }
+    @Test fun usingTheFileVersionDropsRecoveryAndResumesNormalSaves() {
+        val target = Target(MapCodec.encode(doc()))
+        val (_, external) = conflicted(target)
+        val store = MapStore(tmp.root, "uri", target)
+        assertTrue(store.open().conflict)
+        val reloaded = store.discardRecovery()
+        assertEquals(MapCodec.decode(external), reloaded.document)
+        assertArrayEquals("discarding never writes the destination", external, target.bytes)
+        val next = reloaded.document.update(reloaded.document.root.id) { it.copy(text = "after") }
+        store.save(next)
+        assertEquals(next, MapCodec.decode(target.bytes))
+        assertFalse(MapStore(tmp.root, "uri", target).open().recovered)
+    }
+    @Test fun usingAnUnreadableFileVersionKeepsTheRecoveryCopy() {
+        val target = Target(MapCodec.encode(doc()))
+        val (edit, _) = conflicted(target)
+        target.bytes = byteArrayOf(1)
+        val store = MapStore(tmp.root, "uri", target)
+        store.open()
+        assertThrows(Exception::class.java) { store.discardRecovery() }
+        assertEquals(edit, MapStore(tmp.root, "uri", target).open().document)
+    }
 
 }

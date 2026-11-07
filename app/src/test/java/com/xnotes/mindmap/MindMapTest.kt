@@ -11,6 +11,25 @@ class MindMapTest {
             MapNode(id = "c", parent = "a")))
     }
 
+    @Test fun childrenOfAFreeTopicAreLaidOutBesideItAndTheTopicStaysPut() {
+        for (direction in MapDirection.entries) {
+            val (withFree, free) = MapLayout.arrange(tree().copy(direction = direction)).addFree(NodeKind.TEXT, "Free", 900.0, 700.0)
+            val (one, first) = withFree.add(free, NodeKind.TEXT, "")
+            val (doc, second) = one.add(free, NodeKind.TEXT, "")
+            val topic = doc.node(free)
+            assertEquals("$direction", 900.0, topic.x, 0.0); assertEquals(700.0, topic.y, 0.0)
+            for (id in listOf(first, second)) {
+                val child = doc.node(id)
+                if (direction == MapDirection.DOWN) assertTrue("$direction below", child.y > topic.y + topic.height)
+                else assertTrue("$direction beside", child.x > topic.x + topic.width)
+                assertFalse("$direction not on the root", child.x == 0.0 && child.y == 0.0)
+            }
+            assertNotEquals(doc.node(first).let { it.x to it.y }, doc.node(second).let { it.x to it.y })
+            val detached = MapLayout.arrange(doc.detach("a"))
+            assertEquals("detaching keeps the branch's position", doc.node("a").x, detached.node("a").x, 0.0)
+        }
+    }
+
     @Test fun deletingSubtreeAndUndoRestoresInkAndOrder() {
         val doc = tree().update("c") { it.copy(kind = NodeKind.INK, ink = listOf(MapInk(listOf(InkPoint(5.0, 8.0, .7, 12.0))))) }
         val history = MapHistory(doc)
