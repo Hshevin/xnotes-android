@@ -68,6 +68,9 @@ class InfiniteDocument(
         /** [item]'s geometry changed in place (moved, resized, erased into fragments, restyled). */
         fun onItemChanged(item: CanvasItem) {}
 
+        /** Recording associations changed in place; geometry and ordering are unchanged. */
+        fun onSyncChanged(items: List<CanvasItem>) {}
+
         /**
          * The z order changed. Fired once per structural edit, after the per-item callbacks, so a
          * change touching many items publishes one ordering rather than one per item.
@@ -267,6 +270,22 @@ class InfiniteDocument(
             listener?.onItemChanged(item)
         }
         if (changed.isNotEmpty()) contentBoundsValid = false
+    }
+
+    /**
+     * Announce recording metadata without re-filing geometry or invalidating content bounds.
+     * Only current members are notified, once per identity and in first-occurrence input order.
+     * The notification owns its list; later changes to [changed] cannot alter an earlier event.
+     */
+    fun syncChanged(changed: List<CanvasItem>) {
+        if (changed.isEmpty()) return
+        val members = orderMap()
+        val seen = IdentityHashMap<CanvasItem, Boolean>()
+        val owned = ArrayList<CanvasItem>()
+        for (item in changed) {
+            if (members.containsKey(item) && seen.put(item, true) == null) owned.add(item)
+        }
+        if (owned.isNotEmpty()) listener?.onSyncChanged(owned)
     }
 
     // --- queries ---
