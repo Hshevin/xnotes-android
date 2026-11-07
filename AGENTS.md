@@ -91,7 +91,7 @@
 - 分屏文档的关闭 / 返回先显示该窗格的文件选择首页，关闭首页才移除窗格。暂留文档由已有的保存 / 放弃保护处理替换与最终关闭；同文件共享视图关闭拥有者时，保留另一侧首页的物理位置。
 - 文件树只为已确认存在子文件夹的节点显示展开箭头。
 - 分页编辑器跨 AndroidView 宿主重挂时，必须通过 `Editor.surfacesForAttach()` 替换 GlWetPad / FrontInk：先归还暂存笔迹并断开旧回调，保留文档、普通画布、缓存及前缓冲开关。未经目标设备回归不要恢复复用旧湿墨 View。底层 RenderNode / crop 机制仍为推断，不把该修复扩大为全部场景或其他设备的验收。详见 `docs/movinkpad/split-wet-ink-2026-11-04.md`。
-- 无限画布的跨宿主重挂候选通过 `InfiniteEditor.surfacesForAttach()` 在旧 GL 线程完成 detach 后替换主绘制 View 与湿墨 View；保留同一 viewport、scene、文档与撤销，归还暂存及正在绘制的笔段，不复用旧 renderer 的帧回调。首次挂载不替换。画布不再分屏后正常路径不触发此替换，代码暂留；确认无其他跨宿主重挂路径后再清理，不据此宣称黑区已解决。见 `docs/movinkpad/canvas-split-black-2026-11-07.md`。
+- 无限画布的跨宿主重挂候选通过 `InfiniteEditor.surfacesForAttach()` 在旧 GL 线程完成 detach 后替换主绘制 View 与湿墨 View；保留同一 viewport、scene、文档与撤销，归还暂存及正在绘制的笔段，不复用旧 renderer 的帧回调。首次挂载不替换。画布不再分屏后，主菜单往返仍会卸载并重挂宿主；稳定工具栏布局只减少不必要拆挂，不能取代真实重挂时的替换保护，也不据此宣称黑区已解决。见 `docs/movinkpad/canvas-split-black-2026-11-07.md`、`docs/movinkpad/stable-pane-layout-backport-2026-11-07.md`。
 
 ## 存储、PDF 与迁移
 
