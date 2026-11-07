@@ -1851,7 +1851,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // (mode/rotation/scroll direction/scrollbar) into it before the first document lands.
         onViewSettingsChanged(com.xnotes.canvas.ViewSettings(), viewSettings)
         view.onKey = { e -> e.action == android.view.KeyEvent.ACTION_DOWN && handleKeyDown(e) }
-        controller.clipboardHasImage = { clipboardImageUri() != null }
+        // Asked on every touch-down to arm the paste menu: the description only, so no system notice.
+        controller.clipboardHasImage = { com.xnotes.platform.SystemClipboard.mayHoldImage(appContext) }
         controller.onMarkupTap = { at, withLink -> tapMarkup(at, withLink) }
         controller.onTap = { at -> tapClosesNotePeek(at) }
         controller.onAudioTap = { pageIndex, local -> tapAudio(pageIndex, local) }

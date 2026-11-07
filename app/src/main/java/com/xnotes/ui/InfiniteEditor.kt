@@ -169,7 +169,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         devicePxPerDp = { devicePxPerDp },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
-        hasPasteContent = { hasClipboardItems || clipboardHasImage },
+        // Asked on every touch-down: the clipboard description only, so no system paste notice.
+        hasPasteContent = { hasClipboardItems || com.xnotes.platform.SystemClipboard.mayHoldImage(appContext) },
         onToolChanged = { adoptTool(it) },
         onDoubleTap = { vp, toolType, selectedBefore -> onDoubleTap(vp, toolType, selectedBefore) },
         isEditingText = { editingLabel != null },
