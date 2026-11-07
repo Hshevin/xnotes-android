@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Storage messages; names mirror com.xnotes.storage.StorageMsg. -->
 <resources>
+    <string name="storage_msg_reference_identity_mismatch">The document identity no longer matches. Saving was blocked. Locate the original or explicitly open this file as a different document.</string>
+    <string name="storage_msg_reference_identity_missing">The existing file has no document identity. Restore its identity or explicitly upgrade it before saving.</string>
+    <string name="storage_msg_reference_page_metadata_missing">Page reference metadata is missing. Restore the original reference metadata before saving.</string>
+
     <string name="storage_msg_duplicate_document_id">Several files share this document ID. Choose the original or give the copy a new identity first</string>
     <string name="storage_msg_pdf_resource_unregistered">PDF resource is not registered</string>
     <string name="storage_msg_pdf_resource_missing">PDF resource does not exist</string>

@@ -414,3 +414,7 @@ R1c已提交55d64a4e，R1b0原字节page UUID替换工具已提交9d3547f2，全
 ### 2026-11-08 持续推进：R1b1完成
 
 原始整包writer已接Snapshot/Header/新页面UUID/marker，保持源指纹和共享PDF约束。Header回退限流/歧义PDF/legacy取消经红灯修正，最后2999项全量及Android源码编译、独立复核通过。详细证据reference-bundle-copy-2026-11-08.md。接续R2a登记页契约；活模型另存/分叉/合并需另审会话和历史身份，不能修改已建立页面身份后又由旧快照写回。
+
+### R2a登记契约组件已实现
+
+schema2新增按UUID单调页契约表，两种查询覆盖位置和外移UUID证据；typed header预检先验current再验candidate，无隐式新建/修复。独立计划/代码复核完成，3011项JVM与Android源码编译通过。生产正契约登记/保存接线仍待R2b，不能据此启用页面来源。详细reference-contract-registry-2026-11-08.md。

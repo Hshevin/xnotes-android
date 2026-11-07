@@ -6,6 +6,10 @@ package com.xnotes.storage
  * (see ui/StorageMessageResources.kt). Persisted names, keys and file names are intentionally not here.
  */
 enum class StorageMsg(val zh: String) {
+    REFERENCE_IDENTITY_MISMATCH("文档身份已改变，已阻止覆盖。请定位原文档，或明确将当前文件作为另一文档打开。"),
+    REFERENCE_IDENTITY_MISSING("现有文件缺少文档身份。请先恢复身份或明确升级文件，未覆盖原文件。"),
+    REFERENCE_PAGE_METADATA_MISSING("页面引用元数据缺失，已阻止覆盖。请恢复原引用信息后重试。"),
+
     DUPLICATE_DOCUMENT_ID("文档 ID 存在多份文件，请先选择原件或为副本分配新身份"),
     PDF_RESOURCE_UNREGISTERED("PDF 资源未登记"),
     PDF_RESOURCE_MISSING("PDF 资源不存在"),

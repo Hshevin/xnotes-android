@@ -366,3 +366,6 @@
 - [x] 已修（分支 `worktree-fix-render-followups`，2843 项 JVM 通过，仪器／真机未运行）：B6-1/2/3/5 图片显示倒退、P-1/P-5、S-1/S-2/S-3/S-6、D-1/D-3、U-1 剪贴板提示、P-6 整理、U-4 新建画布直接打开。
 - [ ] 未修：P-2/P-3/P-4（需窗口测试配合）、S-4、D-4～D-7、U-2/U-3、B5-1～B5-8、B6-4/6/7。D-2 经用户决定保持现状。原因与提交见 docs/movinkpad/render-backport-review-followups-2026-11-07.md。
 - [x] S-5 的 SVG worker 可变源文件读取：第五批在生产线程冻结 ImageDrawSnapshot，worker 只读请求；源码编译及 2817 项 JVM 通过，详见 docs/movinkpad/scene-batch-backport-2026-11-07.md。实际编辑器 SVG 调度／跨文档迟到结果及窗口、目标 GPU 运行验证仍待安排。
+
+- [x] R2a页面引用登记/预检组件：schema2单调契约，位置及UUID查询，typed错误三语言，3011项JVM/Android源码编译与独立复核。
+- [ ] R2b发布/DB/pending时序、保存与in-place/恢复接线和真实页锚点激活；活模型复制身份及UI来源闭环继续。

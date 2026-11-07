@@ -8,6 +8,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DocumentRegistryTest {
+    @Test fun platformSchemaUpgradeKeepsLocationsAndPersistsMonotonicPageContracts() = database {db,root->
+        val id=UUID.randomUUID().toString();val uri="content://example/document/page-ref"
+        db.register(id,"xnote","original",uri)
+        // All pre-existing table definitions are unchanged from v1; remove only the new table.
+        db.writableDatabase.execSQL("DROP TABLE page_reference_contracts")
+        db.writableDatabase.version=1
+        db.close()
+        val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
+        DocumentRegistry(context).use {upgraded->
+            assertEquals(2,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            upgraded.register(id,"xnote","with references",uri,pageReferences=true)
+            upgraded.register(id,"xnote","ordinary save",uri)
+            assertTrue(upgraded.expectationForId(id).requiresPages)
+            upgraded.writableDatabase.execSQL("DELETE FROM locations")
+        }
+        DocumentRegistry(context).use {reopened->
+            assertNull(reopened.expectationAt(uri));assertTrue(reopened.expectationForId(id).requiresPages)
+        }
+    }
     private fun database(block: (DocumentRegistry,File)->Unit) {
         val base=PenTestRunner.instance.targetContext
         val root=File(base.cacheDir,"registry-test-${UUID.randomUUID()}").apply { mkdirs() }

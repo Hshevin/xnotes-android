@@ -66,3 +66,7 @@ R1b0尾部生成取消guard经独立复核确认正确。R1b1整包writer计划�
 ## 2026-11-08 R1b1 整包复制/导出
 
 按已有审核规格实施，review_input_plan独立只读复核发现Header回退限流过晚、锚定external+embedded歧义及legacy大前缀取消，全部写反例后修正。主代理又补源记录指纹不可随target参数/文件替换的反例并修正。最终复核无新确定性阻断，JVM2999项/Android源码编译通过；未执行SAF/实际仪器/设备。活模型UUID切换与R2保护尚未交付，原始整包路径的完成不扩大为这些范围已完成。
+
+## R2a登记与header契约
+
+review_input_plan计划意见：必须有按UUID的独立契约查询，verifyWrite必须先验证current，均接受。最终schema/事务/查询/guard/三语言复核无先修项；主代理full 280套件3011项和Android源码编译通过。实际SQLite仪器未运行，生产保护接线未完成。

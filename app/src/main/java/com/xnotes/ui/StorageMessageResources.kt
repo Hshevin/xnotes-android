@@ -7,6 +7,10 @@ import com.xnotes.storage.StorageText
 
 /** Exhaustive so every message keeps a resource under R8 shrinking and new entries fail to compile. */
 internal fun StorageMsg.resId(): Int = when (this) {
+    StorageMsg.REFERENCE_IDENTITY_MISMATCH -> R.string.storage_msg_reference_identity_mismatch
+    StorageMsg.REFERENCE_IDENTITY_MISSING -> R.string.storage_msg_reference_identity_missing
+    StorageMsg.REFERENCE_PAGE_METADATA_MISSING -> R.string.storage_msg_reference_page_metadata_missing
+
     StorageMsg.DUPLICATE_DOCUMENT_ID -> R.string.storage_msg_duplicate_document_id
     StorageMsg.PDF_RESOURCE_UNREGISTERED -> R.string.storage_msg_pdf_resource_unregistered
     StorageMsg.PDF_RESOURCE_MISSING -> R.string.storage_msg_pdf_resource_missing

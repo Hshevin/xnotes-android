@@ -7,10 +7,11 @@ import java.io.File
 import java.util.UUID
 
 /** Private index only. Documents and immutable resources remain independently recoverable files. IO callers only. */
-class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 1) {
+class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 2) {
     private val liveLeases = java.util.concurrent.ConcurrentHashMap<String,String>()
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
+        createPageContracts(db)
         db.execSQL("CREATE TABLE documents(id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL)")
         db.execSQL("CREATE TABLE locations(uri TEXT PRIMARY KEY, location_key TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL REFERENCES documents(id), available INTEGER NOT NULL DEFAULT 1)")
         db.execSQL("CREATE INDEX locations_document ON locations(document_id,available)")
@@ -21,20 +22,37 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("CREATE INDEX leases_resource ON leases(resource_id,expires)")
         db.execSQL("CREATE TABLE migrations(uri TEXT PRIMARY KEY, original TEXT NOT NULL, candidate TEXT NOT NULL, source_hash TEXT NOT NULL, document_id TEXT NOT NULL)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { error("Unsupported registry upgrade") }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        check(oldVersion==1 && newVersion==2) {"Unsupported registry upgrade"}
+        createPageContracts(db)
+    }
+    /** No location/document FK: losing a location or removing an index row must not erase evidence. */
+    private fun createPageContracts(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
+    }
     private fun <T> transaction(block: (SQLiteDatabase) -> T): T {
         val db = writableDatabase
         db.beginTransaction()
         try { val result = block(db); db.setTransactionSuccessful(); return result } finally { db.endTransaction() }
     }
-    fun register(id: String, kind: String, name: String, uri: String) = transaction { db ->
+    fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
         require(UUID.fromString(id).toString() == id)
         db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
         db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE uri=?", arrayOf(id,uri))
+        if(pageReferences) db.execSQL("INSERT OR IGNORE INTO page_reference_contracts(document_id) VALUES(?)",arrayOf(id))
     }
+    /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
+    fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(
+        "SELECT l.document_id,p.document_id IS NOT NULL FROM locations l LEFT JOIN page_reference_contracts p ON p.document_id=l.document_id WHERE l.location_key=?",
+        arrayOf(locationKey(uri)),
+    ).use {c->if(c.moveToFirst()) ReferenceExpectation(c.getString(0),c.getInt(1)!=0) else null}
+    /** Also works after every old location/document row was removed or the file moved externally. */
+    fun expectationForId(id:String):ReferenceExpectation = readableDatabase.rawQuery(
+        "SELECT EXISTS(SELECT 1 FROM page_reference_contracts WHERE document_id=?)",arrayOf(id),
+    ).use {c->check(c.moveToFirst());ReferenceExpectation(id,c.getInt(0)!=0)}
     private fun locationKey(uri: String): String = runCatching { val parsed=android.net.Uri.parse(uri); "${parsed.authority}|${android.provider.DocumentsContract.getDocumentId(parsed)}" }.getOrDefault(uri)
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
