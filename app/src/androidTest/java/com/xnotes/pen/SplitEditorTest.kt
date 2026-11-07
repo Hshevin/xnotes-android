@@ -667,7 +667,10 @@ class SplitEditorTest {
                         "application/octet-stream", "saved-split-test-$index.xnote")!!
                     files.add(uri)
                     // Canvases no longer join splits; savedSplitWithCanvasIsRefusedWithoutDetaching covers them.
-                    context.contentResolver.openOutputStream(uri)!!.use { codec.write(a.state.document, it) }
+                    // Each file needs its own document identity: two files claiming one id are refused
+                    // as duplicates, which would leave the second pane closed and the split unsaved.
+                    val doc = if (index == 0) a.state.document else com.xnotes.core.model.Document.blank()
+                    context.contentResolver.openOutputStream(uri)!!.use { codec.write(doc, it) }
                 }
                 a.openAsync(files[0].toString())
                 val b = a.secondaryPane()

@@ -28,5 +28,6 @@
 
 - `JAVA_HOME=…/jdk-21.jdk ./gradlew --offline -I tmp/outdir.init.gradle --project-cache-dir /private/tmp/xnotes-canvas-no-split-cache :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest`，构建输出在 `/private/tmp/xnotes-canvas-no-split-build/`：通过，JVM 2755 项，0 失败、0 错误、0 跳过。
 - `SplitEditorTest`：原「笔记 + 画布」保存恢复用例改为两份笔记，继续覆盖顺序、比例、方向与双视口；新增 `savedSplitWithCanvasIsRefusedWithoutDetaching` 与 `lastSessionSplitWithCanvasRestoresOnlyThePrimaryPane`。仅编译，未在模拟器或设备上运行。
+- 后续（同日）：master test2 模拟器仪器测试中 `savedSplitReopensFilesOrderRatioAndBothViewports` 在 `saveCurrentSplit()` 断言失败（见 `master-test2-2026-11-07.md`）。原因是上述改写把两份笔记写成同一文档，文档 ID 重复，第二窗格按重复身份被拒绝打开，分屏不成立。夹具已改为第二份写入独立的 `Document.blank()`；属测试问题，非产品缺陷。修正仅编译，待模拟器重跑确认。
 - MainActivity 入口拦截（按钮隐藏、窗格首页拒绝、两文件分屏、在旁边打开）没有自动化测试，需手动或真机确认。
 - 待真机验收：MovinkPad Pro 14 / Android 15 上，单独打开画布正常；上述各入口无法让画布进入分屏且提示正确；旧含画布 `.xsplit` 与上次会话恢复行为；笔记 / PDF 分屏回归。
