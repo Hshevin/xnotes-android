@@ -41,7 +41,7 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
-        db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE uri=?", arrayOf(id,uri))
+        db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE location_key=?", arrayOf(id,locationKey(uri)))
         if(pageReferences) db.execSQL("INSERT OR IGNORE INTO page_reference_contracts(document_id) VALUES(?)",arrayOf(id))
     }
     /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
@@ -53,7 +53,9 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     fun expectationForId(id:String):ReferenceExpectation = readableDatabase.rawQuery(
         "SELECT EXISTS(SELECT 1 FROM page_reference_contracts WHERE document_id=?)",arrayOf(id),
     ).use {c->check(c.moveToFirst());ReferenceExpectation(id,c.getInt(0)!=0)}
-    private fun locationKey(uri: String): String = runCatching { val parsed=android.net.Uri.parse(uri); "${parsed.authority}|${android.provider.DocumentsContract.getDocumentId(parsed)}" }.getOrDefault(uri)
+    internal fun locationKey(uri: String): String = runCatching { val parsed=android.net.Uri.parse(uri); "${parsed.authority}|${android.provider.DocumentsContract.getDocumentId(parsed)}" }.getOrDefault(uri)
+    internal fun uriAtLocation(uri:String):String? = readableDatabase.rawQuery("SELECT uri FROM locations WHERE location_key=?",arrayOf(locationKey(uri))).use {if(it.moveToFirst()) it.getString(0) else null}
+    internal fun nameForId(id:String):String? = readableDatabase.rawQuery("SELECT name FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
     fun locations(id: String): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations WHERE document_id=? AND available=1 ORDER BY uri", arrayOf(id)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }

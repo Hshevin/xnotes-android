@@ -10,8 +10,8 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /** One immutable PDF object per digest; notes and chats address the same private persistent object. */
-class PdfResources private constructor(private val context: Context) {
-    val registry get() = NotebookStorage.get(context).registry
+class PdfResources internal constructor(private val context: Context,val registry:DocumentRegistry) {
+    internal class Unavailable(cause:Throwable?=null):IllegalStateException(StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT),cause)
     val directory = File(context.noBackupFilesDir, "ai-pdfs").apply { check(isDirectory || mkdirs()) }
     private val gate = Any()
     private val admitted = java.util.concurrent.ConcurrentHashMap<String,File>()
@@ -63,10 +63,13 @@ class PdfResources private constructor(private val context: Context) {
     fun resolve(id: String): File = synchronized(gate) {
         require(id.matches(Regex("[a-f0-9]{64}"))) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
         val file = File(directory, "$id.pdf")
-        check(file.isFile) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+        if(!file.isFile) throw Unavailable()
         val stamp = file.length() to file.lastModified()
         if (verified[id] != stamp) {
-            check(BundleMigration.hash(file) == id) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+            val hash=try {BundleMigration.hash(file)}
+                catch(error:java.io.IOException) {throw Unavailable(error)}
+                catch(error:SecurityException) {throw Unavailable(error)}
+            if(hash!=id) throw Unavailable()
             if (verified.size >= 256) verified.clear()
             verified[id] = stamp
         }
@@ -88,6 +91,12 @@ class PdfResources private constructor(private val context: Context) {
         }
         registry.references(owner,ids)
     }
+    /** Resolve and persist protection under the same gate used by collection, without a GC gap. */
+    internal fun protect(owner:String,ids:Set<String>) = synchronized(gate) {
+        ids.forEach {resolve(it)}
+        val previous=references(owner)
+        if(!previous.containsAll(ids)) pin(owner,previous+ids)
+    }
     fun references(owner: String): Set<String> = registry.referenceIds(owner)
     fun hold(ids: Set<String>): AutoCloseable = synchronized(gate) {
         val tokens = mutableListOf<String>()
@@ -98,7 +107,6 @@ class PdfResources private constructor(private val context: Context) {
     }
     fun collect(): Int = synchronized(gate) { registry.collect(System.currentTimeMillis(),7L*24*60*60*1000,directory) }
     companion object {
-        @Volatile private var instance: PdfResources? = null
-        fun get(context: Context): PdfResources = instance ?: synchronized(this) { instance ?: PdfResources(context.applicationContext).also { instance = it } }
+        fun get(context:Context):PdfResources = NotebookStorage.get(context).pdfResources
     }
 }

@@ -432,10 +432,20 @@ schema2新增按UUID单调页契约表，两种查询覆盖位置和外移UUID�
 
 先覆盖现有文件的普通保存（.xnote/.xcanvas），不混入新文件、另存、复制或首次页编号激活。`publishNote` 从目标取不可变原件快照，源/候选完整ZIP及页面契约验证，禁止改变UUID、剥离/隐式新增页标记，原共享PDF身份保持。发布前依位置+UUID检查current；重试current已经等于candidate仍重新验证。所有目标（包括受管目录）走durable journal，受管文件写入使用同目录暂存/校验后原子替换。写后回读→PDF note pin及登记→清日志，登记失败保留原/候选可重试，不重复写。
 
-pending v3增加类型化操作目的（本片仅EXISTING_SAVE），SHA与目的由同一record解析、绑定并传入validation，旧1/2无目的不自动发布，明确恢复仍保留。ensure仅自动继续已验证EXISTING_SAVE，其他pending继续提示恢复。共享PDF先在固定migration owner下持久保护原/候选引用的并集，成功note pin+登记及清pending后解除；崩溃后无pending的遗留owner可保守回收，不能把仍有pending的资源清掉。日志按规范location_key定位并兼容旧URI日志；冲突记录拒绝，不选任意一份。
+pending v3增加类型化操作目的（本片仅EXISTING_SAVE），SHA与目的由同一record解析、绑定并传入validation，旧1/2无目的不自动发布，明确恢复仍保留。ensure仅自动继续已验证EXISTING_SAVE，其他pending继续提示恢复。共享PDF先在固定migration owner下持久保护原/候选引用的并集，成功note pin+登记及清pending后解除；不按“无pending”单独清理owner。崩溃遗留pin保守保留，只有锁内无活动操作、当前文件完整验证且note pin已经覆盖当前依赖后才考虑解除；清理失败仅保留pin，不把已提交保存报成失败。日志按规范location_key定位并兼容旧URI日志；冲突记录拒绝，不选任意一份。
 
-Editor分页in-place只允许经当前身份/registry预检的无页锚点旧包，带页锚点/已知页契约或候选启用锚点强制完整事务；预检typed拒绝不能吞成fallback。画布也改用publishNote，不直接wt复制。保存顶层保留typed失败原因和dirty，不让异步异常误报成功。不在本片正登记页契约/开放页来源；完整打开/元数据迁移/显式恢复/SaveAs截断前保护及模型UUID切换仍需接续处理。
+本片删除实际目标的无before-image in-place调用，统一先构建完整私有候选再走事务；后续优化只能在私有候选拼接或先保护完整原件，不恢复写坏目标后靠fallback补救。typed拒绝不能吞成另一种写入fallback。画布也改用publishNote，不直接wt复制。保存顶层保留typed失败原因和dirty，不让异步异常误报成功。成功保存已验证anchored包必须登记pageReferences=true；这不构成legacy首次激活。页来源界面尚不开放；完整元数据迁移/SaveAs截断前保护及模型UUID切换仍需接续处理。
 
 验收：普通保存/保存重试、A→B/剥marker/隐式增加marker/损坏页ID拒绝且零写，当前已经降级不能借candidate修复；DB失败原候选pending/PDF pin保留；current==candidate重试零写；受管原子失败保留旧文件，SAF部分写入保留journal；取消/typed错误无full fallback；canvas真实入口；URI别名与冲突journal；共享PDF在待恢复/GC期间不丢失。JVM/Robolectric和Android仪器源码，实际SAF与目标设备仍单独验收。
 
 R2b1a实施/独立复核通过：284套件3051项及Android源码编译成功，reference-source-read-2026-11-08.md记录生产接线与取消边界。R2b1b审核必须修订：禁止真实目标无before-image的in-place后再靠full fallback修复；先选私有候选拼接或本片停用目标in-place，注入部分写入失败覆盖恢复证据。
+
+R2b1b计划补充（接受审核）：普通保存持久目的区分SAVE_NOTE/SAVE_CANVAS；严格读manifest format/version并与original/candidate及本次保存类型一致，禁止同UUID跨格式覆盖。legacy的Header/ZIP检查不能冒充格式验证。旧URI journal兼容至少覆盖当前URI及registry保存的规范位置别名；无法绑定的旧pending不能猜测关联、不能自动发布。
+
+R2b1b计划进一步修订（接受审核）：受管Target.write接收已观察的expected current SHA（显式缺失为null），同目录暂存fsync/校验完成后在move前再次核对，外部A→B不覆盖B并留journal。新v3不能被原空hook restore/keepCurrent消费；本片一并接原件/当前文件完整身份+页契约/类型校验、PDF note pin和登记，keepCurrent重复校验捕获当前摘要。恢复旧原件若违反已知页契约应拒绝，不借恢复剥离页编号。新/旧记录不够证明自动发布意图时保留手动恢复。
+
+### R2b1b 已实现与主机验证
+
+普通现有note/canvas save及restore/keep验证、v3用途+摘要、DB/pin时序、canonical/已知别名日志、单一PDF资源所有权和受管原子替换已接通。Editor失败/取消finally及canvas在途保存关窗等待已修，3086项JVM/Android源码编译/独立复核通过；平台未运行。详见reference-native-save-2026-11-08.md。
+
+下一阶段R2b2：另存输出打开前显式目标证明、save/fork/merge的文档scope与新页面ID、会话/撤销对账。已有pending的Save按钮重试需先证明新快照与暂存候选的关系（不能无条件resume别的模型后覆盖）；恢复UI要保留当前未保存模型。保存部分成功后“放弃修改”语义已向用户异步询问，等待期间不实现依赖该决定的清理/回退。legacy v1/坏记录的native keep-current目前保留证据，独立副本/身份修复界面继续补齐。之后才正接页锚点激活与C1/C2/D，A2未取消。

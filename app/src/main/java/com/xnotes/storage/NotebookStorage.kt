@@ -12,20 +12,24 @@ import java.io.FileInputStream
 import kotlinx.coroutines.ensureActive
 
 /** On-demand, IO-only registration. Never walks storage on startup or a drawing callback. */
-class NotebookStorage internal constructor(private val context: Context) {
+class NotebookStorage internal constructor(private val context:Context,
+                                          private val targetOverride:((String)->MigrationPublication.Target)?=null) {
     val registry = DocumentRegistry(context)
+    internal val pdfResources by lazy {PdfResources(context,registry)}
     private val lock = Any()
     /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
     fun identity(uri: String,checkActive:()->Unit={}): BundleIdentity? = synchronized(lock) {
         try {
             NativeReferenceReader.read(context.cacheDir,tryHeader={
+                if(targetOverride!=null) null else {
                 val descriptor=try {context.contentResolver.openFileDescriptor(Uri.parse(uri),"r")}
                     catch(_:UnsupportedOperationException) {null}
                 descriptor?.use {pfd->
                     // Pipes/non-regular descriptors cannot be sought. Reopen a fresh input stream.
                     if(pfd.statSize<0) null else BundleHeader.read(FileInputStream(pfd.fileDescriptor).channel) {checkActive();false}
                 }
-            },open={context.contentResolver.openInputStream(Uri.parse(uri))
+                }
+            },open={targetOverride?.invoke(uri)?.read() ?: context.contentResolver.openInputStream(Uri.parse(uri))
                 ?: throw java.io.FileNotFoundException(StorageText.t(StorageMsg.NOTE_UNREADABLE))},checkActive=checkActive) {header->
                 ReferenceContract.verifyObserved(registry.expectationAt(uri),
                     header.identity?.let {registry.expectationForId(it.documentId)},header)
@@ -39,11 +43,84 @@ class NotebookStorage internal constructor(private val context: Context) {
             }
         }
     }
-    private fun journal(uri: String): MigrationPublication {
-        val id = java.security.MessageDigest.getInstance("SHA-256").digest(uri.toByteArray()).joinToString("") { "%02x".format(it) }
-        return MigrationPublication(File(context.noBackupFilesDir, "migrations/$id"))
+    private fun hashKey(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") {"%02x".format(it)}
+    private fun journalCandidates(uri:String):List<File> = listOfNotNull(registry.locationKey(uri),uri,registry.uriAtLocation(uri))
+        .distinct().map {File(context.noBackupFilesDir,"migrations/${hashKey(it)}")}.distinct()
+    private fun journal(uri:String):MigrationPublication {
+        val candidates=journalCandidates(uri);val pending=candidates.filter {MigrationPublication(it).pending}
+        if(pending.size>1) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        return MigrationPublication(pending.singleOrNull() ?: candidates.first())
+    }
+    private fun migrationOwner(uri:String)="migration:${hashKey(registry.locationKey(uri))}"
+    private fun recovery(reason:StorageMsg)=MigrationPublication.RecoveryRequired(StorageText.t(reason),reason=reason)
+    private fun sourceSnapshot(backend:MigrationPublication.Target)=com.xnotes.format.BundleSnapshot.fromInput(backend.read(),context.cacheDir)
+    private fun inspect(file:File):com.xnotes.format.BundleReferenceInfo = try {
+        com.xnotes.format.BundleReferenceInfo.inspect(file,validatePayload=true)
+    } catch(error:Exception) {
+        if(error is ReferenceContractViolation || error is MigrationPublication.RecoveryRequired || error is java.util.concurrent.CancellationException) throw error
+        throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error)
+    }
+    private fun verifyObserved(uri:String,info:com.xnotes.format.BundleReferenceInfo) = ReferenceContract.verifyObserved(
+        registry.expectationAt(uri),info.header.identity?.let {registry.expectationForId(it.documentId)},info.header)
+    private fun dependencies(info:com.xnotes.format.BundleReferenceInfo):Set<String> = info.header.identity
+        ?.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
+    private fun protectPending(uri:String,vararg infos:com.xnotes.format.BundleReferenceInfo) =
+        pdfResources.protect(migrationOwner(uri),infos.flatMap {dependencies(it)}.toSet())
+    private fun protectCurrentHeader(uri:String,file:File,embeddedBackup:String?=null) {
+        val header=try {BundleHeader.read(file)} catch(error:Exception) {
+            if(error is java.util.concurrent.CancellationException) throw error
+            return
+        }
+        val dependency=header.identity?.takeIf {it.externalPdf}?.pdfResource
+        if(dependency!=null) try {pdfResources.protect(migrationOwner(uri),setOf(dependency))}
+        catch(error:PdfResources.Unavailable) {
+            if(dependency!=embeddedBackup) throw error
+            // Only absent/corrupt bytes can use the verified embedded original as fallback.
+            // An available current resource is always pinned, even if the current UUID is foreign.
+        }
+    }
+    private fun purpose(kind:String):MigrationPublication.Purpose = when(kind) {
+        "xnote" -> MigrationPublication.Purpose.SAVE_NOTE
+        "xcanvas" -> MigrationPublication.Purpose.SAVE_CANVAS
+        else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    private fun verifyKind(info:com.xnotes.format.BundleReferenceInfo,expected:MigrationPublication.Purpose?) {
+        if(expected!=null && purpose(info.format.orEmpty())!=expected) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    private fun registerVerified(uri:String,info:com.xnotes.format.BundleReferenceInfo,name:String?=null) {
+        val identity=info.header.identity ?: run {
+            // Explicit restoration of an unidentified historical original can return to legacy open.
+            verifyObserved(uri,info);return
+        }
+        pdfResources.protect("note:${identity.documentId}",dependencies(info))
+        val display=name ?: registry.nameForId(identity.documentId) ?: Uri.parse(uri).lastPathSegment.orEmpty()
+        registry.register(identity.documentId,requireNotNull(info.format),display,uri,pageReferences=info.header.anchors!=null)
+    }
+    private fun releaseCompletedPin(uri:String) {
+        // Only after successful validation + note pin/registration + journal clear, while owner holds lock.
+        try {pdfResources.pin(migrationOwner(uri),emptySet())}
+        catch(error:Exception) {android.util.Log.w("xnotes.storage","Retained migration resource protection after commit",error)}
+    }
+    private fun currentHash(backend:MigrationPublication.Target):String {
+        val digest=java.security.MessageDigest.getInstance("SHA-256");val buffer=ByteArray(65536)
+        backend.read().use {input->while(true) {val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
+        return digest.digest().joinToString("") {"%02x".format(it)}
+    }
+    private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose) {
+        val pending=journal(uri);val backend=target(uri)
+        var verified:com.xnotes.format.BundleReferenceInfo?=null
+        pending.publishValidated(backend,validate={state->
+            if(state.purpose!=expected) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+            val original=inspect(state.original);val candidate=inspect(state.candidate)
+            val current=when(state.current) {state.original->original;state.candidate->candidate;else->error("Unbound publication version")}
+            NativeSaveContract.verify(original,candidate,current,expected,registry.expectationAt(uri),
+                current.header.identity?.let {registry.expectationForId(it.documentId)})
+            protectPending(uri,original,candidate);verified=candidate
+        },afterVerified={registerVerified(uri,requireNotNull(verified),name)})
+        releaseCompletedPin(uri)
     }
     private fun target(uri:String):MigrationPublication.Target {
+        targetOverride?.let {return it(uri)}
         val parsed=Uri.parse(uri)
         if(parsed.authority==context.packageName+".documents") return OwnedRecoveryTarget(context,DocumentsContract.getDocumentId(parsed))
         return object:MigrationPublication.Target {
@@ -56,31 +133,90 @@ class NotebookStorage internal constructor(private val context: Context) {
             }
         }
     }
-    fun hasRecovery(uri: String): Boolean = journal(uri).pending
-    fun restore(uri: String) = synchronized(lock) { journal(uri).restore(target(uri)) }
-    fun keepCurrent(uri: String) = synchronized(lock) {
-        // Check the complete ZIP before discarding the only known-good original.
-        val temp = File.createTempFile("validate-", ".zip", context.cacheDir)
-        try { target(uri).read().use { input -> temp.outputStream().use { input.copyTo(it) } }; BundleMigration.fingerprints(temp); journal(uri).keepCurrent() }
-        finally { temp.delete() }
+    fun hasRecovery(uri:String):Boolean = synchronized(lock) {journalCandidates(uri).any {MigrationPublication(it).pending}}
+    fun restore(uri:String) = synchronized(lock) {
+        val pending=journal(uri);val backend=target(uri)
+        var verified:com.xnotes.format.BundleReferenceInfo?=null
+        pending.restoreValidated(backend,validate={state->
+            val original=inspect(state.original)
+            verifyKind(original,state.purpose);verifyObserved(uri,original)
+            if(state.currentHash!=null) sourceSnapshot(backend).use {current->
+                if(current.sourceHash!=state.currentHash) throw recovery(StorageMsg.MIGRATION_INTERRUPTED)
+                protectCurrentHeader(uri,current.file,original.embeddedPdfHash)
+                val header=try {BundleHeader.read(current.file)} catch(error:Exception) {
+                    if(error is java.util.concurrent.CancellationException) throw error
+                    null // Partial/corrupt target; the explicit restore still requires a verified original.
+                }
+                val currentId=header?.identity?.documentId
+                if(currentId!=null && currentId!=original.header.identity?.documentId &&
+                    !(original.header.identity==null && state.candidateHash==current.sourceHash && state.purpose==null))
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                val readable=try {inspect(current.file)} catch(error:ReferenceContractViolation) {null}
+                if(readable!=null && (readable.format!=original.format ||
+                    readable.originalPdfHash!=null && readable.originalPdfHash!=original.originalPdfHash))
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            }
+            protectPending(uri,original);verified=original
+        },afterVerified={registerVerified(uri,requireNotNull(verified))})
+        releaseCompletedPin(uri)
+    }
+    fun keepCurrent(uri:String) = synchronized(lock) {
+        val pending=journal(uri);val backend=target(uri)
+        sourceSnapshot(backend).use {snapshot->
+            protectCurrentHeader(uri,snapshot.file)
+            val current=inspect(snapshot.file)
+            pending.keepCurrentValidated(validate={state->
+                verifyKind(current,state.purpose);verifyObserved(uri,current)
+                if(currentHash(backend)!=snapshot.sourceHash) throw recovery(StorageMsg.MIGRATION_INTERRUPTED)
+                // With no location evidence, an explicit keep still must not reassign a known backup UUID.
+                val versions=listOf(state.original to state.originalVerified,state.candidate to state.candidateVerified)
+                val historical=versions.mapNotNull {(file,trusted)->
+                    if(file==null || !trusted) null else try {inspect(file)} catch(error:Exception) {
+                        if(error is java.util.concurrent.CancellationException) throw error
+                        null
+                    }
+                }
+                val trustedOriginal=state.original?.takeIf {state.originalVerified}?.let {file->
+                    try {inspect(file)} catch(error:Exception) {
+                        if(error is java.util.concurrent.CancellationException) throw error
+                        null
+                    }
+                }
+                if(trustedOriginal!=null) {
+                    if(state.purpose!=null) NativeSaveContract.verify(trustedOriginal,current,current,state.purpose,
+                        registry.expectationAt(uri),current.header.identity?.let {registry.expectationForId(it.documentId)})
+                    else if(trustedOriginal.originalPdfHash!=current.originalPdfHash ||
+                        trustedOriginal.header.anchors!=null && current.header.anchors==null)
+                        throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                }
+                val knownCurrent=snapshot.sourceHash in listOfNotNull(state.originalHash,state.candidateHash)
+                if(!knownCurrent && historical.isEmpty()) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                val ids=historical.mapNotNull {it.header.identity?.documentId}.toSet()
+                if(!knownCurrent && ids.isNotEmpty() && current.header.identity?.documentId !in ids)
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                if(!knownCurrent && historical.any {it.originalPdfHash!=current.originalPdfHash})
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                protectPending(uri,current)
+            },afterVerified={registerVerified(uri,current)})
+        }
+        releaseCompletedPin(uri)
     }
     fun ensure(uri: String, name: String, kind: String,checkActive:()->Unit={}): BundleIdentity = synchronized(lock) {
-        if (journal(uri).pending) throw MigrationPublication.RecoveryRequired(
-            StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING),reason=StorageMsg.MIGRATION_RECOVERY_PENDING)
+        if(journal(uri).pending) publishSave(uri,name,purpose(kind))
         val existing = identity(uri,checkActive)
         checkActive()
         val identity = compactPdf(uri, existing ?: migrate(uri, copy = false))
         registry.register(identity.documentId, kind, name, uri)
-        for(old in registry.locations(identity.documentId)) if(old!=uri) {
+        for(old in registry.locations(identity.documentId)) if(registry.locationKey(old)!=registry.locationKey(uri)) {
             val reachable=runCatching { context.contentResolver.openFileDescriptor(Uri.parse(old),"r")?.use { true } ?: false }.getOrDefault(false)
             if(!reachable) registry.markUnavailable(old)
         }
-        identity.pdfResource?.let { id -> if(registry.resource(id)!=null) PdfResources.get(context).pin("note:${identity.documentId}",PdfResources.get(context).references("note:${identity.documentId}")+id) }
+        identity.pdfResource?.let { id -> if(registry.resource(id)!=null) pdfResources.pin("note:${identity.documentId}",pdfResources.references("note:${identity.documentId}")+id) }
         identity
     }
     /** Pin a verified immutable original before removing its embedded copy. Never re-encode ink. */
     private fun compactPdf(uri: String, identity: BundleIdentity): BundleIdentity {
-        val resources = PdfResources.get(context)
+        val resources = pdfResources
         if (identity.externalPdf) {
             val id = requireNotNull(identity.pdfResource)
             resources.resolve(id)
@@ -108,24 +244,18 @@ class NotebookStorage internal constructor(private val context: Context) {
     }
 
     /** Complete candidate first; local replacement is atomic, SAF retains a durable recovery journal. */
-    fun publishNote(uri: String, candidate: File) = synchronized(lock) {
-        check(!journal(uri).pending) { StorageText.t(StorageMsg.MIGRATION_INTERRUPTED) }
-        val local = ownedFile(uri)
-        if (local != null) {
-            val sibling = File.createTempFile("save-", ".xnote", requireNotNull(local.parentFile))
-            try {
-                java.io.FileOutputStream(sibling).use { out -> candidate.inputStream().use { it.copyTo(out) }; out.fd.sync() }
-                check(BundleMigration.hash(sibling) == BundleMigration.hash(candidate))
-                java.nio.file.Files.move(sibling.toPath(), local.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            } finally { sibling.delete() }
-        } else {
-            val source = File.createTempFile("save-original-", ".zip", context.cacheDir)
-            try {
-                target(uri).read().use { input -> source.outputStream().use { input.copyTo(it) } }
-                journal(uri).stage(source, candidate)
-                journal(uri).publish(target(uri))
-            } finally { source.delete() }
+    fun publishNote(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String) = synchronized(lock) {
+        val pending=journal(uri)
+        if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        val expected=purpose(kind.extension)
+        sourceSnapshot(target(uri)).use {source->
+            val original=inspect(source.file);val next=inspect(candidate)
+            NativeSaveContract.verify(original,next,original,expected,registry.expectationAt(uri),
+                original.header.identity?.let {registry.expectationForId(it.documentId)})
+            protectPending(uri,original,next)
+            pending.stage(source.file,candidate,expected)
         }
+        publishSave(uri,name,expected)
     }
 
     private fun migrate(uri: String, copy: Boolean): BundleIdentity {
@@ -153,7 +283,7 @@ class NotebookStorage internal constructor(private val context: Context) {
         val identity=migrate(uri, copy = true)
         val name=context.contentResolver.query(Uri.parse(uri),arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else "" }.orEmpty()
         registry.register(identity.documentId,if(name.endsWith(".xcanvas",true)) "xcanvas" else "xnote",name,uri)
-        identity.pdfResource?.let { id -> if(registry.resource(id)!=null) PdfResources.get(context).pin("note:${identity.documentId}",setOf(id)) }
+        identity.pdfResource?.let { id -> if(registry.resource(id)!=null) pdfResources.pin("note:${identity.documentId}",setOf(id)) }
         identity
     }
     /** Explicit user-triggered rediscovery, only inside granted workspace trees, with a bounded scan. */

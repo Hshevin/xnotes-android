@@ -8,7 +8,7 @@ data class ReferenceExpectation(val documentId:String,val requiresPages:Boolean)
     init {require(UUID.fromString(documentId).toString()==documentId)}
 }
 
-internal class ReferenceContractViolation(val reason:StorageMsg):IllegalStateException(StorageText.t(reason))
+internal class ReferenceContractViolation(val reason:StorageMsg,cause:Throwable?=null):IllegalStateException(StorageText.t(reason),cause)
 
 /** Header preflight only. Full page identities and source/candidate digests need separate checks. */
 internal object ReferenceContract {

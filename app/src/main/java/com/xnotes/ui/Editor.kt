@@ -550,7 +550,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Below this much ahead of the manifest, a note is rebuilt whole rather than spliced: writing
      *  in place is only worth its (brief) window of an invalid file when the assets are the save. */
-    private val MIN_SPLICE_BYTES = 1024L * 1024L
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
@@ -997,15 +996,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val tmp = java.io.File.createTempFile("save", ".xcanvas", saveTmpDir)
                 try {
                     java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }
-                    val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-                        ?: return@runCatching false
-                    out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
+                    notebookStorage.publishNote(uri,tmp,DocumentKind.CANVAS,doc.displayName ?: doc.title)
                     rememberStamp(uri)
                     true
                 } finally {
                     tmp.delete()
                 }
-            }.getOrDefault(false)
+            }.getOrElse {error->
+                    if(isNativeSaveRejection(error) || error is java.util.concurrent.CancellationException) throw error
+                    false
+                }
         }
 
     private fun scheduleCanvasAutosave() {
@@ -1026,26 +1026,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * writer gets its own item list over the live items ([InfiniteDocument.snapshotForWrite]), taken
      * here on the main thread; the bookkeeping stays on the live [doc].
      */
-    private fun startCanvasWrite(
-        uri: String,
-        doc: com.xnotes.core.infinite.InfiniteDocument,
-        title: String,
-        onDone: (() -> Unit)? = null,
-    ) {
-        val snapshot = doc.snapshotForWrite()
-        val wasDirty = doc.dirty
-        doc.dirty = false // the snapshot holds these edits; see [startNoteWrite]
-        canvasWriteJob = autosaveScope.launch {
-            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                saveCanvasGuarded(uri, snapshot, title, doc)
+    private fun startCanvasWrite(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,onDone:((Boolean)->Unit)?=null) {
+        val snapshot=doc.snapshotForWrite()
+        val wasDirty=doc.dirty;doc.dirty=false
+        canvasWriteJob=autosaveScope.launch {
+            var success=false
+            try {
+                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(uri,snapshot,title,doc)}
+                success=res!=null
+                if(res!=null) {
+                    if(infiniteOrNull?.document===doc) res.fork?.let {adoptCanvasFork(it)}
+                    invalidateThumb(res.uri)
+                }
+            } finally {
+                if(!success && wasDirty) doc.dirty=true
+                if(canvasOpen && infiniteOrNull?.document===doc) savingNote=false
+                if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone?.invoke(success)
             }
-            if (res != null) {
-                if (infiniteOrNull?.document === doc) res.fork?.let { adoptCanvasFork(it) }
-                invalidateThumb(res.uri)
-            } else if (wasDirty && infiniteOrNull?.document === doc) {
-                doc.dirty = true // nothing was written; the edits are still unsaved
-            }
-            onDone?.invoke()
         }
     }
 
@@ -1071,15 +1068,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         canvasDebounceJob?.cancel()
         val uri = canvasAutosaveUri
         val doc = infiniteOrNull?.document
-        if (uri == null || doc == null || !doc.dirty) { onDone(); return }
+        if (uri == null || doc == null) { onDone(); return }
         val title = doc.displayName ?: doc.title
         if (showOverlay) savingNote = true
         autosaveScope.launch {
             canvasWriteJob?.join() // a write already going out finishes first; it may be all there was
             if (!doc.dirty) { savingNote = false; onDone(); return@launch }
-            startCanvasWrite(uri, doc, title) {
-                savingNote = false
-                onDone()
+            startCanvasWrite(uri,doc,title) {ok->
+                savingNote=false
+                if(ok && !doc.dirty) onDone() else message=appContext.getString(R.string.err_save_note)
             }
         }
     }
@@ -4078,32 +4075,36 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         dirty = false
         savingNote = true
         val pending = noteWriteJob // captured, so the join below is on the previous write, not itself
-        noteWriteJob = autosaveScope.launch {
-            pending?.join() // a write already going out finishes first rather than racing this one
-            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val written = writeNoteSafely(uri, snapshot)
-                if (written) runCatching {
-                    notebookStorage.registry.register(snapshot.identity.documentId, "xnote", snapshot.title, uri)
-                }.onFailure { message = appContext.getString(R.string.recovery_index_failed_after_save) }
-                written
-            }
-            savingNote = false
-            if (ok) {
-                // The note may have been switched while the bytes were going out; only the document
-                // this save belongs to may have its path and autosave binding touched.
-                if (state.document === doc) {
-                    doc.identity = snapshot.identity
-                    doc.path = uri
-                    maybeBindAutosave(uri)
-                    refreshContent()
+        noteWriteJob=autosaveScope.launch {
+            var ok=false
+            var rejected:String?=null
+            try {
+                pending?.join()
+                savingNote=true
+                ok=try {withContext(Dispatchers.IO) {writeNoteSafely(uri,snapshot)}}
+                    catch(error:Exception) {
+                        if(!isNativeSaveRejection(error)) throw error
+                        rejected=error.message;false
+                    }
+                if(ok) {
+                    if(state.document===doc) {
+                        doc.identity=snapshot.identity;doc.path=uri
+                        maybeBindAutosave(uri);refreshContent()
+                    }
+                    invalidateThumb(uri)
                 }
-                invalidateThumb(uri)
-            } else {
-                if (wasDirty && state.document === doc) { doc.dirty = true; dirty = true }
-                message = appContext.getString(R.string.err_save_note)
+            } finally {
+                if(!ok) {
+                    if(wasDirty) doc.dirty=true
+                    if(state.document===doc) {
+                        if(wasDirty) dirty=true
+                        message=rejected ?: appContext.getString(R.string.err_save_note)
+                    }
+                }
+                savingNote=false
+                state.lastSaveTotalMs=msSince(startNs)
+                if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone(ok)
             }
-            state.lastSaveTotalMs = msSince(startNs)
-            onDone(ok)
         }
     }
 
@@ -5479,37 +5480,42 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return Fork(forked, name, doc.identity)
     }
 
-    /** Autosave [owner]'s [doc] to [uri], or to the fork [owner] already moved to, forking when that file moved under us. IO. */
-    private fun saveNoteGuarded(uri: String, doc: Document, title: String, owner: Document): SaveResult? = synchronized(saveLock) {
-        val target = forks.target(uri, owner)
-        if (changedUnderneath(target)) {
-            val base = forks.base(target, DocumentKind.stripSuffix(title))
-            val fork = forkNote(target, doc, base) ?: return null
-            forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
-            return SaveResult(fork.uri, fork)
-        }
-        if (!writeNoteSafely(target, doc)) return null
-        notebookStorage.registry.register(doc.identity.documentId,"xnote",title,target)
-        SaveResult(target, null)
-    }
+    private fun isNativeSaveRejection(error:Throwable)=error is com.xnotes.storage.ReferenceContractViolation ||
+        error is com.xnotes.storage.MigrationPublication.RecoveryRequired || error is com.xnotes.storage.PdfResources.Unavailable
 
-    /** The canvas sibling of [saveNoteGuarded]. IO. */
-    private fun saveCanvasGuarded(
-        uri: String,
-        doc: com.xnotes.core.infinite.InfiniteDocument,
-        title: String,
-        owner: com.xnotes.core.infinite.InfiniteDocument,
-    ): SaveResult? = synchronized(saveLock) {
-        val target = forks.target(uri, owner)
-        if (changedUnderneath(target)) {
-            val base = forks.base(target, DocumentKind.stripSuffix(title))
-            val fork = forkCanvas(target, doc, base) ?: return null
-            forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
-            return SaveResult(fork.uri, fork)
+    /** The same candidate/registry transaction is used for notes and canvases. IO. */
+    private fun saveNoteGuarded(uri:String,doc:Document,title:String,owner:Document):SaveResult? = synchronized(saveLock) {
+        try {
+            val target=forks.target(uri,owner)
+            if(changedUnderneath(target)) {
+                val base=forks.base(target,DocumentKind.stripSuffix(title))
+                val fork=forkNote(target,doc,base) ?: return null
+                forks.record(target,fork.uri,owner,DocumentKind.stripSuffix(fork.name),base)
+                return SaveResult(fork.uri,fork)
+            }
+            if(writeNoteSafely(target,doc)) SaveResult(target,null) else null
+        } catch(error:Exception) {
+            if(!isNativeSaveRejection(error)) throw error
+            if(state.document===owner) message=error.message ?: appContext.getString(R.string.err_save_note)
+            null
         }
-        if (!writeCanvasSafely(target, doc)) return null
-        notebookStorage.registry.register(doc.identity.documentId,"xcanvas",title,target)
-        SaveResult(target, null)
+    }
+    private fun saveCanvasGuarded(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,
+                                  owner:com.xnotes.core.infinite.InfiniteDocument):SaveResult? = synchronized(saveLock) {
+        try {
+            val target=forks.target(uri,owner)
+            if(changedUnderneath(target)) {
+                val base=forks.base(target,DocumentKind.stripSuffix(title))
+                val fork=forkCanvas(target,doc,base) ?: return null
+                forks.record(target,fork.uri,owner,DocumentKind.stripSuffix(fork.name),base)
+                return SaveResult(fork.uri,fork)
+            }
+            if(writeCanvasSafely(target,doc)) SaveResult(target,null) else null
+        } catch(error:Exception) {
+            if(!isNativeSaveRejection(error)) throw error
+            if(infiniteOrNull?.document===owner) message=error.message ?: appContext.getString(R.string.err_save_note)
+            null
+        }
     }
 
     /** Point the open note at the copy it just forked into, and say so. Main thread. */
@@ -5561,10 +5567,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     private fun writeNoteSafely(uri: String, doc: Document): Boolean = synchronized(saveLock) {
         if(runCatching { pinPdfForWrite(doc) }.isFailure) return false
-        // Replace only the manifest when everything ahead of it is already right. A splice that
-        // fails part way leaves a file that is not a valid zip, and falling through to the full
-        // rewrite below is what puts it right, so this must stay ordered this way.
-        if (doc.pdfFile == null && writeNoteInPlace(uri, doc)) return true
+        // Build a complete private candidate. An unprotected in-place splice could corrupt the
+        // source before publication preflight had a chance to retain its original bytes.
         runCatching {
             val tmp = java.io.File.createTempFile("save", ".xnote", saveTmpDir)
             try {
@@ -5572,7 +5576,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val timing = com.xnotes.format.DocumentCodec.WriteTiming()
                 java.io.FileOutputStream(tmp).use { writeLocalNote(doc, it, timing = timing) }
                 val copyStart = System.nanoTime()
-                notebookStorage.publishNote(uri, tmp)
+                notebookStorage.publishNote(uri,tmp,DocumentKind.NOTE,doc.displayName ?: doc.title)
                 state.lastSaveEncodeMs = msBetween(encodeStart, copyStart) // all four for the debug overlay
                 state.lastSaveCopyMs = msSince(copyStart)
                 state.lastSaveManifestMs = timing.manifestMs
@@ -5585,89 +5589,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             } finally {
                 tmp.delete()
             }
-        }.getOrDefault(false)
+        }.getOrElse {error->
+                    if(isNativeSaveRejection(error) || error is java.util.concurrent.CancellationException) throw error
+                    false
+                }
     }
 
     /** Elapsed milliseconds since a [System.nanoTime] mark, for the debug overlay's save timings. */
     private fun msSince(startNs: Long): Long = msBetween(startNs, System.nanoTime())
 
     private fun msBetween(startNs: Long, endNs: Long): Long = (endNs - startNs) / 1_000_000L
-
-    /**
-     * Save by replacing only the tail of the note already at [uri]: its manifest, and the flow
-     * entry with it. Everything ahead of them is left exactly where it lies, which for a note built
-     * from a PDF is nearly the whole file. See [com.xnotes.format.ZipTail].
-     *
-     * Returns false, having written nothing, when this is not a bundle it can patch: a different
-     * set of assets, a provider that will not hand out a writable handle, a zip with anything
-     * unexpected in it, or too little ahead of the manifest for the splice to be worth its risk.
-     */
-    private fun writeNoteInPlace(uri: String, doc: Document): Boolean = runCatching {
-        val assets = codec.imageAssets(doc)
-        val audio = codec.audioAssets(doc)
-        val expected = codec.storedEntries(doc, assets, audio).map { (name, file) -> name to file.length() }
-        if (expected.isEmpty()) return@runCatching false
-
-        val target = android.net.Uri.parse(uri)
-        // Streams built on a descriptor the provider owns are never closed here: closing one closes
-        // that descriptor, and the ParcelFileDescriptor would then close a number the system may
-        // already have handed to something else. Only the descriptor itself is closed, once.
-        val existing = appContext.contentResolver.openFileDescriptor(target, "r")?.use { pfd ->
-            com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
-        } ?: return@runCatching false
-
-        // Every asset has to still be the same file in the same place, or the manifest is not the
-        // only thing that changed and the whole bundle has to be rebuilt.
-        val ordered = existing.entries.sortedBy { it.localOffset }
-        if (ordered.size <= expected.size) return@runCatching false
-        for (i in expected.indices) {
-            val e = ordered[i]
-            if (e.name != expected[i].first || e.size != expected[i].second) return@runCatching false
-            if (e.method != java.util.zip.ZipEntry.STORED) return@runCatching false
-        }
-        val tailStart = ordered[expected.size].localOffset
-        if (tailStart < MIN_SPLICE_BYTES) return@runCatching false
-
-        val encodeStart = System.nanoTime()
-        val timing = com.xnotes.format.DocumentCodec.WriteTiming()
-        val tmp = java.io.File.createTempFile("tail", ".zip", saveTmpDir)
-        try {
-            // The new tail is built as an ordinary little zip of its own, so java.util.zip keeps
-            // doing the deflating, the checksums and the entry headers.
-            java.io.FileOutputStream(tmp).use { out ->
-                java.util.zip.ZipOutputStream(out).use { zos ->
-                    zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
-                    codec.writeTail(zos, doc, assets, timing, audio)
-                }
-            }
-            val spliceStart = System.nanoTime()
-            val length = java.io.FileInputStream(tmp).use { tail ->
-                val tailDir = com.xnotes.format.ZipTail.read(tail.channel)
-                    ?: return@runCatching false
-                appContext.contentResolver.openFileDescriptor(target, "rw")?.use { pfd ->
-                    com.xnotes.format.ZipTail.splice(
-                        java.io.FileOutputStream(pfd.fileDescriptor).channel,
-                        tailStart,
-                        ordered.subList(0, expected.size),
-                        tail.channel,
-                        tailDir,
-                    )
-                } ?: -1L
-            }
-            if (length < 0L) return@runCatching false
-            state.lastSaveEncodeMs = msBetween(encodeStart, spliceStart) // all six for the overlay
-            state.lastSaveCopyMs = msSince(spliceStart)
-            state.lastSaveManifestMs = msBetween(encodeStart, spliceStart)
-            state.lastSaveAssetsMs = 0L // the whole point: nothing ahead of the manifest is touched
-            state.lastSaveDeflateMs = timing.deflateMs
-            state.lastSaveManifestBytes = timing.manifestBytes
-            state.lastSaveBytes = length
-            rememberStamp(uri) // read back what the provider reports, not what we wrote
-            true
-        } finally {
-            tmp.delete()
-        }
-    }.getOrDefault(false)
 
     /** The on-disk size of the SAF document at [uri] in bytes, or -1 when the provider won't say. */
     private fun fileSizeOf(uri: String): Long = runCatching {
@@ -5701,47 +5632,35 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * cancelling a debounce (or a flush) can never cancel a write that is already going out.
      * [startNs] is when the caller began the save, for the debug overlay's total.
      */
-    private fun startNoteWrite(
-        uri: String,
-        snapshot: Document,
-        title: String,
-        startNs: Long,
-        onDone: ((Boolean) -> Unit)? = null,
-    ) {
-        val doc = state.document
-        // Clean from here, not once the bytes land: [snapshot] already holds these edits, so an edit
-        // arriving mid-write has to mark the document again and be carried by the next autosave.
-        // Clearing the flag afterwards instead would swallow that edit until something else set it.
-        val wasDirty = doc.dirty
-        doc.dirty = false
-        dirty = false
-        state.autosaveStatus = "in progress"
-        val pending = noteWriteJob
-        noteWriteJob = autosaveScope.launch {
-            pending?.join()
-            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                saveNoteGuarded(uri, snapshot, title, doc)
+    private fun startNoteWrite(uri:String,snapshot:Document,title:String,startNs:Long,onDone:((Boolean)->Unit)?=null) {
+        val doc=state.document
+        val wasDirty=doc.dirty
+        doc.dirty=false;dirty=false;state.autosaveStatus="in progress"
+        val pending=noteWriteJob
+        noteWriteJob=autosaveScope.launch {
+            var success=false
+            try {
+                pending?.join()
+                val res=withContext(Dispatchers.IO) {saveNoteGuarded(uri,snapshot,title,doc)}
+                success=res!=null
+                if(res!=null) {
+                    if(state.document===doc) res.fork?.let {adoptNoteFork(it)}
+                    invalidateThumb(res.uri)
+                }
+            } finally {
+                if(!success && wasDirty) {
+                    doc.dirty=true
+                    if(state.document===doc) dirty=true
+                }
+                if(state.document===doc && !canvasOpen) savingNote=false
+                state.autosaveStatus=if(success) "done" else "failed"
+                state.lastSaveTotalMs=msSince(startNs)
+                android.util.Log.i("xnotes.save","save ${state.lastSaveTotalMs}ms = snapshot ${state.lastSaveSnapshotMs}"+
+                    " + encode ${state.lastSaveEncodeMs} (json ${state.lastSaveManifestMs}"+
+                    " of which deflate ${state.lastSaveDeflateMs} over ${state.lastSaveManifestBytes} raw bytes, assets ${state.lastSaveAssetsMs})"+
+                    " + saf ${state.lastSaveCopyMs}, ${state.lastSaveBytes} bytes, $success")
+                if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone?.invoke(success)
             }
-            if (res != null) {
-                // The note may have been closed or switched while the bytes were going out. The write
-                // still counts, but only the document it belongs to may have its flags touched.
-                if (state.document === doc) res.fork?.let { adoptNoteFork(it) }
-                invalidateThumb(res.uri) // file changed on disk; drop the stale tile so the grid re-renders it
-            } else if (wasDirty && state.document === doc) {
-                doc.dirty = true; dirty = true // nothing was written; the edits are still unsaved
-            }
-            state.autosaveStatus = if (res != null) "done" else "failed"
-            state.lastSaveTotalMs = msSince(startNs)
-            android.util.Log.i(
-                "xnotes.save",
-                "save ${state.lastSaveTotalMs}ms = snapshot ${state.lastSaveSnapshotMs}" +
-                    " + encode ${state.lastSaveEncodeMs} (json ${state.lastSaveManifestMs}" +
-                    " of which deflate ${state.lastSaveDeflateMs} over" +
-                    " ${state.lastSaveManifestBytes} raw bytes, assets ${state.lastSaveAssetsMs})" +
-                    " + saf ${state.lastSaveCopyMs}" +
-                    ", ${state.lastSaveBytes} bytes, ${res != null}",
-            )
-            onDone?.invoke(res != null)
         }
     }
 

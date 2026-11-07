@@ -374,3 +374,6 @@
 - [ ] R2b1生产存储引用契约、完整候选校验、登记与pending PDF保护；原生保存/in-place/目标截断前保护。
 
 - [x] R2b1a原生身份只读接线：ZIP不支持布局回退，页面契约与位置/UUID保护，pending拒绝自动发布，实际来源/重新发现取消链；3051项JVM/Android源码编译/独立复核通过。
+
+- [x] R2b1b普通note/canvas保存与配套恢复：kind/UUID/页/PDF契约、v3目的+SHA、DB/pin时序、受管原子替换、当前B保护、可信历史、legacy恢复、Editor取消dirty及canvas在途关窗保护；3086项JVM/Android源码编译/独立复核通过。
+- [ ] R2b2另存前目标证明、活模型saveAs/fork/merge新页scope、session/历史；pending保存重试/恢复时保留当前模型，放弃语义待用户答复。

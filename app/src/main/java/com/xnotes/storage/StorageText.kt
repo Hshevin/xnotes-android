@@ -10,6 +10,7 @@ enum class StorageMsg(val zh: String) {
     MIGRATION_RECOVERY_INVALID("恢复资料缺失、损坏或版本不受支持，现有恢复资料未清除。请检查当前文件后选择恢复方式。"),
     MIGRATION_INDEX_INCOMPLETE("文档登记尚未完成，当前文件和恢复资料均已保留，可以重试完成登记。"),
 
+    REFERENCE_WRITE_CONTEXT_INVALID("本次保存与原文档的类型、页引用状态或原始 PDF 不一致，未覆盖原文件。请使用对应的复制、恢复或升级操作。"),
     REFERENCE_METADATA_INVALID("无法验证文档身份或页面引用信息，未修改原文件。请检查原文件或使用恢复资料。"),
     REFERENCE_IDENTITY_MISMATCH("文档身份已改变，已阻止覆盖。请定位原文档，或明确将当前文件作为另一文档打开。"),
     REFERENCE_IDENTITY_MISSING("现有文件缺少文档身份。请先恢复身份或明确升级文件，未覆盖原文件。"),

@@ -30,4 +30,5 @@
     <string name="storage_msg_pdf_resource_corrupt">The original PDF this note refers to is not stored in this app. Another installed version may have upgraded the note, or the app was reinstalled or its data cleared. Your ink and annotations are intact: choose the same original PDF, or an older note file or exported package that still embeds it, to re-link</string>
     <string name="storage_msg_pdf_resource_mismatch">The selected file does not match this note\'s original PDF. Nothing was changed; choose the same PDF you first imported, or an older note file that contains it</string>
     <string name="storage_msg_reference_metadata_invalid">Unable to verify the document identity or page references. The source file was not changed. Check the original file or use recovery data.</string>
+    <string name="storage_msg_reference_write_context_invalid">This save does not match the original document type, page reference state, or original PDF. The file was not overwritten. Use the corresponding copy, recovery, or upgrade operation.</string>
 </resources>

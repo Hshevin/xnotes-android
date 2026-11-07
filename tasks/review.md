@@ -78,3 +78,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b1a 来源身份读取
 
 独立计划复核要求pending先拒绝自动发布、快读/snapshot变化拒绝、本地化错误；实施复核发现仪器Runner未注册、真实协程取消遗漏、外层catch吞取消及guard后取消窗口，均修复并补反例。最终复核无剩余阻断，284套件3051项/Android源码编译通过；仪器/SAF/目标设备未运行。来源读取不等于保存保护或正页契约激活完成。
+
+## R2b1b 普通保存与配套恢复
+
+计划/代码独立复核要求真实target拼接先保护原件（本片撤除）、kind绑定、已有anchored正登记、move前重核、migration pin时序及所有权唯一、同record目的、当前B保护、legacy容量不退化、Editor取消dirty/finally、历史stage SHA可信证明及PDF恢复例外。反例逐项补齐，旧v1恢复candidate仅call-time证明明确；native keep无可靠SHA故意保留证据。最终修复available PDF仍先pin与在途保存dirty=false不早关画布，窄复核无新阻断。288套件3086项与Android源码编译通过，实际仪器/SAF/目标设备未运行。完整边界reference-native-save-2026-11-08.md；pending下当前模型协调/另存/激活/来源闭环未完成。
