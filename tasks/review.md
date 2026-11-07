@@ -56,3 +56,7 @@ review_input_plan只读复核：发现抢救未知layer仍整份失败及提前�
 ## 2026-11-08 R1c 来源范围
 
 计划与代码独立复核均完成。接受意见：严格识别旧字段真实类型、补PAGE hint及两字段各自缺失组合、canonicalUUID/FILE越界、完整多来源与平台NULL。生产diff与测试无阻断；tmp/page-source-format-full.log全量2977项及Android源码编译通过，仪器未实际执行。页面归属/存在性及导航不纳入此格式层结论。
+
+## 2026-11-08 R1b0 原字节页面ID重铸
+
+独立计划及源码复核完成，无阻断；接受完整字面量位置、输出ID集合、新旧集合不相交、编辑范围预检、skip中取消/所有权和生成阶段取消建议。新增7项行为/字节回归，红灯日志page-copy-literals-red与page-copy-generation-red，最后全量2984项与Android源码编译通过。仅格式工具，整包writer/marker/Snapshot接入未完成。

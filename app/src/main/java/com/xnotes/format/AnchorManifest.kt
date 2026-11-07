@@ -16,7 +16,9 @@ internal object AnchorManifest {
     private const val MAX_KEY_CHARS=1024
     private const val MAX_ACTIVE_KEYS=8192
     private const val MAX_ACTIVE_KEY_CHARS=262144
-    data class Insertion(val position:Long,val text:String)
+    /** UTF-16 source offset and length, matching JsonPull.position. skip=0 is a plain insertion. */
+    data class Insertion(val position:Long,val text:String,val skip:Long=0)
+    /** identities always describes the output, including newly minted IDs in a copy plan. */
     data class Plan(val format:String,val insertions:List<Insertion>,val identities:Set<String>)
     private enum class Place { ROOT,PAGE,OTHER }
 
@@ -34,8 +36,13 @@ internal object AnchorManifest {
         }
         return InputStreamReader(limited,Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT))
     }
+    /** Caller verifies the bundle marker and binding; every open must use one immutable snapshot. */
+    fun inspectCopy(input:()->InputStream,cancelled:()->Boolean={false}):Plan = plan(input,true,true,cancelled)
+
     /** Every open must address the same immutable snapshot, not the mutable external document. */
-    fun inspect(input:()->InputStream,anchored:Boolean,cancelled:()->Boolean={false}):Plan {
+    fun inspect(input:()->InputStream,anchored:Boolean,cancelled:()->Boolean={false}):Plan = plan(input,anchored,false,cancelled)
+
+    private fun plan(input:()->InputStream,anchored:Boolean,rekey:Boolean,cancelled:()->Boolean):Plan {
         val format=reader(input(),cancelled).use { r ->
             val p=JsonPull(r,strict=true);p.beginObject()
             var found:String?=null
@@ -46,6 +53,7 @@ internal object AnchorManifest {
             require(found=="xnote") {"Unsupported anchor manifest format"};found!!
         }
         val insertions=ArrayList<Insertion>()
+        val literals=ArrayList<Pair<Long,Long>>()
         val ids=linkedSetOf<String>()
         var existing=0;var missing=0;var targets=0
         var activeKeys=0;var activeKeyChars=0
@@ -73,16 +81,20 @@ internal object AnchorManifest {
                                 place==Place.ROOT && key=="format" -> require(p.nextString()==format) {"Manifest format changed"}
                                 place==Place.ROOT && key=="version" -> require(p.nextInt()==1) {"Unsupported anchor manifest version"}
                                 place==Place.ROOT && key=="pages" && format=="xnote" -> array(Place.PAGE,::value)
-                                (place==Place.PAGE) && key=="reference_id" -> {
+                                place==Place.PAGE && key=="reference_id" -> {
+                                    require(p.peek()==JsonPull.Token.STRING) {"Page identity must be a string"}
+                                    val start=p.position
                                     val id=p.nextString()
+                                    val end=p.position
                                     require(UUID.fromString(id).toString()==id) {"Invalid anchor UUID"}
                                     require(ids.add(id)) {"Duplicate anchor UUID"};existing++;hasId=true
+                                    if(rekey) literals+=start to (end-start)
                                 }
                                 else -> value(Place.OTHER)
                             }
                         }
                         if(place==Place.ROOT) require(names.containsAll(listOf("format","version","pages"))) {"Missing anchor manifest structure"}
-                        if((place==Place.PAGE) && !hasId) {
+                        if(place==Place.PAGE && !hasId) {
                             require(!anchored) {"Upgraded document lost an anchor identity"}
                             missing++;val id=UUID.randomUUID().toString();check(ids.add(id))
                             insertions+=Insertion(p.position,(if(names.isEmpty()) "" else ",")+"\"reference_id\":\"$id\"")
@@ -99,10 +111,28 @@ internal object AnchorManifest {
         }
         require(targets>0) {"A referenced note must have a page"}
         require(existing==0 || missing==0) {"Partially missing anchor identities require explicit recovery"}
+        if(rekey) {
+            // Generate only after validating every old ID, including pages later in the manifest.
+            val fresh=linkedSetOf<String>()
+            val edits=literals.map {(position,length)->
+                var id:String
+                do {
+                    check(!cancelled()) {"Page identity copy cancelled"}
+                    id=UUID.randomUUID().toString()
+                } while(id in ids || !fresh.add(id))
+                Insertion(position,"\"$id\"",length)
+            }
+            return Plan(format,edits,fresh.toSet())
+        }
         return Plan(format,insertions.toList(),ids.toSet())
     }
     /** One continuous encoder preserves surrogate pairs split by either read or insertion chunks. */
     fun write(input:()->InputStream,out:OutputStream,plan:Plan,cancelled:()->Boolean={false}) {
+        var end=0L
+        for(edit in plan.insertions) {
+            require(edit.position>=end && edit.skip>=0 && edit.skip<=Long.MAX_VALUE-edit.position) {"Invalid or overlapping manifest edits"}
+            end=edit.position+edit.skip
+        }
         val encoder=Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
         val writer=OutputStreamWriter(out,encoder)
         reader(input(),cancelled).use { r ->
@@ -115,6 +145,13 @@ internal object AnchorManifest {
                     require(n>0) {"Snapshot truncated during anchor insertion"};writer.write(buffer,0,n);consumed+=n
                 }
                 writer.write(insertion.text)
+                var remaining=insertion.skip
+                while(remaining>0) {
+                    check(!cancelled())
+                    val n=r.read(buffer,0,minOf(buffer.size.toLong(),remaining).toInt())
+                    require(n>0) {"Snapshot truncated during page identity replacement"}
+                    remaining-=n;consumed+=n
+                }
             }
             while(true) {
                 check(!cancelled());val n=r.read(buffer);if(n<0) break

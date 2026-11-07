@@ -37,3 +37,13 @@ R1c：.xmap来源契约撤除对象/固定区域身份，页面可附可选矩�
 新增6项PageSourceFormatTest，初始3个反例在旧代码上失败（tmp/page-source-format-red.log）。覆盖FILE/PAGE有无hint及旧字段缺失组合、wrong type/null、UUID、多个来源metadata/顺序/主要预览保持；Android仪器增平台JSONObject.NULL用例，只编译。专项通过后全量 tmp/page-source-format-full.log：275套件2977项通过，失败/错误/跳过均为0，Android测试源码编译通过。独立只读复核未发现阻断或兼容遗漏。
 
 页面实际是否属于该文档、是否仍存在、画布禁止PAGE来源以及跳转，仍由后续真实来源解析负责，不能把本片JSON模型验证当成来源已可用。
+
+## R1b0 原字节页面身份替换工具
+
+新增 AnchorManifest.inspectCopy：调用方须先核实 bundle marker/文档绑定并提供同一不可变快照。完整校验所有旧页面ID后生成互不重复且与全部旧页面ID不相交的新UUID；Plan.identities表示输出集合。定位使用原字符串字面量的UTF-16起止位置，保留转义字段名及冒号空白，未知对象、嵌套扩展和原始采样字节不改。
+
+Insertion可带skip长度。writer先检查非负/溢出/重叠，然后连续编码、分块复制/跳过；截断、取消、输出失败均抛出，拥有输入但不关闭调用方输出。扫描与UUID生成阶段均响应取消。
+
+初始inspectCopy仅转发原校验时，新增字节/身份反例失败（tmp/page-copy-literals-red.log）；独立复核建议增加生成期取消，并以tmp/page-copy-generation-red.log复现后修复。7项AnchorCopyManifestTest覆盖全转义UUID、字段名、空白、单字节UTF-8长边界、精确字节oracle、坏来源、复制幂等输出、截断/取消/流所有权/非法编辑计划。tmp/page-copy-literals-full.log全量276套件2984项通过，失败/错误/跳过均0，Android测试源码编译通过。独立源码复核未发现阻断。
+
+本片只是转换工具，**未接BundleMigration/BundlePdf/Editor.copyFileTo**，不把其测试当作整包复制已正确或SAF激活已完成。下一片继续接入同一BundleSnapshot/Header，复制重铸页面ID并重绑marker，同文档便携导出保留身份及原marker字节。
