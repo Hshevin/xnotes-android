@@ -45,4 +45,10 @@ R2实际阶段证明/prepare→commit已实现、独立复核通过：tmp/native
 
 R2固定writer视图已实现/独立复核通过：tmp/native-frozen-writer-final-full.log 302套件3326项全过，Android测试源码编译成功；14新增JVM（含真实native/cache/七类整ZIP oracle/表格别名先红后绿）。Stroke pin已发布Samples前缀、不复制点数组；其它字段/嵌套容器/每页胶合/层/PDF与永久页ID保持；默认浅快照不切换、不增临时成员副本。新SaveRequest/NativeWorkingSession接固定路径，生产仍未接。活动预览capture屏障和view-only前O(items)副本性能债待下一片，不能视为真机/性能验收。阶段已提交ffaec942，无运行作业。下一片轻量source observation/按需正文计划reference-lightweight-capture-2026-11-08.md正在独立审核。overall complete=false。
 
-R2轻量source observation/按需正文已实现/独立复核通过：tmp/native-light-capture-full.log 302套件3329项全过，Android源码编译成功。3新JVM场景+真实same-SHA noop扩展；note prepare页ID后一次key，reserve→仅requiresBody固定，view-only无body/不访问items、失败旧head保持；Observer私有actual owner factory、IO只epoch不读live、不授native保存能力。两probe先红后绿。阶段待本地提交，无运行作业；不激活生产，活动事务屏障、同head handoff/ack/恢复认领、新建另存copy pending、页激活/来源UI/往返/backlinks/网络仍继续，overall complete=false。
+R2轻量source observation/按需正文已实现/独立复核通过：tmp/native-light-capture-full.log 302套件3329项全过，Android源码编译成功。3新JVM场景+真实same-SHA noop扩展；note prepare页ID后一次key，reserve→仅requiresBody固定，view-only无body/不访问items、失败旧head保持；Observer私有actual owner factory、IO只epoch不读live、不授native保存能力。两probe先红后绿。阶段已提交b216132a，无运行作业；不激活生产，活动事务屏障、同head handoff/ack/恢复认领、新建另存copy pending、页激活/来源UI/往返/backlinks/网络仍继续，overall complete=false。
+
+下一阶段同head交接内核计划已据固定writer/轻量Observation更新至reference-native-handoff-2026-11-08.md末尾，待独立审核。schema2 T/一次性fresh permit/root intent/previous-head锁外钩子/真实head ack/v4受控commit/accepted ID/恢复claim仍未代码；UI稳定输入屏障和生产迁移另后续保留，不启用旧生产。overall complete=false。
+
+同head交接内核计划独立复核可实施，补Root注册/claim/完成先短cache锁invalidate旧reservation再发布intent，guard读同Root锁。基础API WorkingSessionCache previous-head锁外hook/forceBody/invalidate/actual Read issuer+head验证已实现并独立源码复核通过；tmp/native-handoff-transition-first.log定向+Android源码编译通过，完整tmp/native-handoff-transition-full.log 302套件3334项全过，Android源码编译成功。5新增JVM（含最后check后卡住的write/clear竞态），无native授权/schema2激活。继续T/permit/root/ack/B恢复claim实际内核；整体complete=false。
+
+交接previous-head/代次/forceBody/Read基础片完整验证与独立复核完成，阶段待提交；无运行作业。下一步在这些接口上实施schema2 T、一次性capture permit、共享root intent、私有真实head ack/v4 commit和actual B恢复claim，不能把基础片当作交接闭环。overall complete=false。

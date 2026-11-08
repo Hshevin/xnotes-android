@@ -31,6 +31,77 @@ class WorkingSessionCacheTest {
             assertEquals("A",JSONObject(it.metadataJson).getString("path"));assertEquals(body(),it.body.readText())
         }
     }
+    @Test fun previousHeadGuardCanRejectWritesAndClearBeforeAnyNewBytesAreCreated() {
+        val root=dir();val c=cache(root);val owner=Any()
+        try {
+            write(c,request(c,owner,meta=JSONObject().put("handoff","pending")))
+            val before=root.listFiles()!!.associate {it.name to it.readBytes().toList()}
+            var calls=0
+            val guard:(WorkingSessionCache.Previous?)->Unit={old->
+                calls++;assertNotNull(old);assertEquals(id,old!!.documentId)
+                assertEquals("pending",JSONObject(old.metadataJson).getString("handoff"))
+                assertEquals(0L,old.contentVersion);assertEquals(64,old.sha256.length);assertEquals(64,old.headHash.length)
+                throw WorkingSessionCache.Conflict()
+            }
+            val next=request(c,owner,1)
+            assertThrows(WorkingSessionCache.Conflict::class.java) {c.publishChecked(next,validatePrevious=guard) {fail("guard precedes encoding")}}
+            assertEquals(before,root.listFiles()!!.associate {it.name to it.readBytes().toList()})
+            assertThrows(WorkingSessionCache.Conflict::class.java) {c.publishClearChecked(c.reserveClear(),validatePrevious=guard)}
+            assertEquals(2,calls);assertEquals(before,root.listFiles()!!.associate {it.name to it.readBytes().toList()})
+        } finally {root.deleteRecursively()}
+    }
+    @Test fun previousHeadGuardRunsOutsideTheReservationLockAndANewerReservationWins() {
+        val root=dir();val c=cache(root);val executor=java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val owner=Any();write(c,request(c,owner));val r=request(c,owner,1)
+            var newest:WorkingSessionCache.WriteRequest?=null
+            val result=c.publishChecked(r,validatePrevious={
+                newest=executor.submit<WorkingSessionCache.WriteRequest> {request(c,owner,2)}.get(5,TimeUnit.SECONDS)
+            }) {fail("superseded before body encoding")}
+            assertFalse(result.published);assertTrue(c.isCurrent(requireNotNull(newest)));assertEquals(body(),text(c))
+        } finally {executor.shutdownNow();root.deleteRecursively()}
+    }
+    @Test fun intentInvalidationAfterTheLastCheckPreventsBothWriteAndClearCommit() {
+        for(clear in listOf(false,true)) {
+            val root=dir();val ready=CountDownLatch(1);val release=CountDownLatch(1);var armed=false
+            val c=cache(root) {event,_->if(armed && event==WorkingSessionCache.Event.BEFORE_HEAD_COMMIT) {
+                ready.countDown();check(release.await(5,TimeUnit.SECONDS))
+            }}
+            val executor=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                val owner=Any();write(c,request(c,owner));val before=File(root,"head.json").readBytes();armed=true
+                val future=if(clear) {
+                    val r=c.reserveClear();executor.submit<WorkingSessionCache.Publication> {c.publishClear(r)}
+                } else {
+                    val r=request(c,owner,1);executor.submit<WorkingSessionCache.Publication> {write(c,r,body(text="new"))}
+                }
+                assertTrue(ready.await(5,TimeUnit.SECONDS));c.invalidateReservations();release.countDown()
+                assertFalse(future.get(5,TimeUnit.SECONDS).published)
+                assertArrayEquals(before,File(root,"head.json").readBytes());assertEquals(body(),text(c))
+            } finally {release.countDown();executor.shutdownNow();root.deleteRecursively()}
+        }
+    }
+    @Test fun forcedBodyNeverReusesAnEarlierSameRevisionProof() {
+        val root=dir();val c=cache(root);val owner=Any()
+        try {
+            write(c,request(c,owner));assertFalse(request(c,owner).requiresBody)
+            val fresh=c.reserve(owner,WorkingSessionCache.Kind.NOTE,id,0,JSONObject(),forceBody=true)
+            assertTrue(fresh.requiresBody);assertTrue(write(c,fresh,body(text="fresh capture")).published)
+            assertEquals(body(text="fresh capture"),text(c));assertFalse(request(c,owner).requiresBody)
+        } finally {root.deleteRecursively()}
+    }
+    @Test fun currentHeadReadProofRequiresItsOwnIssuerAnOpenLeaseAndTheUnchangedHead() {
+        val root=dir();val c=cache(root);val owner=Any()
+        try {
+            write(c,request(c,owner));val read=c.load()!!
+            c.verifyRead(read)
+            assertThrows(WorkingSessionCache.Invalid::class.java) {cache(root).verifyRead(read)}
+            val view=request(c,owner,meta=JSONObject().put("view",2));assertTrue(write(c,view).published)
+            assertEquals(body(),read.body.readText())
+            assertThrows(WorkingSessionCache.Conflict::class.java) {c.verifyRead(read)}
+            read.close();assertThrows(WorkingSessionCache.Invalid::class.java) {c.verifyRead(read)}
+        } finally {root.deleteRecursively()}
+    }
     @Test fun freshReadersRejectAmbiguousEnvelopesWithoutCollectingOrReplacingRecoveryData() {
         val invalid=listOf(
             """{"version":1,"state":"cleared","metadata":{"version":99}}""",

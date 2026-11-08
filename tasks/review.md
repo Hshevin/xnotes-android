@@ -114,3 +114,7 @@ review_input_plan独立审核确认Samples前缀可共享，要求复制嵌套�
 ## 轻量来源观察与按需正文（2026-11-08）
 
 review_input_plan独立计划/源码复核通过：actual source/model observation私有工厂核对epoch，IO不读活模型、不颁native写权；NOTE准备身份再冻结key，reserve后仅requiresBody复制固定模型并复核key/current，view-only null body由encoder守卫与cache复用合同保证。错owner/path、head失败保留、同SHA accept废票等覆盖准确。最终302套件3329项与Android源码编译全过；未做仪器/真机性能，活动内容事务屏障与生产仍后续。
+
+## 交接转移基础接口（2026-11-08）
+
+review_input_plan计划指出锁外check后的rename窗口，已加同cache短锁invalidateReservations及最后检查后双线程write/clear反例；Root未来注册/claim/完成先失效再发布intent，guard读同Root锁。源码复核确认锁外previous-head hook、失败零新bytes、重入reserve无锁反序、forceBody不伪造复用、Read issuer/open/head均闭合；旧held Read仍可读旧body。最终302套件3334项与Android源码编译全过，仪器/目标设备未运行。T/ack/native授权仍未实现，该片不改变生产。

@@ -68,3 +68,26 @@ NotebookStorage.StagedSave已绑定实际storage issuer、canonical journal路�
 最终tmp/native-staged-save-full.log：完整301套件3312项全部通过（0失败/错误/跳过），Android测试源码编译成功。新增19个JVM行为例，含record降级/散列中取消、来源失活、target/retained/registry变化、精确journal/跨storage/重复或被恢复消费、NOTE/CANVAS、PDF migration pin间隙和锁释放；新增真实owned provider两阶段场景仅编译，未在Android执行。未打包、安装、推送或发布。无渲染/GPU改动。
 
 后续仍需：稳定内容capture及活动事务屏障、同head cache schema2/ack和重启认领、生产Editor/旧session迁移、新建/另存copy pending、页面来源/预览/往返/backlinks/网络；整体未完成。不得只凭本片阶段证明清空旧工作缓存或采用陈旧预读来源。
+
+## 下一阶段：同head持久交接内核
+
+前置已具备：92334288 v4拒写、16557eca实际两段stage/commit、ffaec942固定writer与b216132a轻量实际source observation。活动未提交编辑的owner稳定屏障、Editor生产迁移和新建/另存copy pending仍保留；本阶段只在稳定owner测试模型上接通交接内核，不能据此启用旧生产会话恢复。
+
+1. native metadata写schema2、读1/2，通用cache envelope仍v1。bound metadata可含T={canonical UUID交接ID、A SHA、B SHA、record SHA}，kind/docId/locationKey/URI沿实际source字段；T必须与sourceA和v4 record结构一致，不保存整页ID列表。T是数据，JSON本身不颁任何原文件写权。未知/未来/坏T保留。
+2. 由实际Receipt.Staged为同owner/current Observation签发交接capture意图：核对原请求issuer/epoch/expected对象与ownerToken、实际A/B/record和stage4 ID；只收真正staged proof，不收tuple。每次协调回Main新签一次性capture permit，callback必须用该permit对真实owner捕获当前C；旧Write/其它permit不可替代。内容已固定，捕获后的live编辑不改C。活动UI事务idle仍由未来生产owner屏障保证，本片不承诺能检测其模式。
+3. NativeWorkingSession按canonical root共享运行时intent归属，注册T后同owner后续capture都携带T，旧Write/其它owner/clear不得抹T或抢先保留无T head。cold head有T却未认领时，普通写/clear失败保留，不能靠相同doc UUID接管。普通latest reservation即可，不做handoff-only rebase。
+4. WorkingSessionCache增每次publish/clear的previous-head验证钩子（已核实metadata+body后、任何副本写前，锁外执行）；原子head CAS仍复核同初始head。Native层据actual previous T及私有intent检查转移，checkActive在发布各边界重复检查运行时intent；不在cache锁内回调storage/PDF。view-only携T仍需真实body proof，第一次post-stage捕获保守强制正文以免旧revision/预览误背书。
+5. 交接入口prepare→fresh Main capture→发布C+T→核实durable actual head。Publication(false)不颁ack；若更晚同owner C1携同T已成功，允许验证该actual current head后取得私有HandoffPublication。只此私有证明可由相配Receipt.Staged触发storage/core v4 commit；core仍核expected record摘要、同ID、A/B、target及全部原生/登记契约。原生-only/旧ensure没有ack路径。ack核实发生在IO，不能从空Unit callback或任意JSON签发；正文验证/leases/清理仍沿原cache能力。
+6. Native成功Receipt带本次T ID，EditSource.accept才推进expected/epoch并记accepted ID；之后同owner capture的source observation携带此实际accepted ID，才可把T与新sourceB metadata在同head移除。A==B no-op仍按ID/epoch处理，不靠SHA猜成功。失败后T/原日志保留，已写B不回滚。
+7. 恢复T只对actual source=B（含A==B）且cache自身UUID/页集/PDF/anchor/完整identity合同核实后准备实际模型；actual A且无pending仍fail-closed。pending4先走显式受控固定候选续写或keepWrittenSave，不由旧ensure抢写。恢复Bound持有同adapter actual Read直到采用/认领；只有确切Prepared实际模型的adopt/editSource可claim同head T，新runtime第一次重写正文，不把live C1 revision给旧C0 body背书。head变/lease关/另一模型不能claim，未采用资料不能被clear。
+8. 显式重启续写仅可使用actual v4 retained/journal与同head T，并复核同ID/record/A/B/完整契约；这是固定B完成，不给任意live模型Receipt。完成后再actual B+cache C恢复，外部C或不一致保留。无法完成该受控入口时明确留pending，不能放松旧入口。
+
+验收覆盖真实stage目标仍A、当前C+T先持久才B、写后回执前重开恢复C/继续保存；旧/空capture、stale publish、其它owner/clear/未来metadata、record替换、no-op、head失败、provider部分或写后报错、登记/取消、源失活、恢复C0后编辑C1再claim、actual A/B/外部C、PDF可用性及lease/GC。双线程latch证明storage不持锁等待Main、cache钩子不在cache锁内。现有原生/导图/事件完整回归与独立复核；Android真实provider/目标设备未运行单列。整体仍未完成，生产输入/备份/页面来源等后续项不取消。
+
+独立计划复核补充：运行时intent注册/claim/完成必须线性化到cache最终提交。Root短锁内先invalidateReservations（cache同一短state锁使旧latest失效），再发布新intent；所有发布guard读取同Root锁。旧writer若先commit则发生在intent注册前，否则被失效拦；不能只在锁外checkActive检查。测试卡在最后检查完成、rename尚未发生处，write/clear均零head替换。
+
+基础接口已实现并独立源码复核通过：WorkingSessionCache.publishChecked/publishClearChecked带previous-head data验证（已核旧body/metadata及新metadata后、任何新bytes前锁外），默认publish签名保留；forceBody仅显式跳过复用proof；invalidateReservations不清committed body proof；Read带私有issuer和headHash，opt-in verifyRead锁外验body、前后核issuer/open/head，旧held Read保持旧正文可读。BEFORE_HEAD_COMMIT为最后check之后的测试seam，实际CAS仍同短锁。没有在这些API直接授native写权或改变metadata schema。
+
+定向tmp/native-handoff-transition-first.log已成功，包含previous guard拒write/clear且零新bytes、guard内其它线程reserve不死锁、最后检查后失效write/clear、forceBody与Read issuer/open/head反例；Android源码编译成功。schema2 T/私有permit/root intent/ack/accepted ID/恢复claim内核仍继续，不能把基础接口当作完整交接。
+
+基础接口最终tmp/native-handoff-transition-full.log完整302套件3334项全过（0失败/错误/跳过），Android测试源码编译成功；5新增JVM场景，真实Android仪器未运行。已核Read最终短锁内再次确认open/issuer。该片未引入T/ack/source grant，后续内核继续实施。

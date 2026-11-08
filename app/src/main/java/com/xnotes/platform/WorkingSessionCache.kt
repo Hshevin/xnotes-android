@@ -30,7 +30,7 @@ internal class WorkingSessionCache(
     constructor(directory:File,validateBody:(File,Kind,String)->Unit,onEvent:(Event,File)->Unit={_,_->})
         :this(directory,validateBody,onEvent,{_,_,_->})
     enum class Kind { NOTE,CANVAS }
-    enum class Event { BEFORE_HEAD_REPLACE,BEFORE_DELETE }
+    enum class Event { BEFORE_HEAD_REPLACE,BEFORE_HEAD_COMMIT,BEFORE_DELETE }
     class Invalid(cause:Throwable?=null):IOException("Invalid working session cache",cause)
     class Conflict:IOException("Working session cache changed before publication")
 
@@ -42,12 +42,16 @@ internal class WorkingSessionCache(
     ):Request(coordinator,generation)
     class ClearRequest internal constructor(coordinator:Any,generation:Long):Request(coordinator,generation)
     data class Publication(val request:Request,val published:Boolean)
+    data class Previous(val kind:Kind,val documentId:String,val contentVersion:Long,val metadataJson:String,
+                        val sha256:String,val headHash:String)
 
     class Read internal constructor(
+        private val issuer:Any,val headHash:String,
         val body:File,val kind:Kind,val documentId:String,val metadataJson:String,val sha256:String,
         private val release:()->Unit,
     ):Closeable {
         private val closed=java.util.concurrent.atomic.AtomicBoolean(false)
+        internal fun checkIssuer(owner:Any) {if(issuer!==owner || closed.get()) throw Invalid()}
         override fun close() {if(closed.compareAndSet(false,true)) release()}
     }
 
@@ -66,24 +70,32 @@ internal class WorkingSessionCache(
     private val root=directory.canonicalFile
     private val headFile=File(root,"head.json")
     private val state=coordinator(root.path)
+    private val readIssuer=Any()
 
     /** Owner-thread reservation; no filesystem access or encoder/validator callbacks. */
-    fun reserve(owner:Any,kind:Kind,documentId:String,contentVersion:Long,metadata:JSONObject):WriteRequest {
+    fun reserve(owner:Any,kind:Kind,documentId:String,contentVersion:Long,metadata:JSONObject,forceBody:Boolean=false):WriteRequest {
         ReferenceIdentity.requireUuid(documentId)
         require(contentVersion>=0)
         val frozen=metadata.toString()
         require(frozen.toByteArray(Charsets.UTF_8).size<=MAX_METADATA) {"Session metadata exceeds its budget"}
         return synchronized(state) {
-            val proof=state.committed?.takeIf {it.owner===owner && it.body.kind==kind && it.body.documentId==documentId && it.body.version==contentVersion}
+            val proof=state.committed?.takeIf {!forceBody && it.owner===owner && it.body.kind==kind && it.body.documentId==documentId && it.body.version==contentVersion}
             WriteRequest(state,nextGeneration(),owner,kind,documentId,contentVersion,frozen,proof==null,proof?.headHash).also {state.latest=it}
         }
     }
     fun reserveClear():ClearRequest=synchronized(state) {ClearRequest(state,nextGeneration()).also {state.latest=it}}
     fun isCurrent(request:Request):Boolean=synchronized(state) {request.coordinator===state && state.latest===request}
+    /** Domain intent registration calls this before publishing its new in-memory boundary.
+     * No filesystem, body or application callback runs under this short coordinator lock. */
+    fun invalidateReservations()=synchronized(state) {nextGeneration();state.latest=null}
     private fun nextGeneration():Long {check(state.generation<Long.MAX_VALUE);return ++state.generation}
 
     /** Run on IO; the caller must also check [isCurrent] before applying a late success to UI state. */
-    fun publish(request:WriteRequest,checkActive:()->Unit={},writeBody:(OutputStream)->Unit):Publication {
+    fun publish(request:WriteRequest,checkActive:()->Unit={},writeBody:(OutputStream)->Unit):Publication =
+        publishChecked(request,checkActive,{},writeBody)
+
+    fun publishChecked(request:WriteRequest,checkActive:()->Unit={},validatePrevious:(Previous?)->Unit,
+                       writeBody:(OutputStream)->Unit):Publication {
         require(request.coordinator===state)
         val initial=begin(request) ?: return Publication(request,false)
         var pending:File?=null
@@ -93,6 +105,7 @@ internal class WorkingSessionCache(
             checkActive()
             verify(initial.body,checkActive)
             validateMetadata(request.kind,request.documentId,request.metadataJson)
+            validatePrevious(previous(initial));checkActive()
             if(!isCurrent(request)) return Publication(request,false)
             val next:Body
             if(request.requiresBody) {
@@ -120,6 +133,7 @@ internal class WorkingSessionCache(
             // All callbacks and body hashing stay outside the reservation lock.
             verify(next,checkActive)
             checkActive()
+            onEvent(Event.BEFORE_HEAD_COMMIT,headTemp)
             val published=synchronized(state) {
                 if(state.latest!==request) false else {
                     if(checkedHead().hash!=initial.hash) throw Conflict()
@@ -145,15 +159,19 @@ internal class WorkingSessionCache(
         }
     }
 
-    fun publishClear(request:ClearRequest,checkActive:()->Unit={}):Publication {
+    fun publishClear(request:ClearRequest,checkActive:()->Unit={}):Publication = publishClearChecked(request,checkActive,{})
+
+    fun publishClearChecked(request:ClearRequest,checkActive:()->Unit={},validatePrevious:(Previous?)->Unit):Publication {
         require(request.coordinator===state)
         val initial=begin(request) ?: return Publication(request,false)
         var temp:File?=null
         try {
             verify(initial.body,checkActive)
+            validatePrevious(previous(initial));checkActive()
             if(!isCurrent(request)) return Publication(request,false)
             ensureDirectory();val bytes=encode(null);temp=prepareHead(bytes);onEvent(Event.BEFORE_HEAD_REPLACE,temp)
             verify(initial.body,checkActive);checkActive()
+            onEvent(Event.BEFORE_HEAD_COMMIT,temp)
             val published=synchronized(state) {
                 if(state.latest!==request) false else {
                     if(checkedHead().hash!=initial.hash) throw Conflict()
@@ -172,14 +190,24 @@ internal class WorkingSessionCache(
 
     /** A missing head or explicit tombstone is empty. Corruption is an error, never empty. */
     fun load(checkActive:()->Unit={}):Read? {
-        val body=synchronized(state) {
-            checkedHead().body?.also {acquire(it)}
-        } ?: return null
+        val head=synchronized(state) {checkedHead().also {it.body?.let(::acquire)}}
+        val body=head.body ?: return null
         try {
             verify(body,checkActive)
-            return Read(File(root,body.name),body.kind,body.documentId,body.metadata,body.sha) {release(body);cleanup()}
+            return Read(readIssuer,requireNotNull(head.hash),File(root,body.name),body.kind,body.documentId,body.metadata,body.sha) {release(body);cleanup()}
         } catch(error:Throwable) {release(body);throw error}
     }
+
+    /** An opt-in current-head proof; ordinary held reads remain readable after head replacement. */
+    fun verifyRead(read:Read,checkActive:()->Unit={}) {
+        read.checkIssuer(readIssuer)
+        val head=synchronized(state) {checkedHead()}
+        if(head.hash!=read.headHash || head.body==null) throw Conflict()
+        verify(head.body,checkActive)
+        read.checkIssuer(readIssuer)
+        synchronized(state) {read.checkIssuer(readIssuer);if(checkedHead().hash!=read.headHash) throw Conflict()}
+    }
+    private fun previous(head:Head)=head.body?.let {Previous(it.kind,it.documentId,it.version,it.metadata,it.sha,requireNotNull(head.hash))}
 
     private fun begin(request:Request):Head?=synchronized(state) {
         if(state.latest!==request) null else checkedHead().also {it.body?.let(::acquire)}
