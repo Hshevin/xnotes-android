@@ -60,3 +60,5 @@ R2轻量source observation/按需正文已实现/独立复核通过：tmp/native
 2026-11-08 恢复后完成 native4 typed ack/commit/实际Receipt accepted-ID半段；独立复核通过，tmp/native-handoff-ack-full.log 完整303套件3355项全过、Android测试源码编译成功。新增目标散列中失活零写/写后登记契约冲突重试零重写两组。无运行作业，待本地提交后继续accepted-ID completion；actualB恢复/claim、生产稳定输入与统一writer及来源UI/backlinks/网络仍保留，overall complete=false，不打APK。
 
 当前恢复点：native4受控ack已提交eec10da5；accepted-ID完成转换已实现并独立复核，tmp/native-handoff-completion-full.log完整303套件3363项全过/Android源码编译成功（实际仪器/目标设备未运行）。8新增JVM，含after-commit来源退休卡Root先红后绿、last-check旧T写、两个completion交错、新T不被旧收尾清除、head成功返回失败重试、真实sameSHA canvas与PDF资源。成功收尾主动失效reservation，后续producer不能用published&&isCurrent判断completion。待本地提交，下一阶段actualB恢复/claim计划审核中；生产/稳定事务屏障和来源闭环仍保留，overall complete=false，无运行作业，不打APK。
+
+当前恢复点：completion已提交50d413a1。cold actualB恢复/claim已实现并完成独立复核；tmp/native-handoff-recovery-final-full.log 完整303套件3367项全过、Android测试源码编译（新增实际provider链只编译）。四个新增JVM方法及canvas/PDF扩展、跨adapter/换head/双Prepared/closed/错模型/firstbody失败gate/C1重写/实际A或外部原件保全已覆盖。复核的Unit注册/Observation提升保存权限两口改typed私有cap；后者已实际先红后绿。Bound持Read至close，claim只转移previous-head能力不背书旧body；首次无T/B新正文成功才开native。任何live Root拒接管。生产/稳定输入和pending4受控续写仍未完成；整体complete=false，无运行作业，准备本地提交，不打APK。

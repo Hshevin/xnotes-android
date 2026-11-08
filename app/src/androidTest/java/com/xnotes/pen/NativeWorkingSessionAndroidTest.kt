@@ -19,6 +19,8 @@ import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.platform.NativeWorkingSession
 import com.xnotes.platform.WorkingSessionCache
 import com.xnotes.storage.NotebookStorage
+import com.xnotes.storage.ReferenceContractViolation
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -111,6 +113,37 @@ class NativeWorkingSessionAndroidTest {
                 assertTrue(binding.accept(request,receipt));assertEquals(BundleMigration.hash(file),receipt.version.sha256)
                 val saved=file.inputStream().use {input->note.read(input)}
                 assertEquals("working copy",saved.bookmarks.single().label);assertEquals(2,saved.pages.size)
+            }
+        } finally {folder.deleteRecursively()}
+    }
+    @Test fun providerHandoffRestoresLaterWorkingEditsAndGatesNativeSaveUntilItsFirstCheckpoint()=scenario {storage,root,note,canvas->
+        val base=PenTestRunner.instance.targetContext;val key="handoff-recovery-${UUID.randomUUID()}"
+        val folder=File(AppStorageDocumentsProvider.rootDir(base),key).apply {mkdir()};val file=File(folder,"source.xnote")
+        val uri=DocumentsContract.buildDocumentUri(base.packageName+".documents","root/$key/source.xnote").toString()
+        try {
+            file.outputStream().use {note.write(Document.blank().apply {enableReferenceAnchors()}.snapshot(),it)}
+            val p=storage.prepareOpen(uri,DocumentKind.NOTE,note,canvas,File(root,"pdfs"),File(root,"assets"))
+            val doc=p.note!!;doc.path=uri;p.protectForAdoption();p.adopt(doc);p.close();val source=p.editSource()
+            val directory=File(root,"working");val store=NativeWorkingSession(directory,note,canvas,storage.pdfResources)
+            val view=NativeWorkingSession.NoteView(1.0,0.0,0.0,false,ViewOverrides())
+            doc.bookmarks.add(Bookmark(0,"saved B"));doc.dirty=true
+            store.publish(store.capture(doc,source,view))
+            val stage=source.capture(doc).prepareForHandoff(storage,note,canvas,File(root,"save"),"source")
+            doc.bookmarks.add(Bookmark(0,"later C"));doc.dirty=true
+            runBlocking {store.persistHandoff(stage) {it.capture(doc,source,view)}}.use {stage.commit(it)}
+            assertEquals(1,file.inputStream().use {note.read(it)}.bookmarks.size)
+            val coldDir=File(root,"cold");directory.copyRecursively(coldDir)
+            val cold=NativeWorkingSession(coldDir,note,canvas,storage.pdfResources)
+            (cold.prepareRecovery(storage,File(root,"restored-pdfs"),File(root,"restored-assets")) as NativeWorkingSession.Recovery.Bound).use {bound->
+                val restored=bound.prepared.note!!;assertEquals(2,restored.bookmarks.size)
+                bound.prepared.protectForAdoption();bound.prepared.adopt(restored)
+                PenTestRunner.instance.runOnMainSync {bound.claim()}
+                val next=bound.prepared.editSource()
+                try {next.capture(restored);fail("First checkpoint is required")} catch(_:ReferenceContractViolation) {}
+                val write=cold.capture(restored,next,view);assertTrue(write.requiresBody);assertTrue(cold.publish(write).published)
+                cold.load()!!.use {assertNull(it.metadata.handoff)}
+                val request=next.capture(restored);val receipt=request.publish(storage,note,canvas,File(root,"later-save"),"source")
+                assertTrue(next.accept(request,receipt));assertEquals(2,file.inputStream().use {note.read(it)}.bookmarks.size)
             }
         } finally {folder.deleteRecursively()}
     }

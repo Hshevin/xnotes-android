@@ -24,7 +24,10 @@ internal class PreparedNativeOpen private constructor(
     val note:Document?,val canvas:InfiniteDocument?,
     private val assets:File,private val resources:PdfResources,
     private val pdfIds:Set<String>,private val lease:AutoCloseable,
+    private val recoveryBinding:RecoveryBinding?=null,
 ) : AutoCloseable {
+    private class RecoveryBinding(val session:NativeWorkingSession,val read:NativeWorkingSession.Read,val id:String)
+    @Volatile private var recoveryClaimed=false
     private var closed=false
     private var adopted=false
     private var protected=false
@@ -32,7 +35,19 @@ internal class PreparedNativeOpen private constructor(
     private var editSourceMemo:EditSource?=null
 
     /** One long-lived source owner per actual adoption; the temporary lease is not retained by it. */
-    fun editSource():EditSource=EditSource.fromPrepared(this)
+    @Synchronized fun editSource():EditSource {
+        check(recoveryBinding==null || recoveryClaimed) {"Recovery requires actual adoption and claim"}
+        return EditSource.fromPrepared(this)
+    }
+    @Synchronized internal fun sourceForClaim(session:NativeWorkingSession,read:NativeWorkingSession.Read):EditSource {
+        val binding=recoveryBinding
+        check(!closed && adopted && !recoveryClaimed && binding?.session===session && binding.read===read) {"Recovery is not ready for claim"}
+        return EditSource.fromPrepared(this)
+    }
+    @Synchronized internal fun acceptClaim(claim:NativeWorkingSession.RecoveryClaim) {
+        check(!closed && adopted && !recoveryClaimed && claim.authorizes(this,requireNotNull(editSourceMemo))) {"Recovery claim is invalid"}
+        recoveryClaimed=true
+    }
 
     /** IO-only, before the final non-suspending UI adoption check. No source file is written. */
     @Synchronized fun protectForAdoption() {
@@ -67,12 +82,13 @@ internal class PreparedNativeOpen private constructor(
     internal class EditSource private constructor(
         private val note:Document?,private val canvas:InfiniteDocument?,private val resources:PdfResources,
         private val pdfIds:Set<String>,private val externalPdf:Boolean,initial:NativeSourceVersion,
+        private var acceptedHandoffId:String?=null,private var nativeSaveReady:Boolean=true,
+        private val claimActive:()->Boolean={true},
     ) {
         private val issuer=Any()
         private var generation=0L
         private var active=true
         private var base=initial
-        private var acceptedHandoffId:String?=null
         private fun same(document:Document)=note===document && base.kind==DocumentKind.NOTE &&
             document.identity.documentId==base.documentId && document.path?.let {resources.registry.locationKey(it)}==base.locationKey
         private fun same(document:InfiniteDocument)=canvas===document && base.kind==DocumentKind.CANVAS &&
@@ -81,7 +97,7 @@ internal class PreparedNativeOpen private constructor(
         @Synchronized fun version(document:Document):NativeSourceVersion {if(!active || !same(document)) invalid();return base}
         @Synchronized fun version(document:InfiniteDocument):NativeSourceVersion {if(!active || !same(document)) invalid();return base}
         @Synchronized fun invalidate() {active=false}
-        private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && generation==epoch && base===expected}
+        private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && claimActive() && generation==epoch && base===expected}
         /** Read-only epoch, with no native body or publication capability. */
         class Observation private constructor(private val source:EditSource,private val epoch:Long,val expected:NativeSourceVersion,
                                               internal val ownerToken:Any,internal val acceptedHandoffId:String?) {
@@ -102,14 +118,17 @@ internal class PreparedNativeOpen private constructor(
                 }
             }
         }
-        fun observe(document:Document)=Observation.capture(this,document)
-        fun observe(document:InfiniteDocument)=Observation.capture(this,document)
+        fun observe(document:Document):Observation {if(!claimActive()) invalid();return Observation.capture(this,document)}
+        fun observe(document:InfiniteDocument):Observation {if(!claimActive()) invalid();return Observation.capture(this,document)}
+        internal fun observationForClaim()=note?.let {Observation.capture(this,it)} ?: Observation.capture(this,requireNotNull(canvas))
         @Synchronized fun capture(document:Document):SaveRequest.Note {
+            if(!nativeSaveReady || !claimActive()) invalid()
             val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
             val epoch=generation
             return SaveRequest.Note(issuer,epoch,expected,requireNotNull(document.path),resources,pdfIds,externalPdf,document.fixedWriteSnapshot()) {authorize(epoch,expected)}
         }
         @Synchronized fun capture(document:InfiniteDocument):SaveRequest.Canvas {
+            if(!nativeSaveReady || !claimActive()) invalid()
             val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
             val epoch=generation
             return SaveRequest.Canvas(issuer,epoch,expected,requireNotNull(document.path),resources,document.snapshotForWrite(fixedItems=true)) {authorize(epoch,expected)}
@@ -124,12 +143,16 @@ internal class PreparedNativeOpen private constructor(
             acceptedHandoffId=receipt.handoffId
             return true
         }
+        @Synchronized internal fun finishRecovery(completion:NativeWorkingSession.RecoveryCompletion) {
+            if(completion.authorizes(this)) nativeSaveReady=true
+        }
         companion object {
             internal fun fromPrepared(prepared:PreparedNativeOpen):EditSource=synchronized(prepared) {
                 val version=prepared.note?.let {prepared.sourceVersion(it)}
                     ?: prepared.sourceVersion(requireNotNull(prepared.canvas))
                 prepared.editSourceMemo ?: EditSource(prepared.note,prepared.canvas,prepared.resources,
-                    prepared.pdfIds.toSet(),prepared.originalExternalPdf,version).also {prepared.editSourceMemo=it}
+                    prepared.pdfIds.toSet(),prepared.originalExternalPdf,version,prepared.recoveryBinding?.id,
+                    prepared.recoveryBinding==null,{prepared.recoveryBinding==null || prepared.recoveryClaimed}).also {prepared.editSourceMemo=it}
             }
         }
     }
@@ -272,7 +295,9 @@ internal class PreparedNativeOpen private constructor(
             check()
             val origin=read.metadata.source ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
             val version=source.version
-            if(version.kind!=origin.kind || version.documentId!=origin.documentId || version.locationKey!=origin.locationKey || version.sha256!=origin.sha256)
+            val handoff=read.metadata.handoff
+            if(version.kind!=origin.kind || version.documentId!=origin.documentId || version.locationKey!=origin.locationKey ||
+                version.sha256!=(handoff?.candidateSha256 ?: origin.sha256))
                 throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
             val body=read.body
             fun verifyBody() {
@@ -330,7 +355,8 @@ internal class PreparedNativeOpen private constructor(
                 val ids=note?.pdfFile?.let {setOf(it.nameWithoutExtension)} ?: emptySet()
                 // Transfer the cache's admission leases, not source.ids: embedded source has not
                 // been decoded and can have an empty set. No resolve/close GC gap is introduced.
-                return PreparedNativeOpen(version,source.file.length(),note,canvas,assets,resources,ids,AutoCloseable {release()})
+                return PreparedNativeOpen(version,source.file.length(),note,canvas,assets,resources,ids,AutoCloseable {release()},
+                    handoff?.let {RecoveryBinding(session,read,it.id)})
             } catch(error:Throwable) {
                 try {release()} catch(close:Throwable) {error.addSuppressed(close)}
                 try {if(!assets.deleteRecursively() && assets.exists()) error.addSuppressed(java.io.IOException("Cannot remove working recovery assets"))}

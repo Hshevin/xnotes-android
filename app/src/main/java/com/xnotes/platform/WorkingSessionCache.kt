@@ -44,6 +44,10 @@ internal class WorkingSessionCache(
     data class Publication(val request:Request,val published:Boolean)
     data class Previous(val kind:Kind,val documentId:String,val contentVersion:Long,val metadataJson:String,
                         val sha256:String,val headHash:String)
+    class Claim private constructor(private val coordinator:Any,private val headHash:String) {
+        internal fun matches(owner:Any,previous:Previous)=coordinator===owner && headHash==previous.headHash
+        companion object {internal fun issue(owner:Any,headHash:String)=Claim(owner,headHash)}
+    }
 
     class Read internal constructor(
         private val issuer:Any,val headHash:String,
@@ -223,6 +227,14 @@ internal class WorkingSessionCache(
         if(state.observedHeadHash!=read.headHash || !ownsHead(read.headHash,owner,0)) false
         else {nextGeneration();state.latest=null;true}
     }
+    /** Transfer this verified read's transition identity, never its old body's revision proof. */
+    fun claimRead(read:Read):Claim=synchronized(state) {
+        read.checkIssuer(readIssuer)
+        if(state.observedHeadHash!=read.headHash) throw Conflict()
+        nextGeneration();state.latest=null;state.committed=null
+        Claim.issue(state,read.headHash)
+    }
+    fun ownsClaimedPrevious(claim:Claim,previous:Previous)=claim.matches(state,previous)
     /** Finish only this adapter's actual committed write; expire even later uncommitted tickets. */
     fun invalidateForPublication(request:WriteRequest):Boolean=synchronized(state) {
         val committed=state.committed

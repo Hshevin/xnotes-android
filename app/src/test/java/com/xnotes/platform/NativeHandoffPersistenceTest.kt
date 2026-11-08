@@ -74,7 +74,7 @@ class NativeHandoffPersistenceTest {
         fun stage(source:PreparedNativeOpen.EditSource,doc:Document)=source.capture(doc).prepareForHandoff(storage,notes,canvases,File(root,"scratch"),"source")
         fun copyStore(name:String):NativeWorkingSession {
             val target=File(root,name);directory.copyRecursively(target)
-            return NativeWorkingSession(target,notes,canvases,storage.pdfResources)
+            return NativeWorkingSession(target,notes,canvases,storage.pdfResources,onEvent={e,f->event?.invoke(e,f)})
         }
         fun bytes()=directory.listFiles().orEmpty().associate {it.name to it.readBytes().toList()}
     }
@@ -158,7 +158,7 @@ class NativeHandoffPersistenceTest {
         cold.load()!!.use {assertEquals(stage.handoffId,it.metadata.handoff!!.id)}
         assertThrows(WorkingSessionCache.Conflict::class.java) {cold.publishClear(cold.reserveClear())}
         assertThrows(WorkingSessionCache.Conflict::class.java) {cold.publish(cold.capture(doc,source,f.view))}
-        assertThrows(WorkingSessionCache.Conflict::class.java) {cold.prepareRecovery(f.storage,File(f.root,"recovery-pdf"),File(f.root,"recovery-assets"))}
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {cold.prepareRecovery(f.storage,File(f.root,"recovery-pdf"),File(f.root,"recovery-assets"))}
         assertEquals(before,dir.listFiles()!!.associate {it.name to it.readBytes().toList()});assertEquals(0,f.writes)
     }
     @Test fun anotherOwnerPublishedBetweenIoPreflightAndMainRegistrationCannotBeOverwritten()=scenario {f->
@@ -485,6 +485,13 @@ class NativeHandoffPersistenceTest {
         assertEquals(stage.original.sha256,stage.candidate.sha256)
         runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source)}}.use {publication->
             val receipt=stage.commit(publication);assertEquals(0,f.writes)
+            val cold=f.copyStore("noop-cold")
+            (cold.prepareRecovery(f.storage,File(f.root,"noop-pdfs"),File(f.root,"noop-assets")) as NativeWorkingSession.Recovery.Bound).use {bound->
+                val p=bound.prepared;val restored=p.canvas!!;p.protectForAdoption();p.adopt(restored);bound.claim()
+                val next=p.editSource();assertThrows(ReferenceContractViolation::class.java) {next.capture(restored)}
+                val write=cold.capture(restored,next);assertTrue(write.requiresBody);assertTrue(cold.publish(write).published)
+                next.capture(restored)
+            }
             assertTrue(f.store.publish(f.store.capture(doc,source)).published)
             f.store.load()!!.use {assertNotNull(it.metadata.handoff)}
             assertTrue(source.accept(request,receipt));assertTrue(f.store.publish(f.store.capture(doc,source)).published)
@@ -518,7 +525,15 @@ class NativeHandoffPersistenceTest {
         val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
         doc.pages.single().items.add(ink(400.0));doc.dirty=true
         runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
-            assertTrue(source.accept(request,stage.commit(publication)))
+            val receipt=stage.commit(publication)
+            val cold=f.copyStore("pdf-cold")
+            (cold.prepareRecovery(f.storage,File(f.root,"pdf-pdfs"),File(f.root,"pdf-assets")) as NativeWorkingSession.Recovery.Bound).use {bound->
+                val p=bound.prepared;val restored=p.note!!;assertTrue(restored.identity.externalPdf)
+                p.protectForAdoption();p.adopt(restored);bound.claim();val next=p.editSource()
+                val write=cold.capture(restored,next,f.view);assertTrue(write.requiresBody);assertTrue(cold.publish(write).published)
+                next.capture(restored)
+            }
+            assertTrue(source.accept(request,receipt))
             val write=f.store.capture(doc,source,f.view);assertFalse(write.requiresBody)
             assertTrue(f.store.publish(write).published)
             val native=com.xnotes.format.BundleReferenceInfo.inspect(f.file,true)
@@ -529,6 +544,89 @@ class NativeHandoffPersistenceTest {
             }
             f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0");f.storage.pdfResources.collect()
             assertTrue(pdf.isFile)
+        }
+    }
+    @Test fun coldActualBRecoveryClaimsOnlyTheAdoptedModelAndRewritesItsCurrentContentBeforeSaving()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+        doc.pages.single().items.add(ink(400.0));doc.dirty=true
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {stage.commit(it)}
+        val cold=f.copyStore("cold-b")
+        val recovery=cold.prepareRecovery(f.storage,File(f.root,"recover-pdfs"),File(f.root,"recover-assets")) as NativeWorkingSession.Recovery.Bound
+        val p=recovery.prepared;val restored=requireNotNull(p.note)
+        assertEquals(2,restored.pages.single().items.size)
+        assertThrows(IllegalStateException::class.java) {p.editSource()}
+        assertThrows(IllegalStateException::class.java) {recovery.claim()}
+        p.protectForAdoption();assertThrows(ReferenceContractViolation::class.java) {p.adopt(restored.snapshot())};p.adopt(restored)
+        val gated=p.sourceForClaim(cold,recovery.held)
+        assertThrows(ReferenceContractViolation::class.java) {gated.observe(restored)}
+        assertThrows(ReferenceContractViolation::class.java) {gated.capture(restored)}
+        restored.pages.single().items.add(ink(900.0));restored.dirty=true
+        recovery.claim();val next=p.editSource();recovery.close()
+        next.observe(restored) // Readonly cache observation cannot unlock native capture.
+        assertThrows(ReferenceContractViolation::class.java) {next.capture(restored)}
+        f.event={event,_->if(event==WorkingSessionCache.Event.BEFORE_HEAD_REPLACE) throw java.io.IOException("first body failed")}
+        assertThrows(java.io.IOException::class.java) {cold.publish(cold.capture(restored,next,f.view))}
+        assertThrows(ReferenceContractViolation::class.java) {next.capture(restored)}
+        f.event=null
+        val write=cold.capture(restored,next,f.view);assertTrue(write.requiresBody);assertNull(write.handoff)
+        assertTrue(cold.publish(write).published)
+        cold.load()!!.use {assertNull(it.metadata.handoff);assertEquals(3,it.body.inputStream().use {f.notes.read(it)}.pages.single().items.size)}
+        val request=next.capture(restored);val receipt=request.publish(f.storage,f.notes,f.canvases,File(f.root,"later-save"),"source")
+        assertTrue(next.accept(request,receipt));assertEquals(3,f.file.inputStream().use {f.notes.read(it)}.pages.single().items.size)
+    }
+    @Test fun twoColdPreparationsCannotBothClaimAndAClosedPreparationNeverClaims()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {stage.commit(it)}
+        val cold=f.copyStore("claim-race")
+        fun prepare()=cold.prepareRecovery(f.storage,File(f.root,"recover-pdfs"),File(f.root,"recover-assets")) as NativeWorkingSession.Recovery.Bound
+        val closed=prepare();closed.close();assertThrows(IllegalStateException::class.java) {closed.claim()}
+        prepare().use {one->prepare().use {two->
+            for(bound in listOf(one,two)) {bound.prepared.protectForAdoption();bound.prepared.adopt(bound.prepared.note!!)}
+            one.claim();assertThrows(WorkingSessionCache.Conflict::class.java) {two.claim()}
+            assertThrows(IllegalStateException::class.java) {two.prepared.editSource()}
+            val next=one.prepared.editSource();val write=cold.capture(one.prepared.note!!,next,f.view)
+            assertTrue(write.requiresBody);assertTrue(cold.publish(write).published)
+            assertThrows(WorkingSessionCache.Conflict::class.java) {two.claim()}
+        }}
+    }
+    @Test fun unresolvedActualAAndForeignActualSourceCannotBeRebasedOrLoseTheirRecoveryBytes() {
+        for(foreign in listOf(false,true)) scenario {f->
+            val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+            f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+            runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.close()
+            f.storage.restore(f.uri)
+            if(foreign) {doc.pages.single().items.add(ink(800.0));f.file.outputStream().use {f.notes.write(doc.snapshot(),it)}}
+            val cold=f.copyStore("unresolved");val directory=File(f.root,"unresolved")
+            val before=directory.listFiles()!!.associate {it.name to it.readBytes().toList()};val target=f.file.readBytes()
+            assertThrows(ReferenceContractViolation::class.java) {cold.prepareRecovery(f.storage,File(f.root,"recover-pdfs"),File(f.root,"recover-assets"))}
+            assertEquals(before,directory.listFiles()!!.associate {it.name to it.readBytes().toList()});assertArrayEquals(target,f.file.readBytes())
+            assertEquals(0,f.writes)
+        }
+    }
+    @Test fun anotherAdapterReadAndAReplacedHeadCannotClaimAnEarlierPreparation()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {stage.commit(it)}
+        val cold=f.copyStore("changed-head");val dir=File(f.root,"changed-head")
+        val other=NativeWorkingSession(dir,f.notes,f.canvases,f.storage.pdfResources)
+        val bound=cold.prepareRecovery(f.storage,File(f.root,"recover-pdfs"),File(f.root,"recover-assets")) as NativeWorkingSession.Recovery.Bound
+        bound.use {
+            val p=it.prepared;p.protectForAdoption();p.adopt(p.note!!)
+            assertThrows(IllegalStateException::class.java) {p.sourceForClaim(other,it.held)}
+            other.load()!!.use {wrong->assertThrows(IllegalStateException::class.java) {p.sourceForClaim(cold,wrong)}}
+            val generic=WorkingSessionCache(dir,{_,_,_->})
+            val metadata=org.json.JSONObject(File(dir,"head.json").readText()).getJSONObject("metadata")
+            metadata.getJSONObject("view").put("scrollY",999.0)
+            val ticket=generic.reserve(Any(),WorkingSessionCache.Kind.NOTE,doc.identity.documentId,123,metadata)
+            assertTrue(generic.publish(ticket) {out->bound.held.body.inputStream().use {input->input.copyTo(out)}}.published)
+            assertThrows(WorkingSessionCache.Conflict::class.java) {bound.claim()}
+            assertThrows(IllegalStateException::class.java) {p.editSource()}
+        }
+        (cold.prepareRecovery(f.storage,File(f.root,"recover-pdfs"),File(f.root,"recover-assets")) as NativeWorkingSession.Recovery.Bound).use {
+            val p=it.prepared;p.protectForAdoption();p.adopt(p.note!!);it.claim()
+            assertTrue(cold.publish(cold.capture(p.note!!,p.editSource(),f.view)).published)
         }
     }
     private fun normalizeZipTimes(file:File,root:File) {

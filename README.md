@@ -80,7 +80,7 @@
 
 活模型的页身份复制组件已实现，覆盖重复/链式复制、删除页撤销与快照一致性，见[复制上下文与验证](docs/movinkpad/reference-copy-scope-2026-11-08.md)。当前仅为模型基础；另存、自动分叉与会话恢复接线仍在开发。
 
-会话正文与文档身份的原子配对组件已实现，包含旧任务拒绝、读租约及损坏保留，见[会话事务与验证](docs/movinkpad/reference-session-cache-2026-11-08.md)。原生笔记/画布codec、严格来源描述和视口的适配已补齐（[原生会话适配](docs/movinkpad/reference-native-session-adapter-2026-11-08.md)），视口变化可复用便携正文；损坏或未来版本缓存保留并拒绝清理。已绑定工作副本可经真实来源版本核实后准备恢复，支持保留增删/重排页和原PDF包装（[恢复合同与验证](docs/movinkpad/reference-working-recovery-2026-11-08.md)）。保存交接组件已支持先持久保留当前编辑内容、再受控保存原文件，并凭对应成功回执更新缓存基准；失败保留恢复资料，已经写入的版本不会自动回滚（[交接合同与验证](docs/movinkpad/reference-native-handoff-2026-11-08.md)）。编辑器和旧缓存尚待统一接入，来源描述本身不授予覆盖原文件的权限。
+会话正文与文档身份的原子配对组件已实现，包含旧任务拒绝、读租约及损坏保留，见[会话事务与验证](docs/movinkpad/reference-session-cache-2026-11-08.md)。原生笔记/画布codec、严格来源描述和视口的适配已补齐（[原生会话适配](docs/movinkpad/reference-native-session-adapter-2026-11-08.md)），视口变化可复用便携正文；损坏或未来版本缓存保留并拒绝清理。已绑定工作副本可经真实来源版本核实后准备恢复，支持保留增删/重排页和原PDF包装（[恢复合同与验证](docs/movinkpad/reference-working-recovery-2026-11-08.md)）。保存交接组件已支持先持久保留当前编辑内容、再受控保存原文件，并凭对应成功回执更新缓存基准；异常退出后可核实已写版本并准备恢复工作副本，实际采用并重新持久化后才恢复保存权限；失败保留恢复资料，已经写入的版本不会自动回滚（[交接合同与验证](docs/movinkpad/reference-native-handoff-2026-11-08.md)）。编辑器和旧缓存尚待统一接入，来源描述本身不授予覆盖原文件的权限。
 
 原生来源版本 API 已补上同源读取、外部同编号修改的覆盖拒绝、PDF 校验期保护与保存回执，见[来源版本与验证](docs/movinkpad/reference-native-source-version-2026-11-08.md)。真实打开入口已接入同源核验；普通保存与会话任务的统一接线仍在继续。
 

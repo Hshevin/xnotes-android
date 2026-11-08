@@ -1,7 +1,7 @@
 # 原生保存到工作会话的持久交接（2026-11-08）
 
 用户要求：继续思维导图保存/重开闭环；保留已写入版本，只丢之后修改；不要打包APK。
-状态：整体交接计划已独立审核；首片 v4 持久拒写保护已实现；完整 JVM 300 套件 / 3293 项通过，Android 测试源码编译成功，独立源码复核通过；实际阶段证明/prepare→commit也已实现并独立复核；完整协调交接尚未实施。
+状态：v4受控发布与accepted-ID完成转换已实现、完整JVM303套件3363项通过、Android测试源码编译与独立复核通过；cold actualB恢复/认领已验证（303套件3367项/Android测试源码编译）；生产统一writer和稳定输入屏障尚未接入。
 本轮边界：源码、测试、文档、本地提交；不打包、安装、推送、合并或发布。
 
 ## 要解决的真实窗口
@@ -127,3 +127,18 @@ previous-head 只允许实际同 owner 的 T+A，或同次完成已提交但尚�
 接口约定：成功完成转换会主动失效 reservation；其返回值 published=true 表示实际缓存已提交，但 isCurrent(write) 随收尾失效为 false。后续 producer 不得套用普通缓存的 published && isCurrent 来判断完成转换，必须分别处理保存回执、当前模型和缓存完成结果。生产尚未接入此接口。
 
 新增测试覆盖当前C保留/正文复用、最后检查之后旧T写入、head失败保T、head已提交但调用者未收到成功的重试、两个完成写交错且新T已注册后旧收尾、实际同SHA画布、来源退休及受管PDF包装/资源保护。完整 tmp/native-handoff-completion-full.log：303 套件3363项全部通过（0失败/错误/跳过），Android 测试源码编译成功；含最后新增的外部PDF原件包装与资源保护场景。独立源码复核确认收尾修复与交错测试通过。仍未实现 actualB 重启认领、活动输入稳定屏障和统一生产 writer；Android 仪器及目标设备未运行。
+
+
+## cold actualB 恢复／认领
+
+本片限定重启后的冷 Root：任何现存交接 intent、completion 或已认领 owner 都拒绝接管；活 owner 显式退休后的转交仍是后续工作。prepareRecovery 持有本 adapter 的实际 Read，实际来源须满足 kind/UUID/location 和 T.candidate SHA，且缓存自身页集/锚点/PDF合同及完整原件 identity 核实。实际 A!=B、外部版本、pending4、失效权限均不自动改基准，不写原文件、不清恢复资料。普通无T恢复保持原合同。
+
+Prepared 仅由实际 decode 链持私有 session/Read/T 绑定。真正采用同一模型后，Main 认领核实同 adapter、Read 未关闭及当前 observed head；cache 同短锁失效旧 reservation、清掉旧 runtime body proof，转移私有 Claim 以解释确切 previous T head。Root 成功注册后签 RecoveryClaim，Prepared 才开放 cache 观察。关闭未认领 Bound 永远不能领权；成功认领后关闭 Bound 仅释放临时资源，实际 adopted 模型和长期 source 保留。旧 Read 在认领时转为私有过渡能力，不把旧 contentVersion 或冷 C0 正文背书给新 owner。
+
+首次捕获必须重写当前实际模型正文，包括恢复 C0 后编辑 C1 再认领；无T+B 新正文原子提交并由实际 ticket/generation/owner/head 收尾后，私有 RecoveryCompletion 才打开 native capture。first body失败仍拒原件保存；成功head返回中断可以同owner/noT+B再完成；其他模型/过期Read/另一认领不能借同UUID取得权限。
+
+独立复核指出并已移除两个过宽接口：任意Unit回调置claimed，以及普通Observation调用finish打开native保存。后者 tmp/native-handoff-recovery-review-red.log 已实际重现；修复改为两份私有构造的typed能力，仅实际Root/cache完成能签发，旧Observation参数及Unit回调形状已从接口撤除。当前sourceForClaim即使直接调用也只返回禁用的context，观察与native capture均拒绝。
+
+定向 tmp/native-handoff-recovery-boundaries.log 已通过，含真实B/C恢复并继续保存、C1首次重写、first body失败gate、两个Prepared竞争、关闭/错模型、actualA/外部版本资料保全，以及同SHA画布和external PDF冷恢复。新增真实Android provider交接→恢复→首次持久化场景只编译，未运行。完整 tmp/native-handoff-recovery-final-full.log：303套件3367项全部通过（0失败/错误/跳过），Android测试源码编译成功，含新增真实provider场景仅编译；生产Editor/旧SessionStore尚未迁移，不把本片当作整项功能完成。
+
+仍需受控pending4固定B续写、活owner恢复转交、稳定输入屏障、生产统一native/cache writer、新建/另存持久copy交接、页身份激活与来源菜单/多来源预览、跳转往返/backlinks、关系网络及剩余导图交互。

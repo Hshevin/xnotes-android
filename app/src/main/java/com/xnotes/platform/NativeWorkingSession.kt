@@ -40,7 +40,8 @@ internal class NativeWorkingSession(
     data class Metadata(val dirty:Boolean,val displayName:String?,val source:SourceDescription?,val noteView:NoteView?,val canvasView:Waypoint?,val handoff:Handoff?=null)
     class Write internal constructor(internal val ticket:WorkingSessionCache.WriteRequest,internal val note:Document?,
                                      internal val canvas:InfiniteDocument?,internal val proof:PreparedNativeOpen.EditSource.Observation?,
-                                     internal val handoff:Handoff?=null,private val captureSeal:Any?=null,internal val completion:Any?=null) {
+                                     internal val handoff:Handoff?=null,private val captureSeal:Any?=null,internal val completion:Any?=null,
+                                     internal val recovery:Any?=null) {
         val requiresBody get()=ticket.requiresBody
         internal fun sourceCurrent()=proof?.isCurrent()!=false
         internal fun capturedBy(seal:Any)=captureSeal===seal
@@ -54,14 +55,23 @@ internal class NativeWorkingSession(
         internal fun checkIssuer(owner:Any)=synchronized(this) {check(!closed && issuer===owner) {"Working session read is not owned by this adapter"}}
         internal fun owns(cache:WorkingSessionCache,owner:Any,minimumGeneration:Long=0)=cache.ownsPublished(held,owner,minimumGeneration)
         internal fun invalidate(cache:WorkingSessionCache,owner:Any)=cache.invalidateForRead(held,owner)
+        internal fun claim(cache:WorkingSessionCache)=cache.claimRead(held)
         internal fun verifyCurrent(cache:WorkingSessionCache,checkActive:()->Unit)=cache.verifyRead(held,checkActive)
         override fun close() {synchronized(this) {if(closed) return;closed=true};held.close()}
     }
     sealed interface Recovery {
         data object Empty:Recovery
         data class Unbound(val kind:WorkingSessionCache.Kind,val documentId:String,val metadata:Metadata):Recovery
-        class Bound internal constructor(val prepared:PreparedNativeOpen,val metadata:Metadata):Recovery,AutoCloseable {
-            override fun close()=prepared.close()
+        class Bound internal constructor(internal val session:NativeWorkingSession,val prepared:PreparedNativeOpen,internal val held:Read):Recovery,AutoCloseable {
+            val metadata get()=held.metadata
+            private var closed=false
+            @Synchronized fun claim() {check(!closed) {"Recovery is closed"};RecoveryClaim.claim(session,this)}
+            @Synchronized override fun close() {
+                if(closed) return;closed=true
+                var failure:Throwable?=null
+                try {prepared.close()} catch(error:Throwable) {failure=error;throw error}
+                finally {try {held.close()} catch(close:Throwable) {if(failure!=null) failure.addSuppressed(close) else throw close}}
+            }
         }
     }
     private val readIssuer=Any()
@@ -70,10 +80,14 @@ internal class NativeWorkingSession(
         fun matches(observation:PreparedNativeOpen.EditSource.Observation?,owner:Any)=
             owner===intent.owner && proof.sameEpoch(observation)
     }
-    private class CaptureContext(val intent:Intent?,val completion:Completion?) {
+    private class Recovered(val owner:Any,val source:PreparedNativeOpen.EditSource,val proof:PreparedNativeOpen.EditSource.Observation,
+                            val handoff:Handoff,val claim:WorkingSessionCache.Claim) {
+        fun matches(observation:PreparedNativeOpen.EditSource.Observation?,owner:Any)=this.owner===owner && proof.sameEpoch(observation)
+    }
+    private class CaptureContext(val intent:Intent?,val completion:Completion?,val recovered:Recovered?) {
         val handoff get()=if(completion==null) intent?.handoff else null
     }
-    private class RootState {var intent:Intent?=null;var persisted=false;var completion:Completion?=null}
+    private class RootState {var intent:Intent?=null;var persisted=false;var completion:Completion?=null;var recovered:Recovered?=null}
     private val rootState=rootState(directory.canonicalPath)
     private class ExpiredSource:CancellationException("Working source capture expired")
     private val cache=WorkingSessionCache(directory,validateBody={file,kind,id->
@@ -90,6 +104,8 @@ internal class NativeWorkingSession(
 
     private fun captureIntent(owner:Any,proof:PreparedNativeOpen.EditSource.Observation?,required:Intent?):CaptureContext=synchronized(rootState) {
         val intent=rootState.intent
+        val recovered=rootState.recovered
+        if(recovered!=null && (required!=null || !recovered.matches(proof,owner))) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         if(required!=null && required!==intent) throw WorkingSessionCache.Conflict()
         if(intent!=null) {
             val completing=rootState.completion
@@ -100,13 +116,16 @@ internal class NativeWorkingSession(
                 rootState.completion=Completion(intent,requireNotNull(proof))
             } else intent.staged.checkCapture(proof,owner)
         }
-        CaptureContext(intent,rootState.completion)
+        CaptureContext(intent,rootState.completion,recovered)
     }
     private fun needsHandoffBody(context:CaptureContext):Boolean=synchronized(rootState) {
-        if(rootState.intent!==context.intent || rootState.completion!==context.completion) throw WorkingSessionCache.Conflict()
+        if(rootState.intent!==context.intent || rootState.completion!==context.completion || rootState.recovered!==context.recovered) throw WorkingSessionCache.Conflict()
         context.intent!=null && context.completion==null && !rootState.persisted
     }
     private fun allowed(write:Write):Boolean=synchronized(rootState) {
+        val recovered=rootState.recovered
+        if(recovered!=null) return@synchronized write.recovery===recovered && write.handoff==null && recovered.matches(write.proof,write.ticket.owner)
+        if(write.recovery!=null) return@synchronized false
         val intent=rootState.intent ?: return@synchronized write.handoff==null && write.completion==null
         val completing=rootState.completion
         if(completing!=null) return@synchronized write.completion===completing && write.handoff==null && completing.matches(write.proof,write.ticket.owner)
@@ -117,6 +136,7 @@ internal class NativeWorkingSession(
     }
     private fun previousMetadata(previous:WorkingSessionCache.Previous?)=previous?.let {parseMetadata(it.kind,it.documentId,it.metadataJson)}
     private fun register(staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,previous:Read):Intent=synchronized(rootState) {
+        if(rootState.recovered!=null) throw WorkingSessionCache.Conflict()
         staged.checkCurrent();require(staged.usesResources(resources))
         val existing=rootState.intent
         if(existing!=null && existing.staged!==staged) throw WorkingSessionCache.Conflict()
@@ -261,7 +281,7 @@ internal class NativeWorkingSession(
         val snapshot=if(ticket.requiresBody) document.copyWriteSnapshot(fixedItems=true) else null
         if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,snapshot,null,proof,intent.handoff,seal,intent.completion)
+        return Write(ticket,snapshot,null,proof,intent.handoff,seal,intent.completion,intent.recovered)
     }
     fun capture(document:InfiniteDocument,source:PreparedNativeOpen.EditSource?):Write {
         return captureCanvas(document,source)
@@ -280,12 +300,12 @@ internal class NativeWorkingSession(
         val snapshot=if(ticket.requiresBody) document.snapshotForWrite(fixedItems=true) else null
         if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,null,snapshot,proof,intent.handoff,seal,intent.completion)
+        return Write(ticket,null,snapshot,proof,intent.handoff,seal,intent.completion,intent.recovered)
     }
     fun isCurrent(write:Write)=cache.isCurrent(write.ticket) && write.sourceCurrent() && allowed(write)
     fun reserveClear()=cache.reserveClear()
     fun publishClear(request:WorkingSessionCache.ClearRequest,checkActive:()->Unit={}):WorkingSessionCache.Publication {
-        val check={checkActive();synchronized(rootState) {if(rootState.intent!=null) throw WorkingSessionCache.Conflict()}}
+        val check={checkActive();synchronized(rootState) {if(rootState.intent!=null || rootState.recovered!=null) throw WorkingSessionCache.Conflict()}}
         check()
         return cache.publishClearChecked(request,check) {previous->if(previousMetadata(previous)?.handoff!=null) throw WorkingSessionCache.Conflict()}
     }
@@ -295,7 +315,16 @@ internal class NativeWorkingSession(
         val check={checkActive();if(!write.sourceCurrent() || !allowed(write)) throw ExpiredSource()}
         return try {cache.publishChecked(write.ticket,check,{previous->
             val metadata=previousMetadata(previous);val old=metadata?.handoff
-            if(write.completion!=null) {
+            if(write.recovery!=null) {
+                val recovered=synchronized(rootState) {rootState.recovered?.takeIf {it===write.recovery}} ?: throw WorkingSessionCache.Conflict()
+                val source=metadata?.source ?: throw WorkingSessionCache.Conflict()
+                val expected=recovered.proof.expected
+                if(previous==null || source.kind!=expected.kind || source.documentId!=expected.documentId || source.locationKey!=expected.locationKey)
+                    throw WorkingSessionCache.Conflict()
+                if(old!=null) {
+                    if(old!=recovered.handoff || source.sha256!=old.originalSha256 || !cache.ownsClaimedPrevious(recovered.claim,previous)) throw WorkingSessionCache.Conflict()
+                } else if(source.sha256!=expected.sha256 || !cache.ownsPrevious(previous,recovered.owner)) throw WorkingSessionCache.Conflict()
+            } else if(write.completion!=null) {
                 val completion=synchronized(rootState) {rootState.completion?.takeIf {it===write.completion}} ?: throw WorkingSessionCache.Conflict()
                 if(previous==null || !cache.ownsPrevious(previous,write.ticket.owner) || old!=null && old!=completion.intent.handoff)
                     throw WorkingSessionCache.Conflict()
@@ -304,7 +333,7 @@ internal class NativeWorkingSession(
                 if(source.kind!=expected.kind || source.documentId!=expected.documentId || source.locationKey!=expected.locationKey || source.sha256!=expected.sha256)
                     throw WorkingSessionCache.Conflict()
             } else if(old!=null && old!=write.handoff) throw WorkingSessionCache.Conflict()
-            if(write.completion==null && write.handoff!=null && previous!=null) {
+            if(write.recovery==null && write.completion==null && write.handoff!=null && previous!=null) {
                 val intent=synchronized(rootState) {rootState.intent} ?: throw WorkingSessionCache.Conflict()
                 val source=metadata?.source ?: throw WorkingSessionCache.Conflict()
                 val expected=intent.staged.original
@@ -334,7 +363,10 @@ internal class NativeWorkingSession(
         }.also {result->if(result.published) synchronized(rootState) {
             // The source may have retired after the head committed. Runtime commit provenance,
             // rather than a live editing grant, authorizes this memory-only cleanup.
-            if(write.completion!=null && rootState.completion===write.completion && cache.invalidateForPublication(write.ticket)) {
+            val recovered=rootState.recovered
+            if(write.recovery!=null && write.recovery===recovered) {
+                RecoveryCompletion.complete(this,write)?.let {requireNotNull(recovered).source.finishRecovery(it)}
+            } else if(write.completion!=null && rootState.completion===write.completion && cache.invalidateForPublication(write.ticket)) {
                 rootState.intent=null;rootState.completion=null;rootState.persisted=false
             } else if(write.handoff!=null && rootState.intent?.handoff==write.handoff && rootState.completion==null) rootState.persisted=true
         }}} catch(_:ExpiredSource) {WorkingSessionCache.Publication(write.ticket,false)}
@@ -349,23 +381,61 @@ internal class NativeWorkingSession(
     /** Internal proof check for the decoding factory; neither a tuple nor a closed lease can stand in for a load. */
     internal fun checkRecoveryRead(read:Read)=read.checkIssuer(readIssuer)
 
+    /** Private capability issued only after the actual read has transferred into this cold root. */
+    class RecoveryClaim private constructor(private val store:NativeWorkingSession,private val prepared:PreparedNativeOpen,
+                                           private val recovered:Recovered) {
+        internal fun authorizes(candidate:PreparedNativeOpen,source:PreparedNativeOpen.EditSource)=
+            candidate===prepared && recovered.source===source && synchronized(store.rootState) {store.rootState.recovered===recovered}
+        companion object {
+            internal fun claim(store:NativeWorkingSession,bound:Recovery.Bound) {
+                check(android.os.Looper.myLooper()===android.os.Looper.getMainLooper()) {"Recovery claim requires the owner thread"}
+                require(bound.session===store);store.checkRecoveryRead(bound.held)
+                val handoff=bound.metadata.handoff ?: throw WorkingSessionCache.Conflict()
+                synchronized(bound.prepared) {
+                    val source=bound.prepared.sourceForClaim(store,bound.held)
+                    val proof=source.observationForClaim();val owner=proof.ownerToken
+                    if(proof.acceptedHandoffId!=handoff.id || proof.expected.sha256!=handoff.candidateSha256) throw WorkingSessionCache.Conflict()
+                    synchronized(store.rootState) {
+                        if(store.rootState.intent!=null || store.rootState.completion!=null || store.rootState.recovered!=null) throw WorkingSessionCache.Conflict()
+                        val claim=bound.held.claim(store.cache)
+                        val recovered=Recovered(owner,source,proof,handoff,claim)
+                        store.rootState.recovered=recovered
+                        bound.prepared.acceptClaim(RecoveryClaim(store,bound.prepared,recovered))
+                    }
+                }
+            }
+        }
+    }
+    /** Actual successful cache publication, never a readonly Observation or Unit callback. */
+    class RecoveryCompletion private constructor(private val recovered:Recovered) {
+        internal fun authorizes(source:PreparedNativeOpen.EditSource)=recovered.source===source && recovered.proof.isCurrent()
+        companion object {
+            internal fun complete(store:NativeWorkingSession,write:Write):RecoveryCompletion?=synchronized(store.rootState) {
+                val recovered=store.rootState.recovered
+                if(recovered==null || write.recovery!==recovered || !store.cache.invalidateForPublication(write.ticket)) null
+                else {store.rootState.recovered=null;RecoveryCompletion(recovered)}
+            }
+        }
+    }
+
     /** IO-only. No UI replacement, cache consumption or native write. Only a verified bound source can issue a preparation. */
     fun prepareRecovery(storage:NotebookStorage,pdfDir:File,assetRoot:File,checkActive:()->Unit={}):Recovery {
         require(storage.pdfResources===resources)
-        var prepared:PreparedNativeOpen?=null
+        var prepared:PreparedNativeOpen?=null;var read:Read?=null
         try {
-            val read=load(checkActive) ?: return Recovery.Empty
-            read.use {
-                if(it.metadata.handoff!=null) throw WorkingSessionCache.Conflict() // Actual-B recovery/claim follows the persistence boundary.
-                val origin=it.metadata.source ?: return Recovery.Unbound(it.kind,it.documentId,it.metadata)
+            read=load(checkActive) ?: return Recovery.Empty
+            val current=read
+            current.let {
+                val origin=it.metadata.source ?: return Recovery.Unbound(it.kind,it.documentId,it.metadata).also {current.close();read=null}
                 storage.openSource(origin.uri,origin.kind,checkActive).use {source->
                     prepared=PreparedNativeOpen.readWorking(this,it,source,resources,noteCodec,canvasCodec,pdfDir,assetRoot,checkActive)
                 }
-                checkActive();checkRecoveryRead(it)
-                return Recovery.Bound(requireNotNull(prepared),it.metadata)
+                checkActive();checkRecoveryRead(it);it.verifyCurrent(cache,checkActive)
+                return Recovery.Bound(this,requireNotNull(prepared),it).also {read=null;prepared=null}
             }
         } catch(error:Throwable) {
             try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            try {read?.close()} catch(close:Throwable) {error.addSuppressed(close)}
             throw error
         }
     }
