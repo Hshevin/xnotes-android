@@ -14,7 +14,12 @@ internal class BundleReferenceInfo private constructor(val header:BundleHeader,v
             require(header.anchors==null)
             return BundleReferenceInfo(header,emptyList(),null,null,null)
         }
-        fun inspect(file:File,validatePayload:Boolean,cancelled:()->Boolean={false}):BundleReferenceInfo {
+        fun inspect(file:File,validatePayload:Boolean,cancelled:()->Boolean={false}):BundleReferenceInfo =
+            inspectBundle(file,validatePayload,false,cancelled)
+        /** Full manifest validation for independent recovery copies, without decoding model contents. */
+        fun inspectStrict(file:File,cancelled:()->Boolean={false}):BundleReferenceInfo =
+            inspectBundle(file,true,true,cancelled)
+        private fun inspectBundle(file:File,validatePayload:Boolean,strictManifest:Boolean,cancelled:()->Boolean):BundleReferenceInfo {
             val header=BundleHeader.read(file,cancelled)
             if(!validatePayload && header.anchors==null) return legacy(header)
             val payloads=BundleEntries.digests(file,cancelled,boundedManifest=header.anchors!=null)
@@ -28,7 +33,11 @@ internal class BundleReferenceInfo private constructor(val header:BundleHeader,v
                 val metadata=zip.getInputStream(entry).use {input->
                     InputStreamReader(BundleEntries.cancellable(input,cancelled),Charsets.UTF_8.newDecoder()
                         .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)).use {reader->
-                        val p=JsonPull(reader,strict=header.anchors!=null);p.beginObject()
+                        // Unmarked legacy strings had no token limit. Keep that size contract while
+                        // checking their complete JSON; anchored manifests retain the existing limits.
+                        val p=if(strictManifest && header.anchors==null) JsonPull(reader,strict=true,tokenLimit=Int.MAX_VALUE)
+                            else JsonPull(reader,strict=header.anchors!=null)
+                        p.beginObject()
                         val names=hashSetOf<String>();var format:String?=null;var version=false;var hasPdf=false
                         while(p.hasNext()) {
                             check(!cancelled());val key=p.nextName()

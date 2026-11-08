@@ -59,6 +59,12 @@ internal class WorkingSessionCache(
         override fun close() {if(closed.compareAndSet(false,true)) release()}
     }
 
+    sealed interface LoadState {
+        data object Absent:LoadState
+        data object Cleared:LoadState
+        class Active(val read:Read):LoadState
+    }
+
     private data class Body(val name:String,val sha:String,val kind:Kind,val documentId:String,val version:Long,val metadata:String)
     private data class Head(val hash:String?,val body:Body?)
     private data class Proof(val owner:Any,val headHash:String,val body:Body,val generation:Long)
@@ -194,12 +200,16 @@ internal class WorkingSessionCache(
     }
 
     /** A missing head or explicit tombstone is empty. Corruption is an error, never empty. */
-    fun load(checkActive:()->Unit={}):Read? {
+    fun load(checkActive:()->Unit={}):Read? = (loadState(checkActive) as? LoadState.Active)?.read
+
+    /** Only genuine absence permits a caller to inspect an older storage format. */
+    fun loadState(checkActive:()->Unit={}):LoadState {
+        checkActive()
         val head=synchronized(state) {checkedHead().also {it.body?.let(::acquire)}}
-        val body=head.body ?: return null
+        val body=head.body ?: return if(head.hash==null) LoadState.Absent else LoadState.Cleared
         try {
             verify(body,checkActive)
-            return Read(readIssuer,requireNotNull(head.hash),File(root,body.name),body.kind,body.documentId,body.metadata,body.sha) {release(body);cleanup()}
+            return LoadState.Active(Read(readIssuer,requireNotNull(head.hash),File(root,body.name),body.kind,body.documentId,body.metadata,body.sha) {release(body);cleanup()})
         } catch(error:Throwable) {release(body);throw error}
     }
 
