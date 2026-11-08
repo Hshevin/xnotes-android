@@ -98,6 +98,18 @@ class PdfResources internal constructor(private val context: Context,val registr
         if(!previous.containsAll(ids)) pin(owner,previous+ids)
     }
     fun references(owner: String): Set<String> = registry.referenceIds(owner)
+    /** Validate and acquire under the collection gate; there is no resolve-to-lease GC gap. */
+    internal fun holdResolved(ids:Set<String>):AutoCloseable = synchronized(gate) {
+        ids.forEach {resolve(it)}
+        hold(ids)
+    }
+    internal class HeldPdf(val file:File,val lease:AutoCloseable)
+    /** Decoder adoption of an embedded original cannot expose an unleased managed object. */
+    internal fun admitHeld(input:InputStream,name:String,expectedHash:String):HeldPdf = synchronized(gate) {
+        val file=admit(input,name)
+        if(file.nameWithoutExtension!=expectedHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+        HeldPdf(file,holdResolved(setOf(expectedHash)))
+    }
     fun hold(ids: Set<String>): AutoCloseable = synchronized(gate) {
         val tokens = mutableListOf<String>()
         try {

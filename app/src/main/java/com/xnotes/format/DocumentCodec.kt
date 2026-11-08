@@ -828,7 +828,11 @@ class DocumentCodec(
                             // Never slurp the PDF into memory: stream it to disk (or skip it).
                             if (pdfDir != null) {
                                 val started = System.nanoTime()
-                                pdfFile = if (pdfStore != null) pdfStore(zis) else {
+                                pdfFile = if (pdfStore != null) {
+                                    // The codec owns the ZIP. A sink may consume/close its entry view
+                                    // without closing the following manifest, identity or assets.
+                                    pdfStore(object:java.io.FilterInputStream(zis) {override fun close() {}})
+                                } else {
                                     val f = File.createTempFile("src", ".pdf", pdfDir).also {created+=it}
                                     FileOutputStream(f).use { zis.copyTo(it) }
                                     f

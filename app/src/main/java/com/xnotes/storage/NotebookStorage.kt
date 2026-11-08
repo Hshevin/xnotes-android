@@ -13,7 +13,8 @@ import kotlinx.coroutines.ensureActive
 
 /** On-demand, IO-only registration. Never walks storage on startup or a drawing callback. */
 class NotebookStorage internal constructor(private val context:Context,
-                                          private val targetOverride:((String)->MigrationPublication.Target)?=null) {
+                                          private val targetOverride:((String)->MigrationPublication.Target)?=null,
+                                          private val sourceValidationHook:(()->Unit)?=null) {
     val registry = DocumentRegistry(context)
     internal val pdfResources by lazy {PdfResources(context,registry)}
     private val lock = Any()
@@ -53,7 +54,45 @@ class NotebookStorage internal constructor(private val context:Context,
     }
     private fun migrationOwner(uri:String)="migration:${hashKey(registry.locationKey(uri))}"
     private fun recovery(reason:StorageMsg)=MigrationPublication.RecoveryRequired(StorageText.t(reason),reason=reason)
-    private fun sourceSnapshot(backend:MigrationPublication.Target)=com.xnotes.format.BundleSnapshot.fromInput(backend.read(),context.cacheDir)
+    private fun sourceSnapshot(backend:MigrationPublication.Target,checkActive:()->Unit={})=
+        com.xnotes.format.BundleSnapshot.fromInput(backend.read(),context.cacheDir) {checkActive();false}
+
+    /** IO-only, source bytes and their version are from the same owned container. */
+    internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot = synchronized(lock) {
+        purpose(kind.extension) // Reject unsupported document kinds before reading.
+        if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        checkActive()
+        val snapshot=sourceSnapshot(target(uri),checkActive)
+        var lease:AutoCloseable?=null
+        var leasedIds:Set<String>?=null
+        try {
+            // A fallback can inflate a large local ZIP view before returning the header. Protect
+            // only its dependency hints first; they cannot register or authorize a source identity.
+            val header=BundleHeader.readWithPdfProtection(snapshot.file,protect={ids->
+                check(lease==null) {"Source metadata protection was requested twice"}
+                lease=pdfResources.holdResolved(ids)
+                leasedIds=ids.toSet()
+                sourceValidationHook?.invoke()
+            }) {checkActive();false}
+            ReferenceContract.verifyObserved(registry.expectationAt(uri),
+                header.identity?.let {registry.expectationForId(it.documentId)},header)
+            val ids=header.identity?.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
+            if(leasedIds!=ids) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+            val inspected=NativeSourceVersion.inspect(snapshot.file,registry.locationKey(uri),kind,checkActive)
+            verifyObserved(uri,inspected.info)
+            val source=NativeSourceSnapshot.open(snapshot,inspected,pdfResources,requireNotNull(lease),ids,checkActive)
+            lease=null // Ownership transfers only on success.
+            source
+        } catch(error:Throwable) {
+            try {lease?.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            try {snapshot.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            if(error !is ReferenceContractViolation && error !is MigrationPublication.RecoveryRequired &&
+                error !is java.util.concurrent.CancellationException && error !is PdfResources.Unavailable &&
+                (error is IllegalArgumentException || error is IllegalStateException || error is java.util.zip.ZipException))
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error)
+            throw error
+        }
+    }
     private fun inspect(file:File):com.xnotes.format.BundleReferenceInfo = try {
         com.xnotes.format.BundleReferenceInfo.inspect(file,validatePayload=true)
     } catch(error:Exception) {
@@ -106,18 +145,23 @@ class NotebookStorage internal constructor(private val context:Context,
         backend.read().use {input->while(true) {val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
         return digest.digest().joinToString("") {"%02x".format(it)}
     }
-    private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose) {
+    private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose):NativeSourceVersion {
         val pending=journal(uri);val backend=target(uri)
         var verified:com.xnotes.format.BundleReferenceInfo?=null
+        var receipt:NativeSourceVersion?=null
         pending.publishValidated(backend,validate={state->
             if(state.purpose!=expected) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
-            val original=inspect(state.original);val candidate=inspect(state.candidate)
+            val original=inspect(state.original)
+            val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),
+                if(expected==MigrationPublication.Purpose.SAVE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS)
+            val candidate=checked.info;receipt=checked.version
             val current=when(state.current) {state.original->original;state.candidate->candidate;else->error("Unbound publication version")}
             NativeSaveContract.verify(original,candidate,current,expected,registry.expectationAt(uri),
                 current.header.identity?.let {registry.expectationForId(it.documentId)})
             protectPending(uri,original,candidate);verified=candidate
         },afterVerified={registerVerified(uri,requireNotNull(verified),name)})
         releaseCompletedPin(uri)
+        return requireNotNull(receipt)
     }
     private fun target(uri:String):MigrationPublication.Target {
         targetOverride?.let {return it(uri)}
@@ -244,18 +288,35 @@ class NotebookStorage internal constructor(private val context:Context,
     }
 
     /** Complete candidate first; local replacement is atomic, SAF retains a durable recovery journal. */
-    fun publishNote(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String) = synchronized(lock) {
+    fun publishNote(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String) {
+        synchronized(lock) {publishExisting(uri,candidate,kind,name,null)}
+    }
+
+    /** Ordinary save of a model based on an issued source version. No implicit creation or repair. */
+    internal fun publishExpected(uri:String,candidate:File,expected:NativeSourceVersion,name:String):NativeSourceVersion = synchronized(lock) {
+        publishExisting(uri,candidate,expected.kind,name,expected)
+    }
+    private fun publishExisting(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String,
+                                version:NativeSourceVersion?):NativeSourceVersion {
         val pending=journal(uri)
         if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         val expected=purpose(kind.extension)
+        if(version!=null && version.locationKey!=registry.locationKey(uri))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         sourceSnapshot(target(uri)).use {source->
             val original=inspect(source.file);val next=inspect(candidate)
+            if(version!=null) {
+                if(original.header.identity?.documentId!=version.documentId)
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                if(source.sourceHash!=version.sha256)
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+            }
             NativeSaveContract.verify(original,next,original,expected,registry.expectationAt(uri),
                 original.header.identity?.let {registry.expectationForId(it.documentId)})
             protectPending(uri,original,next)
             pending.stage(source.file,candidate,expected)
         }
-        publishSave(uri,name,expected)
+        return publishSave(uri,name,expected)
     }
 
     private fun migrate(uri: String, copy: Boolean): BundleIdentity {

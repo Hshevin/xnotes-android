@@ -11,6 +11,7 @@ internal fun StorageMsg.resId(): Int = when (this) {
     StorageMsg.MIGRATION_RECOVERY_INVALID -> R.string.storage_msg_migration_recovery_invalid
     StorageMsg.MIGRATION_INDEX_INCOMPLETE -> R.string.storage_msg_migration_index_incomplete
 
+    StorageMsg.REFERENCE_SOURCE_CHANGED -> R.string.storage_msg_reference_source_changed
     StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID -> R.string.storage_msg_reference_write_context_invalid
     StorageMsg.REFERENCE_METADATA_INVALID -> R.string.storage_msg_reference_metadata_invalid
     StorageMsg.REFERENCE_IDENTITY_MISMATCH -> R.string.storage_msg_reference_identity_mismatch

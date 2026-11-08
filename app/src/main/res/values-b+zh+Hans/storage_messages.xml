@@ -31,4 +31,5 @@
     <string name="storage_msg_pdf_resource_mismatch">所选文件与此笔记的原始 PDF 内容不一致，未做任何更改；请选择当初导入的同一份 PDF，或包含它的旧笔记文件</string>
     <string name="storage_msg_reference_metadata_invalid">无法验证文档身份或页面引用信息，未修改原文件。请检查原文件或使用恢复资料。</string>
     <string name="storage_msg_reference_write_context_invalid">本次保存与原文档的类型、页引用状态或原始 PDF 不一致，未覆盖原文件。请使用对应的复制、恢复或升级操作。</string>
+    <string name="storage_msg_reference_source_changed">来源文件内容已变化，已阻止覆盖。当前编辑内容仍保留，请检查原文件或另存副本。</string>
 </resources>

@@ -27,9 +27,21 @@ internal class BundleHeader private constructor(
         private const val MAX_BYTES=4096L
         private const val MAX_COMPRESSED=65536L
         private const val U32=0xffffffffL
-        fun read(file:File,cancelled:()->Boolean={false}):BundleHeader {
+        fun read(file:File,cancelled:()->Boolean={false}):BundleHeader = readFile(file,cancelled,null)
+        /**
+         * Protection hints only, not source identity authority. A fallback invokes protect after
+         * bounded directory metadata is parsed, before validating the potentially large local view.
+         * A failure afterwards still rejects the header; the caller must release temporary leases.
+         */
+        fun readWithPdfProtection(file:File,protect:(Set<String>)->Unit,cancelled:()->Boolean={false}):BundleHeader =
+            readFile(file,cancelled,protect)
+        private fun dependencies(header:BundleHeader):Set<String> = header.identity?.takeIf {it.externalPdf}
+            ?.pdfResource?.let {setOf(it)} ?: emptySet()
+        private fun readFile(file:File,cancelled:()->Boolean,protect:((Set<String>)->Unit)?):BundleHeader {
             check(!cancelled()) {"Bundle header cancelled"}
-            FileInputStream(file).use {input->read(input.channel,cancelled)?.let {return it}}
+            FileInputStream(file).use {input->read(input.channel,cancelled)?.let {header->
+                protect?.invoke(dependencies(header));return header
+            }}
             // Standard-library fallback for commented/ZIP64 layouts. Read local metadata too,
             // so a permissive central-directory reader cannot accept conflicting physical entries.
             return ZipFile(file).use {zip->
@@ -42,6 +54,8 @@ internal class BundleHeader private constructor(
                     metadata[entry.name]=entry to guarded(zip.getInputStream(entry),cancelled).use {readBytes(it,entry.size,entry.crc)}
                     }
                 }
+                val header=parse(metadata[BundleIdentity.ENTRY]?.second,metadata[AnchorMetadata.ENTRY]?.second)
+                protect?.invoke(dependencies(header))
                 val anchored=AnchorMetadata.ENTRY in metadata
                 if(anchored) for(entry in zip.entries().asSequence()) {
                     check(!cancelled())
@@ -71,7 +85,7 @@ internal class BundleHeader private constructor(
                     }
                 }
                 require(seen==metadata.keys) {"Directory metadata is absent from local entries"}
-                parse(metadata[BundleIdentity.ENTRY]?.second,metadata[AnchorMetadata.ENTRY]?.second)
+                header
             }
         }
         /** Does not own or reposition the channel. Unsupported directory layouts require the File API. */

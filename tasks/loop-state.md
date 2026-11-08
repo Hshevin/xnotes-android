@@ -12,4 +12,6 @@ R2b2a模型scope/确定性新页ID/冻结投影/采用已实现，计划已独�
 
 R2b2b0共用WorkingSessionCache事务组件已实现，27新增测试，tmp/session-cache-full.log 290套件3133项全通过、Android源码编译成功；计划/代码独立复核均完成，已提交aeccdc71。详情reference-session-cache-2026-11-08.md。b1生产适配器/Editor、b2原生来源凭据继续保留，不半接尚未配套的旧会话。无运行作业。
 
-R2b2b1a正文计数/画布owner token已实现，tmp/session-body-revision-full.log 291套件3142项全通过/Android源码编译/独立复核通过，待提交。详情reference-session-cache末节。已确认Editor.bookmarkVersion与重绘contentVersion并非统一正文计数；不要据此复用过时正文。实际会话接线与native来源摘要需一并审，不半接恢复后自动覆盖。
+R2b2b1a正文计数/画布owner token已实现，tmp/session-body-revision-full.log 291套件3142项全通过/Android源码编译/独立复核通过，已提交d3100c6e。详情reference-session-cache末节。已确认Editor.bookmarkVersion与重绘contentVersion并非统一正文计数；不要据此复用过时正文。实际会话接线与native来源摘要需一并审，不半接恢复后自动覆盖。
+
+R2b2b2a源版本API已实现并独立复核，全量tmp/native-source-version-full.log 292套件3163项全通过/Android源码编译成功，待提交；详情reference-native-source-version-2026-11-08.md。先有与真实读取快照同源的SHA、严格expected版本保存与staged receipt，再统一实际session/Editor接线；不把FileStamp当内容证明，不半接unsafe恢复。无运行作业。

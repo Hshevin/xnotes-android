@@ -94,3 +94,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b2b1a 正文版本
 
 独立计划/源码复核通过；保留owner标dirty契约、同值identity/marker不计数，快照最后复制版本/归属，画布lastView后续放cache metadata。9项新增，291套件3142项/Android源码编译成功，未实际运行平台测试；未接SessionStore，不宣称恢复闭环完成。
+
+## R2b2b2a 原生来源版本
+
+计划/源码独立复核完成：受控签发/Inspected私有证明对、retained candidate receipt、早期资源保护、admit/handoff同gate。发现codec回调关闭ZIP、Header fallback长校验未lease，均红灯后修。主代理再补实际模型PDF SHA、v1 unused字段、hint后失败类型化/释放。最终292套件3163项/Android源码编译成功（3新平台测试仅编译），独立窄复核无剩余阻断；UI/Session尚未接。详细reference-native-source-version-2026-11-08.md。

@@ -387,3 +387,5 @@
 - [ ] R2b2b2：同源native摘要与会话恢复的来源冲突/在途保存对账。
 
 - [x] R2b2b1a：bodyRevision与画布snapshot owner，9新增/3142项全量/Android源码编译/独立复核完成。
+
+- [x] R2b2b2a：NativeSourceVersion/openSource/publishExpected、PDF Header/decoder/lease边界；3163全量/Android源码编译/独立复核通过。

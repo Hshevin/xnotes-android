@@ -463,3 +463,7 @@ R2b2a源码独立复核通过，修复空容器共享导致部分采用，新增
 reference-session-cache-2026-11-08.md独立计划/代码复核完成，immutable body+atomic head、已观察摘要CAS、reserve/clear代次、lease/GC均有反例。290套件3133项全通过/Android源码编译成功，未运行实际平台。接着b1接SessionStore/CanvasSessionStore/Editor和旧缓存，b2接native来源摘要/恢复决策，再R2b2c另存/fork/merge，其他来源闭环与网络需求保留。
 
 R2b2b1a正文版本/画布owner快照已实现，3142项全量及独立复核通过。接线前还需同源native打开/保存凭据，内部配对不能授权外部同UUID覆盖；安全来源证明与实际会话入口一并审。
+
+### R2b2b2a 来源版本 API 已验证
+
+同源SourceSnapshot/私有版本签发、严格publishExpected/staged receipt、PDF早期Header保护与codec entry边界均已完成；21新回归，全量3163项/Android源码编译/独立复核通过。接续实际SourceBinding、会话捕获与成功receipt时序、旧cache保留及来源冲突，另存切换旧cache不得写回原件。新建/另存/fork/merge、页面引用激活、Source UI/反向索引/网络和A2均保留。
