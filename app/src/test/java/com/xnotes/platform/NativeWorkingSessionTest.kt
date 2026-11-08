@@ -93,6 +93,38 @@ class NativeWorkingSessionTest {
         }
         assertEquals(110.0,ink.xAt(0),.001)
     }
+    @Test fun viewOnlyNotesDoNotVisitItemsAndFailedBodyCaptureKeepsTheExistingHead()=scenario {f->
+        for(bound in listOf(false,true)) {
+            val (doc,source)=if(bound) f.bound() else Document.blank() to null
+            assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            val old=f.allBytes()
+            // Deliberately omit dirty solely as a traversal probe. Real content edits must advance
+            // bodyRevision; the next part proves that doing so requires and validates a new body.
+            val probe=object:com.xnotes.core.model.CanvasItem by com.xnotes.core.model.Stroke(
+                com.xnotes.core.tools.Tool.PEN,com.xnotes.core.tools.ToolConfig()) {override val kind="copy-must-fail"}
+            doc.pages.single().items.add(probe)
+            val viewOnly=f.store.capture(doc,source,f.view.copy(scrollY=500.0))
+            assertFalse(viewOnly.requiresBody);assertNull(viewOnly.note);assertNull(viewOnly.canvas)
+            assertTrue(f.store.publish(viewOnly).published)
+            f.store.load()!!.use {read->
+                val saved=read.body.inputStream().use {f.noteCodec.read(it)}
+                assertTrue(saved.pages.single().items.isEmpty())
+                assertEquals(500.0,read.metadata.noteView!!.scrollY,0.0)
+            }
+            val afterView=f.allBytes();doc.dirty=true
+            assertThrows(IllegalArgumentException::class.java) {f.store.capture(doc,source,f.view)}
+            assertEquals(afterView,f.allBytes());assertEquals(old.keys.count {it.startsWith("body-")},afterView.keys.count {it.startsWith("body-")})
+        }
+    }
+    @Test fun viewOnlyCanvasHasNoBodyAndDoesNotCopyUnsupportedItems()=scenario {f->
+        val doc=InfiniteDocument();assertTrue(f.store.publish(f.store.capture(doc,null)).published)
+        val unsupported=com.xnotes.core.model.TextItem(com.xnotes.core.geometry.Pt.ZERO,text="probe",measurer=FakeTextMeasurer())
+        doc.add(unsupported)
+        val viewOnly=f.store.capture(doc,null);assertFalse(viewOnly.requiresBody);assertNull(viewOnly.note);assertNull(viewOnly.canvas)
+        assertTrue(f.store.publish(viewOnly).published);val before=f.allBytes()
+        doc.dirty=true;assertThrows(IllegalArgumentException::class.java) {f.store.capture(doc,null)}
+        assertEquals(before,f.allBytes())
+    }
     @Test fun noteRoundTripsItsPortableBodyFrozenMetadataAndUnboundOrigin()=scenario {f->
         val doc=Document.blank(2).apply {enableReferenceAnchors();displayName="draft.xnote";dirty=true}
         val view=f.view.copy(overrides=ViewOverrides(mode=ViewingMode.COVER,verticalScroll=false,contrast=130,invert=40,

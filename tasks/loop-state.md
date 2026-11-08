@@ -43,4 +43,6 @@ R2实际阶段证明/prepare→commit已实现、独立复核通过：tmp/native
 
 下一片固定writer快照计划reference-frozen-writer-2026-11-08.md待独立审核：新native capture冻结可写item状态、Stroke共享不可变Samples前缀避免全量样本复制；保留原浅快照默认与新渲染，活动内容事务屏障仍另片且不激活生产。overall complete=false。
 
-R2固定writer视图已实现/独立复核通过：tmp/native-frozen-writer-final-full.log 302套件3326项全过，Android测试源码编译成功；14新增JVM（含真实native/cache/七类整ZIP oracle/表格别名先红后绿）。Stroke pin已发布Samples前缀、不复制点数组；其它字段/嵌套容器/每页胶合/层/PDF与永久页ID保持；默认浅快照不切换、不增临时成员副本。新SaveRequest/NativeWorkingSession接固定路径，生产仍未接。活动预览capture屏障和view-only前O(items)副本性能债待下一片，不能视为真机/性能验收。阶段待本地提交，无运行作业。下一片轻量source observation/按需正文计划reference-lightweight-capture-2026-11-08.md正在独立审核。overall complete=false。
+R2固定writer视图已实现/独立复核通过：tmp/native-frozen-writer-final-full.log 302套件3326项全过，Android测试源码编译成功；14新增JVM（含真实native/cache/七类整ZIP oracle/表格别名先红后绿）。Stroke pin已发布Samples前缀、不复制点数组；其它字段/嵌套容器/每页胶合/层/PDF与永久页ID保持；默认浅快照不切换、不增临时成员副本。新SaveRequest/NativeWorkingSession接固定路径，生产仍未接。活动预览capture屏障和view-only前O(items)副本性能债待下一片，不能视为真机/性能验收。阶段已提交ffaec942，无运行作业。下一片轻量source observation/按需正文计划reference-lightweight-capture-2026-11-08.md正在独立审核。overall complete=false。
+
+R2轻量source observation/按需正文已实现/独立复核通过：tmp/native-light-capture-full.log 302套件3329项全过，Android源码编译成功。3新JVM场景+真实same-SHA noop扩展；note prepare页ID后一次key，reserve→仅requiresBody固定，view-only无body/不访问items、失败旧head保持；Observer私有actual owner factory、IO只epoch不读live、不授native保存能力。两probe先红后绿。阶段待本地提交，无运行作业；不激活生产，活动事务屏障、同head handoff/ack/恢复认领、新建另存copy pending、页激活/来源UI/往返/backlinks/网络仍继续，overall complete=false。

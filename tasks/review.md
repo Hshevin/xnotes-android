@@ -110,3 +110,7 @@ review_input_plan独立计划/源码复核：绑定storage issuer、canonical jo
 ## 固定writer视图（2026-11-08）
 
 review_input_plan独立审核确认Samples前缀可共享，要求复制嵌套容器、按页scope胶合、Canvas六类拒绝Text，均落实。源码复核发现FlowTable widths/minHeights别名，真实ZIP flow反例先红后绿，固定路径按table identity脱离且cell共享保留；默认flow不改。全部serialized字段、层/页ID/PDF及NOTE/CANVAS native/cache反例复核无新必修。最终302套件3326项与Android源码编译全过。只读视口capture额外O(items)分配可留下一片但生产激活前必须解决，活动事务稳定屏障及真机性能仍未验收。
+
+## 轻量来源观察与按需正文（2026-11-08）
+
+review_input_plan独立计划/源码复核通过：actual source/model observation私有工厂核对epoch，IO不读活模型、不颁native写权；NOTE准备身份再冻结key，reserve后仅requiresBody复制固定模型并复核key/current，view-only null body由encoder守卫与cache复用合同保证。错owner/path、head失败保留、同SHA accept废票等覆盖准确。最终302套件3329项与Android源码编译全过；未做仪器/真机性能，活动内容事务屏障与生产仍后续。

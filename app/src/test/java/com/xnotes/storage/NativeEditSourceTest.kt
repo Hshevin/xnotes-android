@@ -167,6 +167,20 @@ class NativeEditSourceTest {
         assertEquals(BundleMigration.hash(f.current),source.version(doc).sha256)
         assertEquals(page,doc.pages.single().referenceIdentity.id);assertSame(stroke,doc.pages.single().items.single())
     }
+    @Test fun readOnlySourceObservationsRequireTheActualOwnerAndExpireOnRetirement()=scenario {f->
+        f.note();val a=f.prepare(DocumentKind.NOTE);val b=f.prepare(DocumentKind.NOTE)
+        val ad=requireNotNull(a.note);val bd=requireNotNull(b.note);val ac=a.editSource();val bc=b.editSource()
+        assertEquals(ad.identity.documentId,bd.identity.documentId)
+        assertThrows(ReferenceContractViolation::class.java) {ac.observe(bd)}
+        assertThrows(ReferenceContractViolation::class.java) {bc.observe(ad)}
+        val ao=ac.observe(ad);val bo=bc.observe(bd)
+        assertSame(ac.version(ad),ao.expected);assertTrue(ao.isCurrent());assertTrue(bo.isCurrent())
+        ac.invalidate();assertFalse(ao.isCurrent());assertTrue(bo.isCurrent())
+        assertThrows(ReferenceContractViolation::class.java) {ac.observe(ad)}
+        bd.path="content://edit-source/document/other"
+        assertThrows(ReferenceContractViolation::class.java) {bc.observe(bd)}
+        assertEquals(0,f.writes)
+    }
     @Test fun twoRealSavesAdvanceOnlyTheirOwnContextAndUseTheLatestBase()=scenario {f->
         f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
         repeat(2) {
@@ -253,6 +267,10 @@ class NativeEditSourceTest {
         f.canvas();normalizeZipTimes(f.current,f.root)
         val p=f.prepare(DocumentKind.CANVAS);val doc=requireNotNull(p.canvas);val source=p.editSource();val base=source.version(doc)
         val a=source.capture(doc);val b=source.capture(doc)
+        val observation=source.observe(doc)
+        val cache=com.xnotes.platform.NativeWorkingSession(File(f.root,"working"),f.noteCodec,f.canvasCodec,f.storage.pdfResources)
+        assertTrue(cache.publish(cache.capture(doc,source)).published)
+        val viewOnly=cache.capture(doc,source);assertFalse(viewOnly.requiresBody);assertNull(viewOnly.canvas)
         // Normalize only ZIP timestamps in this fixture, keeping real codec payloads. The publisher
         // still goes through actual staging/readback/registration; no fake receipt is constructed.
         f.beforeRead={f.scratch.listFiles().orEmpty().filter {it.isFile}.forEach {normalizeZipTimes(it,f.root)}}
@@ -260,6 +278,8 @@ class NativeEditSourceTest {
         val br=b.publish(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"canvas")
         assertEquals(base.sha256,ar.version.sha256);assertEquals(base.sha256,br.version.sha256)
         assertTrue(source.accept(a,ar));assertFalse(source.accept(a,ar));assertFalse(source.accept(b,br))
+        assertFalse(observation.isCurrent());assertFalse(cache.publish(viewOnly).published)
+        assertTrue(source.observe(doc).isCurrent())
         assertEquals(base.sha256,source.version(doc).sha256);assertEquals(0,f.writes)
     }
     @Test fun publicationLeasesTheOriginalBeforeNativeValidationAndHandsItToTheSavedNotePin()=scenario {f->

@@ -81,6 +81,20 @@ internal class PreparedNativeOpen private constructor(
         @Synchronized fun version(document:InfiniteDocument):NativeSourceVersion {if(!active || !same(document)) invalid();return base}
         @Synchronized fun invalidate() {active=false}
         private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && generation==epoch && base===expected}
+        /** Read-only epoch, with no native body or publication capability. */
+        class Observation private constructor(private val source:EditSource,private val epoch:Long,val expected:NativeSourceVersion) {
+            fun isCurrent()=source.authorize(epoch,expected)
+            companion object {
+                internal fun capture(source:EditSource,document:Document):Observation=synchronized(source) {
+                    Observation(source,source.generation,source.version(document))
+                }
+                internal fun capture(source:EditSource,document:InfiniteDocument):Observation=synchronized(source) {
+                    Observation(source,source.generation,source.version(document))
+                }
+            }
+        }
+        fun observe(document:Document)=Observation.capture(this,document)
+        fun observe(document:InfiniteDocument)=Observation.capture(this,document)
         @Synchronized fun capture(document:Document):SaveRequest.Note {
             val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
             val epoch=generation

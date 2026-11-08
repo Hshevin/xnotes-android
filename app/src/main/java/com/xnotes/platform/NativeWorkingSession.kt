@@ -7,7 +7,7 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.ReferenceIdentity
-import com.xnotes.core.model.fixedWriteSnapshot
+import com.xnotes.core.model.prepareReferenceAnchors
 import com.xnotes.core.model.copyWriteSnapshot
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleReferenceInfo
@@ -31,9 +31,9 @@ internal class NativeWorkingSession(
     data class SourceDescription(val kind:DocumentKind,val documentId:String,val uri:String,val locationKey:String,val sha256:String)
     data class Metadata(val dirty:Boolean,val displayName:String?,val source:SourceDescription?,val noteView:NoteView?,val canvasView:Waypoint?)
     class Write internal constructor(internal val ticket:WorkingSessionCache.WriteRequest,internal val note:Document?,
-                                     internal val canvas:InfiniteDocument?,internal val proof:PreparedNativeOpen.SaveRequest?) {
+                                     internal val canvas:InfiniteDocument?,internal val proof:PreparedNativeOpen.EditSource.Observation?) {
         val requiresBody get()=ticket.requiresBody
-        internal fun sourceCurrent()=proof?.isCurrentSource()!=false
+        internal fun sourceCurrent()=proof?.isCurrent()!=false
     }
     class Read internal constructor(private val issuer:Any,private val held:WorkingSessionCache.Read,val metadata:Metadata):AutoCloseable {
         private var closed=false
@@ -68,24 +68,31 @@ internal class NativeWorkingSession(
     /** Owner-thread capture/reservation. No filesystem/PDF/codec IO. */
     fun capture(document:Document,source:PreparedNativeOpen.EditSource?,view:NoteView):Write {
         validateView(view)
-        val proof=source?.capture(document)
+        val proof=source?.observe(document)
         if(proof==null && !document.path.isNullOrBlank()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        val snapshot=proof?.snapshot ?: document.fixedWriteSnapshot()
+        document.prepareReferenceAnchors()
+        val owner=document.snapshotOwnerToken;val id=document.identity.documentId;val version=document.bodyRevision
         val metadata=metadata(WorkingSessionCache.Kind.NOTE,document.dirty,document.displayName,
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},view,null)
-        parseMetadata(WorkingSessionCache.Kind.NOTE,snapshot.identity.documentId,metadata.toString())
-        val ticket=cache.reserve(snapshot.snapshotOwnerToken,WorkingSessionCache.Kind.NOTE,snapshot.identity.documentId,snapshot.bodyRevision,metadata)
+        parseMetadata(WorkingSessionCache.Kind.NOTE,id,metadata.toString())
+        val ticket=cache.reserve(owner,WorkingSessionCache.Kind.NOTE,id,version,metadata)
+        val snapshot=if(ticket.requiresBody) document.copyWriteSnapshot(fixedItems=true) else null
+        if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         return Write(ticket,snapshot,null,proof)
     }
     fun capture(document:InfiniteDocument,source:PreparedNativeOpen.EditSource?):Write {
         document.lastView?.let(::validateWaypoint)
-        val proof=source?.capture(document)
+        val proof=source?.observe(document)
         if(proof==null && !document.path.isNullOrBlank()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        val snapshot=proof?.snapshot ?: document.snapshotForWrite(fixedItems=true)
+        val owner=document.snapshotOwnerToken;val id=document.identity.documentId;val version=document.bodyRevision
         val metadata=metadata(WorkingSessionCache.Kind.CANVAS,document.dirty,document.displayName,
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},null,document.lastView)
-        parseMetadata(WorkingSessionCache.Kind.CANVAS,snapshot.identity.documentId,metadata.toString())
-        val ticket=cache.reserve(snapshot.snapshotOwnerToken,WorkingSessionCache.Kind.CANVAS,snapshot.identity.documentId,snapshot.bodyRevision,metadata)
+        parseMetadata(WorkingSessionCache.Kind.CANVAS,id,metadata.toString())
+        val ticket=cache.reserve(owner,WorkingSessionCache.Kind.CANVAS,id,version,metadata)
+        val snapshot=if(ticket.requiresBody) document.snapshotForWrite(fixedItems=true) else null
+        if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         return Write(ticket,null,snapshot,proof)
     }
     fun isCurrent(write:Write)=cache.isCurrent(write.ticket) && write.sourceCurrent()
@@ -96,6 +103,7 @@ internal class NativeWorkingSession(
         if(!write.sourceCurrent()) return WorkingSessionCache.Publication(write.ticket,false)
         val check={checkActive();if(!write.sourceCurrent()) throw ExpiredSource()}
         return try {cache.publish(write.ticket,check) {output->
+            kotlin.check(write.requiresBody) {"View-only publication must not encode a body"}
             val note=write.note
             if(note!=null) {
                 val portable=note.copyWriteSnapshot()
