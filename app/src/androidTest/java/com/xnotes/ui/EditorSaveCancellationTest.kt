@@ -71,14 +71,14 @@ class EditorSaveCancellationTest {
                         Editor::class.java.getDeclaredField("canvasAutosaveUri").apply {isAccessible=true}.set(e,uri)
                         e.goHome()
                     } else Editor::class.java.declaredMethods.single {it.name=="startCanvasWrite"}.apply {isAccessible=true}
-                        .invoke(e,uri,doc,"source.xcanvas",{ok:Boolean->callbacks.incrementAndGet();result.set(ok);Unit})
+                        .invoke(e,uri,doc,"source.xcanvas",false,{ok:Boolean->callbacks.incrementAndGet();result.set(ok);Unit})
                 } else {
                     e.newNote();val doc=e.state.document;doc.path=uri
                     current.outputStream().use {DocumentCodec(image,text).write(doc.snapshot(),it)}
                     before.set(current.readBytes());doc.pages.first().items.add(stroke());doc.dirty=true
                     if(mode==0) e.saveToThen(uri) {ok->callbacks.incrementAndGet();result.set(ok)}
                     else Editor::class.java.declaredMethods.single {it.name=="startNoteWrite"}.apply {isAccessible=true}
-                        .invoke(e,uri,doc.snapshot(),"source.xnote",System.nanoTime(),{ok:Boolean->callbacks.incrementAndGet();result.set(ok);Unit})
+                        .invoke(e,uri,doc,"source.xnote",System.nanoTime(),false,{ok:Boolean->callbacks.incrementAndGet();result.set(ok);Unit})
                 }
                 Editor::class.java.getDeclaredField(if(mode>=2) "canvasWriteJob" else "noteWriteJob")
                     .apply {isAccessible=true}.get(e) as? Job

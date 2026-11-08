@@ -451,12 +451,16 @@ private fun EditorScreen(
             else {
                 runCatching {resolver.takePersistableUriPermission(uri,rwFlags)}
                 val name=displayNameOf(resolver,uri)
-                runCatching {resolver.openOutputStream(uri,"wt")?.use {request.owner.save(it,uri.toString(),name)}}
-                    .onSuccess {
-                        if(request.afterSaveApplies()) continuation?.invoke()
-                        else editor.message=context.getString(R.string.err_save_note)
+                scope.launch {
+                    if (!request.owner.awaitStableForSave() || !request.sameModel()) {
+                        editor.message=context.getString(R.string.native_open_changed)
+                        return@launch
                     }
-                    .onFailure {editor.message=context.getString(R.string.err_save_note)}
+                    val ok=runCatching {resolver.openOutputStream(uri,"wt")?.use {request.owner.save(it,uri.toString(),name)} == true}
+                        .getOrDefault(false)
+                    if(ok && request.afterSaveApplies()) continuation?.invoke()
+                    else editor.message=context.getString(R.string.err_save_note)
+                }
             }
         }
     }
@@ -842,7 +846,7 @@ private fun EditorScreen(
         val other = target.sibling
         if (other?.noteOpen == true && !other.canvasOpen &&
             other.currentUri?.let { target.isSameDocument(it, uriStr) } == true) {
-            target.openSharedView(other)
+            if (!target.openSharedView(other)) return null
         } else {
             val name = displayNameOf(resolver, Uri.parse(uriStr))
             if (com.xnotes.core.util.DocumentKind.ofName(name ?: "") == com.xnotes.core.util.DocumentKind.CANVAS) {
@@ -1098,8 +1102,12 @@ private fun EditorScreen(
     // Every shortcut acts on the focused pane, so the same KeyActions serve both of them.
     editor.keyActions = remember {
         Editor.KeyActions(
-            newNote = { guarded { editor.active.newNote() } },
-            open = { backstageView = com.xnotes.ui.BackstageView.HOME; guardedAll { editor.goHomeAll() } },
+            newNote = {
+                val target = editor.active
+                var discarded: Editor.OpenDiscard? = null
+                guarded(target, onDiscard = { discarded = it }) { target.newNote(setOfNotNull(discarded)) }
+            },
+            open = { backstageView = com.xnotes.ui.BackstageView.HOME; guardedAll { editor.goHomeAll(it) } },
             save = { saveOrPrompt() },
             saveAs = { launchSaveAs(editor.active) },
             exportPdf = {
@@ -1108,7 +1116,7 @@ private fun EditorScreen(
                     render = { o, prog, cancel -> from.exportPdf(o, prog, cancel) },
                     onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${from.title}.pdf") })
             },
-            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; guardedAll { editor.goHomeAll() } },
+            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; guardedAll { editor.goHomeAll(it) } },
             fullscreen = onToggleFullscreen,
         )
     }
@@ -1138,11 +1146,11 @@ private fun EditorScreen(
         val markdown = runCatching { resolver.getType(src) }.getOrNull() in MARKDOWN_TYPES ||
             name?.substringAfterLast('.', "")?.lowercase() in MARKDOWN_EXTENSIONS
         val stem = com.xnotes.core.util.Paths.stem(name ?: "Document")
-        guardedAll {
+        guardedAll { discarded ->
             if (editor.browseRoot == null) editor.useInternalStorage()
             editor.requestImport(stem, src.toString(), markdown)
             backstageView = com.xnotes.ui.BackstageView.HOME
-            editor.goHomeAll()
+            editor.goHomeAll(discarded)
         }
     }
 

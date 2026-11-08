@@ -79,6 +79,7 @@ import com.xnotes.core.search.TypedText
 import com.xnotes.core.search.TypedTexts
 import com.xnotes.core.model.deepCopy
 import com.xnotes.core.model.snapshot
+import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
@@ -207,6 +208,12 @@ data class ImportProgress(val done: Int, val total: Int)
 /** Per-folder colour sidecar: a hidden ".xnote" dir holding "colors.json" (item name -> hex). */
 private const val SIDECAR_DIR = ".xnote"
 private const val SIDECAR_FILE = "colors.json"
+
+/** Activity recreation can leave an old encoder reading these shared files in this process. */
+private object EditorTempRoots {
+    private val used = hashSetOf<String>()
+    fun firstUse(directory: java.io.File): Boolean = synchronized(used) { used.add(directory.canonicalPath) }
+}
 /** In the root folder's sidecar only: the names given to colour codes, so they sync with the notes. */
 private const val COLOR_NAMES_FILE = "color-names.json"
 
@@ -329,14 +336,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var fullscreen by mutableStateOf(settings.prefs.startFullscreen ?: !deviceHasDisplayCutout)
         private set
 
-    /** Prepares one of the shared temp dirs. The launch purge drops temps orphaned by a crash, which
-     *  is safe for the primary editor because no real note is open yet at construction. A secondary
-     *  pane is built mid-session, with the primary's note already live in these dirs, so it only
-     *  takes the handle. */
+    private val purgeOrphanTemps = EditorTempRoots.firstUse(appContext.filesDir) && pane == Pane.PRIMARY
+
+    /** Purge crash orphans once per process, never while a previous Editor can still encode them. */
     private fun tempDir(name: String): java.io.File =
         java.io.File(appContext.filesDir, name).apply {
             mkdirs()
-            if (pane == Pane.PRIMARY) listFiles()?.forEach {
+            if (purgeOrphanTemps) listFiles()?.forEach {
                 if(com.xnotes.storage.PreparedNativeOpen.isAssetDirectory(it)) it.deleteRecursively() else it.delete()
             }
         }
@@ -362,7 +368,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     init {
         // The purge above took the files of what an earlier editor in this process copied.
-        if (pane == Pane.PRIMARY) {
+        if (purgeOrphanTemps) {
             PageClipboard.put(null)
             com.xnotes.canvas.ItemClipboard.clip = null
         }
@@ -486,8 +492,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val sessionDir = java.io.File(appContext.filesDir, if (pane == Pane.PRIMARY) "session" else "session-b")
     private val session = com.xnotes.platform.SessionStore(sessionDir, codec, pdfDir, imageDir)
     private val canvasSession = com.xnotes.platform.CanvasSessionStore(sessionDir, canvasCodec, imageDir)
+    private val sessionOwner = com.xnotes.platform.LegacySessionQueue.attach(sessionDir)
     private val viewStates = com.xnotes.platform.ViewStateStore(com.xnotes.platform.JsonStore.viewStates(appContext))
-    private var lastSessionContentVersion = -1
+    private var lastSessionBody: Document? = null
+    private var lastSessionBodyRevision = -1L
+    private var sessionWriteJob: kotlinx.coroutines.Job? = null
+    private var sessionSaveSequence = 0L
+    private var sessionPending = false
+    private var sessionSlotAdopted = false
+    private var sessionCloseRequested = false
+    private var sessionAdoptionSequence = 0L
+    private var replacementSequence = 0L
     private var sessionLoaded = false
     private var restoredPagedSession = false
 
@@ -529,6 +544,104 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         get() = sharedOwner?.autosaveUri ?: ownAutosaveUri
         private set(value) { ownAutosaveUri = value }
     private val autosaveScope = kotlinx.coroutines.MainScope()
+
+    private val captureHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var captureWakePosted = false
+    private var captureBoundary = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    /** Wake after the whole input/commit stack, including history and tool switching, has returned. */
+    private fun contentTransactionChanged() {
+        if (captureWakePosted) return
+        captureWakePosted = true
+        captureHandler.post {
+            captureWakePosted = false
+            val previous = captureBoundary
+            captureBoundary = kotlinx.coroutines.CompletableDeferred()
+            previous.complete(Unit)
+            sharedPeer()?.let { if (it !== this) it.wakeCaptureWaiters() }
+            if (sessionPending) submitWorkingSessionIfStable()
+        }
+    }
+
+    private fun wakeCaptureWaiters() {
+        val previous = captureBoundary
+        captureBoundary = kotlinx.coroutines.CompletableDeferred()
+        previous.complete(Unit)
+        if (sessionPending) submitWorkingSessionIfStable()
+    }
+
+    private suspend fun afterInputDispatch() = kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
+        captureHandler.post { if (continuation.isActive) continuation.resumeWith(Result.success(Unit)) }
+    }
+
+    private fun noteTransactionsPending(doc: Document): Boolean =
+        listOfNotNull(this, sharedPeer()).any { pane ->
+            pane.state.document === doc && (pane.stylusInContact || pane.controller.hasPendingContentTransaction ||
+                pane.tablePreviews.values.any { pane.currentTablePreview(it) && it.table.snapshot() != it.before })
+        }
+
+    private fun commitNoteTextForSave() {
+        for (pane in listOfNotNull(this, sharedPeer())) {
+            pane.commitText()
+            pane.flowText.flushPendingEdits()
+        }
+    }
+
+    private suspend fun awaitNoteCapture(doc: Document): Boolean {
+        afterInputDispatch()
+        while (sessionOwner.isCurrent() && noteOpen && !canvasOpen && state.document === doc && documentOwner === this) {
+            val boundary = captureBoundary
+            if (!noteTransactionsPending(doc)) return true
+            kotlinx.coroutines.selects.select<Unit> {
+                boundary.onAwait { }
+                sessionOwner.onRetired { }
+            }
+        }
+        return false
+    }
+
+    private suspend fun awaitCanvasCapture(doc: com.xnotes.core.infinite.InfiniteDocument): Boolean {
+        afterInputDispatch()
+        while (sessionOwner.isCurrent() && noteOpen && canvasOpen && infiniteOrNull?.document === doc && documentOwner === this) {
+            val boundary = captureBoundary
+            if (infiniteOrNull?.hasPendingContentTransaction != true && !stylusInContact) return true
+            kotlinx.coroutines.selects.select<Unit> {
+                boundary.onAwait { }
+                sessionOwner.onRetired { }
+            }
+        }
+        return false
+    }
+
+    private suspend fun awaitSessionEncoders() {
+        for (pane in listOfNotNull(this, sharedPeer())) {
+            pane.sessionOwner.awaitAccepted()
+            pane.sessionWriteJob?.join()
+        }
+    }
+
+    /** All synchronous callers still return promptly; only an already clean workspace swaps inline. */
+    private fun replaceWhenSaved(
+        explicitlyDiscarded: Set<OpenDiscard> = emptySet(),
+        whole: Boolean = false,
+        replace: () -> Unit,
+    ) {
+        val request = ++replacementSequence
+        invalidateNativeOpen()
+        if (explicitlyDiscarded.none { it.owner === documentOwner && it.applies() }) {
+            if (canvasOpen) infiniteOrNull?.commitText() else {
+                commitNoteTextForSave()
+                flowText.endSession()
+            }
+        }
+        val slots = captureOpenSlots(whole)
+        // Discard must also check for unresolved writes, even when all UI transactions are idle.
+        if (explicitlyDiscarded.isEmpty() && readyToAdopt(slots, whole, emptySet(), null)) { replace(); return }
+        autosaveScope.launch {
+            if (settleOpenSlots(slots, whole, explicitlyDiscarded, null) && request == replacementSequence &&
+                readyToAdopt(slots, whole, explicitlyDiscarded, null)) replace()
+        }
+    }
 
     /** The note autosave's debounce timer. Cancelled freely: nothing has been written yet. */
     private var noteDebounceJob: kotlinx.coroutines.Job? = null
@@ -669,7 +782,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     class OpenDiscard internal constructor(internal val owner:Editor,private val model:Document,private val revision:Long) {
         private val path=model.path?.let(owner::documentKey)
         internal fun sameModel()=owner.documentOwner===owner && owner.noteOpen && !owner.canvasOpen && owner.state.document===model
-        internal fun afterSaveApplies()=sameModel() && !model.dirty
+        internal fun afterSaveApplies()=sameModel() && !model.dirty && !owner.noteTransactionsPending(model)
         internal fun applies()=sameModel() && model.bodyRevision==revision && model.path?.let(owner::documentKey)==path
     }
     internal fun discardForOpen():OpenDiscard {
@@ -801,6 +914,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     val infinite: InfiniteEditor
         get() = infiniteOrNull ?: InfiniteEditor(appContext).also {
             infiniteOrNull = it
+            it.onContentTransactionChanged = ::contentTransactionChanged
             it.penShortcuts = { preferences.penShortcuts }
             it.penDoublePressMs = { preferences.penDoublePressMs.toLong() }
             it.otherPenInContact = { sibling?.stylusInContact == true }
@@ -856,9 +970,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Open a fresh, unsaved infinite canvas on top of backstage. */
     fun newCanvas() {
-        val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
-        settings.newCanvasBackground?.let { doc.background = it }
-        openCanvasDocument(doc, uri = null, displayName = null)
+        replaceWhenSaved {
+            val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
+            settings.newCanvasBackground?.let { doc.background = it }
+            openCanvasDocument(doc, uri = null, displayName = null)
+        }
     }
 
     /**
@@ -870,7 +986,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         infinite.commitText()
         canvasDebounceJob?.cancel()
         canvasWriteJob?.join()
+        awaitSessionEncoders()
         val doc = infinite.document
+        if (!awaitCanvasCapture(doc)) return false
         val uri = canvasAutosaveUri ?: doc.path
         if (uri == null) {
             if (doc.dirty) message = appContext.getString(R.string.split_save_before_replace)
@@ -881,7 +999,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             canvasWriteJob?.join()
         }
         if (doc.dirty) message = appContext.getString(R.string.err_save_note)
-        return !doc.dirty
+        return noteOpen && canvasOpen && infiniteOrNull?.document === doc && !doc.dirty &&
+            infiniteOrNull?.hasPendingContentTransaction != true && !stylusInContact
     }
 
     private val notebookStorage by lazy { com.xnotes.storage.NotebookStorage.get(appContext) }
@@ -969,7 +1088,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         doc.dirty = true // nothing is on disk yet; the close guard offers to save it
         storageMissingPdf = null
         storageProblemUri = null
-        if (!saveCanvasBeforeReplacement()) return false
+        val slots = captureOpenSlots(false)
+        if (!settleOpenSlots(slots, false, emptySet(), null)) return false
         replaceDocument(doc)
         if (doc.omittedOnCopy > 0) say(appContext.resources.getQuantityString(R.plurals.recovery_ink_only_omitted, doc.omittedOnCopy, doc.omittedOnCopy))
         return true
@@ -998,7 +1118,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     ) {
         invalidateNativeOpen();retireCanvasEditSource();retireNoteEditSource()
         leaveSharedDocument()
-        flushAutosave() // a paged note may be open underneath; do not leave its edits unwritten
+        // Replacement callers settle the outgoing owner before adoption. Retire its remaining
+        // callbacks without scheduling a second write, especially after an explicit discard.
+        noteDebounceJob?.cancel()
+        autosaveUri = null
+        flowText.endSession()
+        controller.resetGestureState()
+        tablePreviews.clear()
         doc.path = uri
         doc.displayName = displayName
         val canvas = infinite
@@ -1013,6 +1139,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         canvasAutosaveUri?.let { rememberStamp(it) }
         canvasOpen = true
         noteOpen = true
+        sessionModelAdopted()
         canvas.recoverRecordings(fromSession)
     }
 
@@ -1037,13 +1164,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun scheduleCanvasAutosave() {
         val uri = canvasAutosaveUri ?: return
+        val doc = infiniteOrNull?.document ?: return
         canvasDebounceJob?.cancel()
         canvasDebounceJob = autosaveScope.launch {
             kotlinx.coroutines.delay(1200L) // debounce: write after a short idle
             canvasWriteJob?.join() // wait out a write already going out rather than racing it
-            val canvas = infiniteOrNull ?: return@launch
-            val doc = canvas.document
-            if (!doc.dirty) return@launch
+            if (infiniteOrNull?.document !== doc || !doc.dirty) return@launch
             startCanvasWrite(uri, doc, doc.displayName ?: doc.title)
         }
     }
@@ -1053,21 +1179,35 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * writer gets its own item list over the live items ([InfiniteDocument.snapshotForWrite]), taken
      * here on the main thread; the bookkeeping stays on the live [doc].
      */
-    private fun startCanvasWrite(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,onDone:((Boolean)->Unit)?=null) {
-        val snapshot=doc.snapshotForWrite()
-        val wasDirty=doc.dirty;doc.dirty=false
+    private fun startCanvasWrite(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,
+                                 showOverlay:Boolean=false,onDone:((Boolean)->Unit)?=null) {
+        val pending = canvasWriteJob
+        val requestedPath = doc.path
         canvasWriteJob=autosaveScope.launch {
             var success=false
+            var wasDirty=false
             try {
-                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(uri,snapshot,title,doc)}
+                pending?.join()
+                sessionOwner.awaitAccepted()
+                if (!awaitCanvasCapture(doc)) return@launch
+                val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val snapshot=doc.snapshotForWrite(fixedItems=true)
+                val captureTitle = doc.displayName ?: title
+                wasDirty=doc.dirty;doc.dirty=false
+                if (showOverlay) savingNote = true
+                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(target,snapshot,captureTitle,doc)}
                 success=res!=null
                 if(res!=null) {
                     if(infiniteOrNull?.document===doc) res.fork?.let {adoptCanvasFork(it)}
                     invalidateThumb(res.uri)
                 }
+            } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
+            } catch (_: Throwable) {
+                if (canvasOpen && infiniteOrNull?.document === doc) message = appContext.getString(R.string.err_save_note)
             } finally {
                 if(!success && wasDirty) doc.dirty=true
                 if(canvasOpen && infiniteOrNull?.document===doc) savingNote=false
+                contentTransactionChanged()
                 if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone?.invoke(success)
             }
         }
@@ -1093,17 +1233,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     private fun flushCanvasThen(showOverlay: Boolean, onDone: () -> Unit) {
         canvasDebounceJob?.cancel()
-        val uri = canvasAutosaveUri
         val doc = infiniteOrNull?.document
-        if (uri == null || doc == null) { onDone(); return }
+        if (doc == null) { onDone(); return }
+        val uri = canvasAutosaveUri ?: doc.path
         val title = doc.displayName ?: doc.title
-        if (showOverlay) savingNote = true
+        val revision = doc.bodyRevision
         autosaveScope.launch {
             canvasWriteJob?.join() // a write already going out finishes first; it may be all there was
+            awaitSessionEncoders()
+            if (!awaitCanvasCapture(doc)) { savingNote = false; return@launch }
+            if (infiniteOrNull?.document !== doc) { savingNote = false; return@launch }
+            if (uri == null) {
+                savingNote = false
+                if (!doc.dirty && doc.bodyRevision == revision) onDone()
+                else message = appContext.getString(R.string.split_save_before_replace)
+                return@launch
+            }
             if (!doc.dirty) { savingNote = false; onDone(); return@launch }
-            startCanvasWrite(uri,doc,title) {ok->
+            startCanvasWrite(uri,doc,title,showOverlay) {ok->
                 savingNote=false
-                if(ok && !doc.dirty) onDone() else message=appContext.getString(R.string.err_save_note)
+                if(ok && infiniteOrNull?.document === doc && !doc.dirty && infiniteOrNull?.hasPendingContentTransaction != true) onDone()
+                else if (infiniteOrNull?.document === doc) message=appContext.getString(R.string.err_save_note)
             }
         }
     }
@@ -1206,7 +1356,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
         onAddPageAtEnd = { addPageAtEnd() },
         onHaptic = { runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } },
-    )
+    ).also { it.onContentTransactionChanged = ::contentTransactionChanged }
 
     /**
      * Accents from a physical keyboard's dead keys, composed through the layout the user
@@ -1229,6 +1379,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         requestRender = { onRender() },
     ).also { ctrl ->
         controller.flowText = ctrl
+        ctrl.onTransactionChanged = ::contentTransactionChanged
         ctrl.onHaptic = {
             runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) }
         }
@@ -2405,12 +2556,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  swap so a closed note's (possibly huge) cached PDF doesn't linger on disk. */
     private fun adoptOpenPdf(doc: Document) {
         val keep = doc.pdfFile
-        // The outgoing note's flush is still streaming this file into its bundle, so the delete waits
-        // that write out rather than pulling the source out from under it.
-        val pending = noteWriteJob
+        // A peer can be the last view releasing this file while its actual owner still encodes it.
+        // Capture both physical slots now: adoption may detach that relationship before we resume.
+        val encodingPanes = listOfNotNull(this, sibling).distinct()
+        val pending = encodingPanes.mapNotNull { it.noteWriteJob }.distinct()
+        val sessionOwners = encodingPanes.map { it.sessionOwner }
         openPdfTemp?.let { old ->
             // A shared private original is the note's only copy of its PDF, never a temp: leave it to reference collection.
-            if (old != keep && sibling?.openPdfTemp != old && !com.xnotes.storage.PdfResources.get(appContext).isOwned(old)) autosaveScope.launch { pending?.join(); old.delete() }
+            if (old != keep && sibling?.openPdfTemp != old && !com.xnotes.storage.PdfResources.get(appContext).isOwned(old)) autosaveScope.launch {
+                pending.forEach { it.join() }
+                sessionOwners.forEach { it.awaitAccepted() }
+                old.delete()
+            }
         }
         openPdfTemp = keep
     }
@@ -3235,6 +3392,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Snapshot live state into settings and save (call on pause/stop). */
     fun persist() {
+        if (canvasOpen) infiniteOrNull?.commitText() else commitNoteTextForSave()
         if (pane == Pane.PRIMARY && active !== this) {
             active.resetPenButtons()
             copyToolSettingsFrom(active)
@@ -3268,46 +3426,151 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // The note + session writes are heavy for a big note; run them off the main thread so pressing
         // Home never freezes the UI. The process survives to finish them; the debounced autosave during
         // editing bounds any loss on an immediate hard kill.
-        flushThen(showOverlay = false) {}
-        flushCanvasAutosave()
-        saveSession()
-        saveCanvasSession()
+        if (canvasOpen) flushCanvasAutosave() else flushThen(showOverlay = false) {}
+        requestWorkingSession()
         secondary?.persist() // the other pane's note has to be flushed on pause too
         if (pane == Pane.PRIMARY) saveSplitWorkspace()
     }
 
-    /** Persist the open canvas, or clear the stored one when a canvas is not what is open. */
-    private fun saveCanvasSession() {
-        val canvas = infiniteOrNull
-        if (!canvasOpen || canvas == null) {
-            canvasSession.clear()
-            return
-        }
-        canvasSession.save(canvas.document, writeDocument = true)
+    private sealed interface WorkingCapture {
+        data class Note(val model: Document, val revision: Long, val body: Document?,
+            val metadata: com.xnotes.platform.SessionStore.Metadata): WorkingCapture
+        data class Canvas(val model: com.xnotes.core.infinite.InfiniteDocument,
+            val body: com.xnotes.core.infinite.InfiniteDocument,
+            val metadata: com.xnotes.platform.CanvasSessionStore.Metadata): WorkingCapture
+        data object Closed: WorkingCapture
     }
 
-    /** Persist the working session (open document + zoom/scroll) so the next launch
-     *  reopens this note where the user left off, unsaved edits included. */
-    private fun saveSession() {
-        if (pane == Pane.SECONDARY && isSharedView) return // primary stores the shared recovery snapshot
+    private fun sessionModelAdopted() {
+        sessionAdoptionSequence++
+        sessionSaveSequence++
+        sessionPending = false
+        sessionSlotAdopted = true
+        sessionCloseRequested = false
+        sessionLoaded = true
+        missingDocument = null
+        lastSessionBody = null
+        lastSessionBodyRevision = -1L
+        tablePreviews.entries.removeAll { it.value.document !== state.document }
+        contentTransactionChanged()
+    }
 
-        if (!sessionLoaded) return // don't overwrite the saved note before restore has applied
-        if (!noteOpen || canvasOpen) { session.clear(); return } // nothing paged on top: wipe any stale session
-        val contentChanged = contentVersion != lastSessionContentVersion
-        lastSessionContentVersion = contentVersion
-        // Snapshot on the main thread, then write the session off-thread, so saving a big note's
-        // session never freezes the UI. Unconditionally, even for a view-state-only refresh: the
-        // store re-encodes whatever it is handed when the session file is missing, and handing it
-        // the live document would put the writer back on the mutating model.
-        val snapshot = state.document.snapshot()
-        val zoom = state.zoom
-        val sx = state.scrollX
-        val sy = state.scrollY
-        val locked = zoomLocked
-        val vo = viewOverrides
-        autosaveScope.launch {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                session.save(snapshot, zoom, sx, sy, locked, vo, writeDocument = contentChanged)
+    /** One request covers both legacy stores. Unadopted slots never save or clear older recovery. */
+    private fun requestWorkingSession() {
+        if (!sessionLoaded || !sessionSlotAdopted || missingDocument != null ||
+            pane == Pane.SECONDARY && isSharedView || !sessionOwner.isCurrent()) return
+        if (!noteOpen && !sessionCloseRequested) return
+        sessionSaveSequence++
+        sessionPending = true
+        if (noteOpen) contentTransactionChanged() else submitWorkingSessionIfStable()
+    }
+
+    private fun workingSessionClosed() {
+        sessionCloseRequested = true
+        requestWorkingSession()
+    }
+
+    /** Main only: a view-only note refresh carries no live body to the writer. */
+    private fun captureWorkingSession(forceBody: Boolean = false): WorkingCapture? {
+        if (!noteOpen) return WorkingCapture.Closed
+        val owner = documentOwner
+        if (canvasOpen) {
+            val canvas = infiniteOrNull ?: return null
+            if (owner.canvasWriteJob?.isActive == true || canvas.hasPendingContentTransaction || stylusInContact) return null
+            val doc = canvas.document
+            return WorkingCapture.Canvas(doc, doc.snapshotForWrite(fixedItems = true),
+                com.xnotes.platform.CanvasSessionStore.Metadata(doc.path, doc.displayName, doc.dirty))
+        }
+        val doc = state.document
+        if (owner.noteWriteJob?.isActive == true || noteTransactionsPending(doc)) return null
+        val body = if (forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision)
+            doc.fixedWriteSnapshot() else null
+        return WorkingCapture.Note(doc, doc.bodyRevision, body,
+            com.xnotes.platform.SessionStore.Metadata(doc.path, doc.displayName, doc.dirty,
+                state.zoom, state.scrollX, state.scrollY, zoomLocked, viewOverrides))
+    }
+
+    private fun sameWorkingModel(capture: WorkingCapture): Boolean = when (capture) {
+        is WorkingCapture.Note -> noteOpen && !canvasOpen && state.document === capture.model
+        is WorkingCapture.Canvas -> noteOpen && canvasOpen && infiniteOrNull?.document === capture.model
+        WorkingCapture.Closed -> !noteOpen
+    }
+
+    /** IO only; both files remain in their old format and share the directory FIFO. */
+    private fun writeWorkingCapture(capture: WorkingCapture): com.xnotes.platform.LegacySessionWrite {
+        val saved = com.xnotes.platform.LegacySessionWrite.SAVED
+        return when (capture) {
+            is WorkingCapture.Note -> {
+                val result = session.saveChecked(capture.body, capture.metadata)
+                if (result == saved && !canvasSession.clearChecked()) com.xnotes.platform.LegacySessionWrite.FAILED else result
+            }
+            is WorkingCapture.Canvas -> {
+                val result = canvasSession.saveChecked(capture.body, capture.metadata)
+                if (result == saved && !session.clearChecked()) com.xnotes.platform.LegacySessionWrite.FAILED else result
+            }
+            WorkingCapture.Closed -> {
+                val note = session.clearChecked()
+                val canvas = canvasSession.clearChecked()
+                if (note && canvas) saved else com.xnotes.platform.LegacySessionWrite.FAILED
+            }
+        }
+    }
+
+    private fun submitWorkingSessionIfStable() {
+        if (!sessionPending || !sessionOwner.isCurrent()) { sessionPending = false; return }
+        if (!sessionSlotAdopted || !sessionLoaded || missingDocument != null || pane == Pane.SECONDARY && isSharedView) return
+        // Close is registered immediately, even if an earlier encode is in flight. A newer Editor
+        // must observe this clear before reading the slot; its announce cannot make the clear vanish.
+        if (noteOpen && sessionWriteJob?.isActive == true) return
+        val capture = try { captureWorkingSession() } catch (_: Throwable) {
+            sessionPending = false
+            message = appContext.getString(R.string.err_save_recovery_session)
+            return
+        } ?: return
+        val sequence = sessionSaveSequence
+        val operation = sessionOwner.submit {
+            var actual = capture
+            var result = writeWorkingCapture(actual)
+            if (result == com.xnotes.platform.LegacySessionWrite.NEEDS_BODY) {
+                val retry = withContext(Dispatchers.Main) {
+                    if (sessionOwner.isCurrent() && sequence == sessionSaveSequence && sameWorkingModel(capture))
+                        captureWorkingSession(forceBody = true) else null
+                }
+                if (retry != null) { actual = retry; result = writeWorkingCapture(actual) }
+            }
+            actual to result
+        } ?: return
+        sessionPending = false
+        sessionWriteJob = autosaveScope.launch {
+            try {
+                when (val outcome = operation.await()) {
+                    is com.xnotes.platform.LegacySessionQueue.Outcome.Success -> {
+                        val (actual, result) = outcome.value
+                        if (sessionOwner.isCurrent() && sameWorkingModel(actual)) {
+                            if (result == com.xnotes.platform.LegacySessionWrite.SAVED && actual is WorkingCapture.Note) {
+                                lastSessionBody = actual.model
+                                lastSessionBodyRevision = actual.revision
+                            } else {
+                                lastSessionBody = null
+                                lastSessionBodyRevision = -1L
+                            }
+                            if (sequence == sessionSaveSequence) {
+                                if (result == com.xnotes.platform.LegacySessionWrite.NEEDS_BODY) sessionPending = true
+                                else if (result == com.xnotes.platform.LegacySessionWrite.FAILED)
+                                    message = appContext.getString(R.string.err_save_recovery_session)
+                            }
+                        }
+                    }
+                    is com.xnotes.platform.LegacySessionQueue.Outcome.Failure -> {
+                        lastSessionBody = null
+                        lastSessionBodyRevision = -1L
+                        if (sessionOwner.isCurrent() && sequence == sessionSaveSequence)
+                            message = appContext.getString(R.string.err_save_recovery_session)
+                    }
+                }
+            } finally {
+                if (sessionWriteJob === coroutineContext[kotlinx.coroutines.Job]) sessionWriteJob = null
+                contentTransactionChanged()
             }
         }
     }
@@ -3316,16 +3579,21 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  main thread; the apply runs on the caller's (main) dispatcher. A no-op when
      *  there is no saved session. Drives the launch loader, so it's safe to await. */
     suspend fun restoreSession() {
+        if (sessionLoaded || noteOpen || sessionSlotAdopted) return
+        val request = ++sessionAdoptionSequence
         // A canvas was open last time: it takes precedence, since only one document is ever on top.
-        val canvasDoc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            if (canvasSession.exists()) canvasSession.load() else null
-        }
+        val operation = sessionOwner.submit {
+            val canvas = if (canvasSession.exists()) canvasSession.load() else null
+            canvas to if (canvas == null) session.load() else null
+        } ?: return
+        val outcome = operation.await()
+        if (request != sessionAdoptionSequence || !sessionOwner.isCurrent() || sessionLoaded || noteOpen) return
+        if (outcome !is com.xnotes.platform.LegacySessionQueue.Outcome.Success) { sessionLoaded = true; return }
+        val (canvasDoc, snap) = outcome.value
         if (canvasDoc != null) {
             openCanvasDocument(canvasDoc, canvasDoc.path, canvasDoc.displayName, fromSession = true)
-            sessionLoaded = true
             return
         }
-        val snap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { session.load() }
         if (snap != null) {
             restoredPagedSession = true
             invalidateNativeOpen();retireNoteEditSource()
@@ -3353,6 +3621,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             refreshContent()
             view.requestRender()
             recoverRecordings(fromSession = true)
+            noteOpen = true
+            sessionModelAdopted()
         }
         sessionLoaded = true
     }
@@ -3619,6 +3889,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun sharedLayoutSnapshot() = state.document.pages.map { Triple(it, state.footprint(it), it.pdfTurn) }
 
     private fun refreshContent(notifySharedView: Boolean = true) {
+        contentTransactionChanged()
         republishFlowIfStale()
         canUndo = history.canUndo
         canRedo = history.canRedo
@@ -4072,10 +4343,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Both paged and canvas preparation use this cancellation route. */
     fun cancelOpenInProgress() {nativeOpenRequest?.cancelled?.set(true)}
 
-    fun save(output: OutputStream, uri: String, name: String? = null) {
-        sharedOwner?.let { it.save(output, uri, name); return }
+    /** Used before a picker opens its destination, as well as by explicit save commands. */
+    suspend fun awaitStableForSave(): Boolean {
+        val owner = documentOwner
+        if (owner !== this) return owner.awaitStableForSave()
+        return if (canvasOpen) {
+            val doc = infinite.document
+            infinite.commitText()
+            canvasWriteJob?.join()
+            awaitCanvasCapture(doc) && canvasOpen && infiniteOrNull?.document === doc
+        } else {
+            val doc = state.document
+            commitNoteTextForSave()
+            noteWriteJob?.join()
+            awaitNoteCapture(doc) && !canvasOpen && state.document === doc
+        }
+    }
+
+    fun save(output: OutputStream, uri: String, name: String? = null): Boolean {
+        sharedOwner?.let { return it.save(output, uri, name) }
         try {
-            val toSave = state.document.snapshot()
+            check(!noteTransactionsPending(state.document))
+            val toSave = state.document.fixedWriteSnapshot()
             if (!toSave.path.isNullOrBlank() && documentKey(toSave.path.orEmpty()) != documentKey(uri)) {
                 toSave.identity = toSave.identity.copy(documentId = java.util.UUID.randomUUID().toString())
             }
@@ -4092,9 +4381,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             maybeBindAutosave(uri) // saving into the folder makes it autosave thereafter
             refreshContent()
             invalidateThumb(uri) // content changed; re-render its tile next time it's shown
+            return true
         } catch (e: Throwable) {
             // Throwable, not Exception: an OutOfMemoryError mid-encode must surface a message, not crash.
             message = appContext.getString(R.string.err_save_note)
+            return false
         }
     }
 
@@ -4109,26 +4400,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     fun saveToThen(uri: String, onDone: (Boolean) -> Unit) {
         sharedOwner?.let { it.saveToThen(uri, onDone); return }
+        commitNoteTextForSave()
         noteDebounceJob?.cancel() // this write supersedes a pending debounce
         val doc = state.document
         val startNs = System.nanoTime()
-        // Pointers, on the main thread: the writer gets its own page lists over the live items.
-        val snapshot = doc.snapshot()
-        if (!snapshot.path.isNullOrBlank() && documentKey(snapshot.path.orEmpty()) != documentKey(uri)) {
-            snapshot.identity = snapshot.identity.copy(documentId = java.util.UUID.randomUUID().toString())
-        }
-        state.lastSaveSnapshotMs = msSince(startNs)
-        // Clean from here, not once the bytes land; see [startNoteWrite] for why.
-        val wasDirty = doc.dirty
-        doc.dirty = false
-        dirty = false
-        savingNote = true
         val pending = noteWriteJob // captured, so the join below is on the previous write, not itself
         noteWriteJob=autosaveScope.launch {
             var ok=false
+            var wasDirty=false
             var rejected:String?=null
             try {
                 pending?.join()
+                sessionOwner.awaitAccepted()
+                if (!awaitNoteCapture(doc)) return@launch
+                val captureStart = System.nanoTime()
+                val snapshot = doc.fixedWriteSnapshot()
+                if (!snapshot.path.isNullOrBlank() && documentKey(snapshot.path.orEmpty()) != documentKey(uri)) {
+                    snapshot.identity = snapshot.identity.copy(documentId = java.util.UUID.randomUUID().toString())
+                }
+                state.lastSaveSnapshotMs = msSince(captureStart)
+                wasDirty = doc.dirty
+                doc.dirty = false
+                dirty = false
                 savingNote=true
                 ok=try {withContext(Dispatchers.IO) {writeNoteSafely(uri,snapshot)}}
                     catch(error:Exception) {
@@ -4142,6 +4435,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     }
                     invalidateThumb(uri)
                 }
+            } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
+            } catch (_: Throwable) {
+                rejected = appContext.getString(R.string.err_save_note)
             } finally {
                 if(!ok) {
                     if(wasDirty) doc.dirty=true
@@ -4152,6 +4448,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
                 savingNote=false
                 state.lastSaveTotalMs=msSince(startNs)
+                contentTransactionChanged()
                 if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone(ok)
             }
         }
@@ -5661,41 +5958,50 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun scheduleAutosave() {
         sharedOwner?.let { it.scheduleAutosave(); return }
         val uri = autosaveUri ?: return
+        val doc = state.document
         noteDebounceJob?.cancel()
         state.autosaveStatus = "pending" // debounce running; drives the debug overlay
         noteDebounceJob = autosaveScope.launch {
             kotlinx.coroutines.delay(1200L) // debounce: write after a short idle
-            noteWriteJob?.join() // wait out a write already going out rather than racing it
             val startNs = System.nanoTime() // the debug overlay's save timings start once the debounce fires
-            // Pointers, on the main thread: the writer gets its own page lists over the live items
-            // (see [snapshot]), so it never iterates a list the pen is adding to.
-            val snapshot = state.document.snapshot()
-            state.lastSaveSnapshotMs = msSince(startNs)
-            startNoteWrite(uri, snapshot, state.document.displayName ?: state.document.title, startNs)
+            if (state.document === doc && doc.dirty) startNoteWrite(uri, doc, doc.displayName ?: doc.title, startNs)
         }
     }
 
     /**
-     * Write [snapshot] to [uri] off the main thread and do the bookkeeping after it, tracked as
+     * Capture a stable fixed view of [doc], write to [uri] and track the bookkeeping as
      * [noteWriteJob]. Launched into [autosaveScope] rather than as a child of the caller, so that
      * cancelling a debounce (or a flush) can never cancel a write that is already going out.
      * [startNs] is when the caller began the save, for the debug overlay's total.
      */
-    private fun startNoteWrite(uri:String,snapshot:Document,title:String,startNs:Long,onDone:((Boolean)->Unit)?=null) {
-        val doc=state.document
-        val wasDirty=doc.dirty
-        doc.dirty=false;dirty=false;state.autosaveStatus="in progress"
+    private fun startNoteWrite(uri:String,doc:Document,title:String,startNs:Long,
+                               showOverlay:Boolean=false,onDone:((Boolean)->Unit)?=null) {
+        val requestedPath = doc.path
         val pending=noteWriteJob
         noteWriteJob=autosaveScope.launch {
             var success=false
+            var wasDirty=false
             try {
                 pending?.join()
-                val res=withContext(Dispatchers.IO) {saveNoteGuarded(uri,snapshot,title,doc)}
+                sessionOwner.awaitAccepted()
+                if (!awaitNoteCapture(doc)) return@launch
+                val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val captureStart = System.nanoTime()
+                val snapshot = doc.fixedWriteSnapshot()
+                val captureTitle = doc.displayName ?: title
+                state.lastSaveSnapshotMs = msSince(captureStart)
+                wasDirty=doc.dirty
+                doc.dirty=false;dirty=false;state.autosaveStatus="in progress"
+                if (showOverlay) savingNote = true
+                val res=withContext(Dispatchers.IO) {saveNoteGuarded(target,snapshot,captureTitle,doc)}
                 success=res!=null
                 if(res!=null) {
                     if(state.document===doc) res.fork?.let {adoptNoteFork(it)}
                     invalidateThumb(res.uri)
                 }
+            } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
+            } catch (_: Throwable) {
+                if (noteOpen && !canvasOpen && state.document === doc) message = appContext.getString(R.string.err_save_note)
             } finally {
                 if(!success && wasDirty) {
                     doc.dirty=true
@@ -5704,6 +6010,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if(state.document===doc && !canvasOpen) savingNote=false
                 state.autosaveStatus=if(success) "done" else "failed"
                 state.lastSaveTotalMs=msSince(startNs)
+                contentTransactionChanged()
                 android.util.Log.i("xnotes.save","save ${state.lastSaveTotalMs}ms = snapshot ${state.lastSaveSnapshotMs}"+
                     " + encode ${state.lastSaveEncodeMs} (json ${state.lastSaveManifestMs}"+
                     " of which deflate ${state.lastSaveDeflateMs} over ${state.lastSaveManifestBytes} raw bytes, assets ${state.lastSaveAssetsMs})"+
@@ -5715,12 +6022,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /**
      * Start writing the current note to its autosave file; a no-op when not autosaving or clean.
-     * Returns as soon as the snapshot is taken, so a document swap never blocks the main thread on
-     * SAF; the bytes go out through [startNoteWrite]. That is safe for the swap callers because the
-     * snapshot already holds every edit. Callers that must see the write *finish* use [flushThen].
-     *
-     * No join on a write already going out: [saveLock] serializes the two, so this one cannot land
-     * before the earlier one has finished with the file.
+     * Returns promptly; capture follows earlier writes and active content transactions. Callers
+     * replacing or closing the model must await [flushThen], rather than scheduling a write and
+     * immediately swapping the document.
      */
     fun flushAutosave() {
         sharedOwner?.let { it.flushAutosave(); return }
@@ -5728,9 +6032,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val uri = autosaveUri ?: return
         if (!state.document.dirty) return
         val startNs = System.nanoTime()
-        val snapshot = state.document.snapshot() // main thread: its own page lists over the live items
-        state.lastSaveSnapshotMs = msSince(startNs)
-        startNoteWrite(uri, snapshot, state.document.displayName ?: state.document.title, startNs)
+        startNoteWrite(uri, state.document, state.document.displayName ?: state.document.title, startNs)
     }
 
     /**
@@ -5743,17 +6045,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         sharedOwner?.let { it.flushThen(showOverlay, onDone); return }
         noteDebounceJob?.cancel()
         val uri = autosaveUri
-        if (uri == null) { onDone(); return }
-        if (showOverlay) savingNote = true
+        val doc = state.document
+        val revision = doc.bodyRevision
         autosaveScope.launch {
             noteWriteJob?.join() // a write already going out finishes first; it may be all there was
-            if (!state.document.dirty) { savingNote = false; onDone(); return@launch }
-            val startNs = System.nanoTime()
-            val snapshot = state.document.snapshot() // main thread: its own page lists over the live items
-            state.lastSaveSnapshotMs = msSince(startNs)
-            startNoteWrite(uri, snapshot, state.document.displayName ?: state.document.title, startNs) { ok ->
+            awaitSessionEncoders()
+            if (!awaitNoteCapture(doc)) { savingNote = false; return@launch }
+            if (state.document !== doc) { savingNote = false; return@launch }
+            if (uri == null) {
                 savingNote = false
-                if (ok) onDone() else message = appContext.getString(R.string.err_save_note)
+                if (doc.bodyRevision == revision) onDone() else message = appContext.getString(R.string.split_save_before_replace)
+                return@launch
+            }
+            if (!doc.dirty) { savingNote = false; onDone(); return@launch }
+            val startNs = System.nanoTime()
+            startNoteWrite(uri, doc, doc.displayName ?: doc.title, startNs, showOverlay) { ok ->
+                savingNote = false
+                if (ok && state.document === doc && !doc.dirty && !noteTransactionsPending(doc)) onDone()
+                else if (state.document === doc) message = appContext.getString(R.string.err_save_note)
             }
         }
     }
@@ -6751,7 +7060,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             infinite.commitText()
             AudioRecording.stopFor(infinite)
             AudioPlayback.closeFor(infinite)
-            flushCanvasAutosave()
+            canvasDebounceJob?.cancel()
             canvasAutosaveUri = null
             canvasOpen = false
         }
@@ -6759,9 +7068,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         AudioRecording.stopFor(this) // closing the note places its recording
         AudioPlayback.closeFor(this)
         saveViewState() // remember the outgoing folder note's view before switching away
-        flowText.endSession() // flushes the typing burst so the autosave below carries it
-        flushAutosave() // save the outgoing note if it was autosaving to the folder
+        noteDebounceJob?.cancel()
         autosaveUri = null
+        flowText.endSession()
         // File readouts belong to the outgoing note; a file-backed open re-sets them after the swap.
         state.lastOpenCompacted = doc.compactedOnLoad
         state.openFileBytes = -1L
@@ -6779,6 +7088,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         installInitialView(doc.path) // this note's remembered view, or fit width — never the last note's
         refreshContent()
         view.requestRender()
+        noteOpen = true
+        sessionModelAdopted()
         recoverRecordings(fromSession = false)
     }
 
@@ -6998,9 +7309,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     // --- history ---
 
     fun undo() {
+        finishTablePreviews()
+        sharedPeer()?.finishTablePreviews()
         controller.finishSelectionPreviews()
         sharedPeer()?.controller?.finishSelectionPreviews()
-        flowText.flushPendingEdits() // the open typing burst is the first thing Ctrl+Z takes back
+        flowText.flushPendingEdits() // the open edit is the first thing Ctrl+Z takes back
         if (controller.isEditingLabel) controller.commitTextEdit() // and so is a label being typed
         val command = history.nextUndo
         val pagesBefore = state.document.pages.toList()
@@ -7013,6 +7326,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     fun redo() {
+        finishTablePreviews()
+        sharedPeer()?.finishTablePreviews()
         controller.finishSelectionPreviews()
         sharedPeer()?.controller?.finishSelectionPreviews()
         flowText.flushPendingEdits()
@@ -8699,22 +9014,52 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         endTableEdit()
     }
 
-    /** Show [snapshot] on [table] without an undo step (a drag or the style popup in progress). */
-    fun tablePreview(table: FlowTable, snapshot: TableSnapshot) {
-        if (table.snapshot() == snapshot) return
-        snapshot.applyTo(table)
-        state.document.flow.touch()
-        state.document.dirty = true
-        republishFlow(invalidate = !state.flowLifted)
-        onRender()
+    class TablePreview internal constructor(
+        internal val document: Document, internal val table: FlowTable, val before: TableSnapshot,
+    )
+    private val tablePreviews = java.util.IdentityHashMap<FlowTable, TablePreview>()
+
+    private fun finishTablePreviews() {
+        tablePreviews.values.toList().forEach { finishTablePreview(it, commit = true) }
     }
 
-    /** Close a preview begun at [before]: the table's current state lands as one undo step. */
-    fun tableCommitPreview(table: FlowTable, before: TableSnapshot) {
-        val after = table.snapshot()
-        if (after == before) return
-        before.applyTo(table)
-        tableEdit { ed -> ed.setSnapshot(table, after)?.let { it to null } }
+    fun beginTablePreview(table: FlowTable): TablePreview? {
+        if (!noteOpen || canvasOpen || state.document.flow.paragraphs.none { it.table === table }) return null
+        return tablePreviews[table]?.takeIf { it.document === state.document }
+            ?: TablePreview(state.document, table, table.snapshot()).also { tablePreviews[table] = it }
+    }
+
+    private fun currentTablePreview(preview: TablePreview): Boolean =
+        noteOpen && !canvasOpen && preview.document === state.document && tablePreviews[preview.table] === preview &&
+            state.document.flow.paragraphs.any { it.table === preview.table }
+
+    /** Only a token issued for this actual document can mutate its preview. */
+    fun tablePreview(preview: TablePreview, snapshot: TableSnapshot) {
+        if (!currentTablePreview(preview) || preview.table.snapshot() == snapshot) return
+        snapshot.applyTo(preview.table)
+        state.document.flow.touch()
+        republishFlow(invalidate = !state.flowLifted)
+        onRender()
+        contentTransactionChanged()
+    }
+
+    /** A no-op and a cancellation are real endings too: both release a waiting save. */
+    fun finishTablePreview(preview: TablePreview, commit: Boolean) {
+        val current = currentTablePreview(preview)
+        if (tablePreviews[preview.table] === preview) tablePreviews.remove(preview.table)
+        if (current) {
+            val after = preview.table.snapshot()
+            if (after != preview.before) {
+                preview.before.applyTo(preview.table)
+                if (commit) tableEdit { ed -> ed.setSnapshot(preview.table, after)?.let { it to null } }
+                else {
+                    state.document.flow.touch()
+                    republishFlow(invalidate = !state.flowLifted)
+                    onRender()
+                }
+            }
+        }
+        contentTransactionChanged()
     }
 
     /** The magic wand: column widths that even out the cell heights across each row. */
@@ -9514,28 +9859,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return if (canvasOpen) infinite.onStylusButtonKey(e.keyCode, down) else controller.onStylusButtonKey(e.keyCode, down)
     }
 
-    fun newNote() {
-        invalidateNativeOpen();retireNoteEditSource()
-        leaveSharedDocument()
+    fun newNote(explicitlyDiscarded: Set<OpenDiscard> = emptySet()) {
+        replaceWhenSaved(explicitlyDiscarded) { newNoteSettled() }
+    }
+
+    private fun newNoteSettled() {
         resetPenButtons()
-        AudioRecording.stopFor(this) // closing the note places its recording
-        AudioPlayback.closeFor(this)
-        saveViewState()
-        flushAutosave()
-        autosaveUri = null
-        state.document = blankDocument().also { stampNewNoteDefaults(it) }
-        rebuildPdfSource() // close the outgoing note's PDF source (a blank note has none)
-        adoptOpenPdf(state.document) // and reclaim its temp PDF file now it's released
-        history.clear()
-        controller.resetGestureState() // drop the outgoing note's fling/elastic so it can't bleed in
-        controller.clearSelection() // reset first: the old gesture cannot be restored through the new model
-        clearPageSelection()
-        state.invalidateAllCaches()
-        state.relayout()
-        installInitialView(null) // a fresh in-memory note: fit width
-        refreshContent()
-        view.requestRender()
-        noteOpen = true // push the editor on top of backstage
+        replaceDocument(blankDocument().also { stampNewNoteDefaults(it) })
     }
 
     /** A second view borrows the owner's model/history; only the owner may write the file. */
@@ -9560,15 +9890,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** The receiving pane must be empty or guarded by the caller before replacing its document. */
-    fun openSharedView(source: Editor) {
-        invalidateNativeOpen();retireNoteEditSource()
+    fun openSharedView(source: Editor): Boolean {
         val owner = source.documentOwner
         require(owner !== this && !owner.canvasOpen && owner.noteOpen)
+        if (sharedOwner === owner && state.document === owner.state.document) return true
+        if (!readyToAdopt(captureOpenSlots(false), false, emptySet(), null)) {
+            message = appContext.getString(R.string.split_save_before_replace)
+            return false
+        }
+        invalidateNativeOpen();retireNoteEditSource()
         leaveSharedDocument()
-        commitText()
-        flowText.endSession()
-        flushAutosave()
-        flushCanvasAutosave()
+        noteDebounceJob?.cancel()
+        canvasDebounceJob?.cancel()
         ownAutosaveUri = null
         owner.commitText()
         owner.flowText.endSession()
@@ -9588,22 +9921,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         copyToolSettingsFrom(source)
         noteOpen = true
         sibling?.takeIf { it.secondary === this }?.secondaryStarted = true
-        sessionLoaded = true
+        sessionModelAdopted()
         sharedLayout = sharedLayoutSnapshot()
         owner.sharedLayout = owner.sharedLayoutSnapshot()
         publishedBackgroundRevision = state.backgroundRevision
         owner.publishedBackgroundRevision = owner.state.backgroundRevision
         refreshContent()
         view.requestRender()
+        return true
     }
 
     /** Release a borrowed view without clearing its owner's history or deleting the shared PDF. */
     private fun leaveSharedDocument() {
         sharedOwner?.let {
             invalidateNativeOpen()
-            commitText()
-            flowText.endSession()
-            it.flushAutosave()
             sharedOwner = null
             ownAutosaveUri = null
             history.detach()
@@ -9611,10 +9942,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return
         }
         sibling?.takeIf { it.sharedOwner === this }?.let {
-            it.commitText()
-            it.flowText.endSession()
             it.leaveSharedDocument()
             it.noteOpen = false
+            it.workingSessionClosed()
         }
     }
 
@@ -9673,15 +10003,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (missingDocument != null) return true
         if (canvasOpen) return saveCanvasBeforeReplacement()
         if (documentOwner !== this) return documentOwner.flushSplitDocument()
-        commitText()
+        val doc = state.document
+        commitNoteTextForSave()
         flowText.endSession()
         noteDebounceJob?.cancel()
         noteWriteJob?.join()
-        if (!state.document.dirty) return true
-        val uri = currentUri ?: return false
-        startNoteWrite(uri, state.document.snapshot(), state.document.displayName ?: state.document.title, System.nanoTime())
-        noteWriteJob?.join()
-        return !state.document.dirty
+        if (!awaitNoteCapture(doc)) return false
+        if (doc.dirty) {
+            val uri = currentUri ?: return false
+            startNoteWrite(uri, doc, doc.displayName ?: doc.title, System.nanoTime())
+            noteWriteJob?.join()
+        }
+        awaitSessionEncoders()
+        return state.document === doc && !doc.dirty && !noteTransactionsPending(doc)
     }
 
     /** An explicit reusable arrangement; independent of the last-session recovery files. */
@@ -9691,7 +10025,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (openPanes.any { it.visibleDocumentUri == null }) {
             say(appContext.getString(R.string.split_save_files_first)); return false
         }
-        savingNote = true
         try {
             val paths = openPanes.map { it.visibleDocumentUri!! }.sorted()
             val alreadySaved = withContext(Dispatchers.IO) {
@@ -9840,10 +10173,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     private fun readyToAdopt(slots:List<OpenSlot>,whole:Boolean,discarded:Set<OpenDiscard>,request:NativeOpenRequest?):Boolean {
         if(request!=null && !nativeOpenCurrent(request) || !sameOpenSlots(slots,whole) || nativeOpenPenInContact()) return false
+        if (slots.any { it.pane.sessionWriteJob?.isActive == true || it.pane.noteWriteJob?.isActive == true || it.pane.canvasWriteJob?.isActive == true }) return false
         for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
             val ed=slot.owner
             if(ed.noteWriteJob?.isActive==true || ed.canvasWriteJob?.isActive==true) return false
             val explicit=discarded.any {it.owner===ed && it.applies()}
+            if (ed.sessionWriteJob?.isActive == true || ed.sharedPeer()?.sessionWriteJob?.isActive == true) return false
+            if (!explicit && if (ed.canvasOpen) ed.infiniteOrNull?.hasPendingContentTransaction == true
+                else ed.noteTransactionsPending(ed.state.document)) return false
             if(!explicit && (if(ed.canvasOpen) ed.infinite.document.dirty else ed.state.document.dirty)) return false
         }
         return true
@@ -9851,8 +10188,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private suspend fun settleOpenSlots(slots:List<OpenSlot>,whole:Boolean,discarded:Set<OpenDiscard>,request:NativeOpenRequest?):Boolean {
         fun current()=(request==null || nativeOpenCurrent(request)) && sameOpenSlots(slots,whole)
         if(!current() || nativeOpenPenInContact()) return false
+        for (ed in slots.map { it.pane }.distinct()) {
+            ed.noteWriteJob?.join()
+            ed.canvasWriteJob?.join()
+            ed.awaitSessionEncoders()
+            if (!current()) return false
+        }
         val panes=slots.filter {it.open}.map {it.pane}
+        val owners = panes.map { it.documentOwner }.toSet()
+        if (discarded.any { it.owner in owners && !it.applies() }) {
+            say(appContext.getString(R.string.native_open_changed)); return false
+        }
+        val discardOwners = discarded.filter { it.owner in owners && it.applies() }.map { it.owner }.toSet()
         for(ed in panes) {
+            if (ed.documentOwner in discardOwners) continue
             AudioRecording.stopFor(ed)
             if(ed.canvasOpen) {AudioRecording.stopFor(ed.infinite);ed.infinite.commitText()}
             else {ed.commitText();ed.flowText.endSession()}
@@ -9862,8 +10211,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if(discarded.any {it.owner===ed && it.applies()}) continue
             if(!ed.flushSplitDocument()) {say(appContext.getString(R.string.err_save_note));return false}
         }
+        for (ed in panes) ed.awaitSessionEncoders()
         // No policy for discarding an already-written/pending save is guessed here.
-        val owners=panes.map {it.documentOwner}.toSet()
         val discardedPaths=discarded.filter {it.owner in owners && it.applies()}.mapNotNull {it.owner.state.document.path}
         val unresolved=withContext(Dispatchers.IO) {discardedPaths.any {notebookStorage.hasRecovery(it)}}
         if(unresolved) {say(com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.MIGRATION_RECOVERY_PENDING));return false}
@@ -10036,7 +10385,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun secondaryPane(): Editor = secondary ?: Editor(viewContext, Pane.SECONDARY).also {
         it.keyActions = keyActions // the shortcuts already resolve their target pane themselves
         it.sibling = this
-        it.sessionLoaded = true
         sibling = it
         secondaryStarted = false
         secondary = it
@@ -10163,14 +10511,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Close every open pane, so the backstage is what's left. */
-    fun goHomeAll() {
-        if (inSplit) saveSplitWorkspace()
-        if (sharedOwner != null) {
-            goHome()
-            secondary?.goHome()
-        } else {
-            secondary?.goHome()
-            goHome()
+    fun goHomeAll(explicitlyDiscarded: Set<OpenDiscard> = emptySet()) {
+        replaceWhenSaved(explicitlyDiscarded, whole = true) {
+            val closing = openPanes.toList()
+            detachSettledWorkspace()
+            closing.forEach { it.workingSessionClosed() }
         }
     }
 
@@ -10184,11 +10529,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         AudioPlayback.closeFor(this)
         infiniteOrNull?.let { AudioPlayback.closeFor(it) }
         if (sharedOwner != null) {
+            val owner = documentOwner
+            val closing = state.document
             commitText()
             flowText.endSession()
-            flushAutosave()
-            leaveSharedDocument()
-            noteOpen = false
+            owner.flushThen(showOverlay = true) {
+                if (sharedOwner !== owner || state.document !== closing) return@flushThen
+                leaveSharedDocument()
+                noteOpen = false
+                workingSessionClosed()
+                owner.requestWorkingSession()
+            }
             return
         }
         val linked = sharedPeer()
@@ -10222,6 +10573,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 canvasAutosaveUri = null
                 canvasOpen = false
                 noteOpen = false
+                workingSessionClosed()
             }
             return
         }
@@ -10237,6 +10589,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
             autosaveUri = null
             noteOpen = false
+            workingSessionClosed()
         }
     }
 }
