@@ -61,4 +61,5 @@
         <item quantity="one">Opened the ink-only copy. %d object could not be read and was left out; the original file is unchanged.</item>
         <item quantity="other">Opened the ink-only copy. %d objects could not be read and were left out; the original file is unchanged.</item>
     </plurals>
+    <string name="native_copy_unfinished">The copy is not finished. Open Recovery materials, choose Continue an unfinished copy, and select this destination.</string>
 </resources>

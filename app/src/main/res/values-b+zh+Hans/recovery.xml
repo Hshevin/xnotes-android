@@ -60,4 +60,5 @@
     <plurals name="recovery_ink_only_omitted">
         <item quantity="other">已打开仅笔迹副本。%d 个对象无法读取，已略去；原文件未改变。</item>
     </plurals>
+    <string name="native_copy_unfinished">副本尚未完成。请打开「恢复资料」，选择「继续未完成的副本…」，再选择此次保存目标。</string>
 </resources>

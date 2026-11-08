@@ -4437,34 +4437,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
-    fun save(output: OutputStream, uri: String, name: String? = null): Boolean {
-        sharedOwner?.let { return it.save(output, uri, name) }
-        try {
-            check(!noteTransactionsPending(state.document))
-            val toSave = state.document.fixedWriteSnapshot()
-            if (!toSave.path.isNullOrBlank() && documentKey(toSave.path.orEmpty()) != documentKey(uri)) {
-                toSave.identity = toSave.identity.copy(documentId = java.util.UUID.randomUUID().toString())
-            }
-            synchronized(saveLock) { codec.write(toSave, output) }
-            state.document.identity = toSave.identity
-            state.document.path = uri
-            if (name != null) state.document.displayName = name
-            state.document.dirty = false
-            val saved=state.document.snapshot()
-            autosaveScope.launch(Dispatchers.IO) {
-                runCatching { notebookStorage.registry.register(saved.identity.documentId,"xnote",name ?: saved.title,uri); pinPdfForWrite(saved) }
-                    .onFailure { message=appContext.getString(R.string.recovery_index_failed_after_save) }
-            }
-            maybeBindAutosave(uri) // saving into the folder makes it autosave thereafter
-            refreshContent()
-            invalidateThumb(uri) // content changed; re-render its tile next time it's shown
-            return true
-        } catch (e: Throwable) {
-            // Throwable, not Exception: an OutOfMemoryError mid-encode must surface a message, not crash.
-            message = appContext.getString(R.string.err_save_note)
-            return false
-        }
-    }
 
     /**
      * Save the current document over its existing SAF file at [uri] via [writeNoteSafely], so a
@@ -4475,55 +4447,140 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * ANR: an explicit save targets whatever the system picker handed over, and openOutputStream on
      * a cloud provider is an untimed binder call into that provider's process.
      */
-    fun saveToThen(uri: String, onDone: (Boolean) -> Unit) {
-        sharedOwner?.let { it.saveToThen(uri, onDone); return }
+    private data class CreatedNoteWrite(val error:Exception?=null,val retained:Boolean=false)
+
+    /** IO-only: encode a fixed copy without pinning an unpublished document as a permanent PDF owner. */
+    private fun publishCreatedNote(uri:String,name:String,snapshot:Document,
+                                   intent:com.xnotes.storage.NativeCreationIntent):CreatedNoteWrite {
+        var candidate:java.io.File?=null
+        var lease:AutoCloseable?=null
+        var failure:Throwable?=null
+        var published=false
+        try {
+            val permit=notebookStorage.prepareNewTarget(intent,uri)
+            snapshot.pdfFile?.let {pdf->
+                val held=notebookStorage.pdfResources.admitHeld(pdf,name)
+                lease=held.lease
+                val hash=held.file.nameWithoutExtension
+                if(snapshot.identity.pdfResource?.let {it!=hash}==true)
+                    throw com.xnotes.storage.ReferenceContractViolation(com.xnotes.storage.StorageMsg.PDF_RESOURCE_MISMATCH)
+                snapshot.pdfFile=held.file
+                snapshot.identity=snapshot.identity.copy(pdfResource=hash,externalPdf=true)
+            }
+            val file=java.io.File.createTempFile("create-note-",".xnote",saveTmpDir).also {candidate=it}
+            java.io.FileOutputStream(file).use {output->
+                codec.write(snapshot,object:java.io.FilterOutputStream(output) {
+                    override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
+                    override fun close() {flush()}
+                },embedPdf=false)
+                output.fd.sync()
+            }
+            notebookStorage.publishCreated(uri,file,permit,name)
+            published=true
+            return CreatedNoteWrite()
+        } catch(cancelled:java.util.concurrent.CancellationException) {failure=cancelled;throw cancelled}
+        catch(error:Exception) {
+            failure=error
+            val retained=try {notebookStorage.retainedCreation(intent,uri,name)!=null}
+                catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);false}
+            return CreatedNoteWrite(error,retained)
+        } finally {
+            candidate?.delete()
+            try {lease?.close()} catch(close:Throwable) {
+                if(failure!=null) failure.addSuppressed(close)
+                else if(published) android.util.Log.w("xnotes.storage","Retained PDF lease after committed copy",close)
+                else throw close
+            }
+        }
+    }
+
+    fun saveToThen(uri:String,onDone:(Boolean)->Unit)=saveToThen(uri,null,false,onDone)
+
+    internal fun saveAsToThen(uri:String,name:String?,onDone:(Boolean)->Unit)=saveToThen(uri,name,true,onDone)
+
+    /** Ordinary same-target saves and explicit new copies have separate publication authority. */
+    private fun saveToThen(uri:String,name:String?,forceCreation:Boolean,onDone:(Boolean)->Unit) {
+        sharedOwner?.let {it.saveToThen(uri,name,forceCreation,onDone);return}
         commitNoteTextForSave()
-        noteDebounceJob?.cancel() // this write supersedes a pending debounce
-        val doc = state.document
-        val startNs = System.nanoTime()
-        val pending = noteWriteJob // captured, so the join below is on the previous write, not itself
+        noteDebounceJob?.cancel()
+        val doc=state.document
+        val requestedIdentity=doc.identity
+        val requestedPath=doc.path
+        val requestedSource=noteEditSource
+        val startNs=System.nanoTime()
+        val pending=noteWriteJob
         noteWriteJob=autosaveScope.launch {
             var ok=false
-            var wasDirty=false
             var rejected:String?=null
             try {
                 pending?.join()
                 sessionOwner.awaitAccepted()
-                if (!awaitNoteCapture(doc)) return@launch
-                val captureStart = System.nanoTime()
-                val snapshot = doc.fixedWriteSnapshot()
-                if (!snapshot.path.isNullOrBlank() && documentKey(snapshot.path.orEmpty()) != documentKey(uri)) {
-                    snapshot.identity = snapshot.identity.copy(documentId = java.util.UUID.randomUUID().toString())
+                if(!awaitNoteCapture(doc)) return@launch
+                if(forceCreation && (doc.identity!=requestedIdentity || doc.path!=requestedPath || noteEditSource!==requestedSource)) {
+                    rejected=appContext.getString(R.string.native_open_changed);return@launch
                 }
-                state.lastSaveSnapshotMs = msSince(captureStart)
-                wasDirty = doc.dirty
-                doc.dirty = false
-                dirty = false
+                val originalIdentity=doc.identity
+                val originalPath=doc.path
+                val originalPdf=doc.pdfFile
+                val source=noteEditSource
+                val observation=source?.observe(doc)
+                val creating=forceCreation || originalPath==null || documentKey(originalPath)!=documentKey(uri)
+                val intent=if(creating) notebookStorage.beginCreation(DocumentKind.NOTE) else null
+                val copy=intent?.let {com.xnotes.core.model.PageReferenceCopy.prepare(doc,it.documentId)}
+                val originalScope=doc.pageReferenceScope
+                val captureStart=System.nanoTime()
+                val fixed=doc.fixedWriteSnapshot()
+                val snapshot=copy?.project(fixed) ?: fixed
+                val revision=doc.bodyRevision
+                val displayName=name ?: doc.displayName ?: doc.title
+                state.lastSaveSnapshotMs=msSince(captureStart)
                 savingNote=true
-                ok=try {withContext(Dispatchers.IO) {writeNoteSafely(uri,snapshot)}}
-                    catch(error:Exception) {
-                        if(!isNativeSaveRejection(error)) throw error
-                        rejected=error.message;false
+                val written=if(intent!=null) withContext(Dispatchers.IO) {publishCreatedNote(uri,displayName,snapshot,intent)}
+                    else withContext(Dispatchers.IO) {
+                        try {if(writeNoteSafely(uri,snapshot)) CreatedNoteWrite() else CreatedNoteWrite(java.io.IOException())}
+                        catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                        catch(error:Exception) {CreatedNoteWrite(error)}
                     }
-                if(ok) {
-                    if(state.document===doc) {
-                        doc.identity=snapshot.identity;doc.path=uri
-                        maybeBindAutosave(uri);refreshContent()
-                    }
-                    invalidateThumb(uri)
+                if(written.error!=null) {
+                    android.util.Log.w("xnotes.save","Native destination publication did not complete",written.error)
+                    rejected=if(written.retained) appContext.getString(R.string.native_copy_unfinished)
+                        else if(isNativeSaveRejection(written.error)) written.error.message
+                        else appContext.getString(R.string.err_save_note)
+                    return@launch
                 }
-            } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
-            } catch (_: Throwable) {
-                rejected = appContext.getString(R.string.err_save_note)
-            } finally {
-                if(!ok) {
-                    if(wasDirty) doc.dirty=true
-                    if(state.document===doc) {
-                        if(wasDirty) dirty=true
-                        message=rejected ?: appContext.getString(R.string.err_save_note)
-                    }
-                }
+                // A late input may still be a preview with no revision yet. Let it settle without
+                // a modal blocking its confirmation, then adopt only on the original live owner.
                 savingNote=false
+                commitNoteTextForSave()
+                if(!awaitNoteCapture(doc)) return@launch
+                if(doc.path!=originalPath || doc.identity!=originalIdentity || doc.pdfFile!==originalPdf || doc.pageReferenceScope!==originalScope ||
+                    noteEditSource!==source || observation?.isCurrent()==false) {
+                    rejected=appContext.getString(R.string.native_open_changed);return@launch
+                }
+                val unchanged=doc.bodyRevision==revision
+                if(copy!=null) {copy.adopt(doc);retireNoteEditSource()}
+                doc.pdfFile=snapshot.pdfFile
+                doc.identity=snapshot.identity
+                doc.path=uri
+                if(name!=null) doc.displayName=name
+                doc.dirty=!unchanged
+                dirty=doc.dirty
+                maybeBindAutosave(uri)
+                refreshContent()
+                invalidateThumb(uri)
+                requestWorkingSession()
+                ok=true
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(error:Throwable) {
+                android.util.Log.w("xnotes.save","Native destination adoption did not complete",error)
+                rejected=appContext.getString(R.string.err_save_note)
+            }
+            finally {
+                if(state.document===doc && !canvasOpen) {
+                    savingNote=false
+                    if(!ok) message=rejected ?: appContext.getString(R.string.err_save_note)
+                }
                 state.lastSaveTotalMs=msSince(startNs)
                 contentTransactionChanged()
                 if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone(ok)

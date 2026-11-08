@@ -440,29 +440,20 @@ private fun EditorScreen(
     val resolver = context.contentResolver
     val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
-    // Bind a picker result before opening its output stream; a late picker must never write a new model.
-    var saveRequest by remember { mutableStateOf<SavePickerRequest?>(null) }
-    val createLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri ->
-        val picked=saveRequest;saveRequest=null
-        val request=picked?.proof
-        val continuation=picked?.afterSave
-        if(uri!=null) {
-            if(request?.applies()!=true) editor.message=context.getString(R.string.native_open_changed)
-            else {
+    // A destination callback retains the model request that actually launched it.
+    val createPicker=com.xnotes.ui.rememberNativeDestinationPicker()
+    fun acceptSaveDestination(picked:SavePickerRequest,uri:Uri?) {
+        if(uri==null) return
+        val request=picked.proof
+        if(!request.applies()) {editor.message=context.getString(R.string.native_open_changed);return}
+        scope.launch {
+            val name=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {resolver.takePersistableUriPermission(uri,rwFlags)}
-                val name=displayNameOf(resolver,uri)
-                scope.launch {
-                    if (!request.owner.awaitStableForSave() || !request.sameModel()) {
-                        editor.message=context.getString(R.string.native_open_changed)
-                        return@launch
-                    }
-                    val ok=runCatching {resolver.openOutputStream(uri,"wt")?.use {request.owner.save(it,uri.toString(),name)} == true}
-                        .getOrDefault(false)
-                    if(ok && request.afterSaveApplies()) continuation?.invoke()
-                    else editor.message=context.getString(R.string.err_save_note)
-                }
+                displayNameOf(resolver,uri)
+            }
+            if(!request.applies()) {editor.message=context.getString(R.string.native_open_changed);return@launch}
+            request.owner.saveAsToThen(uri.toString(),name) {ok->
+                if(ok && request.afterSaveApplies()) picked.afterSave?.invoke()
             }
         }
     }
@@ -704,12 +695,23 @@ private fun EditorScreen(
 
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
     fun launchSaveAs(target:Editor,afterSave:(()->Unit)?=null) {
-        if(saveRequest!=null) {editor.message=context.getString(R.string.native_save_picker_busy);return}
+        if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);return}
         if(target.canvasOpen) {editor.message=context.getString(R.string.err_save_note);return}
-        val request=SavePickerRequest(target.documentOwner.discardForOpen(),afterSave)
-        saveRequest=request
-        try {createLauncher.launch("${target.title}.xnote")}
-        catch(_:Exception) {if(saveRequest===request) saveRequest=null;editor.message=context.getString(R.string.err_save_note)}
+        val owner=target.documentOwner
+        val initial=owner.discardForOpen()
+        val identity=owner.state.document.identity
+        val path=owner.currentUri
+        scope.launch {
+            // Settle IME/flow drafts and pen previews before fixing the picker request. A later
+            // onPause commit must not invalidate the very save action that opened the picker.
+            if(!owner.awaitStableForSave() || !initial.sameModel() || owner.state.document.identity!=identity || owner.currentUri!=path) {
+                editor.message=context.getString(R.string.native_open_changed);return@launch
+            }
+            if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);return@launch}
+            val request=SavePickerRequest(owner.discardForOpen(),afterSave)
+            if(!createPicker.launch("${owner.title}.xnote") {uri->acceptSaveDestination(request,uri)})
+                editor.message=context.getString(R.string.err_save_note)
+        }
     }
 
     fun saveOrPrompt() {
