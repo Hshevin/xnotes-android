@@ -9,7 +9,7 @@
 
 - 导图节点文本／手绘原位和放大、层级／折叠、三种布局、普通关系线、空白落点新建并连接、多来源FILE列表、节点多选／框选／组移动／删除／自由主题对齐与xmap保存已实现；各边界见README及对应docs，不代表PAGE闭环或文件网络已完成。
 - 恢复只读正文基础6c00efa0/8873f200、CREATE首发与typed继续be7bdb68、隔离配置渲染0e05feca、真实物理槽读取与原字节副本2081c753已本地提交。
-- 本轮UI消费者已接通Backstage实际窗格入口、Controller/Host、Main根接线及三语资源。已独审发现并修复旧UI帧动作、主动取消永加载、另resume清无关pending三口；最终窄复核通过，准备本地提交。Root只改文档；全部生产和测试冻结。
+- 本轮UI消费者已接通Backstage实际窗格入口、Controller/Host、Main根接线及三语资源。已独审发现并修复旧UI帧动作、主动取消永加载、另resume清无关pending三口；最终窄复核通过，已本地提交267322cb。全部生产和正式测试冻结，工作区无未提交代码；本恢复点仅同步提交状态。
 - 最新验证：tmp/recovery-host-consumer-reviewed-full.log，22244终态0，328套3599项主机，0失败／错误／跳过，Android测试源码编译成功。此前6207定向Controller5+Copy5全过。无运行Gradle。两中文recovery.xml一致，git diff --check通过。
 - 真红证据：50535两行为红及tmp/recovery-host-review-behavior-red.xml（owner退休LOADING、Retained另resume）；77769 Actions API红。最初92054消费者API红、首版92209完整3596、修后22244完整3599均有日志。
 - 真执行包括旧picker A/B、旧帧所有Actions、owner退休终态、FIFO与真实复制IO的dispose等待、SQLite写后失败/原副本typed重试且writes1。Android真实UI两条仅编译，不是执行；系统DocumentsUI／真实SAF／MovinkPad Android15 ProPen3／GPU／大文件性能未验收。
@@ -27,6 +27,6 @@
 
 ## 协作与恢复
 
-cancel_event_tests持有并冻结本轮UI生产及AndroidUI测试；review_input_plan持有并冻结Controller主机测试、负责UI窄复核与R3计划审核；source_loop_audit已交付R3有限计划并完成只读任务。无agent运行Gradle或提交；root统一验证和本地提交。完成agent需followup_task唤醒，send_message不启动新turn。
+cancel_event_tests持有并冻结本轮UI生产及AndroidUI测试；review_input_plan持有并冻结Controller主机测试、负责UI窄复核与R3计划审核；source_loop_audit已交付R3有限计划，现仅在ignored tmp准备实际saveToThen新副本身份／非空目标反例与接口建议，不改正式源码；待其freeze后root先审测试并跑真红。无agent运行Gradle或提交；root统一验证和本地提交。完成agent需followup_task唤醒，send_message不启动新turn。
 
-当前待root：提交已通过最终窄复核的本轮UI/测试/文档；记录提交号并保持干净工作区。随后直接按已复核R3规格写真实失败反例、实现有限出口与原字节激活/UI，不再重开整套存储方案讨论；常规实现/验证/本地提交无需再向用户确认。
+当前待root：UI/测试/文档已提交267322cb，后台读取／复制提交2081c753。直接按已复核R3规格写真实失败反例，先审source_loop_audit的tmp测试再统一跑红；实现有限出口与原字节激活/UI，不再重开整套存储方案讨论。常规实现/验证/本地提交无需再向用户确认。
