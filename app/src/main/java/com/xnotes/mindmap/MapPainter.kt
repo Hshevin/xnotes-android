@@ -33,13 +33,22 @@ class MapPainter {
     }
     fun drawingBounds(doc:MindMapDocument):Rect {
         val counts=doc.hiddenNodeCounts()
-        return doc.visible().map {node->
+        val nodes=doc.visible().map {node->
             val label=counts[node.id]?.let(collapsedLabel)
             if(label==null) node.bounds else {
                 val badge=badgeBounds(node,label)
                 node.bounds.union(Rect(node.x+badge.x,node.y+badge.y,badge.w,badge.h))
             }
-        }.reduce {a,b->a.union(b)}.outset(Space.s32.value.toDouble())
+        }.reduce {a,b->a.union(b)}
+        return relationGeometry(doc).mapNotNull {it.labelBounds}.fold(nodes) {bounds,label->bounds.union(label)}
+            .outset(Space.s32.value.toDouble())
+    }
+    /** Labels are LEFT aligned at the middle's x, with the same 80-character display and baseline. */
+    internal fun relationGeometry(doc:MindMapDocument)=MapRelationGeometry.visible(doc) {edge,anchor->
+        val label=edge.label.take(80)
+        if(label.isEmpty()) null else text.fontMetrics.let {metrics->
+            Rect(anchor.x,anchor.y+metrics.ascent,text.measureText(label).toDouble(),(metrics.descent-metrics.ascent).toDouble())
+        }
     }
     internal var geometryBuildCount=0; private set
     /** Retain shared immutable strokes; evict only last frame's temporary ink previews. */
@@ -50,7 +59,7 @@ class MapPainter {
     }
     fun clear() { strokes.clear(); layouts.clear() }
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
-             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null) {
+             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
         val visible = doc.visible()
@@ -76,24 +85,20 @@ class MapPainter {
             }
             canvas.drawPath(path, paint)
         }
-        for (edge in doc.relations) {
-            val a=byId[edge.from] ?: continue
-            val b=byId[edge.to] ?: continue
-            val start=a.bounds.center; val end=b.bounds.center
-            paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
+        val edges=doc.relations.associateBy {it.id}
+        for (line in relationGeometry(doc)) {
+            val edge=edges.getValue(line.id)
+            val start=line.start; val end=line.end
+            paint.style=Paint.Style.STROKE;paint.color=fg
+            paint.strokeWidth=if(line.id==selectedRelation) Space.s4.value else Space.s2.value
             paint.pathEffect=android.graphics.DashPathEffect(floatArrayOf(8f,6f),0f)
             canvas.drawLine(start.x.toFloat(),start.y.toFloat(),end.x.toFloat(),end.y.toFloat(),paint)
             paint.pathEffect=null
-            // Arrow near the destination border; endpoints always bind to current node geometry.
-            val dx=end.x-start.x;val dy=end.y-start.y
-            val factor=minOf(if(dx==0.0) Double.POSITIVE_INFINITY else b.width/2/kotlin.math.abs(dx),if(dy==0.0) Double.POSITIVE_INFINITY else b.height/2/kotlin.math.abs(dy))
-            if(edge.directed && factor.isFinite()) {
-                val x=end.x-dx*factor;val y=end.y-dy*factor
-                val angle=kotlin.math.atan2(dy,dx)
-                for(sign in listOf(-1,1)) canvas.drawLine(x.toFloat(),y.toFloat(),(x-14*kotlin.math.cos(angle+sign*.45)).toFloat(),(y-14*kotlin.math.sin(angle+sign*.45)).toFloat(),paint)
+            for(wing in line.wings) {
+                canvas.drawLine(wing.start.x.toFloat(),wing.start.y.toFloat(),wing.end.x.toFloat(),wing.end.y.toFloat(),paint)
             }
             text.color=fg
-            canvas.drawText(edge.label.take(80),((start.x+end.x)/2).toFloat(),((start.y+end.y)/2-8).toFloat(),text)
+            canvas.drawText(edge.label.take(80),line.labelAnchor.x.toFloat(),line.labelAnchor.y.toFloat(),text)
         }
         for (n in visible) {
             val active = n.id == selected

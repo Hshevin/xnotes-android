@@ -22,6 +22,194 @@ abstract class MapInputContract {
     }
     private fun pad(context: Context) = InkPadView(context).also { it.layout(0, 0, 320, 200); it.onCommit = { ink -> it.ink = ink } }
 
+    private fun relationView(context:Context)=MindMapView(context).apply {
+        document=MindMapDocument(nodes=listOf(
+            MapNode(id="a",parent=null,x=-300.0,y=-36.0,width=100.0),
+            MapNode(id="b",parent=null,free=true,x=200.0,y=-36.0,width=100.0)),
+            relations=listOf(MapRelation(id="e",from="a",to="b")))
+        onSelect={selected=it};onSelectRelation={selectedRelation=it}
+        layout(0,0,1000,600);fit()
+    }
+    private fun tapRelation(v:MindMapView,dy:Double=0.0) {
+        val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0))
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),(p.y+dy).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,p.x.toFloat(),(p.y+dy).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+    }
+    @Test fun ordinaryRelationTapUsesWideScreenTargetAndEnterEditsTheExistingIdWithoutCommitting()=ui {context->
+        val v=relationView(context);var commits=0;var edit:String?=null
+        v.onChange={commits++};v.onEditRelation={edit=it}
+        v.selected="a"
+        tapRelation(v,12.0*context.resources.displayMetrics.density)
+        assertEquals("e",v.selectedRelation);assertNull(v.selected);assertEquals(0,commits)
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER,android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_ENTER))
+        assertEquals("e",edit);assertEquals(0,commits)
+        val node=v.screenPoint(v.document.node("a").bounds.center)
+        send(v,MotionEvent.ACTION_DOWN,node.x.toFloat(),node.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,node.x.toFloat(),node.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals("a",v.selected);assertNull(v.selectedRelation)
+    }
+    @Test fun nodeOverARelationWinsAndInkStillOwnsItsBody()=ui {context->
+        val v=relationView(context)
+        val ink=MapNode(id="ink",parent=null,free=true,kind=NodeKind.INK,x=-60.0,y=-50.0,width=120.0,height=100.0)
+        v.document=v.document.copy(nodes=v.document.nodes+ink);v.fit()
+        val p=v.screenPoint(ink.bounds.center);var commits=0
+        v.onChange={commits++;v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat())
+        assertTrue(v.inkInput.active);assertNull(v.selectedRelation)
+        send(v,MotionEvent.ACTION_UP,(p.x+15).toFloat(),(p.y+15).toFloat())
+        assertEquals(1,commits);assertEquals("ink",v.selected);assertNull(v.selectedRelation)
+        val before=v.document
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_MOVE,(p.x+50).toFloat(),(p.y+30).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,(p.x+50).toFloat(),(p.y+30).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(before,v.document);assertNull(v.selectedRelation)
+    }
+    @Test fun cancelledOrFarReleaseNeverSelectsThePressedRelation()=ui {context->
+        for(case in 0..2) {
+            val v=relationView(context);val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0));var commits=0
+            v.onChange={commits++}
+            send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+            when(case) {
+                0->send(v,MotionEvent.ACTION_CANCEL,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+                1->send(v,MotionEvent.ACTION_UP,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER,0x20)
+                else->send(v,MotionEvent.ACTION_UP,(p.x+100).toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+            }
+            assertNull(v.selectedRelation);assertEquals(0,commits)
+        }
+    }
+    @Test fun relationPressThatBecomesAPanOrPinchDoesNotSelectOrEditTheGraph()=ui {context->
+        val v=relationView(context);val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0));val before=v.viewport();var commits=0
+        v.onChange={commits++}
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_MOVE,(p.x+70).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,(p.x+70).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertNull(v.selectedRelation);assertNotEquals(before,v.viewport());assertEquals(0,commits)
+        val mid=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0))
+        multi(v,MotionEvent.ACTION_DOWN,listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(mid))
+        multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_FINGER),listOf(mid,mid+com.xnotes.core.geometry.Pt(100.0,0.0)))
+        multi(v,MotionEvent.ACTION_UP,listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(mid))
+        assertNull(v.selectedRelation);assertEquals(0,commits)
+    }
+    @Test fun relationPendingTapIsInvalidatedByDocumentOrHostOrCameraChanges()=ui {context->
+        for(case in 0..4) {
+            val v=relationView(context);val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0))
+            send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+            when(case) {
+                0->v.document=v.document.copy(id="replacement")
+                1->{v.isEnabled=false;v.isEnabled=true}
+                2->v.onWindowFocusChanged(false)
+                3->v.layout(0,0,1100,600)
+                else->v.zoomBy(1.2f)
+            }
+            send(v,MotionEvent.ACTION_UP,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+            assertNull(v.selectedRelation)
+        }
+    }
+    @Test fun relationSelectionDoesNotStealAnExplicitConnectionTargetTap()=ui {context->
+        val v=relationView(context);var target:String?=null
+        v.onConnectionTarget={_,to->target=to}
+        assertTrue(v.beginConnection("a"))
+        val to=v.screenPoint(v.document.node("b").bounds.center)
+        send(v,MotionEvent.ACTION_DOWN,to.x.toFloat(),to.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,to.x.toFloat(),to.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals("b",target);assertNull(v.selectedRelation)
+    }
+    @Test fun selectedRelationRetiresOnNewDocumentsAndPendingTapsRespectTheSessionEpoch()=ui {context->
+        val v=relationView(context)
+        tapRelation(v);assertEquals("e",v.selectedRelation)
+        v.document=v.document.copy(id="another-document")
+        assertNull(v.selectedRelation)
+        val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0))
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        v.documentEpoch++
+        send(v,MotionEvent.ACTION_UP,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertNull(v.selectedRelation)
+    }
+    private fun relationPointers(v:MindMapView,action:Int,ids:List<Int>,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>) {
+        val props=types.mapIndexed {i,type->MotionEvent.PointerProperties().apply {id=ids[i];toolType=type}}.toTypedArray()
+        val coords=points.map {p->MotionEvent.PointerCoords().apply {x=p.x.toFloat();y=p.y.toFloat();pressure=.7f}}.toTypedArray()
+        val e=MotionEvent.obtain(100,time++,action,props.size,props,coords,0,0,1f,1f,888,0,InputDevice.SOURCE_STYLUS,0)
+        try {v.onTouchEvent(e)} finally {e.recycle()}
+    }
+    @Test fun penRelationTapSurvivesAnIncidentalPalmAndOnlyThePenUpSelects()=ui {context->
+        for(pen in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER)) {
+            val v=relationView(context);val p=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0))
+            val palm=com.xnotes.core.geometry.Pt(30.0,40.0);val camera=v.viewport();val bytes=MapCodec.encode(v.document)
+            var selected=0;var commits=0
+            v.onSelectRelation={selected++;v.selectedRelation=it};v.onChange={commits++}
+            relationPointers(v,MotionEvent.ACTION_DOWN,listOf(7),listOf(pen),listOf(p))
+            relationPointers(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(7,2),listOf(pen,MotionEvent.TOOL_TYPE_FINGER),listOf(p,palm))
+            assertEquals(0,selected)
+            relationPointers(v,MotionEvent.ACTION_POINTER_UP,listOf(7,2),listOf(pen,MotionEvent.TOOL_TYPE_FINGER),listOf(p,palm))
+            assertEquals("e",v.selectedRelation);assertEquals(1,selected);assertNull(v.selected)
+            relationPointers(v,MotionEvent.ACTION_MOVE,listOf(2),listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(palm+com.xnotes.core.geometry.Pt(50.0,20.0)))
+            // A new independent pen press is allowed even while the same palm remains down.
+            relationPointers(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(2,7),listOf(MotionEvent.TOOL_TYPE_FINGER,pen),listOf(palm,p))
+            assertEquals(1,selected)
+            relationPointers(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(2,7),listOf(MotionEvent.TOOL_TYPE_FINGER,pen),listOf(palm,p))
+            assertEquals("e",v.selectedRelation);assertEquals(2,selected)
+            relationPointers(v,MotionEvent.ACTION_UP,listOf(2),listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(palm))
+            assertEquals("e",v.selectedRelation);assertEquals(2,selected);assertEquals(0,commits)
+            assertEquals(camera,v.viewport());assertArrayEquals(bytes,MapCodec.encode(v.document))
+        }
+    }
+    @Test fun penTakingOverAPalmRehitsItsOwnRelationInsteadOfThePalmsCandidate()=ui {context->
+        val v=relationView(context)
+        v.document=v.document.copy(nodes=v.document.nodes+listOf(
+            MapNode(id="c",parent=null,free=true,x=-300.0,y=164.0,width=100.0),
+            MapNode(id="d",parent=null,free=true,x=200.0,y=164.0,width=100.0)),
+            relations=v.document.relations+MapRelation(id="other",from="c",to="d"))
+        v.fit()
+        val palm=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,0.0));val pen=v.screenPoint(com.xnotes.core.geometry.Pt(0.0,200.0))
+        val camera=v.viewport();val bytes=MapCodec.encode(v.document);var selected=0;var commits=0
+        v.onSelectRelation={selected++;v.selectedRelation=it};v.onChange={commits++}
+        relationPointers(v,MotionEvent.ACTION_DOWN,listOf(2),listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(palm))
+        relationPointers(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(2,7),listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS),listOf(palm,pen))
+        assertEquals(0,selected)
+        relationPointers(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(2,7),listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS),listOf(palm,pen))
+        assertEquals("other",v.selectedRelation);assertEquals(1,selected);assertNull(v.selected)
+        relationPointers(v,MotionEvent.ACTION_UP,listOf(2),listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(palm))
+        assertEquals("other",v.selectedRelation);assertEquals(1,selected);assertEquals(0,commits)
+        assertEquals(camera,v.viewport());assertArrayEquals(bytes,MapCodec.encode(v.document))
+    }
+    @Test fun documentUpdatesRetireAnOldNodeDragInsteadOfOverwritingNewContentOnRelease()=ui {context->
+        val v=relationView(context);val p=v.screenPoint(v.document.node("a").bounds.center);var commits=0
+        v.onChange={commits++;v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_MOVE,(p.x+80).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        v.document=v.document.update("a"){it.copy(text="newer asynchronous content")}
+        val latest=v.document
+        send(v,MotionEvent.ACTION_UP,(p.x+80).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(latest,v.document);assertEquals(0,commits)
+    }
+    private fun retiredNodeDrag(context:Context,retire:(MindMapView)->Unit) {
+        val v=relationView(context);val original=v.document;val p=v.screenPoint(v.document.node("a").bounds.center);var commits=0
+        v.onChange={commits++;v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_MOVE,(p.x+80).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        retire(v)
+        send(v,MotionEvent.ACTION_UP,(p.x+80).toFloat(),(p.y+40).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(original,v.document);assertEquals(0,commits)
+    }
+    @Test fun equalDocumentReloadRetiresTheCapturedNodeDragByItsSessionEpoch()=ui {context->
+        retiredNodeDrag(context) {v->v.documentEpoch++;v.document=v.document.copy()}
+    }
+    @Test fun disablingRetiresTheCapturedNodeDragBeforeReenabling()=ui {context->
+        retiredNodeDrag(context) {v->v.isEnabled=false;v.isEnabled=true}
+    }
+    @Test fun aSessionEpochRetiresCompletedTapTimingButNewDoubleTapsStillEditNodes()=ui {context->
+        val v=relationView(context);val p=v.screenPoint(v.document.node("a").bounds.center);var edits=0
+        v.onEdit={edits++}
+        fun tap() {
+            send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER);time+=40
+            send(v,MotionEvent.ACTION_UP,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        }
+        tap();v.documentEpoch++;v.document=v.document.copy();time+=80;tap()
+        assertEquals("A tap from the retired session must not become the new session's double tap",0,edits)
+        time+=400;tap();time+=80;tap();assertEquals(1,edits)
+    }
+
     @Test fun stylusRetainsPressureAndCancellingNextStrokePreservesFinishedInk() = ui { context ->
         val v = pad(context)
         send(v, MotionEvent.ACTION_DOWN)

@@ -45,11 +45,13 @@ private fun RelationChoice(label:String,onClick:()->Unit) {
 
 @Composable
 internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
-                                  change:(MapRelation?,MapRelation?)->RelationEditResult,newRelation:MapRelation?=null,close:()->Unit) {
-    var draft by remember {mutableStateOf(newRelation?.let {RelationDraft(null,it)})}
+                                  change:(MapRelation?,MapRelation?)->RelationEditResult,newRelation:MapRelation?=null,
+                                  existingRelationId:String?=null,onSelectExisting:(String)->Unit={},close:()->Unit) {
+    var draft by remember {mutableStateOf(existingRelationId?.let {id->doc.relations.firstOrNull {it.id==id}?.let {RelationDraft(it,it)}}
+        ?: newRelation?.let {RelationDraft(null,it)})}
     var creatingFrom by remember {mutableStateOf<String?>(null)}
     var choosing by remember {mutableStateOf<RelationEndpoint?>(null)}
-    var message by remember {mutableStateOf<Int?>(null)}
+    var message by remember {mutableStateOf<Int?>(if(existingRelationId!=null && doc.relations.none {it.id==existingRelationId}) R.string.graph_relation_changed else null)}
     val alive=remember {java.util.concurrent.atomic.AtomicBoolean(true)}
     DisposableEffect(Unit) {onDispose {alive.set(false)}}
     val edit=draft;val edge=edit?.edge
@@ -116,7 +118,7 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
             } else {
                 item {MapButton(R.string.graph_connect,enabled=doc.nodes.size>1 && doc.nodes.any {it.id==selected}) {creatingFrom=selected;message=null}}
                 items(doc.relations.size,key={doc.relations[it].id}) {i->val r=doc.relations[i]
-                    RelationChoice(relationSentence(doc,r)) {draft=RelationDraft(r,r);message=null}
+                    RelationChoice(relationSentence(doc,r)) {onSelectExisting(r.id);draft=RelationDraft(r,r);message=null}
                 }
             }
         }

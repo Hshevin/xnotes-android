@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="graph_edit_relation">编辑关系</string>
     <string name="graph_free">自由放置节点</string>
     <string name="graph_detach">脱离分支</string>
     <string name="graph_relations">普通关系线</string>

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="graph_edit_relation">Edit relationship</string>
     <string name="graph_free">Free node</string>
     <string name="graph_detach">Detach branch</string>
     <string name="graph_relations">Relations</string>

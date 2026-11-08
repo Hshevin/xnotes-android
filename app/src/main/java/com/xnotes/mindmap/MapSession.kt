@@ -38,6 +38,7 @@ class MapSession() : ViewModel() {
     internal var connectedDraft by mutableStateOf<ConnectedNodeDraft?>(null);private set
     internal var connectedSourceRequest by mutableStateOf<ConnectedSourceRequest?>(null);private set
     private var connectedEpoch=0L
+    internal val interactionEpoch:Long get()=connectedEpoch
     private var connectedImport:Job?=null
     private var connectedImportId:String?=null
     private data class ExistingSourceRequest(val id:String=java.util.UUID.randomUUID().toString(),val epoch:Long,val documentId:String,val nodeId:String)
@@ -75,6 +76,7 @@ class MapSession() : ViewModel() {
         connectedImport?.cancel();connectedImport=null;connectedImportId=null;connectedSourceRequest=null;connectedDraft=null
     }
     private fun retireConnectedDraft() {
+        selectedRelation=null
         connectedDraft?.let {cancelConnectedNode(it.token)};connectedEpoch++
         existingSourceRequest=null;existingSourceJobs.toList().forEach {it.cancel()};existingSourceJobs.clear()
     }
@@ -179,7 +181,20 @@ class MapSession() : ViewModel() {
     }
     fun reportInkLimit() {limitError=true}
     var document by mutableStateOf<MindMapDocument?>(null); private set
-    var selected by mutableStateOf<String?>(null)
+    private var selectedNode by mutableStateOf<String?>(null)
+    var selected:String?
+        get()=selectedNode
+        set(value) {selectedNode=value;selectedRelation=null}
+    var selectedRelation by mutableStateOf<String?>(null);private set
+    fun selectRelation(id:String?):Boolean {
+        if(closing || replacingDocument || inkContact || textDraft!=null || textRestore!=null) return false
+        if(id==null) {selectedRelation=null;return true}
+        val doc=document ?: return false
+        val visible=doc.visible().mapTo(hashSetOf()) {it.id}
+        if(doc.relations.none {it.id==id && it.from in visible && it.to in visible}) return false
+        selectedNode=null;selectedRelation=id
+        return true
+    }
     var loading by mutableStateOf(true); private set
     var loadFailed by mutableStateOf(false); private set
     var saveFailed by mutableStateOf(false); private set
@@ -246,7 +261,10 @@ class MapSession() : ViewModel() {
     private fun publish(h: MapHistory) {
         limitError=false
         document = h.document
-        if (h.document.nodes.none { it.id == selected }) selected = h.document.root.id
+        val visible=h.document.visible().mapTo(hashSetOf()) {it.id}
+        if(h.document.relations.none {it.id==selectedRelation && it.from in visible && it.to in visible}) selectedRelation=null
+        if(selectedRelation!=null) selectedNode=null
+        else if (h.document.nodes.none { it.id == selected }) selected = h.document.root.id
         canUndo = h.canUndo; canRedo = h.canRedo; dirty = true; copySaved = false; revision++
         debounce?.cancel()
         debounce = viewModelScope.launch { delay(350); save() }

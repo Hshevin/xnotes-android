@@ -37,8 +37,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
       CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
         var sourcesFor by remember { mutableStateOf<String?>(null) }
         var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-        var graphTools by remember { mutableStateOf(false) }
-        var pendingRelation by remember {mutableStateOf<MapRelation?>(null)}
+        val graphEpoch=session.interactionEpoch
+        var graphTools by remember(graphEpoch) { mutableStateOf(false) }
+        var pendingRelation by remember(graphEpoch) {mutableStateOf<MapRelation?>(null)}
+        var relationToEdit by remember(graphEpoch) {mutableStateOf<String?>(null)}
         var connectingFrom by remember {mutableStateOf<String?>(null)}
         var connectedPickerId by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
         val connectedSourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
@@ -71,6 +73,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         val imeBottom = WindowInsets.ime.getBottom(density)
         val textDraft = session.textDraft
         val textRestore = session.textRestore
+        fun editExistingRelation(id:String) {
+            if(session.document?.relations?.none {it.id==id}!=false || !session.selectRelation(id)) return
+            relationToEdit=id;pendingRelation=null;graphTools=true
+        }
         fun endText(confirm:Boolean) {
             val draft=session.textDraft ?: return
             if(confirm && !session.finishTextDraft(draft.token)) return
@@ -149,6 +155,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 HorizontalDivider()
                 val doc = session.document
                 val node = doc?.nodes?.firstOrNull { it.id == session.selected }
+                val relation=doc?.relations?.firstOrNull {it.id==session.selectedRelation}
                 if (doc != null && textDraft==null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         fun add(kind: NodeKind, sibling: Boolean) {
@@ -165,7 +172,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.map_add_text, enabled = node != null && !session.closing) { add(NodeKind.TEXT, false) }
                         MapButton(R.string.map_add_ink, enabled = node != null && !session.closing) { add(NodeKind.INK, false) }
                         MapButton(R.string.map_add_sibling, enabled = node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
-                        MapButton(if(node?.kind==NodeKind.INK) R.string.ink_enlarge else R.string.map_edit, enabled = node != null && !session.closing) { editing = node?.id }
+                        MapButton(when {relation!=null->R.string.graph_edit_relation;node?.kind==NodeKind.INK->R.string.ink_enlarge;else->R.string.map_edit},
+                            enabled = (node != null || relation!=null) && !session.closing) {
+                            if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
+                        }
                         MapButton(if (node?.collapsed == true) R.string.map_expand else R.string.map_collapse, enabled = node != null && doc.children(node.id).isNotEmpty()) {
                             node?.let { session.operate { d -> MapLayout.arrange(d.update(it.id) { n -> n.copy(collapsed = !n.collapsed) }) } }
                         }
@@ -183,7 +193,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         MapButton(R.string.graph_free) { addFree=true }
                         MapButton(R.string.graph_detach,enabled=node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
-                        MapButton(R.string.graph_relations) { graphTools=true }
+                        MapButton(R.string.graph_relations) { relationToEdit=null;pendingRelation=null;graphTools=true }
                         MapButton(R.string.graph_connect_canvas,enabled=node!=null,selected=connectingFrom!=null) {
                             if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
                         }
@@ -206,16 +216,18 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                             v.isEnabled=!enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
                             v.onViewportChanged={viewRevision++}
                             v.onConnectionModeChanged={connectingFrom=it}
-                            v.onConnectionTarget={from,to->pendingRelation=MapRelation(from=from,to=to);graphTools=true}
+                            v.onConnectionTarget={from,to->relationToEdit=null;pendingRelation=MapRelation(from=from,to=to);graphTools=true}
                             v.onConnectionBlank={from,point->session.beginConnectedNode(from,point)}
                             v.editingText=textDraft?.nodeId
                             v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
                             v.onInkContact={session.inkContact=it};v.onInkLimit=session::reportInkLimit;v.onInk={id,old,next ->
                                 session.commitInk(id,old,next).also { accepted -> if(accepted) session.document?.let {v.document=it} }
                             }
-                            v.document = proposed ?: doc; v.dark = dark; v.selected = session.selected
+                            v.documentEpoch=graphEpoch
+                            v.document = proposed ?: doc; v.dark = dark; v.updateSelection(session.selected,session.selectedRelation)
                             v.contentDescription = context.getString(R.string.map_canvas_description)
                             v.onSelect = { session.selected = it }; v.onSources={sourcesFor=it}; v.onEdit = { if (!session.closing) { if(doc.node(it).kind==NodeKind.REFERENCE) sourcesFor=it else editing = it } }; v.onChange = { session.commit(it) }
+                            v.onSelectRelation={session.selectRelation(it)};v.onEditRelation=::editExistingRelation
                         })
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
@@ -269,7 +281,17 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         proposed?.let { preview -> AlertDialog(onDismissRequest={proposed=null},title={Text(stringResource(R.string.graph_preview),fontSize=TextSize.heading)},
             text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
             confirmButton={MapButton(R.string.map_done){session.commit(preview);proposed=null}},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
-        if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::changeRelation,pendingRelation){graphTools=false;pendingRelation=null} }
+        if(graphTools) session.document?.let { current->
+            key(graphEpoch) {
+                GraphRelationsDialog(current,session.selected,{initial,next->
+                    if(session.interactionEpoch!=graphEpoch) RelationEditResult.Conflict else session.changeRelation(initial,next).also {result->
+                        if(result is RelationEditResult.Duplicate && !session.selectRelation(result.relation.id)) session.selectRelation(null)
+                    }
+                },pendingRelation,relationToEdit,onSelectExisting={id->
+                    if(session.interactionEpoch==graphEpoch && !session.selectRelation(id)) session.selectRelation(null)
+                }){graphTools=false;pendingRelation=null;relationToEdit=null}
+            }
+        }
         sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
             val editor=remember(session,id,sourceEdit.epoch,sourceEdit.documentId) {SourceListEditor(session,sourceEdit)}
             GraphSourcesDialog(sourceEdit,editor, {

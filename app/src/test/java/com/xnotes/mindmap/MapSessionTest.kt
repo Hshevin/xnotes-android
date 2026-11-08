@@ -22,6 +22,39 @@ class MapSessionTest {
         }
         fail("Timed out waiting for serialized file IO")
     }
+    @Test fun relationSelectionIsRuntimeOnlyAndSurvivesItsOwnEditUndoAndRedo() {
+        val context=RuntimeEnvironment.getApplication()
+        val edge=MapRelation(id="edge",from="a",to="b",label="before")
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null),MapNode(id="b",parent="a")),relations=listOf(edge))
+        val file=File.createTempFile("selected-relation-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(doc))}
+        val session=MapSession();session.open(context,Uri.fromFile(file));await {!session.loading}
+        assertTrue(session.selectRelation("edge"))
+        assertNull(session.selected);assertEquals("edge",session.selectedRelation)
+        assertFalse(session.canUndo);assertEquals(doc,session.document)
+        assertTrue(session.changeRelation(edge,edge.copy(label="after")) is RelationEditResult.Applied)
+        assertEquals("edge",session.selectedRelation);assertNull(session.selected)
+        session.undo();assertEquals("edge",session.selectedRelation);assertEquals(doc,session.document)
+        session.redo();assertEquals("edge",session.selectedRelation);assertEquals("after",session.document!!.relations.single().label)
+        session.selected="a";assertNull(session.selectedRelation)
+        assertFalse(session.selectRelation("missing"));assertEquals("a",session.selected)
+    }
+    @Test fun relationSelectionIsClearedWhenHiddenDeletedOrTheFileVersionIsAdopted() {
+        val context=RuntimeEnvironment.getApplication()
+        val edge=MapRelation(id="edge",from="a",to="b")
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null),MapNode(id="b",parent="a")),relations=listOf(edge))
+        val file=File.createTempFile("retired-relation-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(doc))}
+        val session=MapSession();session.open(context,Uri.fromFile(file));await {!session.loading}
+        assertTrue(session.selectRelation("edge"))
+        session.operate {it.update("a") {node->node.copy(collapsed=true)}}
+        assertNull(session.selectedRelation)
+        session.undo();assertTrue(session.selectRelation("edge"))
+        val nodes=session.document!!.nodes
+        assertTrue(session.changeRelation(session.document!!.relations.single(),null) is RelationEditResult.Applied)
+        assertNull(session.selectedRelation);assertEquals(nodes,session.document!!.nodes)
+        session.undo();assertTrue(session.selectRelation("edge"))
+        session.useFileVersion();await {!session.replacingDocument}
+        assertNull(session.selectedRelation)
+    }
     @Test fun anOlderRecoveryCopyDoesNotAuthorizeClosingNewUnsavedEdits() {
         val context = RuntimeEnvironment.getApplication()
         val file = File.createTempFile("session-", ".xmap", context.cacheDir)

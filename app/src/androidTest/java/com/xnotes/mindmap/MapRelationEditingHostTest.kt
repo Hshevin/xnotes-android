@@ -32,10 +32,10 @@ class MapRelationEditingHostTest {
         assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
     private fun visible(label:String)=runner.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(label).orEmpty().isNotEmpty()
-    private fun scenario(twoEdges:Boolean=false,multiline:Boolean=false,block:(MindMapActivity,MapSession)->Unit) {
+    private fun scenario(twoEdges:Boolean=false,multiline:Boolean=false,overlap:Boolean=false,block:(MindMapActivity,MapSession)->Unit) {
         val context=runner.targetContext
         val edges=listOf(MapRelation(id="first",from="a",to="b",label="first description"))+
-            if(twoEdges) listOf(MapRelation(id="existing",from="a",to="c",kind=RelationKind.DEPENDS_ON,label="keep existing description")) else emptyList()
+            if(twoEdges || overlap) listOf(MapRelation(id="existing",from="a",to=if(overlap) "b" else "c",kind=RelationKind.DEPENDS_ON,label="keep existing description")) else emptyList()
         val document=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,text="A"),MapNode(id="b",parent="a",text="B"),
             MapNode(id="c",parent="a",text=if(multiline) "C\n第二行\nthird line" else "C")),relations=edges)
         val file=File.createTempFile("relation-host-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(MapLayout.arrange(document)))}
@@ -162,6 +162,78 @@ class MapRelationEditingHostTest {
         val done=runner.uiAutomation.rootInActiveWindow!!.findAccessibilityNodeInfosByText(activity.getString(R.string.map_done)).firstOrNull {it.isClickable}
         assertNotNull(done);assertFalse(done!!.isEnabled)
         click(activity.getString(R.string.cancel));assertEquals(before,main {s.document})
+    }
+    private fun clickScrollingDialog(label:String) {
+        fun scroll(node:AccessibilityNodeInfo):Boolean {
+            if(node.isScrollable && node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+            for(i in 0 until node.childCount) node.getChild(i)?.let {if(scroll(it)) return true}
+            return false
+        }
+        repeat(20) {
+            val root=runner.uiAutomation.rootInActiveWindow
+            val target=root?.findAccessibilityNodeInfosByText(label)?.firstOrNull {it.isClickable && it.isEnabled}
+            if(target!=null) {assertTrue(target.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();return}
+            if(root!=null) scroll(root)
+            runner.waitForIdleSync();Thread.sleep(20)
+        }
+        fail("Dialog action was not reachable: $label")
+    }
+    private fun tapRelationMiddle(activity:MindMapActivity,s:MapSession,expected:String) {
+        main {s.selected=null}
+        waitUntil {main {graph(activity).let {it.width>0 && it.height>0 && it.selected==null && it.selectedRelation==null}}}
+        main {
+            val v=graph(activity);val edge=v.document.relations.first();val a=v.document.node(edge.from).bounds.center;val b=v.document.node(edge.to).bounds.center
+            val p=v.screenPoint(com.xnotes.core.geometry.Pt((a.x+b.x)/2,(a.y+b.y)/2))
+            val down=android.os.SystemClock.uptimeMillis()
+            for((index,action) in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP).withIndex()) {
+                val props=MotionEvent.PointerProperties().apply {id=9;toolType=MotionEvent.TOOL_TYPE_FINGER}
+                val coords=MotionEvent.PointerCoords().apply {x=p.x.toFloat();y=p.y.toFloat();pressure=1f}
+                val event=MotionEvent.obtain(down,down+index,action,1,arrayOf(props),arrayOf(coords),0,0,1f,1f,888,0,android.view.InputDevice.SOURCE_TOUCHSCREEN,0)
+                try {v.onTouchEvent(event)} finally {event.recycle()}
+            }
+        }
+        waitUntil {main {s.selectedRelation==expected && s.selected==null}}
+    }
+    @Test fun canvasSelectedExistingRelationCancelsOrEditsOneHistoryEntryAndKeepsItsIdentity()=scenario {activity,s->
+        val original=main {s.document!!}
+        tapRelationMiddle(activity,s,"first")
+        assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        click(activity.getString(R.string.graph_edit_relation));waitUntil {visible("first description")}
+        enterText("cancelled description");click(activity.getString(R.string.cancel))
+        assertEquals(original,main {s.document});assertFalse(main {s.canUndo});assertEquals("first",main {s.selectedRelation})
+        click(activity.getString(R.string.graph_edit_relation));enterText("canvas edit")
+        click(activity.getString(R.string.map_done))
+        val changed=main {s.document!!}
+        assertEquals(original.nodes,changed.nodes);assertEquals(original.relations.single().copy(label="canvas edit"),changed.relations.single())
+        assertEquals("first",main {s.selectedRelation});assertNull(main {s.selected})
+        click(activity.getString(R.string.cancel))
+        main {s.undo()};assertEquals(original,main {s.document});assertFalse(main {s.canUndo});assertEquals("first",main {s.selectedRelation})
+        main {s.redo()};assertEquals(changed,main {s.document});assertEquals("first",main {s.selectedRelation});assertNull(main {s.selected})
+    }
+    @Test fun completelyOverlappingRelationsRemainIndividuallySelectableEditableAndDeletableInTheList()=scenario(overlap=true) {activity,s->
+        val original=main {s.document!!}
+        tapRelationMiddle(activity,s,"existing")
+        click(activity.getString(R.string.graph_edit_relation));waitUntil {visible("keep existing description")}
+        clickScrollingDialog(activity.getString(R.string.graph_relation_list))
+        click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
+        waitUntil {main {s.selectedRelation=="first" && s.selected==null}}
+        enterText("first changed from list");click(activity.getString(R.string.map_done))
+        val changed=main {s.document!!}
+        assertEquals(original.nodes,changed.nodes);assertEquals("keep existing description",changed.relations.first {it.id=="existing"}.label)
+        assertEquals("first changed from list",changed.relations.first {it.id=="first"}.label)
+        click(activity.getString(R.string.graph_sentence_depends,node(activity,1,"A"),node(activity,2,"B")))
+        waitUntil {main {s.selectedRelation=="existing" && s.selected==null}}
+        clickScrollingDialog(activity.getString(R.string.delete))
+        val deleted=main {s.document!!}
+        assertEquals(original.nodes,deleted.nodes);assertEquals(listOf(changed.relations.first {it.id=="first"}),deleted.relations)
+        click(activity.getString(R.string.cancel))
+        main {s.undo()};assertEquals(changed,main {s.document})
+        main {s.undo()};assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        main {s.redo();s.redo()};assertEquals(deleted,main {s.document})
+        main {s.selected=null};click(activity.getString(R.string.graph_relations))
+        click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
+        waitUntil {visible("first changed from list") && main {s.selectedRelation=="first"}}
+        click(activity.getString(R.string.cancel))
     }
     private fun views(root:View):List<View> = listOf(root)+(if(root is ViewGroup) (0 until root.childCount).flatMap {views(root.getChildAt(it))} else emptyList())
     private fun graph(activity:MindMapActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().single()

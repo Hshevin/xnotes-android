@@ -19,6 +19,69 @@ import java.io.File
 @Config(manifest = Config.NONE, sdk = [35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MapRenderTest {
+    @Test fun relationLabelGeometryMatchesTheLeftAlignedTruncatedTextAndSelectionIsTransient() {
+        val label="relationship description ".repeat(8)
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,width=100.0,x=-300.0),
+            MapNode(id="b",parent=null,free=true,width=100.0,x=200.0)),
+            relations=listOf(MapRelation(id="e",from="a",to="b",label=label,kind=RelationKind.DEPENDS_ON)))
+        val bytes=MapCodec.encode(doc)
+        val painter=MapPainter()
+        val line=painter.relationGeometry(doc).single()
+        val text=android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {textSize=18f}
+        val box=requireNotNull(line.labelBounds)
+        assertEquals(line.labelAnchor.x,box.left,0.0)
+        assertEquals(line.labelAnchor.y+text.fontMetrics.ascent,box.top,.001)
+        assertEquals(text.measureText(label.take(80)).toDouble(),box.w,.001)
+        assertTrue(box.w<text.measureText(label))
+        val bounds=painter.drawingBounds(doc)
+        assertTrue(bounds.contains(box.topLeft));assertTrue(bounds.contains(com.xnotes.core.geometry.Pt(box.right,box.bottom)))
+        val farLabel=com.xnotes.core.geometry.Pt(box.right-1,box.centerY)
+        assertTrue(farLabel.x>line.end.x+24)
+        assertEquals(listOf("e"),MapRelationGeometry.hits(listOf(line),farLabel,.1))
+        assertTrue(MapRelationGeometry.hits(listOf(line.copy(labelBounds=null)),farLabel,.1).isEmpty())
+        for(dark in listOf(false,true)) {
+            fun pixels(selected:String?):IntArray {
+                val image=Bitmap.createBitmap(1400,500,Bitmap.Config.ARGB_8888)
+                try {
+                    val canvas=Canvas(image);canvas.drawColor(if(dark) Color.BLACK else Color.WHITE);canvas.translate(400f,200f)
+                    painter.draw(canvas,doc,dark,selectedRelation=selected)
+                    return IntArray(1400*500).also {image.getPixels(it,0,1400,0,0,1400,500)}
+                } finally {image.recycle()}
+            }
+            val ordinary=pixels(null);val selected=pixels("e")
+            assertFalse(ordinary.contentEquals(selected))
+            assertTrue(selected.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
+            assertArrayEquals(ordinary,pixels(null))
+        }
+        assertArrayEquals(bytes,MapCodec.encode(doc))
+    }
+    @Test fun aLiveRelationSelectionNeverAppearsInStoredThumbnailsOrThePdfImage() {
+        val context=RuntimeEnvironment.getApplication()
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,width=100.0,x=-300.0),
+            MapNode(id="b",parent=null,free=true,width=100.0,x=200.0)),
+            relations=listOf(MapRelation(id="e",from="a",to="b",label="Displayed label")))
+        val bytes=MapCodec.encode(doc)
+        val file=File.createTempFile("relation-render-",".xmap",context.cacheDir).apply {writeBytes(bytes)}
+        val uri=Uri.fromFile(file).toString()
+        try {
+            val before=MapFiles.thumbnail(context,uri,600,400)
+            val view=MindMapView(context).apply {document=doc;layout(0,0,1000,600);fit();selectedRelation="e"}
+            assertEquals("e",view.selectedRelation)
+            val after=MapFiles.thumbnail(context,uri,600,400)
+            try {assertTrue(before.sameAs(after))} finally {before.recycle();after.recycle()}
+            val output=ByteArrayOutputStream()
+            MapFiles.exportPdf(context,uri,output){false}
+            com.tom_roush.pdfbox.pdmodel.PDDocument.load(output.toByteArray()).use {pdf->
+                val resources=pdf.getPage(0).resources
+                val image=resources.getXObject(resources.xObjectNames.single()) as com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+                val exported=image.image
+                val ordinary=MapFiles.thumbnail(context,uri,exported.width,exported.height)
+                try {assertTrue(ordinary.sameAs(exported))} finally {ordinary.recycle();exported.recycle()}
+            }
+            assertEquals("e",view.selectedRelation)
+            assertArrayEquals(bytes,MapCodec.encode(view.document));assertArrayEquals(bytes,file.readBytes())
+        } finally {file.delete()}
+    }
     /** This host suite omits app resources; inject only the formatter at the Android boundary. */
     private fun graphContext():android.content.Context {
         val app=RuntimeEnvironment.getApplication()
