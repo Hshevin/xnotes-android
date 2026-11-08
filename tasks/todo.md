@@ -411,6 +411,8 @@
 - [x] R2换文档reset纯丢旧草稿/连击/dwell/几何与preview引用，嵌套PDF/插空scroll取消及实际画布style/color退休；最终3436项主机、Android源码编译和独立复核通过。
 - [x] R2实际owner稳定事务屏障接旧native3及旧会话：固定capture、输入结束Main post、表格token/历史、暂停defer、FIFO恢复/清理、显式discard新建、共享关闭与临时资源寿命；19574fe1等四个本地提交，3483项主机/Android测试源码编译/两独立复核通过，仪器和目标设备未运行。见reference-owner-capture-2026-11-09.md。
 - [ ] R2继续：native4／真实回执→同head工作会话生产迁移、恢复权限、跨Activity在途native采用、新建／另存copy持久切换；未保存canvas无目标的保存／放弃UI。旧会话稳定捕获不代表新协议接线或完整来源闭环完成。
+- [x] R2恢复只读准备基础：Absent/Cleared/Active真实head、指定Creation新UUID原字节副本、Unbound/legacy实际解码及资源租约，6c00efa0/8873f200；完整322套3571主机/Android源码编译/独立复核通过，实际仪器未执行。
+- [ ] R2恢复预览实际消费者：physical slot选择/队列取消交接、隔离live配置渲染、Backstage真实host与picker、CREATE首发和typed继续、重启显式选择target。当前回调入口仅基座；不以只读基础代替完整producer/复制切换。
 - [x] R2来源重开采用最新保存B：同URI／alias／画布／另一窗格、clean C／身份变更／取消／同SHA复用；d7610f5b，实际4红→8绿与Android源码编译、独立复核通过，平台未运行。
 - [x] A2普通线画布宽命中与选择：geometry／label／arrow同源、48dp、节点优先、运行时互斥、现有线草稿与重合列表、笔掌/取消/旧拖动定时退休、默认导出无选中态；5c43056b，完整315套件3520主机及Android源码编译/独立复核通过，Compose仅编译未运行。
 - [x] A2节点选择/框选、子树并集移动、根保护批量删除与free主题对齐：2b0d1fdc/5cd2552e，318套件3552主机及Android源码编译、独立复核通过；Android实际界面/事件仅编译，目标设备未运行。

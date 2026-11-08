@@ -1,5 +1,9 @@
 # 自主推进恢复点：已恢复
 
+当前续作（2026-11-09）：恢复只读准备基础已本地提交6c00efa0（head分类/指定ID raw copy）、8873f200（readonly decode与纯合同复用）；完整consumer仍in_progress，overall active/complete=false，不打包APK。正式规格reference-recovery-preview-2026-11-09.md。tmp/recovery-preview-foundation-full.log（26006退出0）完整322套3571项0失败/错误/跳过、Android测试源码编译成功；9项foundation+10项readonly新测试，UI sidebar/rail实际2例仅编译。独立plan/代码窄审通过，copy尾随JSON真实一失败后用新增strict入口修复、legacy宽松旧行为保持。此前API红30881/52141/61758与entry红40311保留，最终50 decode focus及63 foundation focus全过，无运行Gradle。
+当前未提交UI基座由cancel_event_tests持有并冻结：Backstage.kt callback/三recovery.xml/新BackstageRecoveryEntryHostTest及runner登记；已随full验证但尚未绑定真实host，勿丢弃/勿当consumer完成。root core/格式/readonly已提交，文档随当前恢复点提交。
+下一实际执行：source_loop_audit准备tmp NativeCreationFirstPublishBindingTest真行为红（SQLite leaseclose seam换同UUID stage）及typedPending API红，待root移动并统一Gradle；其授权仅NativeCreation.kt/NotebookStorage.kt/MigrationPublication.kt+测试，先红再生产不自行Gradle。计划独审已可实施：actualStage在stage返回后所有throwable清理前固定，首发和typed续写同时绑定recordDigest/candidateSHA/newId；识别pending不可反造provenance，老URI恢复供重启显式选择，补checkActive透传。cancel_event_tests准备tmp/recovery-renderer-draft.txt与测试，尚未改Editor渲染；目标复用现CPU helpers加不可变neutral style/bothdim cap/strictPDF/finally cleanup，无新引擎。Renderer测试落盘需避开先行seam行为红以免缺API遮住它。root随后实现actual Editor physical-slot loader/队列owned结果+旧note/canvas显式选→真实host/picker与创建副本，不能再停留API。UI最小契约tmp/recovery-ui-contract.txt，root readonly tests与NativeUnbound已移正式源码且通过；不要再次从旧tmp覆盖测试。
+
 目标：思维导图与文件关系网络，active，overall complete=false。沿已同步的新渲染架构继续完整需求；用户“完工了吗”是状态询问，不是暂停或缩减范围，已明确答复整体尚未完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。本片模型2b0d1fdc、完整节点多选交互5cd2552e已本地提交；本片文档随本恢复点同步本地提交，无用户修改被覆盖。此前来源重开d7610f5b、普通线选择5c43056b保留。
 授权：源码、验证、文档和本地提交；master54f05b0f同步的既有明确授权已执行。不打包、安装、推送或发布，不合入其他开发分支。

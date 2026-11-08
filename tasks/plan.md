@@ -1,5 +1,7 @@
 # 大型 PDF 独立标注与工具光标计划
 
+2026-11-09 R2恢复预览消费者：实际head分类/指定新UUID原字节复制与readonly正文准备已验证并本地提交6c00efa0/8873f200（322套3571项主机、Android源码编译）；当前继续actual physical-slot loader、隔离配置CPU预览与真实host/picker、CREATE首发及typed继续。整体仍实施中，详见 `docs/movinkpad/reference-recovery-preview-2026-11-09.md`。不以这些基础片替代native4生产交接、页激活、多来源及网络需求。
+
 2026-11-09 导图A2续作：节点选择/框选、子树并集移动、批量删除与自由主题对齐已实现，2b0d1fdc/5cd2552e已本地提交，318套件3552项主机及Android测试源码编译通过，规格与独立审核要求见 `docs/movinkpad/mind-map-node-selection-2026-11-09.md`。来源生产保存交接、页面来源和往返、反向引用与文件网络仍按既有依赖继续，未因交互切片取消。当前只编译/测试/本地提交，不打包或安装。
 
 
