@@ -256,6 +256,109 @@ abstract class MapInputContract {
         layout(0,0,800,500);fit();selected="source"
     }
     private fun at(v:MindMapView,id:String)=v.screenPoint(v.document.node(id).bounds.center)
+    private fun portView(context:Context)=connectView(context).apply {
+        val density=resources.displayMetrics.density
+        layout(0,0,(800*density).toInt(),(500*density).toInt());fit()
+    }
+    private fun rightPort(v:MindMapView)=requireNotNull(v.connectionPort()).center
+    @Test fun draggingTheSelectedNodePortRequestsOneRelationWithoutEditingInkOrMovingTheGraph()=ui {context->
+        for(type in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_FINGER)) {
+            val v=portView(context);val before=v.document;val camera=v.viewport();val port=rightPort(v)
+            val requested=mutableListOf<Pair<String,String>>();var commits=0;var busy=false
+            v.onConnectionTarget={from,to->requested+=from to to};v.onChange={commits++};v.onInkContact={busy=it}
+            send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat(),type)
+            assertEquals("source",v.connectionFrom);assertEquals(type==MotionEvent.TOOL_TYPE_STYLUS,busy)
+            touchNode(v,MotionEvent.ACTION_MOVE,"target",type);assertEquals("target",v.connectionTarget)
+            touchNode(v,MotionEvent.ACTION_UP,"target",type)
+            assertEquals(listOf("source" to "target"),requested);assertFalse(busy)
+            assertEquals(before,v.document);assertEquals(camera,v.viewport());assertEquals(0,commits);assertFalse(v.inkInput.active)
+        }
+    }
+    @Test fun tappingAPortArmsClickConnectionAndCancellingAPortDragCreatesNothing()=ui {context->
+        val v=portView(context);val port=rightPort(v);var requests=0;v.onConnectionTarget={_,_->requests++}
+        v.onChange={v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat())
+        send(v,MotionEvent.ACTION_UP,port.x.toFloat(),port.y.toFloat())
+        assertEquals("source",v.connectionFrom);assertEquals(0,requests)
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target")
+        assertEquals(1,requests)
+        send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat());touchNode(v,MotionEvent.ACTION_MOVE,"target")
+        send(v,MotionEvent.ACTION_CANCEL)
+        assertEquals(1,requests);v.cancelConnection()
+        touchNode(v,MotionEvent.ACTION_DOWN,"source");touchNode(v,MotionEvent.ACTION_UP,"source")
+        assertEquals(1,v.document.node("source").ink.size)
+    }
+    @Test fun portTargetsKeep48DpAtDifferentZoomsAndYieldToOtherNodesInk()=ui {context->
+        for(factor in listOf(.1f,1f,4f)) {
+            val v=portView(context);v.zoomBy(factor)
+            val port=requireNotNull(v.connectionPort());val size=48.0*v.resources.displayMetrics.density
+            assertEquals(size,port.w,.001);assertEquals(size,port.h,.001)
+            assertTrue(port.left>=0 && port.top>=0 && port.right<=v.width && port.bottom<=v.height)
+        }
+        val v=portView(context);v.centerOn("source")
+        val original=requireNotNull(v.connectionPort());val camera=v.viewport();val scale=v.contentScale()
+        val block=MapNode(id="blocking",parent=null,free=true,kind=NodeKind.INK,
+            x=(original.x-camera.panX)/scale,y=(original.y-camera.panY)/scale)
+        v.document=v.document.copy(nodes=v.document.nodes+block);v.onChange={v.document=it}
+        val moved=requireNotNull(v.connectionPort());assertTrue(moved.right<=v.screenPoint(v.document.node("source").bounds.topLeft).x)
+        send(v,MotionEvent.ACTION_DOWN,original.centerX.toFloat(),original.centerY.toFloat())
+        send(v,MotionEvent.ACTION_UP,original.centerX.toFloat(),original.centerY.toFloat())
+        assertNull(v.connectionFrom);assertEquals(1,v.document.node("blocking").ink.size);assertTrue(v.document.node("source").ink.isEmpty())
+        v.selected="source"
+        v.document=v.document.update("source") {it.copy(x=-camera.panX/scale,y=-camera.panY/scale,width=v.width/scale,height=v.height/scale)}
+        assertNull(v.connectionPort())
+    }
+    @Test fun portMicroMotionOnlyArmsEvenIfATargetMovesUnderItsRelease()=ui {context->
+        val v=portView(context);val port=requireNotNull(v.connectionPort());var requests=0
+        v.onConnectionTarget={_,_->requests++}
+        send(v,MotionEvent.ACTION_DOWN,port.centerX.toFloat(),port.centerY.toFloat())
+        val camera=v.viewport();val scale=v.contentScale()
+        v.document=v.document.update("target") {it.copy(x=(port.centerX-camera.panX)/scale-20,y=(port.centerY-camera.panY)/scale-20)}
+        send(v,MotionEvent.ACTION_UP,port.centerX.toFloat()+1,port.centerY.toFloat()+1)
+        assertEquals(0,requests);assertEquals("source",v.connectionFrom)
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target")
+        assertEquals(1,requests)
+    }
+    @Test fun portsTryEachFreeSideThenHideWhenEveryCompleteTargetIsBlocked()=ui {context->
+        val v=portView(context);v.centerOn("source");v.document=v.document.copy(nodes=listOf(v.document.node("source")));v.zoomBy(.5f)
+        val source=v.document.node("source");val a=v.screenPoint(source.bounds.topLeft);val b=v.screenPoint(com.xnotes.core.geometry.Pt(source.bounds.right,source.bounds.bottom))
+        val camera=v.viewport();val scale=v.contentScale()
+        repeat(4) {index->
+            val port=requireNotNull(v.connectionPort())
+            when(index) {
+                0->assertTrue(port.left>=b.x)
+                1->assertTrue(port.right<=a.x)
+                2->assertTrue(port.top>=b.y)
+                3->assertTrue(port.bottom<=a.y)
+            }
+            val blocker=MapNode(id="block$index",parent=null,free=true,x=(port.x-camera.panX)/scale,y=(port.y-camera.panY)/scale,
+                width=port.w/scale,height=port.h/scale)
+            v.document=v.document.copy(nodes=v.document.nodes+blocker)
+        }
+        assertNull(v.connectionPort());assertTrue(v.beginConnection("source")) // Toolbar remains available.
+    }
+    @Test fun portDragKeepsPenOwnershipOverPalmAndHandsTwoFingersToTheViewport()=ui {context->
+        for(pen in listOf(false,true)) {
+            val v=portView(context);val before=v.document;var requests=0;var busy=false
+            v.onConnectionTarget={_,_->requests++};v.onInkContact={busy=it}
+            val port=requireNotNull(v.connectionPort()).center;val target=at(v,"target");val palm=com.xnotes.core.geometry.Pt(100.0,100.0)
+            val type=if(pen) MotionEvent.TOOL_TYPE_STYLUS else MotionEvent.TOOL_TYPE_FINGER
+            multi(v,MotionEvent.ACTION_DOWN,listOf(type),listOf(port))
+            multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(type,MotionEvent.TOOL_TYPE_FINGER),listOf(port,palm))
+            if(pen) {
+                assertEquals("source",v.connectionFrom);assertTrue(busy)
+                multi(v,MotionEvent.ACTION_MOVE,listOf(type,MotionEvent.TOOL_TYPE_FINGER),listOf(target,palm))
+                multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(type,MotionEvent.TOOL_TYPE_FINGER),listOf(target,palm))
+                assertEquals(0,requests);multi(v,MotionEvent.ACTION_UP,listOf(type),listOf(target))
+                assertEquals(1,requests);assertFalse(busy)
+            } else {
+                assertNull(v.connectionFrom);assertFalse(busy)
+                multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(type,type),listOf(port,palm));multi(v,MotionEvent.ACTION_UP,listOf(type),listOf(port))
+                assertEquals(0,requests)
+            }
+            assertEquals(before,v.document)
+        }
+    }
     private fun touchNode(v:MindMapView,action:Int,id:String,type:Int=MotionEvent.TOOL_TYPE_STYLUS,flags:Int=0) {
         val p=at(v,id);send(v,action,p.x.toFloat(),p.y.toFloat(),type,flags)
     }
@@ -313,12 +416,28 @@ abstract class MapInputContract {
         }
     }
 
-    private fun multi(v:MindMapView,action:Int,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>,oracle:android.view.ScaleGestureDetector?=null) {
+    private fun multi(v:MindMapView,action:Int,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>,oracle:android.view.ScaleGestureDetector?=null,flags:Int=0) {
         val props=types.mapIndexed {i,type->MotionEvent.PointerProperties().apply {id=if(i==0) 2 else 7;toolType=type}}.toTypedArray()
         val coords=points.map {p->MotionEvent.PointerCoords().apply {x=p.x.toFloat();y=p.y.toFloat();pressure=.7f}}.toTypedArray()
         val e=MotionEvent.obtain(100,time++,action,props.size,props,coords,0,0,1f,1f,888,0,
-            if(types.any {it==MotionEvent.TOOL_TYPE_STYLUS}) InputDevice.SOURCE_STYLUS else InputDevice.SOURCE_TOUCHSCREEN,0)
+            if(types.any {it==MotionEvent.TOOL_TYPE_STYLUS}) InputDevice.SOURCE_STYLUS else InputDevice.SOURCE_TOUCHSCREEN,flags)
         try {oracle?.onTouchEvent(e);v.onTouchEvent(e)} finally {e.recycle()}
+    }
+    @Test fun penTakingOverAFingerPortDragOwnsItsUpAndDrainsRemainingFingerEvents()=ui {context->
+        for(success in listOf(false,true)) {
+            val v=portView(context);val before=v.document;val port=requireNotNull(v.connectionPort()).center
+            val target=at(v,"target");val source=at(v,"source");val types=listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS)
+            var busy=false;var requests=0;v.onInkContact={busy=it};v.onConnectionTarget={_,_->requests++};v.onChange={v.document=it}
+            multi(v,MotionEvent.ACTION_DOWN,listOf(types[0]),listOf(port))
+            multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),types,listOf(port,port));assertTrue(busy)
+            multi(v,MotionEvent.ACTION_MOVE,types,listOf(port,target))
+            multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),types,listOf(port,target),flags=if(success) 0 else 0x20)
+            assertFalse(busy);assertEquals(if(success) 1 else 0,requests)
+            multi(v,MotionEvent.ACTION_MOVE,listOf(types[0]),listOf(source));multi(v,MotionEvent.ACTION_UP,listOf(types[0]),listOf(source))
+            assertEquals(before,v.document)
+            v.cancelConnection();touchNode(v,MotionEvent.ACTION_DOWN,"source");touchNode(v,MotionEvent.ACTION_UP,"source")
+            assertEquals(1,v.document.node("source").ink.size)
+        }
     }
     @Test fun connectionPenOwnsItsPointerBeforeAndAfterPalmAndOnlyFinishesWhenItLifts()=ui {context->
         for(palmFirst in listOf(false,true)) {

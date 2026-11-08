@@ -144,5 +144,25 @@ class MapRenderTest {
         assertEquals(root.bounds.outset(32.0),MapPainter().drawingBounds(plain))
         assertArrayEquals(bytes,MapCodec.encode(doc))
     }
+    @Test fun selectedConnectionPortIsAThemeAwareViewOverlayAndDoesNotChangeExportGeometry() {
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="root",parent=null),MapNode(id="free",parent=null,free=true,x=500.0)))
+        val bytes=MapCodec.encode(doc);val bounds=MapPainter.bounds(doc)
+        val v=MindMapView(RuntimeEnvironment.getApplication()).apply {document=doc;layout(0,0,1000,600);fit()}
+        fun pixels():IntArray {
+            val image=Bitmap.createBitmap(1000,600,Bitmap.Config.ARGB_8888)
+            return try {v.draw(Canvas(image));IntArray(1000*600).also {image.getPixels(it,0,1000,0,0,1000,600)}} finally {image.recycle()}
+        }
+        for(dark in listOf(false,true)) {
+            v.dark=dark;v.selected=null;val plain=pixels()
+            v.selected="root";val port=requireNotNull(v.connectionPort());val selected=pixels()
+            var changed=0
+            for(y in kotlin.math.ceil(port.top).toInt() until port.bottom.toInt()) for(x in kotlin.math.ceil(port.left).toInt() until port.right.toInt()) {
+                if(plain[y*1000+x]!=selected[y*1000+x]) changed++
+            }
+            assertTrue(changed>10);assertTrue(selected.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
+            assertTrue(v.beginConnection("root"));assertNull(v.connectionPort());v.cancelConnection()
+        }
+        assertEquals(bounds,MapPainter.bounds(doc));assertArrayEquals(bytes,MapCodec.encode(v.document))
+    }
 
 }

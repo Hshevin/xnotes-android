@@ -8,6 +8,9 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.geometry.Rect
+import com.xnotes.ui.theme.MinTouchTarget
+import com.xnotes.ui.theme.Space
 import kotlin.math.hypot
 
 /** One native surface for the graph; no nested AndroidViews or wet-ink Surface reattachment. */
@@ -53,6 +56,10 @@ class MindMapView(context: Context) : View(context) {
     private var connectionDocumentId:String?=null
     private var connectionPointer=-1
     private var connectionPen=false
+    private var connectionByPort=false
+    private var connectionPortOrigin:Pt?=null
+    private var connectionPortDragged=false
+    private val portPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     private var savedQuickScale:Boolean?=null
     private val painter = MapPainter()
     private var zoom = 1f
@@ -207,14 +214,48 @@ class MindMapView(context: Context) : View(context) {
             canvas.restore()
         }
         canvas.restore()
+        connectionPort()?.let {bounds->
+            val fg=if(dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            val bg=if(dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+            val node=document.node(requireNotNull(selected));val a=screenPoint(node.bounds.topLeft)
+            val b=screenPoint(Pt(node.bounds.right,node.bounds.bottom))
+            val cx=bounds.centerX.toFloat();val cy=bounds.centerY.toFloat()
+            portPaint.color=fg;portPaint.style=android.graphics.Paint.Style.STROKE
+            portPaint.strokeWidth=Space.s2.value*resources.displayMetrics.density
+            canvas.drawLine(cx.coerceIn(a.x.toFloat(),b.x.toFloat()),cy.coerceIn(a.y.toFloat(),b.y.toFloat()),cx,cy,portPaint)
+            val radius=Space.s8.value*resources.displayMetrics.density
+            portPaint.color=bg;portPaint.style=android.graphics.Paint.Style.FILL;canvas.drawCircle(cx,cy,radius,portPaint)
+            portPaint.color=fg;portPaint.style=android.graphics.Paint.Style.STROKE;canvas.drawCircle(cx,cy,radius,portPaint)
+        }
+    }
+    /** Screen-space target: never shrink it with zoom or place it over editable node content. */
+    internal fun connectionPort():Rect? {
+        if(!isEnabled || inkInput.active || editingText!=null || connectionFrom!=null || pointer>=0 || width<=0 || height<=0) return null
+        val visible=document.visible();val node=visible.firstOrNull {it.id==selected} ?: return null
+        fun screenBounds(n:MapNode):Rect {
+            val a=screenPoint(n.bounds.topLeft);val b=screenPoint(Pt(n.bounds.right,n.bounds.bottom))
+            return Rect.fromPoints(a,b)
+        }
+        val box=screenBounds(node)
+        if(box.right<0 || box.left>width || box.bottom<0 || box.top>height) return null
+        val size=(MinTouchTarget.value*resources.displayMetrics.density).toDouble();val half=size/2
+        val candidates=listOf(Pt(box.right+half,box.centerY),Pt(box.left-half,box.centerY),
+            Pt(box.centerX,box.bottom+half),Pt(box.centerX,box.top-half))
+        val others=visible.filter {it.id!=node.id}.map(::screenBounds)
+        return candidates.map {Rect(it.x-half,it.y-half,size,size)}.firstOrNull {r->
+            r.left>=0 && r.top>=0 && r.right<=width && r.bottom<=height &&
+                others.none {r.left<it.right && r.right>it.left && r.top<it.bottom && r.bottom>it.top}
+        }
     }
     fun beginConnection(from:String):Boolean {
         if(!isEnabled || inkInput.active || pressedStream || pointer>=0 || editingText!=null || document.visible().none {it.id==from}) return false
+        armConnection(from);return true
+    }
+    private fun armConnection(from:String) {
         cancelConnection();cancelGesture();cancelDetectors()
         savedQuickScale=scaleDetector.isQuickScaleEnabled;scaleDetector.isQuickScaleEnabled=false
         connectionDocumentId=document.id;connectionFrom=from;suppressRemainingTouch=false
         selected=from;onSelect(from);onConnectionModeChanged(from);requestFocus();invalidate()
-        return true
     }
     fun cancelConnection() {endConnection(false)}
     private fun cancelDetectors() {
@@ -223,6 +264,7 @@ class MindMapView(context: Context) : View(context) {
     }
     private fun clearConnectionTouch() {
         connectionPointer=-1;connectionTarget=null;connectionPreview=null
+        connectionByPort=false;connectionPortOrigin=null;connectionPortDragged=false
         val wasPen=connectionPen;connectionPen=false
         if(wasPen) onInkContact(false)
         parent?.requestDisallowInterceptTouchEvent(false);invalidate()
@@ -240,12 +282,18 @@ class MindMapView(context: Context) : View(context) {
     /** True consumes; false hands a real two-finger stream to the existing viewport path. */
     private fun handleConnection(e:MotionEvent):Boolean {
         fun position(index:Int) {
+            connectionPortOrigin?.let {origin->
+                if(hypot(e.getX(index)-origin.x,e.getY(index)-origin.y)>slop) connectionPortDragged=true
+            }
             connectionPreview=point(e.getX(index),e.getY(index))
             connectionTarget=hit(e.getX(index),e.getY(index))?.id?.takeUnless {it==connectionFrom}
             invalidate()
         }
         fun begin(index:Int) {
+            val byPort=connectionByPort
             clearConnectionTouch();cancelDetectors();suppressRemainingTouch=false
+            connectionByPort=byPort
+            if(byPort) connectionPortOrigin=Pt(e.getX(index).toDouble(),e.getY(index).toDouble())
             connectionPointer=e.getPointerId(index);connectionPen=isPen(e,index)
             if(connectionPen) onInkContact(true) else scaleDetector.onTouchEvent(e)
             parent?.requestDisallowInterceptTouchEvent(true);position(index)
@@ -269,7 +317,7 @@ class MindMapView(context: Context) : View(context) {
             MotionEvent.ACTION_UP,MotionEvent.ACTION_POINTER_UP -> {
                 if(e.getPointerId(e.actionIndex)!=connectionPointer) return true
                 position(e.actionIndex)
-                val from=connectionFrom;val target=connectionTarget
+                val from=connectionFrom;val target=connectionTarget?.takeIf {connectionPortOrigin==null || connectionPortDragged}
                 if((e.flags and 0x20)==0 && from!=null && target!=null) {
                     endConnection(false) // Busy is released before opening a relation draft.
                     onConnectionTarget(from,target)
@@ -297,6 +345,10 @@ class MindMapView(context: Context) : View(context) {
         }
         if(e.actionMasked==MotionEvent.ACTION_DOWN) suppressRemainingTouch=false
         if(connectionFrom!=null && handleConnection(e)) return true
+        if(e.actionMasked==MotionEvent.ACTION_DOWN && hit(e.x,e.y)==null && connectionPort()?.contains(Pt(e.x.toDouble(),e.y.toDouble()))==true) {
+            armConnection(requireNotNull(selected));connectionByPort=true
+            return handleConnection(e)
+        }
         if(e.actionMasked in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_POINTER_DOWN)) {
             val i=e.actionIndex
             if(e.getToolType(i) in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER,MotionEvent.TOOL_TYPE_MOUSE)) {
