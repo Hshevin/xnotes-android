@@ -56,4 +56,11 @@
     <string name="graph_connect_canvas">Connect on canvas</string>
     <string name="graph_connect_hint">Drag to a target node, or tap one, then confirm the relationship. Two fingers return to view gestures.</string>
     <string name="graph_hidden_nodes_count">+%1$d</string>
+    <string name="graph_create_connected">New node and relationship</string>
+    <string name="graph_create_connected_notice">Create a free node here, with an undirected relationship to %1$s.</string>
+    <string name="graph_connected_changed">The starting node or document changed. Cancel and start a new connection.</string>
+    <string name="graph_display_title">Display title</string>
+    <string name="graph_reference_file_notice">This references the whole file. Referenced files are not included in map backups.</string>
+    <string name="graph_source_loading">Checking source…</string>
+    <string name="graph_sources_changed">Sources changed, or the document limit was reached. Review the list and retry.</string>
 </resources>

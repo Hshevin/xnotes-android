@@ -47,6 +47,84 @@ class MapRelationEditingHostTest {
         } finally {main {activity.finish()}}
     }
     private fun node(a:MindMapActivity,index:Int,name:String)=a.getString(R.string.graph_numbered_node,index,name)
+    private fun enterText(value:String) {
+        fun editable(node:AccessibilityNodeInfo):AccessibilityNodeInfo? {
+            if(node.isEditable) return node
+            for(i in 0 until node.childCount) node.getChild(i)?.let {child->editable(child)?.let {return it}}
+            return null
+        }
+        var field:AccessibilityNodeInfo?=null
+        waitUntil {field=runner.uiAutomation.rootInActiveWindow?.let(::editable);field!=null}
+        assertTrue(field!!.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
+        }));runner.waitForIdleSync()
+    }
+    private fun blank(activity:MindMapActivity) = main {
+        val v=graph(activity);val x=v.width/2f;val y=v.height-v.resources.displayMetrics.density
+        for(action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+            val properties=MotionEvent.PointerProperties().apply {id=9;toolType=MotionEvent.TOOL_TYPE_FINGER}
+            val coordinates=MotionEvent.PointerCoords().apply {this.x=x;this.y=y;pressure=1f}
+            val event=MotionEvent.obtain(100,200,action,1,arrayOf(properties),arrayOf(coordinates),0,0,1f,1f,888,0,android.view.InputDevice.SOURCE_TOUCHSCREEN,0)
+            try {v.onTouchEvent(event)} finally {event.recycle()}
+        }
+    }
+    @Test fun blankTextCreationConfirmsNodeAndLineAsOneUndoAndKeepsTheDropCenter()=scenario {activity,s->
+        val original=main {s.document!!};click(activity.getString(R.string.graph_connect_canvas));blank(activity)
+        waitUntil {main {s.connectedDraft!=null}}
+        val draft=main {s.connectedDraft!!};assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        click(activity.getString(R.string.map_text_node));enterText("New connected text")
+        waitUntil {main {s.connectedDraft?.node?.text=="New connected text"}}
+        click(activity.getString(R.string.map_done));waitUntil {main {s.connectedDraft==null}}
+        val changed=main {s.document!!};val node=changed.node(draft.nodeId)
+        assertEquals(draft.center,node.bounds.center);assertEquals("New connected text",node.text);assertTrue(node.free)
+        assertEquals(original.nodes,changed.nodes.filter {it.id!=node.id})
+        assertTrue(changed.relations.any {it.from==draft.from && it.to==node.id && !it.directed})
+        main {s.undo()};assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        main {s.redo()};assertEquals(changed,main {s.document})
+    }
+    @Test fun cancellingInkAndReferenceDraftsLeavesNoNodeLineOrHistory()=scenario {activity,s->
+        val original=main {s.document!!}
+        for(kind in listOf(R.string.map_ink_node,R.string.graph_reference)) {
+            click(activity.getString(R.string.graph_connect_canvas));blank(activity)
+            waitUntil {main {s.connectedDraft!=null}};click(activity.getString(kind))
+            click(activity.getString(R.string.cancel));waitUntil {main {s.connectedDraft==null}}
+            assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        }
+    }
+    @Test fun inspectedFileReferenceStillNeedsConfirmationAndKeepsItsIndependentTitle()=scenario {activity,s->
+        val original=main {s.document!!};val file=File.createTempFile("connected-source-",".xmap",activity.cacheDir)
+        val bytes=MapCodec.encode(MindMapDocument());file.writeBytes(bytes)
+        try {
+            click(activity.getString(R.string.graph_connect_canvas));blank(activity)
+            waitUntil {main {s.connectedDraft!=null}};click(activity.getString(R.string.graph_reference))
+            val draft=main {s.connectedDraft!!};enterText("Independent title")
+            main {val request=s.beginConnectedSource(draft.token)!!;assertTrue(s.receiveConnectedSource(request.id,Uri.fromFile(file)))}
+            waitUntil {main {s.connectedDraft?.node?.sources?.isNotEmpty()==true && s.connectedDraft?.loadingSource==false}}
+            assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+            click(activity.getString(R.string.map_done));waitUntil {main {s.connectedDraft==null}}
+            val added=main {s.document!!.node(draft.nodeId)};assertEquals("Independent title",added.text)
+            assertEquals(file.name,added.sources.single().fileName);assertEquals(SourceScope.FILE,added.sources.single().scope)
+            assertArrayEquals(bytes,file.readBytes());main {s.undo()};assertEquals(original,main {s.document})
+        } finally {file.delete()}
+    }
+    @Test fun recreatedCreationDialogKeepsItsSessionTextButCancelStillAddsNothing()=scenario {originalActivity,s->
+        var activity=originalActivity
+        try {
+            val original=main {s.document!!};click(activity.getString(R.string.graph_connect_canvas));blank(activity)
+            waitUntil {main {s.connectedDraft!=null}};click(activity.getString(R.string.map_text_node));enterText("Draft survives recreation")
+            waitUntil {main {s.connectedDraft?.node?.text=="Draft survives recreation"}}
+            val token=main {s.connectedDraft!!.token}
+            val monitor=runner.addMonitor(MindMapActivity::class.java.name,null,false)
+            main {activity.recreate()}
+            val recreated=runner.waitForMonitorWithTimeout(monitor,5000) as? MindMapActivity;runner.removeMonitor(monitor)
+            assertNotNull(recreated);activity=recreated!!
+            assertSame(s,main {ViewModelProvider(activity)[MapSession::class.java]})
+            waitUntil {visible("Draft survives recreation")}
+            assertEquals(token,main {s.connectedDraft!!.token});assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+            click(activity.getString(R.string.cancel));waitUntil {main {s.connectedDraft==null}}
+            assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
+        } finally {if(activity!==originalActivity) main {activity.finish()}}
+    }
     @Test fun cancelNewConnectionThenEditEndpointsAndDirectionAsOneUndoStep()=scenario {activity,s->
         val original=main {s.document!!}
         click(activity.getString(R.string.graph_relations));click(activity.getString(R.string.graph_connect));click(node(activity,3,"C"))

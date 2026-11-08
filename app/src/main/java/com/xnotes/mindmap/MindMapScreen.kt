@@ -36,16 +36,21 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
     XnotesTheme(monochromePalette(dark)) {
       CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
         var sourcesFor by remember { mutableStateOf<String?>(null) }
-        var pendingSourceNode by remember { mutableStateOf<String?>(null) }
+        var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         var graphTools by remember { mutableStateOf(false) }
         var pendingRelation by remember {mutableStateOf<MapRelation?>(null)}
         var connectingFrom by remember {mutableStateOf<String?>(null)}
+        var connectedPickerId by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+        val connectedSourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
+            val request=connectedPickerId;connectedPickerId=null
+            if(request!=null) session.receiveConnectedSource(request,uri)
+        }
         var addFree by remember { mutableStateOf(false) }
         var layoutMenu by remember { mutableStateOf(false) }
         var proposed by remember { mutableStateOf<MindMapDocument?>(null) }
         val sourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            val id=pendingSourceNode;pendingSourceNode=null
-            if(uri!=null && id!=null) session.addSource(uri,id)
+            val request=pendingSourceRequest;pendingSourceRequest=null
+            if(request!=null) session.receiveExistingSource(request,uri)
         }
         var view by remember { mutableStateOf<MindMapView?>(null) }
         var viewRevision by remember { mutableIntStateOf(0) }
@@ -104,7 +109,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             session.completeTextRestore(restore.token)
         }
         BackHandler {
-            if(session.textDraft!=null) endText(false)
+            if(session.connectedDraft!=null) session.cancelConnectedNode(session.connectedDraft!!.token)
+            else if(session.textDraft!=null) endText(false)
             else if(session.textRestore!=null) Unit
             else if(editing!=null) editing=null
             else if(connectingFrom!=null) view?.cancelConnection()
@@ -114,7 +120,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         val palette = LocalPalette.current
         val enlarged=editing?.let { id -> session.document?.nodes?.any {it.id==id && it.kind==NodeKind.INK} } == true
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
-          CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null)) {
+          CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null || session.replacingDocument)) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 if(textDraft!=null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
@@ -178,7 +184,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.graph_free) { addFree=true }
                         MapButton(R.string.graph_detach,enabled=node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
                         MapButton(R.string.graph_relations) { graphTools=true }
-                        MapButton(R.string.graph_connect_canvas,enabled=node!=null && doc.nodes.size>1,selected=connectingFrom!=null) {
+                        MapButton(R.string.graph_connect_canvas,enabled=node!=null,selected=connectingFrom!=null) {
                             if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
                         }
                         MapButton(R.string.graph_sources,enabled=node!=null) { sourcesFor=node?.id }
@@ -197,10 +203,11 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     when {
                         doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize(), update = { v ->
-                            v.isEnabled=!enlarged && textDraft==null && textRestore==null && !session.closing
+                            v.isEnabled=!enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
                             v.onViewportChanged={viewRevision++}
                             v.onConnectionModeChanged={connectingFrom=it}
                             v.onConnectionTarget={from,to->pendingRelation=MapRelation(from=from,to=to);graphTools=true}
+                            v.onConnectionBlank={from,point->session.beginConnectedNode(from,point)}
                             v.editingText=textDraft?.nodeId
                             v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
                             v.onInkContact={session.inkContact=it};v.onInkLimit=session::reportInkLimit;v.onInk={id,old,next ->
@@ -240,6 +247,13 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 session.editNodeProperties(id,edited).also { if (it) {editing = null;propertiesFor=null} }
             })
         } }
+        session.connectedDraft?.let {draft->ConnectedNodeDialog(session,draft,connectedPickerId!=null || session.connectedSourceRequest!=null) {
+            if(connectedPickerId==null) session.beginConnectedSource(draft.token)?.let {request->
+                connectedPickerId=request.id
+                try {connectedSourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
+                catch(_:Exception) {connectedPickerId=null;session.failConnectedSource(request.id)}
+            }
+        }}
         if(addFree) AlertDialog(onDismissRequest={addFree=false},title={Text(stringResource(R.string.graph_free),fontSize=TextSize.heading)},text={Column {
             for(k in NodeKind.entries) MapButton(when(k){NodeKind.TEXT->R.string.map_text_node;NodeKind.INK->R.string.map_ink_node;NodeKind.REFERENCE->R.string.graph_reference}) {
                 var added: String?=null
@@ -256,8 +270,15 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
             confirmButton={MapButton(R.string.map_done){session.commit(preview);proposed=null}},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
         if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::changeRelation,pendingRelation){graphTools=false;pendingRelation=null} }
-        sourcesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id==id }?.let { n ->
-            GraphSourcesDialog(n, { edited -> session.operate { it.update(id) { edited } } }, { pendingSourceNode=id;sourcePicker.launch(arrayOf("application/octet-stream","application/zip")) }) { sourcesFor=null }
+        sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
+            val editor=remember(session,id,sourceEdit.epoch,sourceEdit.documentId) {SourceListEditor(session,sourceEdit)}
+            GraphSourcesDialog(sourceEdit,editor, {
+                if(pendingSourceRequest==null) session.beginExistingSource(id)?.let {request->
+                    pendingSourceRequest=request
+                    try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
+                    catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
+                }
+            }) { sourcesFor=null }
         } }
         if (discardingRecovery) AlertDialog(onDismissRequest = { discardingRecovery = false },
             title = { Text(stringResource(R.string.map_conflict_use_file), fontSize = TextSize.heading) },

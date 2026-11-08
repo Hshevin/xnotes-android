@@ -261,6 +261,59 @@ abstract class MapInputContract {
         layout(0,0,(800*density).toInt(),(500*density).toInt());fit()
     }
     private fun rightPort(v:MindMapView)=requireNotNull(v.connectionPort()).center
+    @Test fun blankDropReleasesPenBeforeItsCallbackAndKeepsTheDocumentUnchanged()=ui {context->
+        val v=portView(context);val before=v.document;val camera=v.viewport();val port=rightPort(v)
+        val blank=com.xnotes.core.geometry.Pt(v.width/2.0,v.height-10.0*context.resources.displayMetrics.density)
+        val expected=com.xnotes.core.geometry.Pt((blank.x-camera.panX)/v.contentScale(),(blank.y-camera.panY)/v.contentScale())
+        var busy=false;val drops=mutableListOf<Pair<String,com.xnotes.core.geometry.Pt>>()
+        v.onInkContact={busy=it};v.onConnectionBlank={from,p->assertFalse(busy);assertNull(v.connectionFrom);drops+=from to p}
+        send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat());assertTrue(busy)
+        send(v,MotionEvent.ACTION_MOVE,blank.x.toFloat(),blank.y.toFloat());send(v,MotionEvent.ACTION_UP,blank.x.toFloat(),blank.y.toFloat())
+        assertEquals(1,drops.size);assertEquals("source",drops.single().first)
+        assertEquals(expected.x,drops.single().second.x,.001);assertEquals(expected.y,drops.single().second.y,.001)
+        assertEquals(before,v.document);assertEquals(camera,v.viewport());assertFalse(v.inkInput.active)
+    }
+    @Test fun microPortTapAndAnyNodeHitAreNeverBlankButAFollowingBlankTapCanCreate()=ui {context->
+        val v=portView(context);val port=rightPort(v);var blanks=0;var targets=0
+        v.onConnectionBlank={_,_->blanks++};v.onConnectionTarget={_,_->targets++}
+        send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat());send(v,MotionEvent.ACTION_UP,port.x.toFloat()+1,port.y.toFloat()+1)
+        assertEquals(0,blanks);assertEquals("source",v.connectionFrom)
+        touchNode(v,MotionEvent.ACTION_DOWN,"source");touchNode(v,MotionEvent.ACTION_UP,"source")
+        assertEquals(0,blanks);assertEquals(0,targets)
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target")
+        assertEquals(0,blanks);assertEquals(1,targets)
+        assertTrue(v.beginConnection("source"))
+        val x=v.width/2f;val y=v.height-10f*context.resources.displayMetrics.density
+        send(v,MotionEvent.ACTION_DOWN,x,y);send(v,MotionEvent.ACTION_UP,x,y)
+        assertEquals(1,blanks);assertNull(v.connectionFrom)
+    }
+    @Test fun cancelledBlankDropAndResidualPalmCannotRequestAnyNewNode()=ui {context->
+        for(success in listOf(false,true)) {
+            val v=portView(context);val before=v.document;val port=rightPort(v)
+            val blank=com.xnotes.core.geometry.Pt(v.width/2.0,v.height-10.0*context.resources.displayMetrics.density)
+            val types=listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS);var blanks=0;var busy=false
+            v.onInkContact={busy=it};v.onConnectionBlank={_,_->blanks++}
+            multi(v,MotionEvent.ACTION_DOWN,listOf(types[0]),listOf(port))
+            multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),types,listOf(port,port))
+            multi(v,MotionEvent.ACTION_MOVE,types,listOf(port,blank))
+            multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),types,listOf(port,blank),flags=if(success) 0 else 0x20)
+            assertFalse(busy);assertEquals(if(success) 1 else 0,blanks)
+            multi(v,MotionEvent.ACTION_MOVE,listOf(types[0]),listOf(blank));multi(v,MotionEvent.ACTION_UP,listOf(types[0]),listOf(blank))
+            assertEquals(if(success) 1 else 0,blanks);assertEquals(before,v.document)
+            v.cancelConnection();assertTrue(v.beginConnection("source"))
+            send(v,MotionEvent.ACTION_DOWN,blank.x.toFloat(),blank.y.toFloat());send(v,MotionEvent.ACTION_CANCEL)
+            assertEquals(if(success) 1 else 0,blanks)
+        }
+    }
+    @Test fun releasingOutsideTheGraphNeverRequestsANewNode()=ui {context->
+        val v=portView(context);val before=v.document;var blanks=0;v.onConnectionBlank={_,_->blanks++}
+        for(point in listOf(com.xnotes.core.geometry.Pt(-1.0,10.0),com.xnotes.core.geometry.Pt(10.0,-1.0),
+            com.xnotes.core.geometry.Pt(v.width.toDouble(),10.0),com.xnotes.core.geometry.Pt(10.0,v.height.toDouble()))) {
+            val port=rightPort(v);send(v,MotionEvent.ACTION_DOWN,port.x.toFloat(),port.y.toFloat())
+            send(v,MotionEvent.ACTION_MOVE,point.x.toFloat(),point.y.toFloat());send(v,MotionEvent.ACTION_UP,point.x.toFloat(),point.y.toFloat())
+            assertEquals(0,blanks);assertEquals(before,v.document);v.cancelConnection()
+        }
+    }
     @Test fun draggingTheSelectedNodePortRequestsOneRelationWithoutEditingInkOrMovingTheGraph()=ui {context->
         for(type in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_FINGER)) {
             val v=portView(context);val before=v.document;val camera=v.viewport();val port=rightPort(v)

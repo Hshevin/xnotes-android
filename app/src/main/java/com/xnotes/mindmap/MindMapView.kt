@@ -53,6 +53,7 @@ class MindMapView(context: Context) : View(context) {
     internal var connectionPreview:Pt?=null;private set
     var onConnectionModeChanged:(String?)->Unit={}
     var onConnectionTarget:(String,String)->Unit={_,_->}
+    var onConnectionBlank:((String,Pt)->Unit)?=null
     private var connectionDocumentId:String?=null
     private var connectionPointer=-1
     private var connectionPen=false
@@ -317,10 +318,16 @@ class MindMapView(context: Context) : View(context) {
             MotionEvent.ACTION_UP,MotionEvent.ACTION_POINTER_UP -> {
                 if(e.getPointerId(e.actionIndex)!=connectionPointer) return true
                 position(e.actionIndex)
-                val from=connectionFrom;val target=connectionTarget?.takeIf {connectionPortOrigin==null || connectionPortDragged}
+                val from=connectionFrom;val canDrop=connectionPortOrigin==null || connectionPortDragged
+                val target=connectionTarget?.takeIf {canDrop}
+                val x=e.getX(e.actionIndex);val y=e.getY(e.actionIndex)
+                val blank=if(canDrop && x>=0 && y>=0 && x<width && y<height && hit(x,y)==null) connectionPreview else null
+                val create=onConnectionBlank
                 if((e.flags and 0x20)==0 && from!=null && target!=null) {
                     endConnection(false) // Busy is released before opening a relation draft.
                     onConnectionTarget(from,target)
+                } else if((e.flags and 0x20)==0 && from!=null && blank!=null && create!=null) {
+                    endConnection(false);create(from,blank)
                 } else {clearConnectionTouch();suppressRemainingTouch=true;connectionDrain=true;cancelDetectors()}
             }
             MotionEvent.ACTION_CANCEL -> {clearConnectionTouch();suppressRemainingTouch=true;connectionDrain=true;cancelDetectors()}

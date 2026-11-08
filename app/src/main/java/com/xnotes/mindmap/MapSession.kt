@@ -28,12 +28,104 @@ private object MapSaves {
     fun lockFor(uri: Uri) = locks.getOrPut(uri.toString()) { Mutex() }
 }
 
-class MapSession : ViewModel() {
+class MapSession() : ViewModel() {
+    private var connectedSourceReader:(Context,Uri,()->Unit)->MapSource=MapSourceAccess::inspect
+    private var targetOverride:((Uri)->MapTarget)?=null
+    internal constructor(reader:(Context,Uri,()->Unit)->MapSource,target:((Uri)->MapTarget)?=null):this() {
+        connectedSourceReader=reader;targetOverride=target
+    }
+    internal var replacingDocument by mutableStateOf(false);private set
+    internal var connectedDraft by mutableStateOf<ConnectedNodeDraft?>(null);private set
+    internal var connectedSourceRequest by mutableStateOf<ConnectedSourceRequest?>(null);private set
+    private var connectedEpoch=0L
+    private var connectedImport:Job?=null
+    private var connectedImportId:String?=null
+    private data class ExistingSourceRequest(val id:String=java.util.UUID.randomUUID().toString(),val epoch:Long,val documentId:String,val nodeId:String)
+    private var existingSourceRequest:ExistingSourceRequest?=null
+    private val existingSourceJobs=mutableSetOf<Job>()
+    internal fun beginConnectedNode(from:String,center:com.xnotes.core.geometry.Pt):Boolean {
+        if(closing || replacingDocument || inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null) return false
+        val doc=document ?: return false
+        if(doc.nodes.none {it.id==from}) return false
+        if(!center.x.isFinite() || !center.y.isFinite() || kotlin.math.abs(center.x)>MindMapDocument.MAX_COORD || kotlin.math.abs(center.y)>MindMapDocument.MAX_COORD) {
+            limitError=true;return false
+        }
+        connectedDraft=ConnectedNodeDraft(epoch=connectedEpoch,documentId=doc.id,from=from,center=center)
+        return true
+    }
+    private fun connected(token:String)=connectedDraft?.takeIf {it.token==token && it.epoch==connectedEpoch && it.documentId==document?.id}
+    internal fun chooseConnectedKind(token:String,kind:NodeKind):Boolean {
+        val draft=connected(token)?.takeIf {it.node==null && !closing && !inkContact} ?: return false
+        val node=MapNode(id=draft.nodeId,parent=null,free=true,kind=kind)
+        connectedDraft=draft.copy(node=node.copy(x=draft.center.x-node.width/2,y=draft.center.y-node.height/2))
+        return true
+    }
+    /** Merge only body properties; a late input callback cannot erase an inspected source. */
+    internal fun editConnectedNode(token:String,proposed:MapNode):Boolean {
+        val draft=connected(token)?.takeIf {!closing} ?: return false
+        val node=draft.node?.takeIf {it.id==proposed.id} ?: return false
+        val next=node.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height)
+        return try {
+            MindMapDocument(nodes=listOf(next.copy(parent=null,free=false))).validate()
+            connectedDraft=draft.copy(node=next,problem=null);true
+        } catch(_:IllegalArgumentException) {connectedDraft=draft.copy(problem=ConnectedDraftProblem.LIMIT);false}
+    }
+    internal fun cancelConnectedNode(token:String) {
+        if(connectedDraft?.token!=token) return
+        connectedImport?.cancel();connectedImport=null;connectedImportId=null;connectedSourceRequest=null;connectedDraft=null
+    }
+    private fun retireConnectedDraft() {
+        connectedDraft?.let {cancelConnectedNode(it.token)};connectedEpoch++
+        existingSourceRequest=null;existingSourceJobs.toList().forEach {it.cancel()};existingSourceJobs.clear()
+    }
+    internal fun finishConnectedNode(token:String,proposed:MapNode?=null):Boolean {
+        val draft=connected(token)?.takeIf {!closing && !inkContact && !it.loadingSource && connectedSourceRequest==null} ?: return false
+        val node=draft.node ?: return false
+        if(proposed!=null && proposed.id!=node.id) return false
+        val body=if(proposed==null) node else node.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height)
+        if(body.kind==NodeKind.REFERENCE && body.sources.isEmpty()) return false
+        val centered=body.copy(x=draft.center.x-body.width/2,y=draft.center.y-body.height/2)
+        val result=requireNotNull(document).connectNewNode(draft.from,centered)
+        if(result is ConnectedNodeResult.Applied && commit(result.document)) {
+            selected=centered.id;cancelConnectedNode(token);return true
+        }
+        connectedDraft=draft.copy(problem=if(result==ConnectedNodeResult.Conflict) ConnectedDraftProblem.CHANGED else ConnectedDraftProblem.LIMIT)
+        return false
+    }
+    internal fun beginConnectedSource(token:String):ConnectedSourceRequest? {
+        val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node?.kind==NodeKind.REFERENCE && connectedSourceRequest==null} ?: return null
+        return ConnectedSourceRequest(token=token,epoch=draft.epoch).also {connectedSourceRequest=it}
+    }
+    internal fun receiveConnectedSource(requestId:String,uri:Uri?):Boolean {
+        val request=connectedSourceRequest?.takeIf {it.id==requestId} ?: return false
+        connectedSourceRequest=null
+        val draft=connected(request.token)?.takeIf {it.epoch==request.epoch && !closing} ?: return false
+        if(uri==null) return true
+        connectedDraft=draft.copy(loadingSource=true,problem=null);connectedImportId=request.id
+        connectedImport=viewModelScope.launch {
+            val result=withContext(Dispatchers.IO) {
+                val coroutine=currentCoroutineContext()
+                try {Result.success(connectedSourceReader(app,uri) {coroutine.ensureActive()}.also {it.validate()})}
+                catch(error:java.util.concurrent.CancellationException) {throw error}
+                catch(error:Exception) {Result.failure(error)}
+            }
+            val current=connected(request.token)?.takeIf {it.epoch==request.epoch && connectedImportId==request.id && !closing} ?: return@launch
+            connectedImportId=null;connectedImport=null
+            connectedDraft=result.fold({source->current.copy(loadingSource=false,node=current.node?.copy(sources=listOf(source),primarySource=source.id),problem=null)},
+                {current.copy(loadingSource=false,problem=ConnectedDraftProblem.SOURCE)})
+        }
+        return true
+    }
+    internal fun failConnectedSource(requestId:String) {
+        val request=connectedSourceRequest?.takeIf {it.id==requestId} ?: return
+        if(receiveConnectedSource(requestId,null)) connected(request.token)?.let {connectedDraft=it.copy(problem=ConnectedDraftProblem.SOURCE)}
+    }
+    override fun onCleared() {retireConnectedDraft();super.onCleared()}
     var textDraft by mutableStateOf<MapTextDraft?>(null); private set
     var textRestore by mutableStateOf<MapTextRestore?>(null); private set
     var textEditConflict by mutableStateOf(false); private set
     fun beginText(id:String,viewport:MindMapView.Viewport,width:Int,height:Int,density:Float=1f):Boolean {
-        if(closing || inkContact || textDraft!=null || textRestore!=null || width<=0 || height<=0 || !density.isFinite() || density<=0) return false
+        if(closing || replacingDocument || inkContact || connectedDraft!=null || textDraft!=null || textRestore!=null || width<=0 || height<=0 || !density.isFinite() || density<=0) return false
         val node=document?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.TEXT} ?: return false
         textEditConflict=false
         textDraft=MapTextDraft(nodeId=id,initialText=node.text,viewport=viewport,viewWidth=width,viewHeight=height,previousSelection=selected,viewDensity=density)
@@ -126,12 +218,12 @@ class MapSession : ViewModel() {
             loading = false
         }
     }
-    private fun target(uri: Uri) = object : MapTarget {
+    private fun target(uri: Uri) = targetOverride?.invoke(uri) ?: object : MapTarget {
         override fun read() = checkNotNull(app.contentResolver.openInputStream(uri)).use(MapCodec::readBytes)
         override fun write(bytes: ByteArray) { checkNotNull(app.contentResolver.openOutputStream(uri, "wt")).use { it.write(bytes) } }
     }
     fun commit(next: MindMapDocument): Boolean {
-        if (closing) return false
+        if (closing || replacingDocument) return false
         val h = history ?: return false
         try { h.commit(next); limitError = false } catch (_: IllegalArgumentException) { limitError = true; return false }
         if (h.document != document) publish(h)
@@ -144,13 +236,13 @@ class MapSession : ViewModel() {
     }
     /** Dialog drafts may outlive other edits; only the latest owner document is merged. */
     internal fun changeRelation(initial:MapRelation?,proposed:MapRelation?):RelationEditResult {
-        if(closing || inkContact) return RelationEditResult.Conflict
+        if(closing || replacingDocument || inkContact) return RelationEditResult.Conflict
         val doc=document ?: return RelationEditResult.Conflict
         val result=doc.changeRelation(initial,proposed)
         return if(result is RelationEditResult.Applied && !commit(result.document)) RelationEditResult.Invalid else result
     }
-    fun undo() { if (!closing && !inkContact) history?.let { it.undo(); if (it.document != document) publish(it) } }
-    fun redo() { if (!closing && !inkContact) history?.let { it.redo(); if (it.document != document) publish(it) } }
+    fun undo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.undo(); if (it.document != document) publish(it) } }
+    fun redo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.redo(); if (it.document != document) publish(it) } }
     private fun publish(h: MapHistory) {
         limitError=false
         document = h.document
@@ -161,9 +253,10 @@ class MapSession : ViewModel() {
     }
     /** [overwrite] is the explicit conflict choice to keep this version over the destination's. */
     fun save(onClosed: (() -> Unit)? = null, overwrite: Boolean = false) {
+        if(replacingDocument) return
         val doc = document ?: return
         debounce?.cancel()
-        if (onClosed != null) closing = true
+        if (onClosed != null) {retireConnectedDraft();closing = true}
         val version = revision
         saving = true
         MapSaves.scope.launch {
@@ -184,36 +277,73 @@ class MapSession : ViewModel() {
             }
         }
     }
-    fun addSource(uri: Uri, nodeId: String) {
-        viewModelScope.launch {
-            val source=withContext(Dispatchers.IO) {
-                val coroutine=currentCoroutineContext()
-                try {Result.success(MapSourceAccess.inspect(app,uri) {coroutine.ensureActive()})}
-                catch(error:java.util.concurrent.CancellationException) {throw error}
-                catch(error:Exception) {Result.failure(error)}
-            }
-            sourceFailed=source.isFailure
-            source.getOrNull()?.let { s ->
-                androidx.compose.runtime.snapshotFlow {inkContact}.first { !it }
-                if(document?.nodes?.any { it.id==nodeId } == true) operate { it.update(nodeId) { n -> n.copy(sources=n.sources+s) } }
-            }
+    internal fun beginExistingSource(nodeId:String):String? {
+        val doc=document ?: return null
+        if(closing || replacingDocument || existingSourceRequest!=null || doc.nodes.none {it.id==nodeId}) return null
+        return ExistingSourceRequest(epoch=connectedEpoch,documentId=doc.id,nodeId=nodeId).also {existingSourceRequest=it}.id
+    }
+    private fun sourceCurrent(request:ExistingSourceRequest)=!closing && !replacingDocument && request.epoch==connectedEpoch &&
+        request.documentId==document?.id && document?.nodes?.any {it.id==request.nodeId}==true
+    internal fun receiveExistingSource(requestId:String,uri:Uri?):Boolean {
+        val request=existingSourceRequest?.takeIf {it.id==requestId} ?: return false
+        existingSourceRequest=null
+        if(!sourceCurrent(request)) return false
+        if(uri==null) return true
+        lateinit var job:Job
+        job=viewModelScope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                val source=withContext(Dispatchers.IO) {
+                    val coroutine=currentCoroutineContext()
+                    try {Result.success(connectedSourceReader(app,uri) {coroutine.ensureActive()}.also {it.validate()})}
+                    catch(error:java.util.concurrent.CancellationException) {throw error}
+                    catch(error:Exception) {Result.failure(error)}
+                }
+                if(!sourceCurrent(request)) return@launch
+                sourceFailed=source.isFailure
+                source.getOrNull()?.let {sourceValue->
+                    androidx.compose.runtime.snapshotFlow {inkContact}.first {!it}
+                    if(sourceCurrent(request)) operate {it.update(request.nodeId) {node->node.copy(sources=node.sources+sourceValue)}}
+                }
+            } finally {existingSourceJobs.remove(job)}
         }
+        existingSourceJobs.add(job);job.start();return true
+    }
+    internal fun failExistingSource(requestId:String) {
+        val request=existingSourceRequest?.takeIf {it.id==requestId} ?: return
+        if(receiveExistingSource(requestId,null) && sourceCurrent(request)) sourceFailed=true
+    }
+    /** Source controls never replace a node body, and stale lists cannot erase newly attached data. */
+    internal fun sourceEditSnapshot(nodeId:String):SourceEditSnapshot? {
+        if(closing || replacingDocument) return null
+        val doc=document ?: return null
+        return doc.nodes.firstOrNull {it.id==nodeId}?.let {SourceEditSnapshot(connectedEpoch,doc.id,it)}
+    }
+    internal fun editSources(expected:SourceEditSnapshot,proposed:MapNode):Boolean {
+        if(closing || replacingDocument || inkContact || proposed.id!=expected.node.id || expected.epoch!=connectedEpoch || expected.documentId!=document?.id) return false
+        val current=document?.nodes?.firstOrNull {it.id==expected.node.id} ?: return false
+        if(current.sources!=expected.node.sources || current.primarySource!=expected.node.primarySource) return false
+        return operate {it.update(current.id) {node->node.copy(sources=proposed.sources,primarySource=proposed.primarySource)}}
     }
     /** Explicit conflict choice: discard the recovered edits and reload the destination's version. */
     fun useFileVersion() {
         if (closing || saving || inkContact || textDraft != null) return
+        retireConnectedDraft()
+        replacingDocument=true
         debounce?.cancel()
         saving = true
         MapSaves.scope.launch {
             val result = withContext(Dispatchers.IO) { lock.withLock { runCatching { store.discardRecovery() } } }
             saving = false
             result.onSuccess {
+                retireConnectedDraft()
                 // A new revision drops any save still queued for the discarded edits.
                 revision++
                 history = MapHistory(it.document); document = it.document; selected = it.document.root.id
                 canUndo = false; canRedo = false
                 dirty = false; saveFailed = false; recovered = false; conflict = false; copySaved = false
+                sourceFailed=false
             }.onFailure { saveFailed = true }
+            replacingDocument=false
         }
     }
     /** A copy is a new document: it gets its own id so the registry never sees two files claim one. */

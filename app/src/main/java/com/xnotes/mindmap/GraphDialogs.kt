@@ -19,7 +19,7 @@ private data class RelationDraft(val initial:MapRelation?,val edge:MapRelation,v
 private enum class RelationEndpoint { FROM,TO }
 
 @Composable
-private fun relationNodeTitle(doc:MindMapDocument,id:String):String {
+internal fun relationNodeTitle(doc:MindMapDocument,id:String):String {
     val index=doc.nodes.indexOfFirst {it.id==id}
     if(index<0) return stringResource(R.string.graph_missing_node)
     val node=doc.nodes[index]
@@ -126,10 +126,16 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
     }},dismissButton={MapButton(R.string.cancel,onClick=::dismiss)})
 }
 @Composable
-internal fun GraphSourcesDialog(node: MapNode, change:(MapNode)->Boolean, add:()->Unit, close:()->Unit) {
-    AlertDialog(onDismissRequest=close,title={Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)},text={
+internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,close:()->Unit) {
+    val node=snapshot.node
+    val alive=remember(editor) {java.util.concurrent.atomic.AtomicBoolean(true)}
+    DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
+    SideEffect {editor.sync(snapshot)}
+    fun dismiss() {if(alive.get()) {alive.set(false);editor.close();close()}}
+    AlertDialog(onDismissRequest=::dismiss,title={Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight)) {
             item { Text(stringResource(R.string.graph_sources_notice),fontSize=TextSize.body) }
+            if(editor.conflict) item {Text(stringResource(R.string.graph_sources_changed),fontSize=TextSize.body)}
             items(node.sources.size,key={node.sources[it].id}) { index ->
                 val s=node.sources[index]
                 Text(s.fileName,fontSize=TextSize.title)
@@ -143,20 +149,20 @@ internal fun GraphSourcesDialog(node: MapNode, change:(MapNode)->Boolean, add:()
                     SourceStatus.EMPTY->R.string.graph_status_empty
                     SourceStatus.TRASHED->R.string.graph_status_trashed
                 }),fontSize=TextSize.caption)
-                OutlinedTextField(s.note,{ note -> change(node.copy(sources=node.sources.map { if(it.id==s.id) it.copy(note=note) else it })) },
+                OutlinedTextField(s.note,{ note -> if(alive.get()) editor.note(s.id,note) },
                     label={Text(stringResource(R.string.graph_note),fontSize=TextSize.body)},textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.body))
                 Row {
-                    MapButton(R.string.graph_primary,selected=node.primarySource==s.id){change(node.copy(primarySource=s.id))}
+                    MapButton(R.string.graph_primary,selected=node.primarySource==s.id){if(alive.get()) editor.primary(s.id)}
                     MapButton(R.string.graph_up,enabled=index>0){
-                        val list=node.sources.toMutableList();java.util.Collections.swap(list,index,index-1);change(node.copy(sources=list))
+                        if(alive.get()) editor.move(s.id,-1)
                     }
                     MapButton(R.string.graph_down,enabled=index<node.sources.lastIndex){
-                        val list=node.sources.toMutableList();java.util.Collections.swap(list,index,index+1);change(node.copy(sources=list))
+                        if(alive.get()) editor.move(s.id,1)
                     }
-                    MapButton(R.string.delete){change(node.copy(sources=node.sources.filterNot { it.id==s.id },primarySource=node.primarySource.takeUnless { it==s.id }))}
+                    MapButton(R.string.delete){if(alive.get()) editor.remove(s.id)}
                 }
                 HorizontalDivider()
             }
         }
-    },confirmButton={MapButton(R.string.graph_add_source,onClick=add)},dismissButton={MapButton(R.string.map_done,onClick=close)})
+    },confirmButton={MapButton(R.string.graph_add_source){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
 }
