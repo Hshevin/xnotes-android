@@ -495,7 +495,7 @@ class NotebookStorage internal constructor(private val context:Context,
         try {
             BundleHeader.readWithPdfProtection(file,protect={hint->
                 check(lease==null) {"Creation dependency protection was requested twice"}
-                lease=pdfResources.holdResolved(hint);ids=hint.toSet();sourceValidationHook?.invoke()
+                lease=pdfResources.holdResolved(hint,checkActive);ids=hint.toSet();sourceValidationHook?.invoke()
             }) {checkActive();false}
             return CreationProtection(requireNotNull(ids),requireNotNull(lease))
         } catch(error:Throwable) {
@@ -521,15 +521,48 @@ class NotebookStorage internal constructor(private val context:Context,
         if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         registry.verifyCreation(permit.documentId,permit.kind.extension,uri)
         requireEmptyTarget(target(uri),checkActive)
-        withCreationCandidate(candidate,uri,permit.kind,checkActive) {checked->
+        val staged=withCreationCandidate(candidate,uri,permit.kind,checkActive) {checked->
             if(checked.version.documentId!=permit.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
             registry.verifyCreation(permit.documentId,permit.kind.extension,uri)
             checkActive();protectPending(uri,checked.info)
             // The explicit empty observation is rechecked against this original SHA before any target write.
             val empty=File.createTempFile("native-created-", ".empty",context.cacheDir)
-            try {pending.stage(empty,candidate,creationPurpose(permit.kind),expectedCandidateHash=checked.version.sha256)} finally {empty.delete()}
+            try {
+                val digest=pending.stage(empty,candidate,creationPurpose(permit.kind),expectedCandidateHash=checked.version.sha256,checkActive=checkActive)
+                // No callback or lease release may intervene between the actual stage and this binding.
+                permit.recordStage(creationIssuer,checked.version.sha256,digest)
+            } finally {empty.delete()}
         }
-        publishCreation(uri,name,creationPurpose(permit.kind),permit.documentId,checkActive)
+        publishCreation(uri,name,creationPurpose(permit.kind),permit.documentId,checkActive,staged.recordDigest,staged.candidateSha256)
+    }
+    /** Only this intent's actual stage can become a retry. No target write, cache claim or new permit. */
+    internal fun retainedCreation(intent:NativeCreationIntent,uri:String,name:String,checkActive:()->Unit={}):NativeCreationPending? = synchronized(lock) {
+        checkActive()
+        val staged=intent.retainedStage(creationIssuer,registry.locationKey(uri)) ?: return@synchronized null
+        val pending=journal(uri)
+        if(!pending.pending) return@synchronized null
+        var protection:CreationProtection?=null;var failure:Throwable?=null
+        try {
+            pending.inspectRetained(staged.recordDigest,protectCandidate={protection=acquireCreationProtection(it,checkActive)},checkActive=checkActive) {state->
+                checkActive()
+                if(state.purpose!=creationPurpose(intent.kind)) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                if(state.original.length()!=0L || state.candidateHash!=staged.candidateSha256)
+                    throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                val checked=NativeSourceVersion.inspect(state.candidate,staged.locationKey,intent.kind,checkActive)
+                if(checked.version.documentId!=intent.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                if(checked.version.sha256!=staged.candidateSha256) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+                registry.verifyCreation(intent.documentId,intent.kind.extension,uri,true,checked.info.header.anchors!=null)
+                NativeCreationPending.issue(creationIssuer,intent,staged,uri,name)
+            }
+        } catch(error:Throwable) {failure=error;throw error}
+        finally {try {protection?.close()} catch(close:Throwable) {if(failure!=null) failure.addSuppressed(close) else throw close}}
+    }
+    /** Runtime continuation of the exact failed attempt; a replacement journal cannot use this token. */
+    internal fun completeCreation(pending:NativeCreationPending,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
+        pending.checkIssuer(creationIssuer);checkActive()
+        if(registry.locationKey(pending.uri)!=pending.locationKey) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        publishCreation(pending.uri,pending.name,creationPurpose(pending.kind),pending.documentId,checkActive,pending.recordDigest,pending.candidateSha256)
     }
     /** Explicit recovery of exactly the retained creation. Does not accept a replacement candidate or restore an empty file. */
     internal fun completeCreation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
@@ -542,7 +575,8 @@ class NotebookStorage internal constructor(private val context:Context,
         com.xnotes.core.util.DocumentKind.CANVAS -> MigrationPublication.Purpose.CREATE_CANVAS
         else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
-    private fun publishCreation(uri:String,name:String,expected:MigrationPublication.Purpose,expectedId:String?,checkActive:()->Unit):NativeSourceVersion {
+    private fun publishCreation(uri:String,name:String,expected:MigrationPublication.Purpose,expectedId:String?,checkActive:()->Unit,
+                                expectedRecordDigest:String?=null,expectedCandidateHash:String?=null):NativeSourceVersion {
         val pending=journal(uri);var verified:com.xnotes.format.BundleReferenceInfo?=null;var receipt:NativeSourceVersion?=null
         var protection:CreationProtection?=null;var failure:Throwable?=null;var committed=false
         try {
@@ -556,13 +590,14 @@ class NotebookStorage internal constructor(private val context:Context,
                 val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),kind,checkActive)
                 if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
                 if(expectedId!=null && checked.version.documentId!=expectedId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                if(expectedCandidateHash!=null && checked.version.sha256!=expectedCandidateHash) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
                 registry.verifyCreation(checked.version.documentId,kind.extension,uri,true,checked.info.header.anchors!=null)
                 protectPending(uri,checked.info);verified=checked.info;receipt=checked.version
             },afterVerified={
                 checkActive();val info=requireNotNull(verified);val id=requireNotNull(info.header.identity).documentId
                 pdfResources.protect("note:$id",dependencies(info))
                 registry.registerCreated(id,requireNotNull(info.format),name,uri,info.header.anchors!=null)
-            })
+            },expectedRecordDigest=expectedRecordDigest,checkActive=checkActive)
             committed=true
         } catch(error:Throwable) {failure=error;throw error}
         finally {

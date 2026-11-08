@@ -30,6 +30,8 @@ class MigrationPublication internal constructor(private val directory:File,priva
         internal val creation get()=this==CREATE_NOTE || this==CREATE_CANVAS
     }
     internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?)
+    internal data class RetainedValidation(val original:File,val candidate:File,val purpose:Purpose?,val recordDigest:String,
+                                           val originalHash:String,val candidateHash:String)
     internal data class RestoreValidation(val original:File,val purpose:Purpose?,val currentHash:String?,val candidateHash:String?,val candidateStageProof:Boolean,
                                           val handoffId:String?=null)
     internal data class KeepValidation(val original:File?,val candidate:File?,val purpose:Purpose?,val recordValid:Boolean,
@@ -80,6 +82,23 @@ class MigrationPublication internal constructor(private val directory:File,priva
     /** Validation borrows immutable retained files. current is the version matching the target SHA. */
     fun publish(target:Target,validate:(File,File,File)->Unit={_,_,_->},afterVerified:(File)->Unit={}) =
         publishValidated(target,validate={requireLegacy(it.purpose);validate(it.original,it.candidate,it.current)},afterVerified=afterVerified)
+
+    /** Read-only, borrowed retained files. A caller supplies its actual stage digest, never an observed replacement. */
+    internal fun <T> inspectRetained(expectedRecordDigest:String,protectCandidate:(File)->Unit={},checkActive:()->Unit={},
+                                    validate:(RetainedValidation)->T):T {
+        checkActive();val record=readRecord()
+        if(record.digest!=expectedRecordDigest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        checkActive();protectCandidate(candidate)
+        val kept=retained(checkActive=checkActive)
+        checkRecord(record,kept,checkCandidate=true)
+        val result=validate(RetainedValidation(original,candidate,record.purpose,record.digest,
+            kept.original.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID),
+            kept.candidate.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)))
+        unchanged(kept,checkActive=checkActive)
+        // Large retained hashes precede the final bounded marker check.
+        if(readRecord().digest!=expectedRecordDigest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        checkActive();return result
+    }
 
     internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={},
                                   protectCandidate:(File)->Unit={},expectedRecordDigest:String?=null,checkActive:()->Unit={},
