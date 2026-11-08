@@ -4261,7 +4261,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** One request covers preparation, saving the old owners and synchronous adoption. */
     private suspend fun openNative(uri:String,name:String?,kind:DocumentKind,fromHome:Boolean=false,
                                    explicitlyDiscarded:Set<OpenDiscard> = emptySet()):Boolean {
-        if(opening || nativeOpenPenInContact()) return false
+        if(opening || !sessionOwner.isCurrent() || nativeOpenPenInContact()) return false
         val request=NativeOpenRequest();nativeOpenRequest=request;opening=true
         val slots=captureOpenSlots(fromHome)
         val owned=java.util.concurrent.atomic.AtomicReference<com.xnotes.storage.PreparedNativeOpen?>()
@@ -4285,11 +4285,53 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 checkActive();prepared.protectForAdoption();checkActive()
             }
             readMs=(System.nanoTime()-readStarted)/1_000_000
-            val prepared=requireNotNull(owned.get())
             if(!settleOpenSlots(slots,fromHome,explicitlyDiscarded,request)) return false
+            val stamps=slots.map(::OpenReadStamp)
+            val verifyStarted=System.nanoTime()
+            withContext(Dispatchers.IO) {
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val checkActive={
+                    coroutine.ensureActive()
+                    if(!nativeOpenCurrent(request)) throw java.util.concurrent.CancellationException("Open request expired")
+                }
+                // Settling can save this very source (including an alias or the other pane).
+                // The first decoded A must never replace the B that we just wrote.
+                notebookStorage.openSource(uri,kind,checkActive).use {source->
+                    val old=requireNotNull(owned.get())
+                    val actual=source.version
+                    if(actual.kind!=old.version.kind || actual.documentId!=old.version.documentId ||
+                        actual.locationKey!=old.version.locationKey)
+                        throw com.xnotes.storage.ReferenceContractViolation(com.xnotes.storage.StorageMsg.REFERENCE_SOURCE_CHANGED)
+                    if(actual.sha256!=old.version.sha256) {
+                        var refreshed:com.xnotes.storage.PreparedNativeOpen?=null
+                        var transferred=false
+                        var primary:Throwable?=null
+                        try {
+                            refreshed=com.xnotes.storage.PreparedNativeOpen.read(source,notebookStorage.pdfResources,
+                                codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
+                            refreshed.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
+                            refreshed.canvas?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
+                            checkActive();refreshed.protectForAdoption();checkActive()
+                            owned.set(refreshed);transferred=true
+                            old.close()
+                        } catch(error:Throwable) {primary=error;throw error
+                        } finally {
+                            if(!transferred) try {refreshed?.close()} catch(close:Throwable) {
+                                if(primary!=null) primary.addSuppressed(close) else throw close
+                            }
+                        }
+                    }
+                    checkActive()
+                }
+            }
+            readMs+=(System.nanoTime()-verifyStarted)/1_000_000
             // No suspension from the final workspace check through replacement. A close/new action
             // cannot interleave here, and a late prior request cannot clear another spinner.
-            if(!readyToAdopt(slots,fromHome,explicitlyDiscarded,request)) return false
+            if(!stamps.all {it.isCurrent()} || !readyToAdopt(slots,fromHome,explicitlyDiscarded,request)) {
+                if(nativeOpenCurrent(request)) message=appContext.getString(R.string.native_open_changed)
+                return false
+            }
+            val prepared=requireNotNull(owned.get())
             nativeOpenRequest=null;opening=false
             if(fromHome) {detachSettledWorkspace();abandonSecondary();focusedPane=Pane.PRIMARY}
             if(kind==DocumentKind.CANVAS) {
@@ -10161,6 +10203,26 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private class OpenSlot(val pane:Editor,val owner:Editor,val model:Any,val canvas:Boolean,val open:Boolean)
+    /** Main-only guard around the final IO verification, including edits that have saved clean. */
+    private class OpenReadStamp(private val slot:OpenSlot) {
+        private val revision=revision()
+        private val path=path()
+        private val noteWrite=slot.owner.noteWriteJob
+        private val canvasWrite=slot.owner.canvasWriteJob
+        private fun revision()=when(val model=slot.model) {
+            is Document->model.bodyRevision
+            is com.xnotes.core.infinite.InfiniteDocument->model.bodyRevision
+            else->error("Unknown open document model")
+        }
+        private fun path()=when(val model=slot.model) {
+            is Document->model.path
+            is com.xnotes.core.infinite.InfiniteDocument->model.path
+            else->error("Unknown open document model")
+        }
+        fun isCurrent()=slot.pane.sessionOwner.isCurrent() && slot.owner.sessionOwner.isCurrent() &&
+            revision()==revision && path()==path && slot.owner.noteWriteJob===noteWrite &&
+            slot.owner.canvasWriteJob===canvasWrite
+    }
     private fun captureOpenSlots(whole:Boolean):List<OpenSlot> {
         val panes=if(whole) (listOf(this)+openPanes).distinct() else listOf(this)
         return panes.map {ed->val owner=ed.documentOwner
