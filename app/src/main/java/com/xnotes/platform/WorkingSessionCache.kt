@@ -30,7 +30,7 @@ internal class WorkingSessionCache(
     constructor(directory:File,validateBody:(File,Kind,String)->Unit,onEvent:(Event,File)->Unit={_,_->})
         :this(directory,validateBody,onEvent,{_,_,_->})
     enum class Kind { NOTE,CANVAS }
-    enum class Event { BEFORE_HEAD_REPLACE,BEFORE_HEAD_COMMIT,BEFORE_DELETE }
+    enum class Event { BEFORE_HEAD_REPLACE,BEFORE_HEAD_COMMIT,AFTER_HEAD_COMMIT,BEFORE_DELETE }
     class Invalid(cause:Throwable?=null):IOException("Invalid working session cache",cause)
     class Conflict:IOException("Working session cache changed before publication")
 
@@ -144,6 +144,7 @@ internal class WorkingSessionCache(
                     true
                 }
             }
+            if(published) onEvent(Event.AFTER_HEAD_COMMIT,headFile)
             return Publication(request,published)
         } finally {
             // A failed rename may still have exposed a head on some filesystems. Cleanup consults
@@ -220,6 +221,13 @@ internal class WorkingSessionCache(
     fun invalidateForRead(read:Read,owner:Any):Boolean=synchronized(state) {
         read.checkIssuer(readIssuer)
         if(state.observedHeadHash!=read.headHash || !ownsHead(read.headHash,owner,0)) false
+        else {nextGeneration();state.latest=null;true}
+    }
+    /** Finish only this adapter's actual committed write; expire even later uncommitted tickets. */
+    fun invalidateForPublication(request:WriteRequest):Boolean=synchronized(state) {
+        val committed=state.committed
+        if(request.coordinator!==state || committed?.generation!=request.generation ||
+            committed.owner!==request.owner || committed.headHash!=state.observedHeadHash) false
         else {nextGeneration();state.latest=null;true}
     }
     private fun previous(head:Head)=head.body?.let {Previous(it.kind,it.documentId,it.version,it.metadata,it.sha,requireNotNull(head.hash))}

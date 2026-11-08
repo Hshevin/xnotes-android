@@ -58,3 +58,5 @@ R2轻量source observation/按需正文已实现/独立复核通过：tmp/native
 同head持久化半段无运行作业、独立复核通过，native4仍默认拒写。下一半private Ack实际current head→同Staged/record/path核实→Native4 commit/实际Receipt T ID，再accepted sourceB completion与B恢复claim。不得混用native-only绕过未解决T，生产UI/稳定输入后续未激活。overall complete=false。
 
 2026-11-08 恢复后完成 native4 typed ack/commit/实际Receipt accepted-ID半段；独立复核通过，tmp/native-handoff-ack-full.log 完整303套件3355项全过、Android测试源码编译成功。新增目标散列中失活零写/写后登记契约冲突重试零重写两组。无运行作业，待本地提交后继续accepted-ID completion；actualB恢复/claim、生产稳定输入与统一writer及来源UI/backlinks/网络仍保留，overall complete=false，不打APK。
+
+当前恢复点：native4受控ack已提交eec10da5；accepted-ID完成转换已实现并独立复核，tmp/native-handoff-completion-full.log完整303套件3363项全过/Android源码编译成功（实际仪器/目标设备未运行）。8新增JVM，含after-commit来源退休卡Root先红后绿、last-check旧T写、两个completion交错、新T不被旧收尾清除、head成功返回失败重试、真实sameSHA canvas与PDF资源。成功收尾主动失效reservation，后续producer不能用published&&isCurrent判断completion。待本地提交，下一阶段actualB恢复/claim计划审核中；生产/稳定事务屏障和来源闭环仍保留，overall complete=false，无运行作业，不打APK。

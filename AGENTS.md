@@ -98,7 +98,7 @@
 
 - 笔记完全本地离线保存，无账号、同步或应用后端。修改须持久化；涉及存储、导入、删除、迁移的变更，验证恢复路径与失败行为。
 - 新native请求固定捕获item写入字段；NativeWorkingSession先以实际owner只读epoch observation预约，只有requiresBody才固定正文，view-only不持模型正文、不遍历item、不授保存权限；Stroke仅pin不可变Samples前缀，不复制/重编码采样。每页/画布单独映射胶合与图层，复制嵌套可变容器；画布不支持TextItem时拒绝而非略去。旧默认浅快照保持，活动事务稳定屏障与生产接线未完成；见 `docs/movinkpad/reference-frozen-writer-2026-11-08.md`。
-- NativeWorkingSession写metadata schema2、兼容1；T与当前正文同head持久，须实际staged/private Main permit/owner/head代次证明，不能拿旧T背书新失败尝试。cold未认领T只可读资料、不可普通写/clear；native4受控ack已实现，accepted-ID完成与actualB认领尚未启用，不能切半套生产或混用native-only写入绕过T。见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
+- NativeWorkingSession写metadata schema2、兼容1；T与当前正文同head持久，须实际staged/private Main permit/owner/head代次证明，不能拿旧T背书新失败尝试。cold未认领T只可读资料、不可普通写/clear；native4受控ack与actual Receipt accepted-ID完成已实现，actualB重启认领尚未启用，不能切半套生产或混用native-only写入绕过T。见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
 - 原生普通保存可prepare固定候选后再commit：阶段证明绑定实际storage issuer、canonical journal、本次写入record摘要与A/B版本；仅实际成功commit签请求receipt，prepare不等于保存成功。协调v4 stage仅接受实际同head Publication的typed ack，重启及旧ensure均拒写；完整cache/producer接线仍待完成。验证/复制/读回逐块检查源epoch与取消；见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
 - 严格保留已写版本须有有效typed SAVE、实际目标=候选摘要及完整原生契约；事务登记重查URI/kind/页契约，最后大包hash后重读target、再有界核marker后清日志。返回实际读版本不冒充请求发布receipt；external PDF实际SHA在lease内核对。生产producer接线仍待完成，见 `docs/movinkpad/reference-keep-written-save-2026-11-08.md`。
 - 保存已写入文件而后续步骤失败时，之后选择“放弃修改”保留已写入版本、只放弃之后的新修改，不回滚原文件。未核实的部分写入保留pending资料，不冒充完整版本；见 `docs/movinkpad/reference-discard-written-2026-11-08.md`。

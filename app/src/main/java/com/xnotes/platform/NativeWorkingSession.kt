@@ -40,7 +40,7 @@ internal class NativeWorkingSession(
     data class Metadata(val dirty:Boolean,val displayName:String?,val source:SourceDescription?,val noteView:NoteView?,val canvasView:Waypoint?,val handoff:Handoff?=null)
     class Write internal constructor(internal val ticket:WorkingSessionCache.WriteRequest,internal val note:Document?,
                                      internal val canvas:InfiniteDocument?,internal val proof:PreparedNativeOpen.EditSource.Observation?,
-                                     internal val handoff:Handoff?=null,private val captureSeal:Any?=null) {
+                                     internal val handoff:Handoff?=null,private val captureSeal:Any?=null,internal val completion:Any?=null) {
         val requiresBody get()=ticket.requiresBody
         internal fun sourceCurrent()=proof?.isCurrent()!=false
         internal fun capturedBy(seal:Any)=captureSeal===seal
@@ -66,7 +66,14 @@ internal class NativeWorkingSession(
     }
     private val readIssuer=Any()
     private class Intent(val staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,val handoff:Handoff,val owner:Any)
-    private class RootState {var intent:Intent?=null;var persisted=false}
+    private class Completion(val intent:Intent,val proof:PreparedNativeOpen.EditSource.Observation) {
+        fun matches(observation:PreparedNativeOpen.EditSource.Observation?,owner:Any)=
+            owner===intent.owner && proof.sameEpoch(observation)
+    }
+    private class CaptureContext(val intent:Intent?,val completion:Completion?) {
+        val handoff get()=if(completion==null) intent?.handoff else null
+    }
+    private class RootState {var intent:Intent?=null;var persisted=false;var completion:Completion?=null}
     private val rootState=rootState(directory.canonicalPath)
     private class ExpiredSource:CancellationException("Working source capture expired")
     private val cache=WorkingSessionCache(directory,validateBody={file,kind,id->
@@ -81,18 +88,29 @@ internal class NativeWorkingSession(
         }
     },onEvent=onEvent,validateMetadata={kind,id,json->parseMetadata(kind,id,json)})
 
-    private fun captureIntent(owner:Any,proof:PreparedNativeOpen.EditSource.Observation?,required:Intent?):Intent?=synchronized(rootState) {
+    private fun captureIntent(owner:Any,proof:PreparedNativeOpen.EditSource.Observation?,required:Intent?):CaptureContext=synchronized(rootState) {
         val intent=rootState.intent
         if(required!=null && required!==intent) throw WorkingSessionCache.Conflict()
-        if(intent!=null) intent.staged.checkCapture(proof,owner)
-        intent
+        if(intent!=null) {
+            val completing=rootState.completion
+            if(completing!=null) {
+                if(!completing.matches(proof,owner)) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            } else if(intent.staged.acceptsCompletion(proof,owner)) {
+                cache.invalidateReservations()
+                rootState.completion=Completion(intent,requireNotNull(proof))
+            } else intent.staged.checkCapture(proof,owner)
+        }
+        CaptureContext(intent,rootState.completion)
     }
-    private fun needsHandoffBody(intent:Intent?):Boolean=synchronized(rootState) {
-        if(intent!=null && rootState.intent!==intent) throw WorkingSessionCache.Conflict()
-        intent!=null && !rootState.persisted
+    private fun needsHandoffBody(context:CaptureContext):Boolean=synchronized(rootState) {
+        if(rootState.intent!==context.intent || rootState.completion!==context.completion) throw WorkingSessionCache.Conflict()
+        context.intent!=null && context.completion==null && !rootState.persisted
     }
     private fun allowed(write:Write):Boolean=synchronized(rootState) {
-        val intent=rootState.intent ?: return@synchronized write.handoff==null
+        val intent=rootState.intent ?: return@synchronized write.handoff==null && write.completion==null
+        val completing=rootState.completion
+        if(completing!=null) return@synchronized write.completion===completing && write.handoff==null && completing.matches(write.proof,write.ticket.owner)
+        if(write.completion!=null) return@synchronized false
         if(write.handoff!=intent.handoff || write.ticket.owner!==intent.owner) return@synchronized false
         try {intent.staged.checkCapture(write.proof,write.ticket.owner);true}
         catch(_:ReferenceContractViolation) {false}
@@ -237,13 +255,13 @@ internal class NativeWorkingSession(
         val owner=document.snapshotOwnerToken;val id=document.identity.documentId;val version=document.bodyRevision
         val intent=captureIntent(owner,proof,required)
         val metadata=metadata(WorkingSessionCache.Kind.NOTE,document.dirty,document.displayName,
-            proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},view,null,intent?.handoff)
+            proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},view,null,intent.handoff)
         parseMetadata(WorkingSessionCache.Kind.NOTE,id,metadata.toString())
         val ticket=cache.reserve(owner,WorkingSessionCache.Kind.NOTE,id,version,metadata,forceBody || needsHandoffBody(intent))
         val snapshot=if(ticket.requiresBody) document.copyWriteSnapshot(fixedItems=true) else null
         if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,snapshot,null,proof,intent?.handoff,seal)
+        return Write(ticket,snapshot,null,proof,intent.handoff,seal,intent.completion)
     }
     fun capture(document:InfiniteDocument,source:PreparedNativeOpen.EditSource?):Write {
         return captureCanvas(document,source)
@@ -256,13 +274,13 @@ internal class NativeWorkingSession(
         val owner=document.snapshotOwnerToken;val id=document.identity.documentId;val version=document.bodyRevision
         val intent=captureIntent(owner,proof,required)
         val metadata=metadata(WorkingSessionCache.Kind.CANVAS,document.dirty,document.displayName,
-            proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},null,document.lastView,intent?.handoff)
+            proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},null,document.lastView,intent.handoff)
         parseMetadata(WorkingSessionCache.Kind.CANVAS,id,metadata.toString())
         val ticket=cache.reserve(owner,WorkingSessionCache.Kind.CANVAS,id,version,metadata,forceBody || needsHandoffBody(intent))
         val snapshot=if(ticket.requiresBody) document.snapshotForWrite(fixedItems=true) else null
         if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,null,snapshot,proof,intent?.handoff,seal)
+        return Write(ticket,null,snapshot,proof,intent.handoff,seal,intent.completion)
     }
     fun isCurrent(write:Write)=cache.isCurrent(write.ticket) && write.sourceCurrent() && allowed(write)
     fun reserveClear()=cache.reserveClear()
@@ -277,8 +295,16 @@ internal class NativeWorkingSession(
         val check={checkActive();if(!write.sourceCurrent() || !allowed(write)) throw ExpiredSource()}
         return try {cache.publishChecked(write.ticket,check,{previous->
             val metadata=previousMetadata(previous);val old=metadata?.handoff
-            if(old!=null && old!=write.handoff) throw WorkingSessionCache.Conflict()
-            if(write.handoff!=null && previous!=null) {
+            if(write.completion!=null) {
+                val completion=synchronized(rootState) {rootState.completion?.takeIf {it===write.completion}} ?: throw WorkingSessionCache.Conflict()
+                if(previous==null || !cache.ownsPrevious(previous,write.ticket.owner) || old!=null && old!=completion.intent.handoff)
+                    throw WorkingSessionCache.Conflict()
+                val source=metadata?.source ?: throw WorkingSessionCache.Conflict()
+                val expected=if(old==null) completion.proof.expected else completion.intent.staged.original
+                if(source.kind!=expected.kind || source.documentId!=expected.documentId || source.locationKey!=expected.locationKey || source.sha256!=expected.sha256)
+                    throw WorkingSessionCache.Conflict()
+            } else if(old!=null && old!=write.handoff) throw WorkingSessionCache.Conflict()
+            if(write.completion==null && write.handoff!=null && previous!=null) {
                 val intent=synchronized(rootState) {rootState.intent} ?: throw WorkingSessionCache.Conflict()
                 val source=metadata?.source ?: throw WorkingSessionCache.Conflict()
                 val expected=intent.staged.original
@@ -305,8 +331,12 @@ internal class NativeWorkingSession(
                     }
                 }
             } else canvasCodec.write(requireNotNull(write.canvas),output,isCancelled={check();false})
-        }.also {result->if(result.published && write.handoff!=null) synchronized(rootState) {
-            if(rootState.intent?.handoff==write.handoff) rootState.persisted=true
+        }.also {result->if(result.published) synchronized(rootState) {
+            // The source may have retired after the head committed. Runtime commit provenance,
+            // rather than a live editing grant, authorizes this memory-only cleanup.
+            if(write.completion!=null && rootState.completion===write.completion && cache.invalidateForPublication(write.ticket)) {
+                rootState.intent=null;rootState.completion=null;rootState.persisted=false
+            } else if(write.handoff!=null && rootState.intent?.handoff==write.handoff && rootState.completion==null) rootState.persisted=true
         }}} catch(_:ExpiredSource) {WorkingSessionCache.Publication(write.ticket,false)}
     }
     /** Lease + data only. The caller must still verify the actual source before any writable restoration. */

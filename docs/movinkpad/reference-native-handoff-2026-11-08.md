@@ -116,3 +116,14 @@ NativeHandoffAcknowledgement 私有构造，仅从实际 HandoffPublication.veri
 21 项 NativeHandoffPersistenceTest 定向通过（tmp/native-handoff-ack-boundaries.log），含新增的目标散列中来源失活/Publication close 零写与写后登记契约冲突重试；Android 测试源码编译成功。独立源码复核未发现确定性必修，并建议的两类失败边界已补齐。完整 tmp/native-handoff-ack-full.log：303 套件、3355 项全部通过（0失败/错误/跳过），Android 测试源码编译成功。
 
 本片仍不激活生产 Editor/旧 SessionStore；accepted-ID completion、actual B 恢复/认领、稳定输入屏障与生产统一 writer 仍是后续必须工作。未运行 Android 仪器或 MovinkPad 真机，不打包/安装/推送/发布。
+
+
+## accepted-ID 完成转换
+
+完成转换只接受实际原请求 Receipt 经 EditSource.accept 推进一个 epoch 后的 Observation：原 source issuer、请求 epoch+1、accepted ID、实际 owner 以及候选 B 的 kind/UUID/location/SHA 必须相符。Root 私有 Completion 再绑定该实际 Observation 的 source/epoch/expected 对象。首次转换在 Root 短锁内先失效旧 reservation；之后新捕获把 sourceB 与无 T metadata 同 head 发布，不修改当前正文、dirty 或视口。view-only 可复用已有同 owner/bodyRevision 的实际成功正文；旧 T writer、其它 owner、未获接受回执的观察均不获完成权限，A==B 也没有例外。
+
+previous-head 只允许实际同 owner 的 T+A，或同次完成已提交但尚未收尾的无T+B；后者用于 rename 成功而回调中断后的重试。清 Root 只认私有同 Completion 与 cache 的实际 committed ticket/generation/owner/head 证明，在同短锁中失效尚未提交的 reservation 后再清状态。不能用旧 published=true 清掉更新交接，也不依赖收尾时仍有活跃编辑窗口。独立复核发现的“提交后来源退休卡住Root”已用 tmp/native-handoff-completion-review-red.log 重现，并在 fixed 日志中验证修复；测试还在该窗口预约更晚写入，确认它不能越过收尾。
+
+接口约定：成功完成转换会主动失效 reservation；其返回值 published=true 表示实际缓存已提交，但 isCurrent(write) 随收尾失效为 false。后续 producer 不得套用普通缓存的 published && isCurrent 来判断完成转换，必须分别处理保存回执、当前模型和缓存完成结果。生产尚未接入此接口。
+
+新增测试覆盖当前C保留/正文复用、最后检查之后旧T写入、head失败保T、head已提交但调用者未收到成功的重试、两个完成写交错且新T已注册后旧收尾、实际同SHA画布、来源退休及受管PDF包装/资源保护。完整 tmp/native-handoff-completion-full.log：303 套件3363项全部通过（0失败/错误/跳过），Android 测试源码编译成功；含最后新增的外部PDF原件包装与资源保护场景。独立源码复核确认收尾修复与交错测试通过。仍未实现 actualB 重启认领、活动输入稳定屏障和统一生产 writer；Android 仪器及目标设备未运行。

@@ -61,7 +61,7 @@ class NativeHandoffPersistenceTest {
             }
             override fun write(source:File) {writes++;source.copyTo(file,overwrite=true);afterWrite?.invoke()}
         }})
-        val notes=DocumentCodec(FakeImageCodec(),FakeTextMeasurer())
+        val notes=DocumentCodec(FakeImageCodec(),FakeTextMeasurer()).apply {resolvePdf={storage.pdfResources.resolve(it)}}
         val canvases=CanvasCodec(FakeImageCodec(),FakeTextMeasurer())
         val store=NativeWorkingSession(directory,notes,canvases,storage.pdfResources,onEvent={e,f->event?.invoke(e,f)})
         val view=NativeWorkingSession.NoteView(1.0,10.0,20.0,false,ViewOverrides())
@@ -378,5 +378,172 @@ class NativeHandoffPersistenceTest {
             val receipt=stage.commit(publication)
             assertEquals(1,f.writes);assertFalse(f.storage.hasRecovery(f.uri));assertTrue(source.accept(request,receipt))
         }
+    }
+    @Test fun acceptedReceiptRebasesOnlyTheWorkingMetadataAndPreservesLaterContent()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            val receipt=stage.commit(publication)
+            doc.pages.single().items.add(ink(400.0));doc.dirty=true
+            assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            assertTrue(source.accept(request,receipt))
+            val before=f.store.load()!!.use {assertNotNull(it.metadata.handoff);it.body}
+            val complete=f.store.capture(doc,source,f.view.copy(scrollY=800.0))
+            assertNull(complete.handoff);assertFalse(complete.requiresBody)
+            assertTrue(f.store.publish(complete).published)
+            f.store.load()!!.use {read->
+                assertNull(read.metadata.handoff);assertEquals(receipt.version.sha256,read.metadata.source!!.sha256)
+                assertEquals(before,read.body);assertTrue(read.metadata.dirty)
+                assertEquals(2,read.body.inputStream().use {f.notes.read(it)}.pages.single().items.size)
+            }
+            assertEquals(1,f.writes)
+            assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            assertTrue(f.store.publishClear(f.store.reserveClear()).published)
+        }
+    }
+    @Test fun acceptedCompletionInvalidatesAnOldTWriterPastItsLastCheck()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            val receipt=stage.commit(publication);val old=f.store.capture(doc,source,f.view)
+            val ready=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+            val executor=Executors.newSingleThreadExecutor();val armed=java.util.concurrent.atomic.AtomicBoolean(true)
+            f.event={event,_->if(event==WorkingSessionCache.Event.BEFORE_HEAD_COMMIT && armed.compareAndSet(true,false)) {
+                ready.countDown();check(release.await(5,TimeUnit.SECONDS))
+            }}
+            try {
+                val pending=executor.submit<Boolean> {f.store.publish(old).published}
+                assertTrue(ready.await(5,TimeUnit.SECONDS));assertTrue(source.accept(request,receipt))
+                assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+                release.countDown();assertFalse(pending.get(5,TimeUnit.SECONDS))
+                f.store.load()!!.use {assertNull(it.metadata.handoff);assertEquals(receipt.version.sha256,it.metadata.source!!.sha256)}
+            } finally {release.countDown();executor.shutdownNow()}
+        }
+    }
+    @Test fun failedCompletionKeepsTAndBlocksClearUntilAnActualRetryPublishes()=scenario {f->
+        val (doc,source)=f.open();f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertTrue(source.accept(request,stage.commit(publication)))
+            f.event={event,_->if(event==WorkingSessionCache.Event.BEFORE_HEAD_REPLACE) throw java.io.IOException("head failed")}
+            assertThrows(java.io.IOException::class.java) {f.store.publish(f.store.capture(doc,source,f.view))}
+            f.store.load()!!.use {assertNotNull(it.metadata.handoff)}
+            assertThrows(WorkingSessionCache.Conflict::class.java) {f.store.publishClear(f.store.reserveClear())}
+            f.event=null;assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            f.store.load()!!.use {assertNull(it.metadata.handoff)}
+        }
+    }
+    @Test fun aCommittedCompletionHeadCanRetryWhenItsCallerNeverReceivedSuccess()=scenario {f->
+        val (doc,source)=f.open();f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertTrue(source.accept(request,stage.commit(publication)))
+            f.event={event,_->if(event==WorkingSessionCache.Event.AFTER_HEAD_COMMIT) throw java.io.IOException("return interrupted")}
+            assertThrows(java.io.IOException::class.java) {f.store.publish(f.store.capture(doc,source,f.view))}
+            f.store.load()!!.use {assertNull(it.metadata.handoff)}
+            assertThrows(WorkingSessionCache.Conflict::class.java) {f.store.publishClear(f.store.reserveClear())}
+            f.event=null;assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            assertTrue(f.store.publishClear(f.store.reserveClear()).published)
+        }
+    }
+    @Test fun lateCompletionCleanupCannotEraseANewerHandoffIntent()=scenario {f->
+        val (doc,source)=f.open();f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertTrue(source.accept(request,stage.commit(publication)))
+            val old=f.store.capture(doc,source,f.view)
+            val ready=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+            val executor=Executors.newSingleThreadExecutor();val armed=java.util.concurrent.atomic.AtomicBoolean(true)
+            f.event={event,_->if(event==WorkingSessionCache.Event.AFTER_HEAD_COMMIT && armed.compareAndSet(true,false)) {
+                ready.countDown();check(release.await(5,TimeUnit.SECONDS))
+            }}
+            try {
+                val pending=executor.submit<Boolean> {f.store.publish(old).published}
+                assertTrue(ready.await(5,TimeUnit.SECONDS))
+                doc.pages.single().items.add(ink(900.0));doc.dirty=true
+                assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+                val next=f.stage(source,doc)
+                runBlocking {f.store.persistHandoff(next) {it.capture(doc,source,f.view)}}.use {
+                    release.countDown();assertTrue(pending.get(5,TimeUnit.SECONDS));it.verify(next)
+                    f.store.load()!!.use {assertEquals(next.handoffId,it.metadata.handoff!!.id)}
+                    assertThrows(WorkingSessionCache.Conflict::class.java) {f.store.publishClear(f.store.reserveClear())}
+                }
+            } finally {release.countDown();executor.shutdownNow()}
+        }
+    }
+    @Test fun actualNoopCanvasStillNeedsItsMatchingAcceptedReceiptToDropT()=scenario {f->
+        val blank=com.xnotes.core.infinite.InfiniteDocument()
+        f.file.outputStream().use {f.canvases.write(blank,it)};normalizeZipTimes(f.file,f.root)
+        val p=f.storage.prepareOpen(f.uri,DocumentKind.CANVAS,f.notes,f.canvases,File(f.root,"pdfs"),File(f.root,"assets"))
+        val doc=requireNotNull(p.canvas);doc.path=f.uri;p.protectForAdoption();p.adopt(doc);p.close();val source=p.editSource()
+        f.store.publish(f.store.capture(doc,source))
+        val request=source.capture(doc)
+        f.duringRead={File(f.root,"scratch").listFiles().orEmpty().filter {it.isFile}.forEach {normalizeZipTimes(it,f.root)}}
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"canvas");f.duringRead=null
+        assertEquals(stage.original.sha256,stage.candidate.sha256)
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source)}}.use {publication->
+            val receipt=stage.commit(publication);assertEquals(0,f.writes)
+            assertTrue(f.store.publish(f.store.capture(doc,source)).published)
+            f.store.load()!!.use {assertNotNull(it.metadata.handoff)}
+            assertTrue(source.accept(request,receipt));assertTrue(f.store.publish(f.store.capture(doc,source)).published)
+            f.store.load()!!.use {assertNull(it.metadata.handoff);assertEquals(receipt.version.sha256,it.metadata.source!!.sha256)}
+            assertTrue(f.store.publishClear(f.store.reserveClear()).published)
+        }
+    }
+    @Test fun ownerRetirementAfterCommittedCompletionCannotStrandTheRoot()=scenario {f->
+        val (doc,source)=f.open();f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertTrue(source.accept(request,stage.commit(publication)))
+            var late:NativeWorkingSession.Write?=null
+            f.event={event,_->if(event==WorkingSessionCache.Event.AFTER_HEAD_COMMIT) {
+                f.event=null;late=f.store.capture(doc,source,f.view.copy(scrollY=900.0));source.invalidate()
+            }}
+            assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            f.store.load()!!.use {assertNull(it.metadata.handoff);assertEquals(stage.candidate.sha256,it.metadata.source!!.sha256)}
+            assertFalse(f.store.publish(requireNotNull(late)).published)
+            assertTrue(f.store.publishClear(f.store.reserveClear()).published)
+        }
+    }
+    @Test fun externalPdfCompletionKeepsPortableWorkingBodyAndOriginalResourcePackaging()=scenario {f->
+        val pdf=f.storage.pdfResources.admit("%PDF-handoff-completion".byteInputStream(),"original")
+        val original=Document.blank().apply {
+            enableReferenceAnchors();pdfFile=pdf;identity=identity.copy(pdfResource=pdf.nameWithoutExtension,externalPdf=true)
+        }
+        f.file.outputStream().use {f.notes.write(original.snapshot(),it,embedPdf=false)}
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(40.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        doc.pages.single().items.add(ink(400.0));doc.dirty=true
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertTrue(source.accept(request,stage.commit(publication)))
+            val write=f.store.capture(doc,source,f.view);assertFalse(write.requiresBody)
+            assertTrue(f.store.publish(write).published)
+            val native=com.xnotes.format.BundleReferenceInfo.inspect(f.file,true)
+            assertTrue(native.header.identity!!.externalPdf);assertEquals(pdf.nameWithoutExtension,native.originalPdfHash)
+            f.store.load()!!.use {read->
+                assertNull(read.metadata.handoff);val cached=com.xnotes.format.BundleReferenceInfo.inspect(read.body,true)
+                assertFalse(cached.header.identity!!.externalPdf);assertEquals(pdf.nameWithoutExtension,cached.embeddedPdfHash)
+            }
+            f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0");f.storage.pdfResources.collect()
+            assertTrue(pdf.isFile)
+        }
+    }
+    private fun normalizeZipTimes(file:File,root:File) {
+        val temp=File.createTempFile("zip-time-", ".zip",root)
+        try {
+            java.util.zip.ZipInputStream(file.inputStream()).use {input->java.util.zip.ZipOutputStream(temp.outputStream()).use {output->
+                output.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                while(true) {
+                    val entry=input.nextEntry ?: break;val bytes=input.readBytes()
+                    val next=java.util.zip.ZipEntry(entry.name).apply {time=1700000000000L;method=entry.method}
+                    if(next.method==java.util.zip.ZipEntry.STORED) {next.size=bytes.size.toLong();next.crc=java.util.zip.CRC32().apply {update(bytes)}.value}
+                    output.putNextEntry(next);output.write(bytes);output.closeEntry();input.closeEntry()
+                }
+            }}
+            temp.copyTo(file,overwrite=true)
+        } finally {temp.delete()}
     }
 }

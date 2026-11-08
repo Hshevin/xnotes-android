@@ -87,6 +87,12 @@ internal class PreparedNativeOpen private constructor(
                                               internal val ownerToken:Any,internal val acceptedHandoffId:String?) {
             fun isCurrent()=source.authorize(epoch,expected)
             internal fun matches(request:SaveRequest)=isCurrent() && request.expected===expected && request.issuedBy(source.issuer,epoch)
+            internal fun completes(request:SaveRequest,id:String,candidate:NativeSourceVersion)=isCurrent() &&
+                acceptedHandoffId==id && epoch>0 && request.issuedBy(source.issuer,epoch-1) &&
+                expected.kind==candidate.kind && expected.documentId==candidate.documentId &&
+                expected.locationKey==candidate.locationKey && expected.sha256==candidate.sha256
+            internal fun sameEpoch(other:Observation?)=other!=null && source===other.source && epoch==other.epoch && expected===other.expected &&
+                acceptedHandoffId==other.acceptedHandoffId && isCurrent() && other.isCurrent()
             companion object {
                 internal fun capture(source:EditSource,document:Document):Observation=synchronized(source) {
                     Observation(source,source.generation,source.version(document),document.snapshotOwnerToken,source.acceptedHandoffId)
@@ -191,6 +197,9 @@ internal class PreparedNativeOpen private constructor(
                     if(proof==null || !proof.matches(request) || proof.ownerToken!==ownerToken || owner!==ownerToken)
                         throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
                 }
+                internal fun acceptsCompletion(proof:EditSource.Observation?,owner:Any)=
+                    owner===ownerToken && proof?.ownerToken===ownerToken &&
+                        proof.completes(request,requireNotNull(handoffId),candidate)
                 internal fun verifyWorkingBody(file:File,checkActive:()->Unit={}) {
                     request.checkCurrent(checkActive)
                     stage.verifyWorkingContract(BundleReferenceInfo.inspect(file,true) {request.checkCurrent(checkActive);false})
