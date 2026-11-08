@@ -26,9 +26,12 @@ internal class WorkingSessionCache(
     private val validateBody:(File,Kind,String)->Unit,
     private val onEvent:(Event,File)->Unit,
     private val validateMetadata:(Kind,String,String)->Unit,
+    private val validateBodyChecked:((File,Kind,String,()->Unit)->Unit)?,
 ) {
+    constructor(directory:File,validateBody:(File,Kind,String)->Unit,onEvent:(Event,File)->Unit,
+                validateMetadata:(Kind,String,String)->Unit):this(directory,validateBody,onEvent,validateMetadata,null)
     constructor(directory:File,validateBody:(File,Kind,String)->Unit,onEvent:(Event,File)->Unit={_,_->})
-        :this(directory,validateBody,onEvent,{_,_,_->})
+        :this(directory,validateBody,onEvent,{_,_,_->},null)
     enum class Kind { NOTE,CANVAS }
     enum class Event { BEFORE_HEAD_REPLACE,BEFORE_HEAD_COMMIT,AFTER_HEAD_COMMIT,BEFORE_DELETE }
     class Invalid(cause:Throwable?=null):IOException("Invalid working session cache",cause)
@@ -125,7 +128,7 @@ internal class WorkingSessionCache(
                 ensureDirectory()
                 writeNew(pending) {out->checkActive();writeBody(out);checkActive()}
                 val before=digest(pending,checkActive)
-                validateBody(pending,request.kind,request.documentId)
+                checkBody(pending,request.kind,request.documentId,checkActive)
                 checkActive()
                 if(digest(pending,checkActive)!=before) throw Conflict()
                 Files.move(pending.toPath(),candidate.toPath(),ATOMIC_MOVE)
@@ -271,9 +274,13 @@ internal class WorkingSessionCache(
         val file=File(root,body.name)
         if(!Files.isRegularFile(file.toPath(),NOFOLLOW_LINKS)) throw Invalid()
         if(digest(file,checkActive)!=body.sha) throw Invalid()
-        validateBody(file,body.kind,body.documentId)
+        checkBody(file,body.kind,body.documentId,checkActive)
         checkActive()
         if(digest(file,checkActive)!=body.sha) throw Invalid()
+    }
+    private fun checkBody(file:File,kind:Kind,id:String,checkActive:()->Unit) {
+        val checked=validateBodyChecked
+        if(checked==null) validateBody(file,kind,id) else checked(file,kind,id,checkActive)
     }
 
     private fun ensureDirectory() {if(!root.isDirectory && !root.mkdirs()) throw IOException("Cannot create session cache directory")}

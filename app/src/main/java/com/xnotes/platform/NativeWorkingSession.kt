@@ -94,9 +94,9 @@ internal class NativeWorkingSession(
     private class RootState {var intent:Intent?=null;var persisted=false;var completion:Completion?=null;var recovered:Recovered?=null}
     private val rootState=rootState(directory.canonicalPath)
     private class ExpiredSource:CancellationException("Working source capture expired")
-    private val cache=WorkingSessionCache(directory,validateBody={file,kind,id->
+    private fun validatePortableBody(file:File,kind:WorkingSessionCache.Kind,id:String,checkActive:()->Unit) {
         try {
-            val info=BundleReferenceInfo.inspect(file,true)
+            val info=BundleReferenceInfo.inspect(file,true) {checkActive();false}
             require(info.format==extension(kind) && info.header.identity?.documentId==id)
             // Until durable cache resource pins exist, every cache PDF must be portable.
             require(info.header.identity?.externalPdf!=true)
@@ -104,7 +104,10 @@ internal class NativeWorkingSession(
             if(error is CancellationException || error is WorkingSessionCache.Invalid) throw error
             throw WorkingSessionCache.Invalid(error)
         }
-    },onEvent=onEvent,validateMetadata={kind,id,json->parseMetadata(kind,id,json)})
+    }
+    private val cache=WorkingSessionCache(directory,validateBody={file,kind,id->validatePortableBody(file,kind,id,{})},
+        onEvent=onEvent,validateMetadata={kind,id,json->parseMetadata(kind,id,json)},
+        validateBodyChecked={file,kind,id,check->validatePortableBody(file,kind,id,check)})
 
     private fun captureIntent(owner:Any,proof:PreparedNativeOpen.EditSource.Observation?,required:Intent?):CaptureContext=synchronized(rootState) {
         val intent=rootState.intent

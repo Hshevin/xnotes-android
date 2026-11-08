@@ -38,4 +38,24 @@ class WorkingSessionLoadStateTest {
             } finally {root.deleteRecursively()}
         }
     }
+    @Test fun checkedBodyValidationReceivesCancellationAndReleasesItsReadLease() {
+        val root=Files.createTempDirectory("session-cancel-validation-").toFile()
+        try {
+            var validating=false
+            val store=WorkingSessionCache(root,validateBody={_,_,_->fail("Checked callback must handle validation")},
+                onEvent={_,_->},validateMetadata={_,_,_->},validateBodyChecked={file,_,_,check->
+                    validating=true
+                    try {check();require(file.readText()=="original")} finally {validating=false}
+                })
+            val request=store.reserve(Any(),WorkingSessionCache.Kind.NOTE,UUID.randomUUID().toString(),0,JSONObject())
+            assertTrue(store.publish(request) {it.write("original".toByteArray())}.published)
+            val before=File(root,"head.json").readBytes()
+            assertThrows(java.util.concurrent.CancellationException::class.java) {store.loadState {
+                if(validating) throw java.util.concurrent.CancellationException("inside actual body validation")
+            }}
+            assertFalse(validating);assertArrayEquals(before,File(root,"head.json").readBytes())
+            assertTrue(store.publishClear(store.reserveClear()).published)
+            assertTrue("Cancelled validation must not retain a body reader",root.listFiles()!!.none {it.name.startsWith("body-")})
+        } finally {root.deleteRecursively()}
+    }
 }

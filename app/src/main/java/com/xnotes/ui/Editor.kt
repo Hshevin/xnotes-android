@@ -357,6 +357,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  bytes into the heap; the renderer decodes from these files on demand. Under filesDir (not the
      *  reclaimable cacheDir). */
     private val imageDir = tempDir("noteimg")
+    private val recoveryPreviewTempDir = tempDir("recovery-raw")
 
     /** Scratch dir for [writeNoteSafely]: a note is encoded here in full before any SAF file is
      *  touched, so a failed encode can never truncate a good note. Lives under filesDir (not the
@@ -493,6 +494,32 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val session = com.xnotes.platform.SessionStore(sessionDir, codec, pdfDir, imageDir)
     private val canvasSession = com.xnotes.platform.CanvasSessionStore(sessionDir, canvasCodec, imageDir)
     private val sessionOwner = com.xnotes.platform.LegacySessionQueue.attach(sessionDir)
+    /** A historical read of this pane's own saved slot, never an open/restore of the live document. */
+    internal suspend fun prepareRecoveryPreview(
+        legacy:com.xnotes.platform.RecoveryLegacyArtifact?=null,checkActive:()->Unit={},
+    ):com.xnotes.platform.RecoveryPreviewLoad {
+        val resources=notebookStorage.pdfResources
+        val native=com.xnotes.platform.NativeWorkingSession(sessionDir,codec,canvasCodec,resources)
+        return com.xnotes.platform.RecoveryPreviewSource(sessionDir,sessionOwner,native,resources,codec,canvasCodec,
+            pdfDir,imageDir,recoveryPreviewTempDir).prepare(legacy,checkActive)
+    }
+    internal fun beginRecoveryCopy(prepared:com.xnotes.storage.PreparedRecoveryPreview):com.xnotes.storage.RecoveryCopyRequest =
+        com.xnotes.storage.RecoveryCopyRequest.create(notebookStorage,prepared,recoveryPreviewTempDir)
+    internal suspend fun publishRecoveryCopy(request:com.xnotes.storage.RecoveryCopyRequest,uri:String,name:String,
+                                             checkActive:()->Unit={}):com.xnotes.storage.RecoveryCopyResult =
+        recoveryCopyIo(checkActive) {request.publish(uri,name,it)}
+    internal suspend fun completeRecoveryCopy(pending:com.xnotes.storage.NativeCreationPending,
+                                              checkActive:()->Unit={}):com.xnotes.storage.RecoveryCopyResult =
+        recoveryCopyIo(checkActive) {com.xnotes.storage.RecoveryCopyRequest.complete(notebookStorage,pending,it)}
+    /** Explicitly chosen target after a prior process ended; never an automatic source repair. */
+    internal suspend fun completeRecoveryCopy(uri:String,name:String,
+                                              checkActive:()->Unit={}):com.xnotes.storage.RecoveryCopyResult =
+        recoveryCopyIo(checkActive) {com.xnotes.storage.RecoveryCopyRequest.completeSelected(notebookStorage,uri,name,it)}
+    private suspend fun recoveryCopyIo(checkActive:()->Unit,operation:(()->Unit)->com.xnotes.storage.RecoveryCopyResult) =
+        withContext(Dispatchers.IO) {
+            val running=kotlinx.coroutines.currentCoroutineContext()
+            operation {running.ensureActive();checkActive()}
+        }
     private val viewStates = com.xnotes.platform.ViewStateStore(com.xnotes.platform.JsonStore.viewStates(appContext))
     private var lastSessionBody: Document? = null
     private var lastSessionBodyRevision = -1L
