@@ -1,16 +1,21 @@
 package com.xnotes.pen
 
 import android.content.ContextWrapper
+import android.provider.DocumentsContract
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.Bookmark
+import com.xnotes.core.model.enableReferenceAnchors
+import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.snapshot
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
+import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.platform.NativeWorkingSession
 import com.xnotes.platform.WorkingSessionCache
 import com.xnotes.storage.NotebookStorage
@@ -78,5 +83,35 @@ class NativeWorkingSessionAndroidTest {
         try {store.load();fail("JSON NULL is not an absent optional string")} catch(_:WorkingSessionCache.Invalid) {}
         try {store.publishClear(store.reserveClear());fail("must preserve bad metadata")} catch(_:WorkingSessionCache.Invalid) {}
         assertArrayEquals(before,File(directory,"head.json").readBytes())
+    }
+    @Test fun boundWorkingRecoveryUsesTheRealProviderSourceBeforePublishingItsEditedPageSet()=scenario {storage,root,note,canvas->
+        val base=PenTestRunner.instance.targetContext;val key="working-recovery-${UUID.randomUUID()}"
+        val folder=File(AppStorageDocumentsProvider.rootDir(base),key).apply {mkdir()}
+        val file=File(folder,"source.xnote")
+        val uri=DocumentsContract.buildDocumentUri(base.packageName+".documents","root/$key/source.xnote").toString()
+        try {
+            val original=Document.blank(3).apply {enableReferenceAnchors()}
+            file.outputStream().use {note.write(original.snapshot(),it)}
+            val originalHash=BundleMigration.hash(file)
+            val prepared=storage.prepareOpen(uri,DocumentKind.NOTE,note,canvas,File(root,"pdfs"),File(root,"assets"))
+            val document=prepared.note!!;document.path=uri
+            prepared.protectForAdoption();prepared.adopt(document);prepared.close();val source=prepared.editSource()
+            document.pages.removeAt(1);document.pages.reverse();document.bookmarks.add(Bookmark(0,"working copy"));document.dirty=true
+            val store=NativeWorkingSession(File(root,"working"),note,canvas,storage.pdfResources)
+            val view=NativeWorkingSession.NoteView(2.0,50.0,60.0,true,ViewOverrides())
+            store.publish(store.capture(document,source,view))
+            val recovery=store.prepareRecovery(storage,File(root,"pdfs"),File(root,"assets")) as NativeWorkingSession.Recovery.Bound
+            recovery.use {
+                val p=it.prepared;val restored=p.note!!
+                assertEquals(originalHash,p.version.sha256);assertEquals(originalHash,BundleMigration.hash(file))
+                assertEquals(document.pages.map {page->page.referenceIdentity.id},restored.pages.map {page->page.referenceIdentity.id})
+                assertEquals(view,it.metadata.noteView);assertTrue(restored.dirty)
+                p.protectForAdoption();p.adopt(restored);val binding=p.editSource();val request=binding.capture(restored)
+                val receipt=request.publish(storage,note,canvas,File(root,"save"),"source")
+                assertTrue(binding.accept(request,receipt));assertEquals(BundleMigration.hash(file),receipt.version.sha256)
+                val saved=file.inputStream().use {input->note.read(input)}
+                assertEquals("working copy",saved.bookmarks.single().label);assertEquals(2,saved.pages.size)
+            }
+        } finally {folder.deleteRecursively()}
     }
 }

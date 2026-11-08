@@ -6,6 +6,10 @@ import com.xnotes.core.model.snapshot
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
+import com.xnotes.format.BundleMigration
+import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.platform.NativeWorkingSession
+import com.xnotes.platform.WorkingSessionCache
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
@@ -183,6 +187,83 @@ internal class PreparedNativeOpen private constructor(
         private val ASSET_NAME=Regex("native-open-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         /** Only these owned directories are recursively purged at launch; other temp entries retain prior behavior. */
         internal fun isAssetDirectory(file:File)=ASSET_NAME.matches(file.name) && Files.isDirectory(file.toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        /**
+         * Decode the adapter's own held body, never an externally supplied live model. The raw
+         * source supplies the write baseline and PDF packaging; the cache supplies editable pages.
+         */
+        internal fun readWorking(session:NativeWorkingSession,read:NativeWorkingSession.Read,source:NativeSourceSnapshot,
+                                 resources:PdfResources,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
+                                 pdfDir:File,assetRoot:File,checkActive:()->Unit):PreparedNativeOpen {
+            val check={checkActive();session.checkRecoveryRead(read)}
+            check()
+            val origin=read.metadata.source ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            val version=source.version
+            if(version.kind!=origin.kind || version.documentId!=origin.documentId || version.locationKey!=origin.locationKey || version.sha256!=origin.sha256)
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+            val body=read.body
+            fun verifyBody() {
+                check()
+                if(!Files.isRegularFile(body.toPath(),java.nio.file.LinkOption.NOFOLLOW_LINKS) ||
+                    BundleMigration.hash(body) {check();false}!=read.sha256) throw WorkingSessionCache.Invalid()
+            }
+            verifyBody()
+            val info=BundleReferenceInfo.inspect(body,true) {check();false}
+            if(info.format!=version.kind.extension || info.header.identity?.documentId!=read.documentId || info.header.identity.externalPdf)
+                throw WorkingSessionCache.Invalid()
+            val identity=source.verifyWorkingContract(info)
+            check(assetRoot.isDirectory || assetRoot.mkdirs()) {"Cannot create decoded asset directory"}
+            val assets=File(assetRoot,"native-open-${UUID.randomUUID()}")
+            check(assets.mkdir()) {"Cannot create working recovery directory"}
+            val leases=mutableListOf<AutoCloseable>()
+            fun release() {
+                var failure:Throwable?=null
+                for(lease in leases) try {lease.close()} catch(error:Throwable) {
+                    if(failure==null) failure=error else failure.addSuppressed(error)
+                }
+                failure?.let {throw it}
+            }
+            try {
+                fun input()=object:java.io.FilterInputStream(body.inputStream()) {
+                    override fun read():Int {check();return super.read()}
+                    override fun read(bytes:ByteArray,offset:Int,length:Int):Int {check();return `in`.read(bytes,offset,length)}
+                }
+                val note:Document?;val canvas:InfiniteDocument?
+                when(version.kind) {
+                    DocumentKind.NOTE -> {
+                        note=input().use {noteCodec.read(it,pdfDir,assets,pdfStore={pdf->
+                            pdf.use {stream->
+                                check()
+                                val expected=info.embeddedPdfHash ?: throw WorkingSessionCache.Invalid()
+                                val held=resources.admitHeld(stream,"PDF",expected)
+                                leases.add(held.lease);check();held.file
+                            }
+                        })}
+                        canvas=null;source.verifyWorkingCopy(note,info)
+                        // A portable cache may have normalized resource metadata. Only the source
+                        // establishes ordinary-save packaging, including embedded v1 with no ID.
+                        note.identity=identity;note.path=origin.uri
+                        note.displayName=read.metadata.displayName;note.dirty=read.metadata.dirty
+                    }
+                    DocumentKind.CANVAS -> {
+                        canvas=input().use {canvasCodec.read(it,assets)};note=null
+                        source.verifyWorkingCopy(canvas,info)
+                        canvas.identity=identity;canvas.path=origin.uri;canvas.displayName=read.metadata.displayName
+                        canvas.lastView=read.metadata.canvasView;canvas.dirty=read.metadata.dirty
+                    }
+                    else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                }
+                verifyBody();check()
+                val ids=note?.pdfFile?.let {setOf(it.nameWithoutExtension)} ?: emptySet()
+                // Transfer the cache's admission leases, not source.ids: embedded source has not
+                // been decoded and can have an empty set. No resolve/close GC gap is introduced.
+                return PreparedNativeOpen(version,source.file.length(),note,canvas,assets,resources,ids,AutoCloseable {release()})
+            } catch(error:Throwable) {
+                try {release()} catch(close:Throwable) {error.addSuppressed(close)}
+                try {if(!assets.deleteRecursively() && assets.exists()) error.addSuppressed(java.io.IOException("Cannot remove working recovery assets"))}
+                catch(close:Throwable) {error.addSuppressed(close)}
+                throw error
+            }
+        }
         /** Borrows source; only this private decode path can issue a model/source pairing. */
         internal fun read(source:NativeSourceSnapshot,resources:PdfResources,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
                           pdfDir:File,assetRoot:File,timing:DocumentCodec.ReadTiming?,checkActive:()->Unit):PreparedNativeOpen {

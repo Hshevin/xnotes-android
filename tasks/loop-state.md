@@ -23,5 +23,7 @@ R2b2c0：NativeCreationIntent/prepareNewTarget/publishCreated、CREATE用途与e
 
 R2b2b3a详情reference-edit-source-2026-11-08.md。16新增JVM真实publish/PDF/no-op反例，两个实际Editor生命周期仪器场景只编译未执行；普通writer尚未用context，不得误宣称生产cache/native已迁移。下一片b3b需统一native成功receipt→当前live捕获→cache reserve，旧cache不可靠则保留草稿不自动写原文件，另存A→B需持久copy pending防旧A恢复写回，分屏未采用草稿不能被clear掉。所有替换（键盘newNote等）迁移前要改保存等待；显式PDF插入/合并背景需要来源变更事务，不能放松普通PDF核验。无运行作业，overall complete=false。
 
-R2b2b3b0已实现：原生会话codec/typed metadata/view-only proof/portable PDF/Read SHA、strict head envelope和所有verify路径metadata保护。tmp/native-working-session-final-full.log 296套件3237项全过、Android源码编译/独立复核通过；两个PDF复核发现均已修并留反例。实际仪器/目标设备未运行，生产Editor/旧SessionStore仍未切换。详情reference-native-session-adapter-2026-11-08.md。已验证待本地提交，无运行作业。
-下一片b3b1的计划reference-working-recovery-2026-11-08.md正独立审核：重新读真实来源才给已绑定缓存的实际解码模型签恢复grant，不能由描述/外来model拼权限。unbound/旧缓存草稿、producer协调/copy持久切换、页激活/页面来源/往返backlinks/网络/A2全部保留，overall complete=false。用户关于部分保存后放弃语义仍未答，不实施相关回退清理。
+R2b2b3b0已实现：原生会话codec/typed metadata/view-only proof/portable PDF/Read SHA、strict head envelope和所有verify路径metadata保护。tmp/native-working-session-final-full.log 296套件3237项全过、Android源码编译/独立复核通过；两个PDF复核发现均已修并留反例。实际仪器/目标设备未运行，生产Editor/旧SessionStore仍未切换。详情reference-native-session-adapter-2026-11-08.md。已提交4802a45c，无运行作业。
+R2b2b3b1已实现/独立复核通过；tmp/native-working-recovery-final-full.log 297套件3248项全部通过，Android源码编译成功（新provider恢复发布仪器只编译）；实际目标设备未运行。source实际SHA/kind/id/key、cache自身页集、整个source.identity/PDF包装、Read issuer/open与cache admission lease交接已覆盖。新11个JVM，含真实发布/pending/外部变更/权限/来源缺失/GC/取消/伪造Read。详情reference-working-recovery-2026-11-08.md；待本地提交，无运行作业。
+生产Editor旧SessionStore尚未切换；unbound/旧缓存草稿、producer协调/copy持久切换、页激活/页面来源/往返backlinks/网络全部保留，overall complete=false。部分保存后放弃语义用户未答，不实施相关回退清理。
+下一独立小片A2普通关系编辑计划mind-map-relation-editing-2026-11-08.md正独立审核：补端点选择/清楚方向语义、所有修改草稿确认、取消无残余、重复定位与一步undo。不能因此取消来源闭环或半接生产保存。

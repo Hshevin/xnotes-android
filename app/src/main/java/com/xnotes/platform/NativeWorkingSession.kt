@@ -14,6 +14,7 @@ import com.xnotes.format.BundleReferenceInfo
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
 import com.xnotes.storage.PdfResources
+import com.xnotes.storage.NotebookStorage
 import com.xnotes.storage.PreparedNativeOpen
 import com.xnotes.storage.ReferenceContractViolation
 import com.xnotes.storage.StorageMsg
@@ -34,14 +35,23 @@ internal class NativeWorkingSession(
         val requiresBody get()=ticket.requiresBody
         internal fun sourceCurrent()=proof?.isCurrentSource()!=false
     }
-    class Read internal constructor(private val held:WorkingSessionCache.Read,val metadata:Metadata):AutoCloseable {
+    class Read internal constructor(private val issuer:Any,private val held:WorkingSessionCache.Read,val metadata:Metadata):AutoCloseable {
         private var closed=false
         val kind get()=held.kind
         val documentId get()=held.documentId
         val sha256 get()=held.sha256
         val body:File get()=synchronized(this) {check(!closed) {"Working session read is closed"};held.body}
+        internal fun checkIssuer(owner:Any)=synchronized(this) {check(!closed && issuer===owner) {"Working session read is not owned by this adapter"}}
         override fun close() {synchronized(this) {if(closed) return;closed=true};held.close()}
     }
+    sealed interface Recovery {
+        data object Empty:Recovery
+        data class Unbound(val kind:WorkingSessionCache.Kind,val documentId:String,val metadata:Metadata):Recovery
+        class Bound internal constructor(val prepared:PreparedNativeOpen,val metadata:Metadata):Recovery,AutoCloseable {
+            override fun close()=prepared.close()
+        }
+    }
+    private val readIssuer=Any()
     private class ExpiredSource:CancellationException("Working source capture expired")
     private val cache=WorkingSessionCache(directory,validateBody={file,kind,id->
         try {
@@ -109,8 +119,31 @@ internal class NativeWorkingSession(
     /** Lease + data only. The caller must still verify the actual source before any writable restoration. */
     fun load(checkActive:()->Unit={}):Read? {
         val held=cache.load(checkActive) ?: return null
-        try {return Read(held,parseMetadata(held.kind,held.documentId,held.metadataJson))}
+        try {return Read(readIssuer,held,parseMetadata(held.kind,held.documentId,held.metadataJson))}
         catch(error:Throwable) {try {held.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
+    }
+
+    /** Internal proof check for the decoding factory; neither a tuple nor a closed lease can stand in for a load. */
+    internal fun checkRecoveryRead(read:Read)=read.checkIssuer(readIssuer)
+
+    /** IO-only. No UI replacement, cache consumption or native write. Only a verified bound source can issue a preparation. */
+    fun prepareRecovery(storage:NotebookStorage,pdfDir:File,assetRoot:File,checkActive:()->Unit={}):Recovery {
+        require(storage.pdfResources===resources)
+        var prepared:PreparedNativeOpen?=null
+        try {
+            val read=load(checkActive) ?: return Recovery.Empty
+            read.use {
+                val origin=it.metadata.source ?: return Recovery.Unbound(it.kind,it.documentId,it.metadata)
+                storage.openSource(origin.uri,origin.kind,checkActive).use {source->
+                    prepared=PreparedNativeOpen.readWorking(this,it,source,resources,noteCodec,canvasCodec,pdfDir,assetRoot,checkActive)
+                }
+                checkActive();checkRecoveryRead(it)
+                return Recovery.Bound(requireNotNull(prepared),it.metadata)
+            }
+        } catch(error:Throwable) {
+            try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            throw error
+        }
     }
 
     private fun metadata(kind:WorkingSessionCache.Kind,dirty:Boolean,name:String?,source:SourceDescription?,note:NoteView?,canvas:Waypoint?):JSONObject {

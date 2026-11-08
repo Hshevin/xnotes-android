@@ -69,16 +69,19 @@ internal class NativeSourceSnapshot private constructor(
     fun verify(document:Document) {
         synchronized(gate) {checkOpen()};checkActive()
         if(version.kind!=DocumentKind.NOTE) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        verifyNote(document,inspected.info)
+        verifyContainer()
+    }
+    private fun verifyNote(document:Document,info:BundleReferenceInfo) {
         if(document.identity.documentId!=version.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
-        val anchored=inspected.info.header.anchors!=null
+        val anchored=info.header.anchors!=null
         if(document.hasReferenceAnchors!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
         val actual=document.pages.map {checkActive();it.referenceIdentity.id}
         if(anchored) {
-            if(actual.size!=inspected.info.pageIds.size || actual.toSet()!=inspected.info.pageIds)
+            if(actual.size!=info.pageIds.size || actual.toSet()!=info.pageIds)
                 throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
         } else if(actual.any {it!=null}) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-        verifyOriginalPdf(document)
-        verifyContainer()
+        verifyOriginalPdf(document,info)
     }
     fun verify(document:InfiniteDocument) {
         synchronized(gate) {checkOpen()};checkActive()
@@ -86,11 +89,32 @@ internal class NativeSourceSnapshot private constructor(
         if(document.identity.documentId!=version.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
         verifyContainer()
     }
-    private fun verifyOriginalPdf(document:Document) {
+    /** Data from the actual source, not a permission to bind any external model. */
+    internal fun verifyWorkingContract(info:BundleReferenceInfo):com.xnotes.format.BundleIdentity {
+        synchronized(gate) {checkOpen()};checkActive()
+        val original=inspected.info
+        if(info.format!=version.kind.extension || info.header.identity?.documentId!=version.documentId ||
+            (info.header.anchors!=null)!=(original.header.anchors!=null))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+        if(info.originalPdfHash!=original.originalPdfHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+        verifyContainer()
+        return requireNotNull(original.header.identity)
+    }
+    internal fun verifyWorkingCopy(document:Document,info:BundleReferenceInfo) {
+        verifyWorkingContract(info)
+        if(version.kind!=DocumentKind.NOTE) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        verifyNote(document,info)
+    }
+    internal fun verifyWorkingCopy(document:InfiniteDocument,info:BundleReferenceInfo) {
+        verifyWorkingContract(info)
+        if(version.kind!=DocumentKind.CANVAS || document.identity!=info.header.identity)
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    private fun verifyOriginalPdf(document:Document,info:BundleReferenceInfo) {
         // v1 may carry an unused stale resource field; only the verified manifest/PDF contract
         // determines whether an original exists and what its bytes must be.
-        val expected=inspected.info.originalPdfHash
-        if(document.identity!=inspected.info.header.identity && (expected==null || document.identity.pdfResource!=expected))
+        val expected=info.originalPdfHash
+        if(document.identity!=info.header.identity && (expected==null || document.identity.pdfResource!=expected))
             throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
         val original=document.pdfFile
         if(expected==null) {
