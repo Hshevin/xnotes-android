@@ -711,7 +711,8 @@ private fun EditorScreen(
         val uri = target.currentUri
         if (uri == null) { launchSaveAs(target); return }
         // The write is off the main thread now, so the Save-As fallback fires from its callback.
-        target.saveToThen(uri) { ok -> if (!ok) launchSaveAs(target) }
+        val original=if(!target.canvasOpen) target.discardForOpen() else null
+        target.saveToThen(uri) {ok->if(!ok && original?.sameModel()==true) launchSaveAs(target)}
     }
 
     // The prompt is about one pane's note, so it asks about — and saves — the pane being acted on.

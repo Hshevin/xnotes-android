@@ -472,3 +472,8 @@ R2b2b1a正文版本/画布owner快照已实现，3142项全量及独立复核通
 ### R2b2c0 与 R2b2b2b 已实现（2026-11-08）
 
 reference-native-creation-2026-11-08.md 的新建上下文/CREATE发布/explicit完成已提交d272728a，3191项主机测试/Android源码编译/独立复核通过。reference-verified-open-2026-11-08.md 已接真实Editor/首页打开：完整准备后settle并同步检查旧工作区，同源actualModel绑定、PDF handoff、取消/迟到回调、模型绑定Discard、picker占用；3200项主机测试全通过/Android源码编译成功/独立复核通过，平台未运行。接续生产native保存receipt与会话原子配对/旧cache保留/同源SHA恢复、Save-As持久切换与copyScope；不是页面来源/反向引用/网络已完成。
+
+
+### R2b2b3a 活模型来源与请求配对回执（2026-11-08）
+
+reference-edit-source-2026-11-08.md已实现/独立复核通过，16新JVM反例、总3216项/Android源码编译通过，平台未运行。Editor真实打开持唯一context；主线程source+snapshot请求、真实publish后私有receipt、no-op代次/retire/原PDF核验均具备。生产writer/会话尚未迁移，后续b3b/c2必须统一成功receipt时序、旧cache恢复、所有替换调用保存等待、copy持久切换。背景PDF显式变更不能借普通save放松原件保护。

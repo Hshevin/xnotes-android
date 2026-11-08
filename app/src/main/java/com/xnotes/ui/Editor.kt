@@ -650,8 +650,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Flipped by the open dialog's Cancel so a slow open is discarded instead of swapped in. */
     private class NativeOpenRequest {val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)}
     @Volatile private var nativeOpenRequest:NativeOpenRequest?=null
-    private var noteOpenedSource:com.xnotes.storage.PreparedNativeOpen?=null
-    private var canvasOpenedSource:com.xnotes.storage.PreparedNativeOpen?=null
+    private var noteEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
+    private var canvasEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
+    private fun retireNoteEditSource() {noteEditSource?.invalidate();noteEditSource=null}
+    private fun retireCanvasEditSource() {canvasEditSource?.invalidate();canvasEditSource=null}
     private fun invalidateNativeOpen() {
         nativeOpenRequest?.cancelled?.set(true);nativeOpenRequest=null;opening=false
     }
@@ -660,8 +662,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     internal fun lastReadSourceVersion():com.xnotes.storage.NativeSourceVersion? {
         val owner=documentOwner
         if(owner!==this) return owner.lastReadSourceVersion()
-        return if(canvasOpen) infiniteOrNull?.document?.let {canvasOpenedSource?.sourceVersion(it)}
-            else noteOpenedSource?.sourceVersion(state.document)
+        return if(canvasOpen) infiniteOrNull?.document?.let {canvasEditSource?.version(it)}
+            else noteEditSource?.version(state.document)
     }
     /** Created only by an explicit Discard click's guard; expires when that exact body changes. */
     class OpenDiscard internal constructor(internal val owner:Editor,private val model:Document,private val revision:Long) {
@@ -994,7 +996,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         displayName: String?,
         fromSession: Boolean = false,
     ) {
-        invalidateNativeOpen();canvasOpenedSource=null
+        invalidateNativeOpen();retireCanvasEditSource();retireNoteEditSource()
         leaveSharedDocument()
         flushAutosave() // a paged note may be open underneath; do not leave its edits unwritten
         doc.path = uri
@@ -3326,7 +3328,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val snap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { session.load() }
         if (snap != null) {
             restoredPagedSession = true
-            invalidateNativeOpen();noteOpenedSource=null
+            invalidateNativeOpen();retireNoteEditSource()
             state.document = snap.document
             rebuildPdfSource()
             adoptOpenPdf(snap.document) // track the restored note's temp PDF for later cleanup
@@ -4022,12 +4024,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if(kind==DocumentKind.CANVAS) {
                 val doc=requireNotNull(prepared.canvas)
                 try {openCanvasDocument(doc,uri,name)} finally {
-                    if(infiniteOrNull?.document===doc && canvasOpen) {prepared.adopt(doc);canvasOpenedSource=prepared;adopted=true;adoptedModel=doc}
+                    if(infiniteOrNull?.document===doc && canvasOpen) {prepared.adopt(doc);canvasEditSource=prepared.editSource();adopted=true;adoptedModel=doc}
                 }
             } else {
                 val doc=requireNotNull(prepared.note)
                 try {replaceDocument(doc)} finally {
-                    if(state.document===doc) {prepared.adopt(doc);noteOpenedSource=prepared;adopted=true;adoptedModel=doc}
+                    if(state.document===doc) {prepared.adopt(doc);noteEditSource=prepared.editSource();adopted=true;adoptedModel=doc}
                 }
                 state.openFileBytes=prepared.byteSize;state.lastSaveBytes=prepared.byteSize
                 state.lastOpenInflateMs=timing.inflateMs;state.lastOpenParseMs=timing.parseMs
@@ -6743,8 +6745,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun replaceDocument(doc: Document) {
-        invalidateNativeOpen();noteOpenedSource=null
+        invalidateNativeOpen();retireNoteEditSource()
         if (canvasOpen) {
+            retireCanvasEditSource()
             infinite.commitText()
             AudioRecording.stopFor(infinite)
             AudioPlayback.closeFor(infinite)
@@ -9508,7 +9511,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     fun newNote() {
-        invalidateNativeOpen();noteOpenedSource=null
+        invalidateNativeOpen();retireNoteEditSource()
         leaveSharedDocument()
         resetPenButtons()
         AudioRecording.stopFor(this) // closing the note places its recording
@@ -9554,7 +9557,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The receiving pane must be empty or guarded by the caller before replacing its document. */
     fun openSharedView(source: Editor) {
-        invalidateNativeOpen();noteOpenedSource=null
+        invalidateNativeOpen();retireNoteEditSource()
         val owner = source.documentOwner
         require(owner !== this && !owner.canvasOpen && owner.noteOpen)
         leaveSharedDocument()
@@ -9874,7 +9877,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val closing=openPanes.toList()
         if(inSplit) saveSplitWorkspace()
         for(ed in closing) {
-            ed.invalidateNativeOpen();ed.resetPenButtons();AudioPlayback.closeFor(ed)
+            ed.invalidateNativeOpen();ed.retireNoteEditSource();ed.retireCanvasEditSource();ed.resetPenButtons();AudioPlayback.closeFor(ed)
             ed.infiniteOrNull?.let {AudioPlayback.closeFor(it)}
             if(!ed.canvasOpen) ed.saveViewState()
             if(ed.sharedOwner!=null) ed.leaveSharedDocument()
@@ -10141,7 +10144,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (other.noteOpen) { secondaryStarted = true; return }
         if (!secondaryStarted) return
         secondaryStarted = false
-        other.invalidateNativeOpen()
+        other.invalidateNativeOpen();other.retireNoteEditSource();other.retireCanvasEditSource()
         com.xnotes.platform.MathRendering.removeListener(other.mathLanded)
         other.closeSearchSession()
         other.pdfSource?.close()
@@ -10211,7 +10214,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             infinite.commitText() // an open label goes down with what was typed
             flushCanvasThen(showOverlay = true) {
                 if(!canvasOpen || infiniteOrNull?.document!==closing) return@flushCanvasThen
-                invalidateNativeOpen()
+                invalidateNativeOpen();retireCanvasEditSource()
                 canvasAutosaveUri = null
                 canvasOpen = false
                 noteOpen = false
@@ -10224,7 +10227,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val closing=state.document
         flushThen(showOverlay = true) {
             if(canvasOpen || state.document!==closing) return@flushThen
-            invalidateNativeOpen()
+            invalidateNativeOpen();retireNoteEditSource()
             // Regenerate this folder note's grid tile now that editing is done (off-thread, low priority);
             // a non-folder note (no autosave binding) isn't in the explorer, so there's nothing to do.
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }

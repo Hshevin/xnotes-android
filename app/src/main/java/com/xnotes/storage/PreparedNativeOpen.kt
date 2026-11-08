@@ -2,6 +2,7 @@ package com.xnotes.storage
 
 import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.snapshot
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
@@ -23,6 +24,11 @@ internal class PreparedNativeOpen private constructor(
     private var closed=false
     private var adopted=false
     private var protected=false
+    private val originalExternalPdf=note?.identity?.externalPdf==true
+    private var editSourceMemo:EditSource?=null
+
+    /** One long-lived source owner per actual adoption; the temporary lease is not retained by it. */
+    fun editSource():EditSource=EditSource.fromPrepared(this)
 
     /** IO-only, before the final non-suspending UI adoption check. No source file is written. */
     @Synchronized fun protectForAdoption() {
@@ -53,6 +59,124 @@ internal class PreparedNativeOpen private constructor(
         try {lease.close()} catch(error:Throwable) {if(failure==null) failure=error else failure.addSuppressed(error)}
         failure?.let {throw it}
     }
+    /** Runtime-only baseline and request authority. Capture/accept/invalidate belong to the model owner thread. */
+    internal class EditSource private constructor(
+        private val note:Document?,private val canvas:InfiniteDocument?,private val resources:PdfResources,
+        private val pdfIds:Set<String>,private val externalPdf:Boolean,initial:NativeSourceVersion,
+    ) {
+        private val issuer=Any()
+        private var generation=0L
+        private var active=true
+        private var base=initial
+        private fun same(document:Document)=note===document && base.kind==DocumentKind.NOTE &&
+            document.identity.documentId==base.documentId && document.path?.let {resources.registry.locationKey(it)}==base.locationKey
+        private fun same(document:InfiniteDocument)=canvas===document && base.kind==DocumentKind.CANVAS &&
+            document.identity.documentId==base.documentId && document.path?.let {resources.registry.locationKey(it)}==base.locationKey
+        private fun invalid():Nothing=throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        @Synchronized fun version(document:Document):NativeSourceVersion {if(!active || !same(document)) invalid();return base}
+        @Synchronized fun version(document:InfiniteDocument):NativeSourceVersion {if(!active || !same(document)) invalid();return base}
+        @Synchronized fun invalidate() {active=false}
+        private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && generation==epoch && base===expected}
+        @Synchronized fun capture(document:Document):SaveRequest.Note {
+            val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
+            val epoch=generation
+            return SaveRequest.Note(issuer,epoch,expected,requireNotNull(document.path),resources,pdfIds,externalPdf,document.snapshot()) {authorize(epoch,expected)}
+        }
+        @Synchronized fun capture(document:InfiniteDocument):SaveRequest.Canvas {
+            val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
+            val epoch=generation
+            return SaveRequest.Canvas(issuer,epoch,expected,requireNotNull(document.path),resources,document.snapshotForWrite()) {authorize(epoch,expected)}
+        }
+        @Synchronized fun accept(request:SaveRequest,receipt:SaveRequest.Receipt):Boolean {
+            if(!active || !request.issuedBy(issuer,generation) || request.expected!==base || !receipt.matches(request)) return false
+            if(note?.let {same(it)}!=true && canvas?.let {same(it)}!=true) return false
+            val next=receipt.version
+            if(next.kind!=base.kind || next.documentId!=base.documentId || next.locationKey!=base.locationKey) return false
+            // Byte-identical publication still consumes the epoch; no digest-based "same base" shortcut.
+            generation=Math.incrementExact(generation);base=next
+            return true
+        }
+        companion object {
+            internal fun fromPrepared(prepared:PreparedNativeOpen):EditSource=synchronized(prepared) {
+                val version=prepared.note?.let {prepared.sourceVersion(it)}
+                    ?: prepared.sourceVersion(requireNotNull(prepared.canvas))
+                prepared.editSourceMemo ?: EditSource(prepared.note,prepared.canvas,prepared.resources,
+                    prepared.pdfIds.toSet(),prepared.originalExternalPdf,version).also {prepared.editSourceMemo=it}
+            }
+        }
+    }
+
+    /** No external candidate/receipt factory: this request encodes only its own owner-captured snapshot. */
+    internal sealed class SaveRequest protected constructor(
+        private val issuer:Any,private val generation:Long,internal val expected:NativeSourceVersion,
+        private val uri:String,private val resources:PdfResources,private val pdfIds:Set<String>,private val authorized:()->Boolean,
+    ) {
+        internal fun issuedBy(owner:Any,epoch:Long)=issuer===owner && generation==epoch
+        private fun checkCurrent(checkActive:()->Unit) {
+            checkActive();if(!authorized()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        }
+        protected abstract fun validatePdf(checkActive:()->Unit)
+        protected abstract fun encode(output:java.io.OutputStream,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,checkActive:()->Unit)
+        fun publish(storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,tempDir:File,name:String,
+                    checkActive:()->Unit={}):Receipt=Receipt.publish(this,storage,noteCodec,canvasCodec,tempDir,name,checkActive)
+
+        class Note internal constructor(issuer:Any,generation:Long,expected:NativeSourceVersion,uri:String,resources:PdfResources,
+                                        pdfIds:Set<String>,private val externalPdf:Boolean,val snapshot:Document,authorized:()->Boolean)
+            :SaveRequest(issuer,generation,expected,uri,resources,pdfIds,authorized) {
+            private val originalPdf=pdfIds.singleOrNull()
+            override fun validatePdf(checkActive:()->Unit) {
+                val file=snapshot.pdfFile
+                if((file!=null)!=(originalPdf!=null)) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+                if(file!=null && com.xnotes.format.BundleMigration.hash(file) {checkActive();false}!=originalPdf)
+                    throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+            }
+            override fun encode(output:java.io.OutputStream,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,checkActive:()->Unit) {
+                noteCodec.write(snapshot,output,embedPdf=!externalPdf,isCancelled={checkActive();false})
+            }
+        }
+        class Canvas internal constructor(issuer:Any,generation:Long,expected:NativeSourceVersion,uri:String,resources:PdfResources,
+                                          val snapshot:InfiniteDocument,authorized:()->Boolean)
+            :SaveRequest(issuer,generation,expected,uri,resources,emptySet(),authorized) {
+            override fun validatePdf(checkActive:()->Unit) {}
+            override fun encode(output:java.io.OutputStream,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,checkActive:()->Unit) {
+                canvasCodec.write(snapshot,output,isCancelled={checkActive();false})
+            }
+        }
+        class Receipt private constructor(private val request:SaveRequest,private val expected:NativeSourceVersion,val version:NativeSourceVersion) {
+            internal fun matches(candidate:SaveRequest)=request===candidate && expected===candidate.expected
+            companion object {
+                /** IO-only. A successful storage return, rather than a read/inspect version, issues the receipt. */
+                internal fun publish(request:SaveRequest,storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
+                                     tempDir:File,name:String,checkActive:()->Unit):Receipt {
+                    val check={request.checkCurrent(checkActive)}
+                    check()
+                    // The lease precedes PDF hashing and encoding, including when a source was just closed/deleted.
+                    val lease=request.resources.holdResolved(request.pdfIds)
+                    var failure:Throwable?=null;var committed=false
+                    var candidate:File?=null
+                    try {
+                        request.validatePdf(check);check()
+                        if(!tempDir.isDirectory && !tempDir.mkdirs()) throw java.io.IOException("Cannot create native save directory")
+                        val file=File.createTempFile("native-request-", ".zip",tempDir);candidate=file
+                        file.outputStream().use {request.encode(it,noteCodec,canvasCodec,check)}
+                        check()
+                        val version=storage.publishExpected(request.uri,file,request.expected,name)
+                        committed=true
+                        return Receipt(request,request.expected,version)
+                    } catch(error:Throwable) {failure=error;throw error}
+                    finally {
+                        candidate?.delete()
+                        try {lease.close()} catch(close:Throwable) {
+                            if(failure!=null) failure.addSuppressed(close)
+                            else if(committed) android.util.Log.w("xnotes.storage","Retained PDF lease after confirmed save",close)
+                            else throw close
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     companion object {
         private val ASSET_NAME=Regex("native-open-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         /** Only these owned directories are recursively purged at launch; other temp entries retain prior behavior. */
