@@ -26,8 +26,9 @@ class MigrationPublication internal constructor(private val directory:File,priva
         fun write(source:File,expectedCurrentHash:String?) {write(source)}
     }
     enum class Purpose(val key:String) {
-        SAVE_NOTE("save-note"), SAVE_CANVAS("save-canvas"), CREATE_NOTE("create-note"), CREATE_CANVAS("create-canvas");
+        SAVE_NOTE("save-note"), SAVE_CANVAS("save-canvas"), CREATE_NOTE("create-note"), CREATE_CANVAS("create-canvas"), ACTIVATE_PAGES("activate-pages");
         internal val creation get()=this==CREATE_NOTE || this==CREATE_CANVAS
+        internal val ordinarySave get()=this==SAVE_NOTE || this==SAVE_CANVAS
     }
     internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?)
     internal data class RetainedValidation(val original:File,val candidate:File,val purpose:Purpose?,val recordDigest:String,
@@ -48,13 +49,20 @@ class MigrationPublication internal constructor(private val directory:File,priva
     private enum class Inspection { PUBLISH, RESTORE, KEEP_CURRENT }
 
     val purpose:Purpose? get()=readRecord().purpose
+    /** Explicit selected-target recovery captures purpose and digest from one bounded actual record.
+     * This is only an observation; the consumer must still prove the retained edit permission. */
+    internal fun selectedRecordDigest(expected:Purpose,checkActive:()->Unit={}):String {
+        checkActive();val record=readRecord()
+        if(record.purpose!=expected || record.handoffId!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        checkActive();return record.digest
+    }
     internal val directoryPath:String get()=directory.canonicalPath
 
     fun stage(source:File,replacement:File,purpose:Purpose?=null,expectedCandidateHash:String?=null,
               expectedOriginalHash:String?=null,handoffId:String?=null,checkActive:()->Unit={}):String {
         // A handoff record is durable intent, not permission to publish. The coordinated producer
         // will supply both inspected hashes; old callers cannot accidentally opt in via a new default.
-        require(handoffId==null || (canonicalUuid(handoffId) && purpose!=null && !purpose.creation &&
+        require(handoffId==null || (canonicalUuid(handoffId) && purpose?.ordinarySave==true &&
             expectedOriginalHash?.matches(SHA256)==true && expectedCandidateHash?.matches(SHA256)==true))
         checkActive()
         check(!pending) {StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING)}
@@ -281,7 +289,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
             parts.size==4 && parts[0]=="3" -> Purpose.entries.singleOrNull {it.key==parts[3]}
                 ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
             parts.size==5 && parts[0]=="4" && canonicalUuid(parts[4]) ->
-                Purpose.entries.singleOrNull {it.key==parts[3] && !it.creation}
+                Purpose.entries.singleOrNull {it.key==parts[3] && it.ordinarySave}
                     ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
             else -> throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         }

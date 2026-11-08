@@ -93,6 +93,114 @@ class NotebookStorage internal constructor(private val context:Context,
     internal fun referenceCatalog(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog =
         openSource(uri,kind,checkActive).use {it.referenceCatalog()}
 
+    /** Explicit IO-only page-identity upgrade. The caller supplies an actual, still-current source observation. */
+    internal fun activatePages(uri:String,expected:NativeSourceVersion,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
+        checkActive()
+        if(expected.kind!=com.xnotes.core.util.DocumentKind.NOTE || expected.locationKey!=registry.locationKey(uri))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        openSource(uri,com.xnotes.core.util.DocumentKind.NOTE,checkActive).use {source->
+            if(source.version.documentId!=expected.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            if(source.version.sha256!=expected.sha256) throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+            when(source.referenceCatalog().pages) {
+                NativeSourceSnapshot.ReferenceCatalog.Pages.NeedsActivation -> {
+                    val prepared=try {com.xnotes.format.BundleAnchors.prepare(source.file,context.cacheDir,cancelled={checkActive();false})}
+                        catch(error:Exception) {throw activationFailure(error)}
+                    try {
+                        verifyActivation(source.file,prepared.file,checkActive)
+                        val candidate=NativeSourceVersion.inspect(prepared.file,expected.locationKey,expected.kind,checkActive)
+                        if(candidate.version.documentId!=expected.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                        // A's holder protects the same immutable external PDF throughout preparation,
+                        // staging and publication; verifyActivation proves B did not substitute it.
+                        verifyActivationPdf(candidate.info,checkActive)
+                        protectPending(uri,candidate.info)
+                        val pending=journal(uri,checkActive)
+                        val digest=pending.stage(source.file,prepared.file,MigrationPublication.Purpose.ACTIVATE_PAGES,
+                            expectedOriginalHash=expected.sha256,expectedCandidateHash=candidate.version.sha256,checkActive=checkActive)
+                        // No callback/lease close between stage and retaining this exact returned digest.
+                        publishPageActivation(uri,name,pending,digest,expected,candidate.version.sha256,checkActive)
+                    } finally {prepared.file.delete()}
+                }
+                is NativeSourceSnapshot.ReferenceCatalog.Pages.Available -> {
+                    val info=inspect(source.file,checkActive)
+                    verifyActivationPdf(info,checkActive)
+                    if(currentHash(target(uri),checkActive)!=expected.sha256) throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+                    registerVerified(uri,info,name,strict=true,checkActive=checkActive)
+                    actualPageCatalog(uri,source.version,checkActive)
+                }
+                NativeSourceSnapshot.ReferenceCatalog.Pages.NotPaginated -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            }
+        }
+    }
+    /** Only an explicit user-selected recovery may finish a retained page upgrade. Never called by ensure/save. */
+    internal fun completePageActivation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
+        checkActive()
+        val pending=journal(uri,checkActive)
+        val digest=pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES,checkActive)
+        publishPageActivation(uri,name,pending,digest,null,null,checkActive)
+    }
+    private fun activationFailure(error:Exception):Exception =
+        if(error is ReferenceContractViolation || error is MigrationPublication.RecoveryRequired ||
+            error is java.util.concurrent.CancellationException || error is PdfResources.Unavailable) error
+        else ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error)
+    private fun verifyActivation(original:File,candidate:File,checkActive:()->Unit) {
+        try {com.xnotes.format.BundleAnchors.verifyActivation(original,candidate) {checkActive();false}}
+        catch(error:Exception) {throw activationFailure(error)}
+    }
+    private fun verifyActivationPdf(info:com.xnotes.format.BundleReferenceInfo,checkActive:()->Unit) {
+        // Explicit raw upgrades must not bless a corrupt immutable resource via the stamp cache.
+        for(id in dependencies(info)) if(BundleMigration.hash(pdfResources.resolveChecked(id,checkActive)) {checkActive();false}!=id)
+            throw PdfResources.Unavailable()
+    }
+    private fun actualPageCatalog(uri:String,published:NativeSourceVersion,checkActive:()->Unit):NativeSourceSnapshot.ReferenceCatalog =
+        openSource(uri,com.xnotes.core.util.DocumentKind.NOTE,checkActive).use {actual->
+            if(actual.version.documentId!=published.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            if(actual.version.sha256!=published.sha256) throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+            actual.referenceCatalog().also {
+                if(it.pages !is NativeSourceSnapshot.ReferenceCatalog.Pages.Available)
+                    throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+            }
+        }
+    private fun publishPageActivation(uri:String,name:String,pending:MigrationPublication,recordDigest:String,
+                                      expected:NativeSourceVersion?,candidateHash:String?,checkActive:()->Unit):NativeSourceSnapshot.ReferenceCatalog {
+        var protection:CreationProtection?=null;var failure:Throwable?=null;var committed=false
+        var verified:NativeSourceVersion.Inspected?=null
+        try {
+            pending.publishValidated(target(uri),protectCandidate={file->
+                protection=acquireCreationProtection(file,checkActive)
+            },validate={state->
+                checkActive()
+                if(state.purpose!=MigrationPublication.Purpose.ACTIVATE_PAGES) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                // The retained A→B relation, not the generic journal/header, grants this narrow edit.
+                verifyActivation(state.original,state.candidate,checkActive)
+                val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),com.xnotes.core.util.DocumentKind.NOTE,checkActive)
+                if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+                if(expected!=null) {
+                    if(checked.version.documentId!=expected.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                    if(BundleMigration.hash(state.original) {checkActive();false}!=expected.sha256)
+                        throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                }
+                if(candidateHash!=null && checked.version.sha256!=candidateHash) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                // A may be historical/unmarked after B's registry commit. Only B is observed as the
+                // monotonic page contract; the exact record + raw proof allow current target A or B.
+                verifyObserved(uri,checked.info)
+                verifyActivationPdf(checked.info,checkActive)
+                protectPending(uri,checked.info);verified=checked
+            },afterVerified={registerVerified(uri,requireNotNull(verified).info,name,strict=true,checkActive=checkActive)},
+                expectedRecordDigest=recordDigest,checkActive=checkActive)
+            committed=true
+        } catch(error:Throwable) {failure=error;throw error}
+        finally {
+            try {protection?.close()} catch(close:Throwable) {
+                if(failure!=null) failure.addSuppressed(close)
+                else if(committed) android.util.Log.w("xnotes.storage","Retained PDF lease after committed page activation",close)
+                else throw close
+            }
+        }
+        releaseCompletedPin(uri)
+        return actualPageCatalog(uri,requireNotNull(verified).version,checkActive)
+    }
+
     /** IO-only, source bytes and their version are from the same owned container. */
     internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot = synchronized(lock) {
         purpose(kind.extension) // Reject unsupported document kinds before reading.
@@ -124,7 +232,8 @@ class NotebookStorage internal constructor(private val context:Context,
             try {snapshot.close()} catch(close:Throwable) {error.addSuppressed(close)}
             if(error !is ReferenceContractViolation && error !is MigrationPublication.RecoveryRequired &&
                 error !is java.util.concurrent.CancellationException && error !is PdfResources.Unavailable &&
-                (error is IllegalArgumentException || error is IllegalStateException || error is java.util.zip.ZipException))
+                (error is IllegalArgumentException || error is IllegalStateException || error is java.util.zip.ZipException ||
+                    error is com.xnotes.format.JsonPullException))
                 throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error)
             throw error
         }
@@ -175,7 +284,7 @@ class NotebookStorage internal constructor(private val context:Context,
         else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
     private fun verifyKind(info:com.xnotes.format.BundleReferenceInfo,expected:MigrationPublication.Purpose?) {
-        if(expected?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        if(expected!=null && !expected.ordinarySave) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         if(expected!=null && purpose(info.format.orEmpty())!=expected) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
     private fun registerVerified(uri:String,info:com.xnotes.format.BundleReferenceInfo,name:String?=null,
@@ -207,6 +316,12 @@ class NotebookStorage internal constructor(private val context:Context,
         val pending=journal(uri,checkActive)
         if(stage!=null && (registry.locationKey(uri)!=stage.original.locationKey || pending.directoryPath!=stage.journalPath))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        val kind=when(expected) {
+            MigrationPublication.Purpose.SAVE_NOTE -> com.xnotes.core.util.DocumentKind.NOTE
+            MigrationPublication.Purpose.SAVE_CANVAS -> com.xnotes.core.util.DocumentKind.CANVAS
+            MigrationPublication.Purpose.CREATE_NOTE,MigrationPublication.Purpose.CREATE_CANVAS,MigrationPublication.Purpose.ACTIVATE_PAGES ->
+                throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        }
         val backend=target(uri)
         var verified:com.xnotes.format.BundleReferenceInfo?=null
         var receipt:NativeSourceVersion?=null
@@ -215,7 +330,7 @@ class NotebookStorage internal constructor(private val context:Context,
             checkActive()
             val original=inspect(state.original,checkActive)
             val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),
-                if(expected==MigrationPublication.Purpose.SAVE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS,checkActive)
+                kind,checkActive)
             val candidate=checked.info;receipt=checked.version
             if(stage!=null && (BundleMigration.hash(state.original) {checkActive();false}!=stage.original.sha256 ||
                 checked.version.sha256!=stage.candidate.sha256)) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
@@ -247,7 +362,7 @@ class NotebookStorage internal constructor(private val context:Context,
         val pending=journal(uri);val backend=target(uri)
         var verified:com.xnotes.format.BundleReferenceInfo?=null
         pending.restoreValidated(backend,validate={state->
-            if(state.purpose?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+            if(state.purpose!=null && !state.purpose.ordinarySave) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
             val original=inspect(state.original)
             verifyKind(original,state.purpose);verifyObserved(uri,original)
             if(state.currentHash!=null) sourceSnapshot(backend).use {current->
@@ -298,7 +413,7 @@ class NotebookStorage internal constructor(private val context:Context,
                 } else protectCurrentHeader(uri,snapshot.file)
                 var checkedCurrent:com.xnotes.format.BundleReferenceInfo?=null
                 pending.keepCurrentValidated(validate={state->
-                    if(state.purpose?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                    if(state.purpose!=null && !state.purpose.ordinarySave) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
                     checkActive()
                     if(writtenKind!=null) {
                         if(state.purpose!=expectedPurpose || !state.recordValid || !state.originalVerified || !state.candidateVerified ||
@@ -586,7 +701,12 @@ class NotebookStorage internal constructor(private val context:Context,
                 checkActive()
                 if(state.purpose!=expected || !expected.creation) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
                 if(state.original.length()!=0L) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
-                val kind=if(expected==MigrationPublication.Purpose.CREATE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS
+                val kind=when(expected) {
+                    MigrationPublication.Purpose.CREATE_NOTE -> com.xnotes.core.util.DocumentKind.NOTE
+                    MigrationPublication.Purpose.CREATE_CANVAS -> com.xnotes.core.util.DocumentKind.CANVAS
+                    MigrationPublication.Purpose.SAVE_NOTE,MigrationPublication.Purpose.SAVE_CANVAS,MigrationPublication.Purpose.ACTIVATE_PAGES ->
+                        throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                }
                 val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),kind,checkActive)
                 if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
                 if(expectedId!=null && checked.version.documentId!=expectedId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)

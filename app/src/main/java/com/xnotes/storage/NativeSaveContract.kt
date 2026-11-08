@@ -9,7 +9,7 @@ internal object NativeSaveContract {
         val expected=when(purpose) {
             MigrationPublication.Purpose.SAVE_NOTE -> "xnote"
             MigrationPublication.Purpose.SAVE_CANVAS -> "xcanvas"
-            MigrationPublication.Purpose.CREATE_NOTE,MigrationPublication.Purpose.CREATE_CANVAS -> reject()
+            MigrationPublication.Purpose.CREATE_NOTE,MigrationPublication.Purpose.CREATE_CANVAS,MigrationPublication.Purpose.ACTIVATE_PAGES -> reject()
         }
         if(listOf(original,candidate,current).any {it.format!=expected}) reject()
         ReferenceContract.verifyWrite(atLocation,byIdentity,current.header,candidate.header)
