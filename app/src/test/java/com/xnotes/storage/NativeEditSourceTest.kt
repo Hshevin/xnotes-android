@@ -83,6 +83,26 @@ class NativeEditSourceTest {
         assertTrue(source.accept(request,receipt));assertTrue(doc.dirty);assertEquals(1,f.writes)
         assertEquals(stage.candidate.sha256,source.version(doc).sha256)
     }
+    @Test fun laterNoteGeometryEditsCannotChangeTheCapturedNativeRequest()=scenario {f->
+        f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        val stroke=ink();doc.pages.single().items.add(stroke);doc.dirty=true
+        val request=source.capture(doc);val revision=request.snapshot.bodyRevision
+        stroke.translate(100.0,200.0);doc.dirty=true
+        val receipt=request.publish(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        val saved=f.current.inputStream().use {f.noteCodec.read(it)}.pages.single().items.single() as com.xnotes.core.model.Stroke
+        assertEquals(10.0,saved.xAt(0),.001);assertEquals(20.0,saved.yAt(0),.001)
+        assertEquals(110.0,stroke.xAt(0),.001);assertEquals(revision,request.snapshot.bodyRevision)
+        assertTrue(doc.bodyRevision>revision);assertTrue(source.accept(request,receipt));assertTrue(doc.dirty)
+    }
+    @Test fun laterCanvasGeometryEditsCannotChangeTheCapturedNativeRequest()=scenario {f->
+        f.canvas();val p=f.prepare(DocumentKind.CANVAS);val doc=requireNotNull(p.canvas);val source=p.editSource()
+        val stroke=ink();doc.add(stroke);doc.dirty=true
+        val request=source.capture(doc);stroke.translate(100.0,200.0);doc.dirty=true
+        request.publish(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"canvas")
+        val saved=f.current.inputStream().use {f.canvasCodec.read(it)}.items.single() as com.xnotes.core.model.Stroke
+        assertEquals(10.0,saved.xAt(0),.001);assertEquals(20.0,saved.yAt(0),.001)
+        assertEquals(110.0,stroke.xAt(0),.001);assertTrue(doc.dirty)
+    }
     @Test fun coordinatedRequestNeverIssuesAReceiptBeforeAWorkingCacheAcknowledgementExists()=scenario {f->
         f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
         doc.pages.single().items.add(ink());doc.dirty=true;val request=source.capture(doc)

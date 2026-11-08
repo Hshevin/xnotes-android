@@ -2,7 +2,7 @@ package com.xnotes.storage
 
 import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.model.Document
-import com.xnotes.core.model.snapshot
+import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
@@ -84,12 +84,12 @@ internal class PreparedNativeOpen private constructor(
         @Synchronized fun capture(document:Document):SaveRequest.Note {
             val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
             val epoch=generation
-            return SaveRequest.Note(issuer,epoch,expected,requireNotNull(document.path),resources,pdfIds,externalPdf,document.snapshot()) {authorize(epoch,expected)}
+            return SaveRequest.Note(issuer,epoch,expected,requireNotNull(document.path),resources,pdfIds,externalPdf,document.fixedWriteSnapshot()) {authorize(epoch,expected)}
         }
         @Synchronized fun capture(document:InfiniteDocument):SaveRequest.Canvas {
             val expected=version(document);if(generation==Long.MAX_VALUE) invalid()
             val epoch=generation
-            return SaveRequest.Canvas(issuer,epoch,expected,requireNotNull(document.path),resources,document.snapshotForWrite()) {authorize(epoch,expected)}
+            return SaveRequest.Canvas(issuer,epoch,expected,requireNotNull(document.path),resources,document.snapshotForWrite(fixedItems=true)) {authorize(epoch,expected)}
         }
         @Synchronized fun accept(request:SaveRequest,receipt:SaveRequest.Receipt):Boolean {
             if(!active || !request.issuedBy(issuer,generation) || request.expected!==base || !receipt.matches(request)) return false

@@ -37,6 +37,8 @@ class TextItem(
     override var sync: SyncMark? = null
 
     val font get() = FontSpec(pointSize, face)
+    /** Retain the native measurer without asking it to lay out a writer-only copy. */
+    internal fun copyForWrite()=TextItem(pos,width,height,text,rgba,pointSize,face,measurer)
 
     /** Height the current text needs at the current width (empty ⇒ one line). */
     fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width, FLAGS).h

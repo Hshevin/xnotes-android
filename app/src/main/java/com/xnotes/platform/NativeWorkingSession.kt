@@ -7,7 +7,7 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.ReferenceIdentity
-import com.xnotes.core.model.snapshot
+import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.model.copyWriteSnapshot
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleReferenceInfo
@@ -70,7 +70,7 @@ internal class NativeWorkingSession(
         validateView(view)
         val proof=source?.capture(document)
         if(proof==null && !document.path.isNullOrBlank()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        val snapshot=proof?.snapshot ?: document.snapshot()
+        val snapshot=proof?.snapshot ?: document.fixedWriteSnapshot()
         val metadata=metadata(WorkingSessionCache.Kind.NOTE,document.dirty,document.displayName,
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},view,null)
         parseMetadata(WorkingSessionCache.Kind.NOTE,snapshot.identity.documentId,metadata.toString())
@@ -81,7 +81,7 @@ internal class NativeWorkingSession(
         document.lastView?.let(::validateWaypoint)
         val proof=source?.capture(document)
         if(proof==null && !document.path.isNullOrBlank()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        val snapshot=proof?.snapshot ?: document.snapshotForWrite()
+        val snapshot=proof?.snapshot ?: document.snapshotForWrite(fixedItems=true)
         val metadata=metadata(WorkingSessionCache.Kind.CANVAS,document.dirty,document.displayName,
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},null,document.lastView)
         parseMetadata(WorkingSessionCache.Kind.CANVAS,snapshot.identity.documentId,metadata.toString())

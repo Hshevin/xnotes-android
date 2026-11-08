@@ -106,3 +106,7 @@ review_input_plan 独立计划与源码复核通过：仅canonical UUID+SAVE+预
 ## 原生两阶段保存证明（2026-11-08）
 
 review_input_plan独立计划/源码复核：绑定storage issuer、canonical journal、实际A/B与本次record；取消/epoch贯穿写前、读回、登记，已消费stage不补发Receipt。发现stage后读取替换marker签错证明、retained散列漏core取消，两个反例先红后绿。窄复核确认stage直接返回写入字节SHA、callback前CAS、v4 handle额外拒写、逐块检查与PDF pin间隙闭合。最终301套件3312项和Android源码编译全过；真实provider新增例只编译，目标设备未运行。完整cache/ack/稳定内容capture仍后续。
+
+## 固定writer视图（2026-11-08）
+
+review_input_plan独立审核确认Samples前缀可共享，要求复制嵌套容器、按页scope胶合、Canvas六类拒绝Text，均落实。源码复核发现FlowTable widths/minHeights别名，真实ZIP flow反例先红后绿，固定路径按table identity脱离且cell共享保留；默认flow不改。全部serialized字段、层/页ID/PDF及NOTE/CANVAS native/cache反例复核无新必修。最终302套件3326项与Android源码编译全过。只读视口capture额外O(items)分配可留下一片但生产激活前必须解决，活动事务稳定屏障及真机性能仍未验收。

@@ -103,15 +103,24 @@ fun Document.snapshot(): Document {
     return copyWriteSnapshot()
 }
 
+/** Fixed item state for a versioned native request; subsequent live edits cannot alter this body. */
+internal fun Document.fixedWriteSnapshot():Document {
+    prepareReferenceAnchors()
+    return copyWriteSnapshot(fixedItems=true)
+}
+
 /** Copy a frozen writer view without assigning IDs or consulting its original owner. */
-internal fun Document.copyWriteSnapshot():Document = Document(
+internal fun Document.copyWriteSnapshot(fixedItems:Boolean=false):Document = Document(
     pages = pages.mapTo(mutableListOf()) { p ->
-        Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also {
+        val members=if(fixedItems) p.items.fixedWriteCopies(allowText=true) else ArrayList(p.items)
+        Page(p.width, p.height, members, p.pdfPage, if(fixedItems) p.style.fixedWriteCopy() else p.style,
+            p.margins, if(fixedItems) p.markups.map {it.fixedWriteCopy()} else p.markups,
+            p.pdfTurn, if(fixedItems) p.rooms.toList() else p.rooms).also {
             it.cover = p.cover
             p.referenceIdentity.id?.let {id->it.referenceIdentity.restore(id)}
             it.referenceBinding=PageReferenceBinding(it.referenceIdentity,p.referenceBinding.scope)
             it.layers.restore(p.layers.entries, p.layers.activeId)
-            it.savedLayerIds = p.items.associateWith { item -> p.layerIdForWrite(item) }
+            it.savedLayerIds = members.indices.associateBy({index->members[index]},{index->p.layerIdForWrite(p.items[index])})
         }
     },
     dpi = dpi,
@@ -120,12 +129,12 @@ internal fun Document.copyWriteSnapshot():Document = Document(
     dirty = dirty,
     pdfFile = pdfFile,
     bookmarks = bookmarks.mapTo(mutableListOf()) { Bookmark(it.page, it.label) },
-    style = style,
+    style = if(fixedItems) style.fixedWriteCopy() else style,
     margins = margins,
-    flow = flow.deepCopy(),
+    flow = if(fixedItems) flow.fixedWriteCopy() else flow.deepCopy(),
     created = created,
-    templates = templates,
-    templatePackages = templatePackages,
+    templates = if(fixedItems) templates.toMap() else templates,
+    templatePackages = if(fixedItems) templatePackages.toMap() else templatePackages,
     newPageSize = newPageSize,
 ).also {
     it.bodyStartPage=bodyStartPage;it.identity=identity;it.hasReferenceAnchors=hasReferenceAnchors

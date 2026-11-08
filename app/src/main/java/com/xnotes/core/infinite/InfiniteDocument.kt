@@ -7,6 +7,7 @@ import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.fixedWriteCopies
 import com.xnotes.core.util.Paths
 import java.util.IdentityHashMap
 
@@ -137,12 +138,13 @@ class InfiniteDocument(
      * It carries no spatial index and no listener. It exists to be serialized and dropped, never
      * drawn or edited.
      */
-    fun snapshotForWrite(): InfiniteDocument {
+    fun snapshotForWrite(fixedItems:Boolean=false): InfiniteDocument {
         val copy = InfiniteDocument(dpi, path, displayName, dirty, background, waypoints.toMutableList(), lastView, created)
         copy.identity = identity
         copy.layers.restore(layers.entries, layers.activeId)
-        copy.savedLayerIds = items.associateWith { layerIdForWrite(it) }
-        copy.backing.addAll(backing)
+        val members=if(fixedItems) backing.fixedWriteCopies(allowText=false) else backing
+        copy.savedLayerIds = members.indices.associateBy({index->members[index]},{index->layerIdForWrite(backing[index])})
+        copy.backing.addAll(members)
         // Copy last: construction/identity setters are not edits of this frozen body.
         copy.bodyRevision=bodyRevision
         copy.snapshotOwnerToken=snapshotOwnerToken

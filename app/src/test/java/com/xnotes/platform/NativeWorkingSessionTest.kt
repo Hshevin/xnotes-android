@@ -63,6 +63,36 @@ class NativeWorkingSessionTest {
         val root=Files.createTempDirectory("native-working-session-").toFile();val f=Fixture(root)
         try {block(f)} finally {f.storage.registry.close();root.deleteRecursively()}
     }
+    @Test fun capturedNativeBodyDoesNotReadLaterLiveTextAndTheNextRevisionGetsItsOwnBody()=scenario {f->
+        val doc=Document.blank();val text=com.xnotes.core.model.TextItem(com.xnotes.core.geometry.Pt.ZERO,
+            text="captured",measurer=FakeTextMeasurer())
+        doc.pages.single().items.add(text);doc.dirty=true
+        val first=f.store.capture(doc,null,f.view)
+        text.text="later";doc.dirty=true
+        assertTrue(f.store.publish(first).published)
+        f.store.load()!!.use {read->
+            val saved=read.body.inputStream().use {f.noteCodec.read(it)}
+            assertEquals("captured",(saved.pages.single().items.single() as com.xnotes.core.model.TextItem).text)
+        }
+        val next=f.store.capture(doc,null,f.view);assertTrue(next.requiresBody);assertTrue(f.store.publish(next).published)
+        f.store.load()!!.use {read->
+            val saved=read.body.inputStream().use {f.noteCodec.read(it)}
+            assertEquals("later",(saved.pages.single().items.single() as com.xnotes.core.model.TextItem).text)
+        }
+        assertFalse(f.store.capture(doc,null,f.view).requiresBody)
+    }
+    @Test fun canvasCachePinsTheCapturedStrokeBeforeItsLiveGeometryChanges()=scenario {f->
+        val doc=InfiniteDocument();val ink=com.xnotes.core.model.Stroke(com.xnotes.core.tools.Tool.PEN,com.xnotes.core.tools.ToolConfig(),
+            listOf(com.xnotes.core.stroke.Sample(10.0,20.0,.5),com.xnotes.core.stroke.Sample(30.0,40.0,.75)))
+        doc.add(ink);doc.dirty=true;val request=f.store.capture(doc,null)
+        ink.translate(100.0,200.0);doc.dirty=true
+        assertTrue(f.store.publish(request).published)
+        f.store.load()!!.use {read->
+            val saved=read.body.inputStream().use {f.canvasCodec.read(it)}.items.single() as com.xnotes.core.model.Stroke
+            assertEquals(10.0,saved.xAt(0),.001);assertEquals(20.0,saved.yAt(0),.001)
+        }
+        assertEquals(110.0,ink.xAt(0),.001)
+    }
     @Test fun noteRoundTripsItsPortableBodyFrozenMetadataAndUnboundOrigin()=scenario {f->
         val doc=Document.blank(2).apply {enableReferenceAnchors();displayName="draft.xnote";dirty=true}
         val view=f.view.copy(overrides=ViewOverrides(mode=ViewingMode.COVER,verticalScroll=false,contrast=130,invert=40,
