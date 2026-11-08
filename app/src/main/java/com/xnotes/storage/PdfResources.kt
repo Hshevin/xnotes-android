@@ -110,6 +110,39 @@ class PdfResources internal constructor(private val context: Context,val registr
         if(file.nameWithoutExtension!=expectedHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
         HeldPdf(file,holdResolved(setOf(expectedHash)))
     }
+    /** Working snapshots may start with an immutable pdfsrc temp, not yet a managed original. IO-only. */
+    internal fun admitHeld(file:File,name:String,checkActive:()->Unit={}):HeldPdf = synchronized(gate) {
+        checkActive()
+        val expected=BundleMigration.hash(file) {checkActive();false}
+        if(isOwned(file) && expected!=file.nameWithoutExtension) throw Unavailable()
+        val key="${file.canonicalPath}:${file.length()}:${file.lastModified()}"
+        fun readCurrent():File=file.inputStream().use {input->
+            val guarded=object:java.io.FilterInputStream(input) {
+                override fun read():Int {checkActive();return super.read()}
+                override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length)}
+            }
+            admit(guarded,name)
+        }
+        val stored=if(isOwned(file)) {register(file,name);file}
+            else admitted[key]?.takeIf {it.isFile} ?: readCurrent().also {
+                if(admitted.size>=256) admitted.clear();admitted[key]=it
+            }
+        val current=if(stored.nameWithoutExtension!=expected) {
+            // A private temp should be immutable, but a matching disk stamp is not byte identity.
+            readCurrent().also {
+                if(it.nameWithoutExtension!=expected) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+                admitted[key]=it
+            }
+        } else stored
+        // An admission-cache hit may point at a damaged managed copy with the same stamp.
+        // The source hash proves the temp, not this second file; resolve's stamp cache is
+        // insufficient at this publication boundary.
+        if(current.canonicalFile!=file.canonicalFile && BundleMigration.hash(current) {checkActive();false}!=expected)
+            throw Unavailable()
+        val held=HeldPdf(current,holdResolved(setOf(expected)))
+        try {checkActive();held}
+        catch(error:Throwable) {try {held.lease.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
+    }
     fun hold(ids: Set<String>): AutoCloseable = synchronized(gate) {
         val tokens = mutableListOf<String>()
         try {

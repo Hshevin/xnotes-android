@@ -107,6 +107,8 @@
 - 共享不可变 PDF 对象使用索引引用、活跃租约与延迟回收；不得被缩略图、合并或导出临时清理删除。内部笔记单独复制不构成备份，完整备份必须经应用导出。平台及目标设备验收待执行。详见 `docs/movinkpad/pdf-single-copy-2026-11-05.md`。
 - 引用式笔记的私有原件缺失（其他安装身份迁移、重装、清除数据）时，恢复对话框提供重新关联（原 PDF 或仍内嵌原件的旧笔记 / 导出包，SHA-256 必须与记录一致，不得用不同 PDF 替换底稿），以及不写原文件的「仅笔迹」副本。受管原件只由引用与租约回收删除，任何临时文件清理（如 `adoptOpenPdf`）都必须跳过 `PdfResources.isOwned`。详见 `docs/movinkpad/pdf-relink-2026-11-05.md`、`docs/movinkpad/pdf-original-deletion-2026-11-06.md`。
 
+- 工作会话的来源描述仅是待核实数据，不是保存凭据；恢复必须重新核实真实来源版本。NativeWorkingSession的便携正文与严格metadata共用原子head，坏/未来格式不得被新capture、clear或GC覆盖清除；视口复用只凭同owner/kind/UUID/bodyRevision的成功提交证明。生产会话接线仍待完成，见 `docs/movinkpad/reference-native-session-adapter-2026-11-08.md`。
+
 ## 图层
 
 - 分页 / PDF 按页、无限画布按文档管理 DrawingLayers。图层 ID 与对象归属在删除、移动、跨页转移、橡皮碎片和撤销重做中保持一致；保存快照冻结成员关系，不读取后续编辑过的 layerId。

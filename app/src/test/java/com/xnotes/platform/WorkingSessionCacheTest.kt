@@ -31,6 +31,55 @@ class WorkingSessionCacheTest {
             assertEquals("A",JSONObject(it.metadataJson).getString("path"));assertEquals(body(),it.body.readText())
         }
     }
+    @Test fun freshReadersRejectAmbiguousEnvelopesWithoutCollectingOrReplacingRecoveryData() {
+        val invalid=listOf(
+            """{"version":1,"state":"cleared","metadata":{"version":99}}""",
+            """{"version":1,"state":"active","st\u0061te":"cleared"}""",
+            """{"version":1,"state":"cleared"}{}""",
+            """{"version":1.0,"state":"cleared"}""",
+            """{"version":1,"state":"cleared","body":"future"}""",
+        )
+        for(raw in invalid) {
+            val root=dir()
+            try {
+                File(root,"head.json").writeText(raw)
+                File(root,"body-${UUID.randomUUID()}.zip").writeText(body())
+                val before=root.listFiles()!!.associate {it.name to it.readBytes().toList()}
+                val c=cache(root)
+                assertThrows(WorkingSessionCache.Invalid::class.java) {c.load()}
+                assertThrows(WorkingSessionCache.Invalid::class.java) {write(c,request(c))}
+                assertThrows(WorkingSessionCache.Invalid::class.java) {c.publishClear(c.reserveClear())}
+                assertEquals(before,root.listFiles()!!.associate {it.name to it.readBytes().toList()})
+            } finally {root.deleteRecursively()}
+        }
+    }
+    @Test fun nestedEscapedDuplicatesAndExcessDepthAreRejectedBeforeJSONObjectCanCollapseThem() {
+        for(bad in listOf("""{"a":0,"\u0061":1}""", "[".repeat(63)+"0"+"]".repeat(63))) {
+            val root=dir()
+            try {
+                val c=cache(root);write(c,request(c))
+                val head=File(root,"head.json")
+                val json=JSONObject(head.readText());json.put("metadata",JSONObject())
+                head.writeText(json.toString().replace("\"metadata\":{}","\"metadata\":{\"nested\":$bad}"))
+                val before=root.listFiles()!!.associate {it.name to it.readBytes().toList()}
+                assertThrows(WorkingSessionCache.Invalid::class.java) {cache(root).load()}
+                assertEquals(before,root.listFiles()!!.associate {it.name to it.readBytes().toList()})
+            } finally {root.deleteRecursively()}
+        }
+        val root=dir()
+        try {
+            val c=cache(root);write(c,request(c))
+            val head=File(root,"head.json");val json=JSONObject(head.readText())
+            val nested="[".repeat(62)+"0"+"]".repeat(62)
+            json.put("metadata",JSONObject());head.writeText(json.toString().replace("\"metadata\":{}","\"metadata\":{\"nested\":$nested}"))
+            // Root + metadata + 62 arrays = exactly 64 containers, read on first observation.
+            val fresh=dir()
+            try {
+                root.listFiles()!!.forEach {it.copyTo(File(fresh,it.name))}
+                cache(fresh).load()!!.use {assertEquals(body(),it.body.readText())}
+            } finally {fresh.deleteRecursively()}
+        } finally {root.deleteRecursively()}
+    }
     @Test fun viewOnlyReusesOnlyTheSameOwnerIdentityKindAndContentVersion() {
         val c=cache(dir());val owner=Any();write(c,request(c,owner))
         val view=request(c,owner,meta=JSONObject().put("zoom",2));assertFalse(view.requiresBody)

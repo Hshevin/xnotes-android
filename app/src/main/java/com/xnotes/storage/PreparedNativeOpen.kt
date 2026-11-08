@@ -112,6 +112,8 @@ internal class PreparedNativeOpen private constructor(
         private val uri:String,private val resources:PdfResources,private val pdfIds:Set<String>,private val authorized:()->Boolean,
     ) {
         internal fun issuedBy(owner:Any,epoch:Long)=issuer===owner && generation==epoch
+        /** IO-safe source epoch check, also used by view-only cache writes; reads no live model fields. */
+        internal fun isCurrentSource()=authorized()
         private fun checkCurrent(checkActive:()->Unit) {
             checkActive();if(!authorized()) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         }

@@ -24,8 +24,11 @@ import java.util.UUID
 internal class WorkingSessionCache(
     directory:File,
     private val validateBody:(File,Kind,String)->Unit,
-    private val onEvent:(Event,File)->Unit={_,_->},
+    private val onEvent:(Event,File)->Unit,
+    private val validateMetadata:(Kind,String,String)->Unit,
 ) {
+    constructor(directory:File,validateBody:(File,Kind,String)->Unit,onEvent:(Event,File)->Unit={_,_->})
+        :this(directory,validateBody,onEvent,{_,_,_->})
     enum class Kind { NOTE,CANVAS }
     enum class Event { BEFORE_HEAD_REPLACE,BEFORE_DELETE }
     class Invalid(cause:Throwable?=null):IOException("Invalid working session cache",cause)
@@ -41,7 +44,7 @@ internal class WorkingSessionCache(
     data class Publication(val request:Request,val published:Boolean)
 
     class Read internal constructor(
-        val body:File,val kind:Kind,val documentId:String,val metadataJson:String,
+        val body:File,val kind:Kind,val documentId:String,val metadataJson:String,val sha256:String,
         private val release:()->Unit,
     ):Closeable {
         private val closed=java.util.concurrent.atomic.AtomicBoolean(false)
@@ -89,6 +92,7 @@ internal class WorkingSessionCache(
         try {
             checkActive()
             verify(initial.body,checkActive)
+            validateMetadata(request.kind,request.documentId,request.metadataJson)
             if(!isCurrent(request)) return Publication(request,false)
             val next:Body
             if(request.requiresBody) {
@@ -173,7 +177,7 @@ internal class WorkingSessionCache(
         } ?: return null
         try {
             verify(body,checkActive)
-            return Read(File(root,body.name),body.kind,body.documentId,body.metadata) {release(body);cleanup()}
+            return Read(File(root,body.name),body.kind,body.documentId,body.metadata,body.sha) {release(body);cleanup()}
         } catch(error:Throwable) {release(body);throw error}
     }
 
@@ -190,6 +194,7 @@ internal class WorkingSessionCache(
     }
     private fun verify(body:Body?,checkActive:()->Unit) {
         checkActive();if(body==null) return
+        validateMetadata(body.kind,body.documentId,body.metadata)
         val file=File(root,body.name)
         if(!Files.isRegularFile(file.toPath(),NOFOLLOW_LINKS)) throw Invalid()
         if(digest(file,checkActive)!=body.sha) throw Invalid()
@@ -230,16 +235,21 @@ internal class WorkingSessionCache(
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
                 .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            validateEnvelopeJson(text)
             val json=JSONObject(text)
             require(json.opt("version")==1)
             when(json.opt("state")) {
-                "cleared" -> return Head(sha(bytes),null)
+                "cleared" -> {
+                    require(json.keys().asSequence().toSet()==setOf("version","state"))
+                    return Head(sha(bytes),null)
+                }
                 "active" -> {
+                    require(json.keys().asSequence().toSet()==setOf("version","state","kind","documentId","body","sha256","contentVersion","metadata"))
                     val kind=Kind.valueOf(json.opt("kind") as? String ?: throw Invalid())
                     val id=json.opt("documentId") as? String ?: throw Invalid();ReferenceIdentity.requireUuid(id)
                     val name=json.opt("body") as? String ?: throw Invalid();require(BODY_NAME.matches(name))
                     val hash=json.opt("sha256") as? String ?: throw Invalid();require(HASH.matches(hash))
-                    val version=json.opt("contentVersion").let {require(it is Number);it.toString().toLong()};require(version>=0)
+                    val version=json.opt("contentVersion").let {require(it is Int || it is Long);(it as Number).toLong()};require(version>=0)
                     val metadata=json.opt("metadata") as? JSONObject ?: throw Invalid()
                     return Head(sha(bytes),Body(name,hash,kind,id,version,metadata.toString()))
                 }
@@ -247,6 +257,28 @@ internal class WorkingSessionCache(
             }
         } catch(error:Invalid) {throw error}
         catch(error:Exception) {throw Invalid(error)}
+    }
+
+    /** JSONObject alone accepts duplicate/trailing fields differently on Android and the JVM. */
+    private fun validateEnvelopeJson(text:String) {
+        val parser=com.xnotes.format.JsonPull(java.io.StringReader(text),strict=true)
+        fun value(depth:Int) {
+            when(parser.peek()) {
+                com.xnotes.format.JsonPull.Token.BEGIN_OBJECT -> {
+                    require(depth<64) {"Working session metadata is too deeply nested"}
+                    parser.beginObject();val names=hashSetOf<String>()
+                    while(parser.hasNext()) {require(names.add(parser.nextName())) {"Duplicate working session field"};value(depth+1)}
+                    parser.endObject()
+                }
+                com.xnotes.format.JsonPull.Token.BEGIN_ARRAY -> {
+                    require(depth<64) {"Working session metadata is too deeply nested"}
+                    parser.beginArray();while(parser.hasNext()) value(depth+1);parser.endArray()
+                }
+                else -> parser.skipValue()
+            }
+        }
+        require(parser.peek()==com.xnotes.format.JsonPull.Token.BEGIN_OBJECT)
+        value(0);require(parser.peek()==com.xnotes.format.JsonPull.Token.END_DOCUMENT)
     }
 
     private fun readHeadBytes(file:File):ByteArray {
