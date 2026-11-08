@@ -58,9 +58,11 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
     val targetUri="content://$authority/document/target"
     val source=File(root,"source.xnote")
     val target=File(root,"target.xnote").apply {writeBytes(byteArrayOf())}
+    var sourceDisplayName="source.xnote"
     val writes=AtomicInteger();val deletes=AtomicInteger();val writeOpens=AtomicInteger();val creates=AtomicInteger()
     val release=CountDownLatch(1)
     @Volatile var beforeTargetRead:(()->Unit)?=null
+    @Volatile var beforeTargetWrite:(()->Unit)?=null
     private fun file(id:String)=when(id) {"source"->source;"target"->target;else->error("Unknown document: $id")}
     val provider=object:DocumentsProvider() {
         override fun onCreate()=true
@@ -74,7 +76,7 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
             val document=file(documentId)
             return MatrixCursor(columns).apply {addRow(columns.map {column->when(column) {
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID->documentId
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME->document.name
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME->if(documentId=="source") sourceDisplayName else document.name
                 DocumentsContract.Document.COLUMN_MIME_TYPE->"application/octet-stream"
                 DocumentsContract.Document.COLUMN_FLAGS->DocumentsContract.Document.FLAG_SUPPORTS_WRITE or DocumentsContract.Document.FLAG_SUPPORTS_DELETE
                 DocumentsContract.Document.COLUMN_SIZE->document.length()
@@ -89,26 +91,42 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
         override fun createDocument(parentDocumentId:String,mimeType:String,displayName:String):String {creates.incrementAndGet();return "target"}
         override fun deleteDocument(documentId:String) {deletes.incrementAndGet();file(documentId).delete()}
     }
+    // Robolectric's resolver calls the pre-O query overload, which DocumentsProvider deliberately
+    // rejects. Delegate just that resolver boundary to the same document operations and real files.
+    private val resolverProvider=object:android.content.ContentProvider() {
+        override fun onCreate()=true
+        override fun query(uri:android.net.Uri,projection:Array<out String>?,selection:String?,args:Array<out String>?,sort:String?)=
+            provider.queryDocument(DocumentsContract.getDocumentId(uri),projection)
+        override fun openFile(uri:android.net.Uri,mode:String)=provider.openDocument(DocumentsContract.getDocumentId(uri),mode,null)
+        override fun getType(uri:android.net.Uri)="application/octet-stream"
+        override fun insert(uri:android.net.Uri,values:android.content.ContentValues?):android.net.Uri?=null
+        override fun update(uri:android.net.Uri,values:android.content.ContentValues?,selection:String?,args:Array<out String>?)=0
+        override fun delete(uri:android.net.Uri,selection:String?,args:Array<out String>?):Int {
+            provider.deleteDocument(DocumentsContract.getDocumentId(uri));return 1
+        }
+        override fun call(method:String,arg:String?,extras:android.os.Bundle?)=provider.call(method,arg,extras)
+    }
     val context=object:ContextThemeWrapper(base,android.R.style.Theme_Material_Light_NoActionBar) {
         override fun getApplicationContext():Context=this
         override fun getFilesDir()=File(root,"files").apply {mkdirs()}
         override fun getCacheDir()=File(root,"cache").apply {mkdirs()}
         override fun getNoBackupFilesDir()=File(root,"private").apply {mkdirs()}
-        override fun getContentResolver():ContentResolver=ContentResolver.wrap(provider)
+        override fun getContentResolver():ContentResolver=base.contentResolver
     }
     val codec=DocumentCodec(AndroidImageCodec(),AndroidTextMeasurer())
     val storage=NotebookStorage(context,targetOverride={uri->
         val document=if(uri==sourceUri) source else if(uri==targetUri) target else error("Unexpected target $uri")
         object:MigrationPublication.Target {
             override fun read():java.io.InputStream {if(uri==targetUri) beforeTargetRead?.invoke();return document.inputStream()}
-            override fun write(source:File) {writes.incrementAndGet();source.copyTo(document,overwrite=true)}
+            override fun write(source:File) {if(uri==targetUri) beforeTargetWrite?.invoke();writes.incrementAndGet();source.copyTo(document,overwrite=true)}
         }
     })
     lateinit var editor:Editor
     init {provider.attachInfo(context,ProviderInfo().apply {
         authority=this@EditorPageCopyFixture.authority;exported=true;grantUriPermissions=true
         readPermission="android.permission.MANAGE_DOCUMENTS";writePermission=readPermission
-    })}
+    });resolverProvider.attachInfo(context,ProviderInfo().apply {authority=this@EditorPageCopyFixture.authority})
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal(authority,resolverProvider)}
     fun seed(file:File=source) {
         val document=Document(mutableListOf(Page(500.0,500.0),Page(500.0,500.0))).apply {enableReferenceAnchors()}
         file.outputStream().use {codec.write(document.fixedWriteSnapshot(),it)}
@@ -395,6 +413,222 @@ class EditorPageCopyHostTest {
             assertEquals("Adoption must merge the actual admitted PDF file, not only its v2 identity",stored.canonicalFile,requireNotNull(model.pdfFile).canonicalFile)
             assertArrayEquals(original,requireNotNull(model.pdfFile).readBytes())
             assertNull(f.editor.lastReadSourceVersion())
+        }
+    }
+
+
+    @Test fun aStoredAnchoredFileCopiesItsRawPayloadAndPdfWithoutSavingOrAdoptingTheLiveDraft()=scenario {f->
+        withContext(Dispatchers.IO) {f.seed()}
+        val model=withContext(Dispatchers.Main) {
+            f.editor.openAsync(f.sourceUri,"source.xnote");assertTrue(f.editor.noteOpen)
+            f.stopDebounce();f.addStroke(110.0,recordHistory=true)
+            f.editor.state.zoom=1.25;f.editor.state.scrollX=17.0;f.editor.state.scrollY=43.0
+            f.editor.state.document
+        }
+        val liveIdentity=model.identity;val pages=model.pages.toList();val liveIds=pages.map {it.referenceIdentity.id}
+        val history=f.editor.history;val undo=history.nextUndo
+        val sourceBinding=withContext(Dispatchers.Main) {f.editor.lastReadSourceVersion()}
+        val viewport=withContext(Dispatchers.Main) {Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY)}
+
+        // Build a valid PDF and an existing reference-style stored file after the no-PDF Editor opened.
+        // This keeps PDF rendering outside the scenario and proves copying uses disk bytes, not that model.
+        val pdfOut=java.io.ByteArrayOutputStream()
+        fun ascii(value:String) {pdfOut.write(value.toByteArray(Charsets.US_ASCII))}
+        ascii("%PDF-1.4\n")
+        val objects=listOf("<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>",
+            "<< /Length 4 >>\nstream\nq\nQ\nendstream")
+        val offsets=IntArray(objects.size+1)
+        objects.forEachIndexed {i,body->offsets[i+1]=pdfOut.size();ascii("${i+1} 0 obj\n$body\nendobj\n")}
+        val xref=pdfOut.size();ascii("xref\n0 ${offsets.size}\n0000000000 65535 f \n")
+        for(i in 1 until offsets.size) ascii(java.lang.String.format(java.util.Locale.ROOT,"%010d 00000 n \n",offsets[i]))
+        ascii("trailer\n<< /Size ${offsets.size} /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n")
+        val pdfBytes=pdfOut.toByteArray()
+        val resources=f.storage.pdfResources
+        val managed=withContext(Dispatchers.IO) {resources.admit(pdfBytes.inputStream(),"stored original")}
+        val pdfHash=managed.nameWithoutExtension
+        val rawEntries=java.util.zip.ZipFile(f.source).use {zip->zip.entries().asSequence().associate {entry->
+            entry.name to zip.getInputStream(entry).use {it.readBytes()}
+        }}
+        val oldManifest=String(rawEntries.getValue("manifest.json"),Charsets.UTF_8).trimEnd()
+        assertTrue(oldManifest.contains("\"has_pdf\":false"))
+        val rawManifest=oldManifest.replaceFirst("\"has_pdf\":false","\"has_pdf\":true").dropLast(1)+
+            ",\"future_stored_ink\":{\"samples\":[[-0,1.2500e+02,0.1234567890123456789]],\"page_hint\":\"${liveIds.first()}\"}}"
+        withContext(Dispatchers.IO) {
+            val identity=com.xnotes.format.BundleIdentity.read(f.source)!!.copy(pdfResource=pdfHash,externalPdf=true)
+            java.util.zip.ZipOutputStream(f.source.outputStream()).use {zip->
+                for((name,bytes) in rawEntries) {
+                    zip.putNextEntry(java.util.zip.ZipEntry(name))
+                    zip.write(when(name) {
+                        com.xnotes.format.BundleIdentity.ENTRY->identity.bytes()
+                        "manifest.json"->rawManifest.toByteArray(Charsets.UTF_8)
+                        else->bytes
+                    });zip.closeEntry()
+                }
+                zip.putNextEntry(java.util.zip.ZipEntry("future/unparsed-ink.bin"))
+                zip.write(ByteArray(65539) {(it*31).toByte()});zip.closeEntry()
+            }
+            resources.pin("note:${identity.documentId}",setOf(pdfHash))
+        }
+        var protectedDuringPublication=false
+        f.beforeTargetWrite={
+            resources.pin("note:${liveIdentity.documentId}",emptySet())
+            f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0")
+            resources.collect()
+            assertTrue("The source lease must survive portable encoding and destination publication",managed.isFile)
+            val leases=f.storage.registry.readableDatabase.rawQuery("SELECT COUNT(*) FROM leases WHERE resource_id=?",arrayOf(pdfHash)).use {it.moveToFirst();it.getInt(0)}
+            assertTrue("The copy must hold the actual original during publication",leases>0)
+            protectedDuringPublication=true
+        }
+        val sourceBytes=f.source.readBytes();val before=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.source)
+        val copied=withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"portable-copy.xnote").also {f.stopDebounce()}}
+        assertTrue("A stored-file action must publish a verified portable copy",copied)
+        assertTrue(protectedDuringPublication)
+        val after=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.target)
+        assertNotEquals(before.header.identity!!.documentId,after.header.identity!!.documentId)
+        assertEquals(before.orderedPageIds.size,after.orderedPageIds.size);assertTrue(before.pageIds.intersect(after.pageIds).isEmpty())
+        assertFalse(after.header.identity.externalPdf);assertEquals(pdfHash,after.header.identity.pdfResource)
+        assertEquals(pdfHash,after.embeddedPdfHash)
+        val excluded=setOf(com.xnotes.format.BundleIdentity.ENTRY,com.xnotes.format.AnchorMetadata.ENTRY,"manifest.json",com.xnotes.format.BundlePdf.ENTRY)
+        assertEquals(com.xnotes.format.BundleMigration.fingerprints(f.source).filterKeys {it !in excluded},
+            com.xnotes.format.BundleMigration.fingerprints(f.target).filterKeys {it !in excluded})
+        java.util.zip.ZipFile(f.target).use {zip->
+            assertArrayEquals(pdfBytes,zip.getInputStream(zip.getEntry(com.xnotes.format.BundlePdf.ENTRY)).use {it.readBytes()})
+            var expected=rawManifest
+            before.orderedPageIds.zip(after.orderedPageIds).forEach {(old,new)->
+                expected=expected.replace("\"reference_id\":\"$old\"","\"reference_id\":\"$new\"")
+            }
+            assertArrayEquals(expected.toByteArray(Charsets.UTF_8),zip.getInputStream(zip.getEntry("manifest.json")).use {it.readBytes()})
+        }
+        assertArrayEquals(sourceBytes,f.source.readBytes());assertArrayEquals(pdfBytes,managed.readBytes())
+        assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
+        assertFalse(f.storage.hasRecovery(f.targetUri))
+        withContext(Dispatchers.Main) {
+            assertSame(model,f.editor.state.document);assertEquals(liveIdentity,model.identity);assertEquals(f.sourceUri,model.path);assertTrue(model.dirty)
+            assertEquals(liveIds,model.pages.map {it.referenceIdentity.id});pages.zip(model.pages).forEach {(a,b)->assertSame(a,b)}
+            assertSame(history,f.editor.history);assertSame(undo,history.nextUndo);assertFalse(history.canRedo)
+            assertSame(sourceBinding,f.editor.lastReadSourceVersion())
+            assertEquals(viewport,Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY))
+            assertEquals(listOf(110.0),model.pages.first().items.filterIsInstance<com.xnotes.core.model.Stroke>().map {it.samples.first().x})
+        }
+    }
+
+    @Test fun aStoredFileCopyRejectsTheSourceItselfAndEveryNonemptyProviderTargetWithoutWritingOrDeleting() {
+        for(sameSource in listOf(true,false)) scenario {f->
+            withContext(Dispatchers.IO) {f.seed();if(!sameSource) f.seed(f.target)}
+            val model=withContext(Dispatchers.Main) {
+                f.editor.openAsync(f.sourceUri,"source.xnote");f.stopDebounce();f.addStroke(110.0,recordHistory=true)
+                f.editor.state.zoom=1.25;f.editor.state.scrollX=17.0;f.editor.state.scrollY=43.0;f.editor.state.document
+            }
+            val identity=model.identity;val ids=model.pages.map {it.referenceIdentity.id};val undo=f.editor.history.nextUndo
+            val viewport=withContext(Dispatchers.Main) {Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY)}
+            val sourceBytes=f.source.readBytes();val targetBytes=f.target.readBytes()
+            val destination=if(sameSource) f.sourceUri else f.targetUri
+            assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,destination,"copy.xnote").also {f.stopDebounce()}})
+            assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
+            assertArrayEquals(sourceBytes,f.source.readBytes());assertArrayEquals(targetBytes,f.target.readBytes())
+            assertFalse(f.storage.hasRecovery(f.sourceUri));assertFalse(f.storage.hasRecovery(f.targetUri))
+            withContext(Dispatchers.Main) {
+                assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(f.sourceUri,model.path);assertTrue(model.dirty)
+                assertEquals(ids,model.pages.map {it.referenceIdentity.id});assertSame(undo,f.editor.history.nextUndo)
+                assertEquals(viewport,Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY))
+            }
+        }
+    }
+
+    @Test fun aStoredCanvasCopyKeepsItsRawManifestAndAssetsAndDoesNotAdoptTheOpenEditor()=scenario {f->
+        f.sourceDisplayName="saved.xcanvas"
+        val original=com.xnotes.format.BundleIdentity()
+        val manifest=""" {"format":"xcanvas","version":1,"items":[],"future":{"pressure":0.1234567890123456789,"sample":-0}} """.toByteArray()
+        val asset=ByteArray(65539) {(it*17).toByte()}
+        java.util.zip.ZipOutputStream(f.source.outputStream()).use {zip->
+            for((name,bytes) in listOf("manifest.json" to manifest,"future/raw.bin" to asset,com.xnotes.format.BundleIdentity.ENTRY to original.bytes())) {
+                zip.putNextEntry(java.util.zip.ZipEntry(name));zip.write(bytes);zip.closeEntry()
+            }
+        }
+        val before=f.source.readBytes()
+        val model=withContext(Dispatchers.Main) {f.editor.state.document}
+        assertTrue(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"independent.xcanvas")})
+        val actual=BundleReferenceInfo.inspectStrict(f.target)
+        assertEquals("xcanvas",actual.format);assertNotEquals(original.documentId,actual.header.identity!!.documentId)
+        assertTrue(actual.pageIds.isEmpty());assertNull(actual.header.anchors)
+        java.util.zip.ZipFile(f.target).use {zip->
+            assertArrayEquals(manifest,zip.getInputStream(zip.getEntry("manifest.json")).use {it.readBytes()})
+            assertArrayEquals(asset,zip.getInputStream(zip.getEntry("future/raw.bin")).use {it.readBytes()})
+        }
+        assertArrayEquals(before,f.source.readBytes());assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get());assertEquals(0,f.writeOpens.get())
+        withContext(Dispatchers.Main) {assertSame(model,f.editor.state.document);assertFalse(f.editor.canvasOpen)}
+    }
+
+    @Test fun sharingAStoredNativeBundlePreservesItsIdentityAndEveryRawEntry()=scenario {f->
+        withContext(Dispatchers.IO) {f.seed()}
+        val name=withContext(Dispatchers.IO) {
+            checkNotNull(f.context.contentResolver.query(android.net.Uri.parse(f.sourceUri),arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)).use {cursor->
+                check(cursor.moveToFirst());cursor.getString(0)
+            }
+        }
+        assertEquals("source.xnote",name)
+        val before=f.source.readBytes();val original=BundleReferenceInfo.inspectStrict(f.source)
+        val output=java.io.ByteArrayOutputStream()
+        withContext(Dispatchers.IO) {f.editor.copyFileTo(f.sourceUri,output)}
+        val shared=File(f.root,"shared.xnote").apply {writeBytes(output.toByteArray())}
+        val actual=BundleReferenceInfo.inspectStrict(shared)
+        assertEquals(original.header.identity,actual.header.identity);assertEquals(original.orderedPageIds,actual.orderedPageIds)
+        assertEquals(com.xnotes.format.BundleMigration.fingerprints(f.source),com.xnotes.format.BundleMigration.fingerprints(shared))
+        assertArrayEquals(before,f.source.readBytes());assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
+    }
+
+    @Test fun aStoredCopyRejectsLossOfAnAlreadyRegisteredPageContractBeforeOpeningTheDestination()=scenario {f->
+        withContext(Dispatchers.IO) {f.seed()}
+        val model=withContext(Dispatchers.Main) {
+            f.editor.openAsync(f.sourceUri,"source.xnote");f.stopDebounce();f.addStroke(110.0,recordHistory=true);f.editor.state.document
+        }
+        withContext(Dispatchers.IO) {f.storage.registry.register(model.identity.documentId,"xnote","source.xnote",f.sourceUri,pageReferences=true)}
+        assertTrue(f.storage.registry.expectationAt(f.sourceUri)!!.requiresPages)
+        val identity=model.identity;val undo=f.editor.history.nextUndo
+        withContext(Dispatchers.IO) {
+            val stripped=Document(mutableListOf(Page(500.0,500.0))).apply {this.identity=identity}
+            f.source.outputStream().use {f.codec.write(stripped.fixedWriteSnapshot(),it)}
+        }
+        val sourceBytes=f.source.readBytes()
+        assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"copy.xnote")})
+        assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0L,f.target.length())
+        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());assertFalse(f.storage.hasRecovery(f.targetUri))
+        withContext(Dispatchers.Main) {assertSame(model,f.editor.state.document);assertSame(undo,f.editor.history.nextUndo);assertTrue(model.dirty);assertEquals(identity,model.identity)}
+    }
+
+    @Test fun cancellingAStoredCopyDuringTargetInspectionDoesNotWriteOrReportSuccess()=scenario {f->
+        withContext(Dispatchers.IO) {f.seed()}
+        val sourceBytes=f.source.readBytes();val entered=CompletableDeferred<Unit>()
+        f.beforeTargetRead={entered.complete(Unit);check(f.release.await(10,TimeUnit.SECONDS))}
+        val copy=CoroutineScope(currentCoroutineContext()).async(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"copy.xnote")}
+        try {entered.await();copy.cancel()} finally {f.release.countDown()}
+        try {copy.await();fail("Cancellation must propagate rather than return ordinary copy success or failure")} catch(expected:CancellationException) {}
+        assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0L,f.target.length())
+        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());assertFalse(f.storage.hasRecovery(f.targetUri))
+    }
+
+    @Test fun aStoredCopyWrittenBeforeRegistrationFailureCanOnlyContinueItsRetainedCandidate()=scenario {f->
+        withContext(Dispatchers.IO) {f.seed()}
+        val sourceBytes=f.source.readBytes()
+        val model=withContext(Dispatchers.Main) {
+            f.editor.openAsync(f.sourceUri,"source.xnote");f.stopDebounce();f.addStroke(110.0,recordHistory=true);f.editor.state.document
+        }
+        val identity=model.identity;val undo=f.editor.history.nextUndo
+        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("CREATE TRIGGER fail_stored_copy BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'copy registration failed'); END")}
+        assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"copy.xnote")})
+        assertTrue(f.storage.hasRecovery(f.targetUri));assertEquals(1,f.writes.get())
+        val written=f.target.readBytes();val saved=BundleReferenceInfo.inspectStrict(f.target)
+        assertNotEquals(identity.documentId,saved.header.identity!!.documentId)
+        assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"retry.xnote")})
+        assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get());assertTrue(f.storage.hasRecovery(f.targetUri))
+        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("DROP TRIGGER fail_stored_copy")}
+        assertTrue(withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(f.targetUri,"Completed stored copy")} is RecoveryCopyResult.Saved)
+        assertFalse(f.storage.hasRecovery(f.targetUri));assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get())
+        assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0,f.deletes.get());assertEquals(0,f.writeOpens.get())
+        withContext(Dispatchers.Main) {
+            assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(f.sourceUri,model.path)
+            assertSame(undo,f.editor.history.nextUndo);assertTrue(model.dirty)
         }
     }
 

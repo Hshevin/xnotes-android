@@ -377,7 +377,6 @@ private fun EditorScreen(
     // The pane and page a side-panel "Insert PDF" picked a file for.
     var pendingPdfInsert by remember { mutableStateOf<PendingPdfInsert?>(null) }
     var pendingShareUri by remember { mutableStateOf<String?>(null) }
-    var pendingSaveCopyUri by remember { mutableStateOf<String?>(null) }
     var paneHomes by remember { mutableStateOf<Map<com.xnotes.ui.Pane, String?>>(emptyMap()) }
     var homeFocus by remember { mutableStateOf<com.xnotes.ui.Pane?>(null) }
     var mainMenu by remember { mutableStateOf(false) }
@@ -515,19 +514,6 @@ private fun EditorScreen(
     }
     val exportPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { exportPicked(it) }
     val exportZipLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { exportPicked(it) }
-
-    // Save a copy of an explorer file (a note or a canvas) elsewhere.
-    val saveCopyLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri ->
-        val src = pendingSaveCopyUri; pendingSaveCopyUri = null
-        if (uri != null && src != null) {
-            scope.launch {
-                val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { checkNotNull(resolver.openOutputStream(uri)).use { o -> editor.copyFileTo(src, o, newIdentity = true) } }.isSuccess }
-                if(!ok) editor.message = context.getString(R.string.err_save_copy)
-            }
-        }
-    }
 
     // Save a single selected page as a PNG.
     val savePageImageLauncher = rememberLauncherForActivityResult(
@@ -937,6 +923,24 @@ private fun EditorScreen(
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
+    // Keep the explorer source with its picker request; opening a destination is a storage decision.
+    fun launchStoredCopy(source: String) {
+        if (createPicker.busy) {
+            editor.message = context.getString(R.string.native_save_picker_busy)
+            return
+        }
+        val launched = createPicker.launch("${stemOf(source)}${kindOf(source).suffix}") { destination ->
+            if (destination != null) scope.launch {
+                val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { resolver.takePersistableUriPermission(destination, rwFlags) }
+                    displayNameOf(resolver, destination)
+                }
+                editor.copyStoredFileTo(source, destination.toString(), name)
+            }
+        }
+        if (!launched) editor.message = context.getString(R.string.native_save_picker_busy)
+    }
+
     /** What the export dialog counts for the stored document at [uriStr]: a note's pages, a canvas's items. */
     fun countingOf(uriStr: String): String = ExportProgress.countingFor(kindOf(uriStr))
 
@@ -1219,7 +1223,7 @@ private fun EditorScreen(
                 onRestoreSplit = { if (editor.inSplit) { paneHomes = emptyMap(); mainMenu = false } else guardedAll { discarded -> scope.launch { if (editor.openSplitFile(explicitlyDiscarded = discarded)) { paneHomes = emptyMap(); mainMenu = false } } } },
                 onPickRoot = { browsePickerPane = target; pickRootLauncher.launch(null) },
                 onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
-                onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}${kindOf(uri).suffix}") },
+                onSaveCopyFile = ::launchStoredCopy,
                 onExportFilePdf = { uri ->
                     runPdfExport(stemOf(uri), shareDir = false, counting = countingOf(uri),
                         render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },

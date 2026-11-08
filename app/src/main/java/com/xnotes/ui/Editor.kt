@@ -7063,22 +7063,116 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     // --- per-file actions in the explorer (operate on a stored note URI, not the open document) ---
 
+    /** A read-only stored source. No live editor or source write authority is acquired. IO only. */
+    private fun <T> withStoredNativeSource(srcUri:String,kind:DocumentKind,checkActive:()->Unit,
+                                          action:(com.xnotes.format.BundleSnapshot,com.xnotes.format.BundleIdentity,java.io.File?)->T):T {
+        checkActive()
+        val input=checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri)))
+        return com.xnotes.format.BundleSnapshot.fromInput(input,saveTmpDir) {checkActive();false}.use {snapshot->
+            val resources=notebookStorage.pdfResources
+            var lease:AutoCloseable?=null
+            var protected:Set<String>?=null
+            var failure:Throwable?=null
+            var completed=false
+            try {
+                val header=com.xnotes.format.BundleHeader.readWithPdfProtection(snapshot.file,protect={ids->
+                    check(lease==null)
+                    lease=resources.holdResolved(ids,checkActive);protected=ids.toSet()
+                }) {checkActive();false}
+                fun observed(header:com.xnotes.format.BundleHeader) {
+                    com.xnotes.storage.ReferenceContract.verifyObserved(notebookStorage.registry.expectationAt(srcUri),
+                        header.identity?.let {notebookStorage.registry.expectationForId(it.documentId)},header)
+                }
+                observed(header)
+                val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(snapshot.file) {checkActive();false}
+                require(info.format==kind.extension && info.header.identity==header.identity && info.header.anchors==header.anchors) {"Stored document kind or identity changed"}
+                observed(info.header)
+                val identity=header.identity ?: com.xnotes.format.BundleIdentity()
+                val ids=identity.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
+                require(protected==ids) {"Stored PDF protection changed"}
+                val pdf=if(identity.externalPdf) resources.resolve(requireNotNull(identity.pdfResource)) else null
+                checkActive()
+                val result=action(snapshot,identity,pdf)
+                checkActive();completed=true;result
+            } catch(error:Throwable) {failure=error;throw error}
+            finally {
+                try {lease?.close()} catch(close:Throwable) {
+                    if(failure!=null) failure.addSuppressed(close)
+                    else if(completed) android.util.Log.w("xnotes.storage","Retained source lease after completed copy",close)
+                    else throw close
+                }
+            }
+        }
+    }
+
     /** Exports a self-contained bundle, embedding the referenced PDF without re-encoding ink. */
-    fun copyFileTo(srcUri: String, out: OutputStream, newIdentity: Boolean = false) {
-        if (DocumentKind.ofName(queryDisplayName(android.net.Uri.parse(srcUri)).orEmpty()) == DocumentKind.MIND_MAP) {
-            if (newIdentity) out.write(com.xnotes.mindmap.MapCodec.encode(com.xnotes.mindmap.MapFiles.read(appContext, srcUri).copy(id = java.util.UUID.randomUUID().toString())))
-            else checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use { it.copyTo(out) }
+    fun copyFileTo(srcUri:String,out:OutputStream,newIdentity:Boolean=false) {
+        val kind=DocumentKind.ofName(queryDisplayName(android.net.Uri.parse(srcUri)).orEmpty())
+        if(kind==DocumentKind.MIND_MAP) {
+            if(newIdentity) out.write(com.xnotes.mindmap.MapCodec.encode(com.xnotes.mindmap.MapFiles.read(appContext,srcUri).copy(id=java.util.UUID.randomUUID().toString())))
+            else checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))).use {it.copyTo(out)}
             return
         }
-        val input=checkNotNull(appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri)))
-        com.xnotes.format.BundleSnapshot.fromInput(input,saveTmpDir).use {snapshot->
-            val original=com.xnotes.format.BundleHeader.read(snapshot.file).identity ?: com.xnotes.format.BundleIdentity()
+        require(kind==DocumentKind.NOTE || kind==DocumentKind.CANVAS) {"Unsupported stored document"}
+        withStoredNativeSource(srcUri,kind,{}) {snapshot,original,pdf->
             val identity=if(newIdentity) original.copy(documentId=java.util.UUID.randomUUID().toString()) else original
-            val resources=com.xnotes.storage.PdfResources.get(appContext)
-            val pdf=if(identity.externalPdf) resources.resolve(requireNotNull(identity.pdfResource)) else null
-            val lease=pdf?.let {resources.hold(setOf(it.nameWithoutExtension))}
-            try {com.xnotes.format.BundlePdf.write(snapshot,out,identity,pdf,external=false)}
-            finally {lease?.close()}
+            com.xnotes.format.BundlePdf.write(snapshot,out,identity,pdf,external=false)
+        }
+    }
+
+    /** Explicit explorer copy: publish only the saved file, never an unsaved live model. */
+    internal suspend fun copyStoredFileTo(srcUri:String,destinationUri:String,name:String?):Boolean {
+        val caller=kotlinx.coroutines.currentCoroutineContext()
+        val result=withContext(Dispatchers.IO) {
+            val working=kotlinx.coroutines.currentCoroutineContext()
+            val checkActive={caller.ensureActive();working.ensureActive()}
+            var candidate:java.io.File?=null
+            var intent:com.xnotes.storage.NativeCreationIntent?=null
+            checkActive()
+            val sourceName=queryDisplayName(android.net.Uri.parse(srcUri)).orEmpty()
+            val displayName=name ?: queryDisplayName(android.net.Uri.parse(destinationUri)) ?: sourceName
+            try {
+                checkActive()
+                require(notebookStorage.registry.locationKey(srcUri)!=notebookStorage.registry.locationKey(destinationUri)) {"Copy destination is the source"}
+                val kind=DocumentKind.ofName(sourceName)
+                if(kind==DocumentKind.MIND_MAP) {
+                    com.xnotes.mindmap.MapFiles.copyToDestination(appContext,srcUri,android.net.Uri.parse(destinationUri))
+                } else {
+                    require(kind==DocumentKind.NOTE || kind==DocumentKind.CANVAS) {"Unsupported stored document"}
+                    val creation=notebookStorage.beginCreation(kind).also {intent=it}
+                    val permit=notebookStorage.prepareNewTarget(creation,destinationUri,checkActive)
+                    withStoredNativeSource(srcUri,kind,checkActive) {snapshot,identity,pdf->
+                        val file=java.io.File.createTempFile("stored-copy-",kind.suffix,saveTmpDir).also {candidate=it}
+                        java.io.FileOutputStream(file).use {output->
+                            val sink=object:java.io.FilterOutputStream(output) {
+                                override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
+                                override fun close() {flush()}
+                            }
+                            com.xnotes.format.BundlePdf.write(snapshot,sink,identity.copy(documentId=creation.documentId),pdf,external=false) {checkActive();false}
+                            output.fd.sync()
+                        }
+                        checkActive();notebookStorage.publishCreated(destinationUri,file,permit,displayName,checkActive)
+                    }
+                }
+                CreatedNoteWrite()
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(error:Exception) {
+                val retained=intent?.let {creation->
+                    try {notebookStorage.retainedCreation(creation,destinationUri,displayName,checkActive)!=null}
+                    catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                    catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);false}
+                } ?: false
+                CreatedNoteWrite(error,retained)
+            } finally {candidate?.delete()}
+        }
+        return withContext(Dispatchers.Main) {
+            if(result.error==null) {invalidateThumb(destinationUri);true}
+            else {
+                message=if(result.retained) appContext.getString(R.string.native_copy_unfinished)
+                    else if(isNativeSaveRejection(result.error)) result.error.message ?: appContext.getString(R.string.err_save_copy)
+                    else appContext.getString(R.string.err_save_copy)
+                false
+            }
         }
     }
 
