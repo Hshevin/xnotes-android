@@ -28,32 +28,43 @@ class MigrationPublication internal constructor(private val directory:File,priva
         internal val creation get()=this==CREATE_NOTE || this==CREATE_CANVAS
     }
     internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?)
-    internal data class RestoreValidation(val original:File,val purpose:Purpose?,val currentHash:String?,val candidateHash:String?,val candidateStageProof:Boolean)
+    internal data class RestoreValidation(val original:File,val purpose:Purpose?,val currentHash:String?,val candidateHash:String?,val candidateStageProof:Boolean,
+                                          val handoffId:String?=null)
     internal data class KeepValidation(val original:File?,val candidate:File?,val purpose:Purpose?,val recordValid:Boolean,
-                                       val originalHash:String?,val candidateHash:String?,val originalVerified:Boolean,val candidateVerified:Boolean)
+                                       val originalHash:String?,val candidateHash:String?,val originalVerified:Boolean,val candidateVerified:Boolean,
+                                       val handoffId:String?=null)
     class RecoveryRequired(message:String,cause:Throwable?=null,val reason:StorageMsg?=null):IllegalStateException(message,cause)
     private val original get()=File(directory,"original.zip")
     private val candidate get()=File(directory,"candidate.zip")
     private val marker get()=File(directory,"pending")
     val pending get()=marker.exists()
-    private data class Record(val original:String?,val candidate:String?,val digest:String,val purpose:Purpose?)
+    private data class Record(val original:String?,val candidate:String?,val digest:String,val purpose:Purpose?,val handoffId:String?=null)
     private data class FileProof(val digest:String?,val exists:Boolean,val regular:Boolean,val size:Long,val modified:Long)
     private data class Retained(val original:FileProof,val candidate:FileProof,val marker:FileProof)
     private enum class Inspection { PUBLISH, RESTORE, KEEP_CURRENT }
 
     val purpose:Purpose? get()=readRecord().purpose
 
-    fun stage(source:File,replacement:File,purpose:Purpose?=null,expectedCandidateHash:String?=null) {
+    fun stage(source:File,replacement:File,purpose:Purpose?=null,expectedCandidateHash:String?=null,
+              expectedOriginalHash:String?=null,handoffId:String?=null) {
+        // A handoff record is durable intent, not permission to publish. The coordinated producer
+        // will supply both inspected hashes; old callers cannot accidentally opt in via a new default.
+        require(handoffId==null || (canonicalUuid(handoffId) && purpose!=null && !purpose.creation &&
+            expectedOriginalHash?.matches(SHA256)==true && expectedCandidateHash?.matches(SHA256)==true))
         check(!pending) {StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING)}
         check(directory.isDirectory || directory.mkdirs())
         copyDurable(source,original);copyDurable(replacement,candidate)
         val oldHash=BundleMigration.hash(original);val newHash=BundleMigration.hash(candidate)
-        if(expectedCandidateHash!=null && newHash!=expectedCandidateHash)
+        if(expectedCandidateHash!=null && newHash!=expectedCandidateHash || expectedOriginalHash!=null && oldHash!=expectedOriginalHash)
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         check(BundleMigration.hash(source)==oldHash && BundleMigration.hash(replacement)==newHash) {StorageText.t(StorageMsg.MIGRATION_VERIFY_FAILED)}
         val temp=File(directory,"pending.tmp")
         try {
-            FileOutputStream(temp).use {val record=if(purpose==null) "2\n$oldHash\n$newHash" else "3\n$oldHash\n$newHash\n${purpose.key}"
+            FileOutputStream(temp).use {val record=when {
+                handoffId!=null -> "4\n$oldHash\n$newHash\n${requireNotNull(purpose).key}\n$handoffId"
+                purpose!=null -> "3\n$oldHash\n$newHash\n${purpose.key}"
+                else -> "2\n$oldHash\n$newHash"
+            }
                 it.write(record.toByteArray(Charsets.UTF_8));it.fd.sync()}
             Files.move(temp.toPath(),marker.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
         } finally {temp.delete()}
@@ -66,6 +77,9 @@ class MigrationPublication internal constructor(private val directory:File,priva
     internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={},
                                   protectCandidate:(File)->Unit={}) {
         val record=readRecord()
+        // No acknowledgement authority exists at this layer yet. In particular, ordinary open /
+        // retry after a restart must never publish B before the working body + handoff is durable.
+        if(record.handoffId!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
         // Only dependency protection, never identity authority. The caller owns its lease on every path.
         protectCandidate(candidate)
         val kept=retained()
@@ -98,7 +112,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
         checkRecord(record,kept,checkCandidate=false)
         val current=fingerprint(target)
         if(current==null && !target.confirmedMissing()) throw failure(StorageMsg.NOTE_UNREADABLE)
-        validate(RestoreValidation(original,record.purpose,current,record.candidate ?: kept.candidate.digest,record.candidate!=null))
+        validate(RestoreValidation(original,record.purpose,current,record.candidate ?: kept.candidate.digest,record.candidate!=null,record.handoffId))
         kept=unchanged(kept,Inspection.RESTORE)
         if(fingerprint(target)!=current || current==null && !target.confirmedMissing()) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
         if(current!=hash) writeVerified(target,original,hash,current,StorageMsg.RESTORE_VERIFY_FAILED)
@@ -121,7 +135,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
         fun validateCurrent() {validate(KeepValidation(original.takeIf {kept.original.regular},
             candidate.takeIf {kept.candidate.regular},record?.purpose,record!=null,record?.original,record?.candidate,
             record?.original!=null && record.original==kept.original.digest,
-            record?.candidate!=null && record.candidate==kept.candidate.digest))}
+            record?.candidate!=null && record.candidate==kept.candidate.digest,record?.handoffId))}
         validateCurrent();kept=unchanged(kept,Inspection.KEEP_CURRENT)
         register(afterVerified)
         validateCurrent();unchanged(kept,Inspection.KEEP_CURRENT)
@@ -225,16 +239,21 @@ class MigrationPublication internal constructor(private val directory:File,priva
         if(raw.size>256) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         val body=String(raw.bytes,Charsets.UTF_8)
         if(body=="1") return Record(null,null,raw.digest,null) // Historical records prove call-time consistency only.
-        val parts=body.split('\n');val hash=Regex("[a-f0-9]{64}")
+        val parts=body.split('\n')
         val purpose=when {
             parts.size==3 && parts[0]=="2" -> null
             parts.size==4 && parts[0]=="3" -> Purpose.entries.singleOrNull {it.key==parts[3]}
                 ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+            parts.size==5 && parts[0]=="4" && canonicalUuid(parts[4]) ->
+                Purpose.entries.singleOrNull {it.key==parts[3] && !it.creation}
+                    ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
             else -> throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         }
-        if(!parts[1].matches(hash) || !parts[2].matches(hash)) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-        return Record(parts[1],parts[2],raw.digest,purpose)
+        if(!parts[1].matches(SHA256) || !parts[2].matches(SHA256)) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        return Record(parts[1],parts[2],raw.digest,purpose,parts.getOrNull(4))
     }
+    private fun canonicalUuid(value:String)=try {java.util.UUID.fromString(value).toString()==value} catch(_:IllegalArgumentException) {false}
+    private companion object {val SHA256=Regex("[a-f0-9]{64}")}
     private fun checkRecord(record:Record,kept:Retained,checkCandidate:Boolean) {
         if(record.digest!=kept.marker.digest || record.original!=null && record.original!=kept.original.digest || checkCandidate && record.candidate!=null && record.candidate!=kept.candidate.digest)
             throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)

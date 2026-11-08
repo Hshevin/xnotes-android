@@ -98,3 +98,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## R2b2b2a 原生来源版本
 
 计划/源码独立复核完成：受控签发/Inspected私有证明对、retained candidate receipt、早期资源保护、admit/handoff同gate。发现codec回调关闭ZIP、Header fallback长校验未lease，均红灯后修。主代理再补实际模型PDF SHA、v1 unused字段、hint后失败类型化/释放。最终292套件3163项/Android源码编译成功（3新平台测试仅编译），独立窄复核无剩余阻断；UI/Session尚未接。详细reference-native-source-version-2026-11-08.md。
+
+## 原生交接 v4 拒写保护（2026-11-08）
+
+review_input_plan 独立计划与源码复核通过：仅canonical UUID+SAVE+预检A/B摘要可stage v4；任何callback/target读取前默认拒绝publish，重启/别名不绕过；typed restore/keep仅暴露ID数据，坏record不降级。完整300套件3293项与Android源码编译通过，新增owned provider场景只编译未执行。无ack/生产切换/渲染改动；后续prepare/commit与活动内容事务屏障另审。

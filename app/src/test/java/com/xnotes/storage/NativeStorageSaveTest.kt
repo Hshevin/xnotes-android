@@ -59,6 +59,31 @@ class NativeStorageSaveTest {
         assertArrayEquals(next.readBytes(),f.current.readBytes());assertEquals(1,f.writes)
         assertTrue(f.storage.registry.expectationForId(id).requiresPages);assertFalse(f.storage.hasRecovery(f.uri))
     }
+    @Test fun handoffWithoutCacheAcknowledgementBlocksEnsureAcrossRestartAndUriAliases() = scenario {f->
+        bundle(f.current,pages=true);val next=bundle(File(f.root,"next"),pages=true,body="new")
+        val original=f.current.readBytes()
+        val key=f.storage.registry.locationKey(f.uri)
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") {"%02x".format(it)}
+        val dir=File(f.context.noBackupFilesDir,"migrations/$hash")
+        MigrationPublication(dir).stage(f.current,next,MigrationPublication.Purpose.SAVE_NOTE)
+        val marker=File(dir,"pending")
+        marker.writeText(marker.readText().replaceFirst("3\n","4\n")+"\n8ae77e67-7c66-48da-9235-3d28fc4ed133")
+        val retained=dir.listFiles().orEmpty().associate {it.name to it.readBytes().toList()}
+        val restarted=NotebookStorage(f.context,targetOverride={object:MigrationPublication.Target {
+            override fun read()=f.current.inputStream()
+            override fun write(source:File) {fail("restarted ensure must not write unacknowledged candidate")}
+        }})
+        try {
+            for(storage in listOf(f.storage,restarted)) for(uri in listOf(f.uri,f.alias)) {
+                val error=assertThrows(MigrationPublication.RecoveryRequired::class.java) {storage.ensure(uri,"source","xnote")}
+                assertEquals(StorageMsg.MIGRATION_RECOVERY_PENDING,error.reason)
+                assertThrows(MigrationPublication.RecoveryRequired::class.java) {storage.publishNote(uri,next,DocumentKind.NOTE,"source")}
+                assertThrows(MigrationPublication.RecoveryRequired::class.java) {storage.openSource(uri,DocumentKind.NOTE)}
+                assertEquals(retained,dir.listFiles().orEmpty().associate {it.name to it.readBytes().toList()})
+                assertArrayEquals(original,f.current.readBytes());assertEquals(0,f.writes)
+            }
+        } finally {restarted.registry.close()}
+    }
     @Test fun mismatchedIdentityTypeOrPageStateNeverWritesOrStagesARecoveryRecord() = scenario {f->
         bundle(f.current,pages=true);val original=f.current.readBytes()
         f.storage.registry.register(id,"xnote","source",f.uri,pageReferences=true)
