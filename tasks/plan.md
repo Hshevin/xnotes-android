@@ -1,5 +1,7 @@
 # 大型 PDF 独立标注与工具光标计划
 
+2026-11-09 R3第二片已完成：实际存盘文件副本、导图空目标创建及原字节页启用Storage/显式恢复；334套3640项主机和Android测试源码编译通过，见`docs/movinkpad/reference-stored-copy-and-page-activation-2026-11-09.md`。页来源界面/引用闭环仍未完成；下一步保护createNoteFile与分叉/合并，再接实际页面来源选择。
+
 2026-11-09 R3有限出口第一片已完成：实际分页另存与原字节启用验证器，331套3618项主机及Android测试源码编译通过；见`docs/movinkpad/reference-save-as-page-copy-2026-11-09.md`。页面Storage启用／PAGE界面尚未接通；继续剩余复制／新建／分叉出口后实接，不重复全native4前置。
 
 2026-11-09 R2恢复预览消费者已接通真实Backstage窗格入口、历史预览、独立副本、typed继续与重启显式重选目标；完整328套3599项主机及Android测试源码编译通过，实际仪器/SAF/目标设备未运行。下一产品路径改按现有NativeSaveContract与单调登记先补直接输出/副本/新建/分叉保护，再接原字节页启用与真实PAGE来源，不以全量native4未使用API作为硬前置；详见 `docs/movinkpad/reference-page-ui-first-2026-11-09.md`。保存恢复安全、来源往返/反向引用/网络及剩余交互继续保留。

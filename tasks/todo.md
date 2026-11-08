@@ -421,3 +421,6 @@
 
 - [x] R3有限出口第一片：实际分页首次保存／另存、NativeCreation空目标／独立页scope／C1与PDF采用、运行时固定callback picker；331套3618主机+Android源码编译/独审通过，实际平台未运行。原字节页启用验证器11例通过但尚无Storage消费者，不计作PAGE入口完成。
 - [ ] R3继续：文件副本／createNoteFile／fork／merge出口安全接线→页启用发布和明确恢复→fresh catalog／PAGE来源／xmap重开；随后预览／往返／反向引用／文件网络与A2余项。见reference-save-as-page-copy-2026-11-09.md。
+
+- [x] R3第二片：文件浏览器存盘副本、MapSession/MapFiles空目标JSON创建、ACTIVATE_PAGES原字节启用及同候选显式续写，334套3640主机+Android源码编译/独审通过；系统SAF、仪器及目标设备未运行。
+- [ ] R3下一片：createNoteFile与fork/merge空目标发布及独立页scope采用；接实际PAGE来源选择，不能把Storage API算作用户流程已完成。
