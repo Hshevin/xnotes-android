@@ -4,12 +4,17 @@ import android.content.Context
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import androidx.compose.ui.geometry.Offset
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.infinite.AddCanvasItem
 import com.xnotes.core.infinite.CanvasBackground
+import com.xnotes.core.infinite.InfiniteDocument
+import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
@@ -27,6 +32,98 @@ abstract class InfiniteSurfaceAttachContract {
     private fun withEditor(block: (InfiniteEditor) -> Unit) = runOnMain { context ->
         val editor = InfiniteEditor(context)
         try { block(editor) } finally { detach(editor.view) }
+    }
+
+    @Test fun replacingDocumentRetiresTheOutgoingRestylePreviewBaseline() = withEditor { editor ->
+        val old = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0),
+            Rgba(0, 0, 0, 255), strokeWidth = 3.0, fillRgba = Rgba(128, 128, 128, 255))
+        val oldDocument = editor.document
+        oldDocument.add(old)
+        editor.selectAll()
+        editor.restyleSelection(Rgba(64, 64, 64, 255), 8.0, preview = true)
+        val oldPreview = DrawStyle.of(old)
+        assertEquals(DrawStyle(Rgba(64, 64, 64, 255), 8.0), oldPreview)
+        assertFalse(editor.history.canUndo)
+
+        val fresh = ShapeItem(ShapeKind.RECTANGLE, Pt(400.0, 400.0), Pt(520.0, 540.0),
+            Rgba(0, 0, 0, 255), strokeWidth = 3.0, fillRgba = Rgba(128, 128, 128, 255))
+        val original = DrawStyle.of(fresh)
+        val next = InfiniteDocument().apply { add(fresh) }
+        editor.replaceDocument(next)
+        editor.selectAll()
+        editor.restyleSelection(Rgba(192, 192, 192, 255), 13.0, preview = false)
+        val committed = DrawStyle(Rgba(192, 192, 192, 255), 13.0)
+        assertEquals(committed, DrawStyle.of(fresh))
+        assertEquals(oldPreview, DrawStyle.of(old))
+        assertTrue(editor.history.canUndo)
+        editor.undo()
+        assertEquals(original, DrawStyle.of(fresh))
+        assertEquals(oldPreview, DrawStyle.of(old))
+        assertSame(fresh, next.items.single())
+        assertSame(old, oldDocument.items.single())
+        assertFalse(next.itemsIn(old.paintBounds()).contains(old))
+        assertFalse(editor.history.canUndo)
+        assertTrue(editor.history.canRedo)
+        editor.redo()
+        assertEquals(committed, DrawStyle.of(fresh))
+        assertEquals(oldPreview, DrawStyle.of(old))
+        assertSame(fresh, next.items.single())
+    }
+
+    @Test fun replacingDocumentRetiresTheOutgoingFillPreviewBaseline() = withEditor { editor ->
+        val old = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0),
+            Rgba(0, 0, 0, 255), fillRgba = Rgba(32, 32, 32, 255))
+        val oldDocument = editor.document
+        oldDocument.add(old)
+        editor.selectAll()
+        editor.refillSelection(Rgba(128, 128, 128, 255), preview = true)
+        val oldPreview = old.fillRgba
+        assertEquals(Rgba(128, 128, 128, 255), oldPreview)
+        assertFalse(editor.history.canUndo)
+
+        val original = Rgba(64, 64, 64, 255)
+        val fresh = ShapeItem(ShapeKind.RECTANGLE, Pt(400.0, 400.0), Pt(520.0, 540.0),
+            Rgba(0, 0, 0, 255), fillRgba = original)
+        val next = InfiniteDocument().apply { add(fresh) }
+        val committed = Rgba(192, 192, 192, 255)
+        editor.replaceDocument(next)
+        editor.selectAll()
+        editor.refillSelection(committed, preview = false)
+        assertEquals(committed, fresh.fillRgba)
+        assertEquals(oldPreview, old.fillRgba)
+        assertTrue(editor.history.canUndo)
+        editor.undo()
+        assertEquals(original, fresh.fillRgba)
+        assertEquals(oldPreview, old.fillRgba)
+        assertSame(fresh, next.items.single())
+        assertSame(old, oldDocument.items.single())
+        assertFalse(next.itemsIn(old.paintBounds()).contains(old))
+        assertFalse(editor.history.canUndo)
+        assertTrue(editor.history.canRedo)
+        editor.redo()
+        assertEquals(committed, fresh.fillRgba)
+        assertEquals(oldPreview, old.fillRgba)
+        assertSame(fresh, next.items.single())
+    }
+
+    @Test fun replacingDocumentCancelsTheOutgoingColorDrag() = withEditor { editor ->
+        val old = editor.document
+        editor.beginColorDrag(Rgba(64, 64, 64, 255), Offset.Zero)
+        assertNotNull(editor.colorDrag)
+        val next = InfiniteDocument()
+        editor.replaceDocument(next)
+        assertNull(editor.colorDrag)
+        // A retired pointer's release cannot revive the drag or modify its replacement.
+        editor.moveColorDrag(Offset(20f, 30f))
+        editor.endColorDrag(Offset(20f, 30f))
+        assertNull(editor.colorDrag)
+        assertTrue(old.items.isEmpty())
+        assertTrue(next.items.isEmpty())
+        assertFalse(editor.history.canUndo)
+        editor.beginColorDrag(Rgba(128, 128, 128, 255), Offset.Zero)
+        assertNotNull(editor.colorDrag)
+        editor.cancelColorDrag()
+        assertNull(editor.colorDrag)
     }
 
     @Test fun firstHostKeepsTheNeverAttachedSurfaces() = withEditor { editor ->

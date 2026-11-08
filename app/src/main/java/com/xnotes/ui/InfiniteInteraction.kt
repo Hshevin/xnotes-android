@@ -484,18 +484,58 @@ class InfiniteInteraction(
 
     /** Drop any in-flight gesture and stop a glide, so a document swap cannot bleed into the next. */
     fun resetGestureState() {
+        // Selection may already refer to the next model. Discard controller-owned state only;
+        // abort/end would instead restore or commit it through that new owner.
+        mode = CanvasPointerMode.IDLE
+        touchTakenBack = true
         rulerController.reset()
         clearCapture()
         stopFling()
         cancelLongPress()
+        cancelDwell()
+        dwellEligible = false
         longPressPrevTool = null
-        mode = CanvasPointerMode.IDLE
+        polygonDraft = null
+        pendingShape = null
+        pendingTape = null
+        tapeStart = null
+        tapePath.clear()
+        connectorDraft = null
+        eraseSession = null
+        jointEdit = null
+        jointFollow = GlueFollow.NONE
+        slideItem = null
+        slideBefore = null
+        clearVertex()
+        lastVertexTap = null
+        lastVertexTapAt = 0L
+        lastWaypointTap = -1
+        lastWaypointTapAt = 0L
+        tapCandidate = false
+        tapDownSelected = emptySet()
+        lastTapSelected = emptySet()
+        lastTapAt = null
+        lastTapTime = 0L
+        bandRect = null
+        lassoPoints.clear()
+        grabHandle = null
+        movedBy = Pt.ZERO
+        transformPointer = Pt.ZERO
+        transformMargin = 0.0
+        connectHot = emptyList()
+        strokeDismissedSelection = false
         dismissPressAt = null
+        panMayCommit = false
+        panMayDismiss = false
         panVel = Pt.ZERO
         liveStroke = null
+        drawingPointerId = -1
         endLift()
         onWetStroke(null)
+        onPendingShape(null)
+        onEraserCursor(null, 0.0)
         onLiftSelection(emptyList(), LiftTransform.NONE)
+        setInteractive(false, true)
         stylusButtons.reset()
     }
 

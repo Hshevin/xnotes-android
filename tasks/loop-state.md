@@ -1,9 +1,9 @@
 # 自主推进恢复点：已恢复
 
 目标：思维导图与文件关系网络，overall complete=false。2026-11-08 用户明确恢复，先检查新渲染架构继续开发；历史 goal 工具可能仍显示 paused，以本次用户明确恢复为准。
-工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。上个检查点 af465a64；本轮选择变换取消修复已验证，随当前提交保存。
+工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。选择取消已提交a168d62b；本轮换文档reset纯清理已验证，随当前提交保存。
 授权：源码、验证、文档和本地提交；用户明确授权同步 master54f05b0f（含主线已有更新）。不打包、安装、推送或发布，不合入其他开发分支。
-当前阶段：生产来源保存前置的选择变换取消已修：CANCEL／双指接管／清选区恢复几何、连线、选框和索引；成功宿主回调先结束模式避免切工具重入。最新 tmp/selection-cancel-full.log 为308套件3425项、0失败/错误/跳过，Android测试源码编译与两独立复核通过；16新事件场景实际仪器／目标设备未运行。无运行作业，overall complete=false。
+当前阶段：取消修复后继续完成换文档reset纯清理（polygon/tap/dwell/旧几何refs、PDF请求/插空scroll、宿主style与color任务），不恢复或补交旧事务。最终tmp/document-reset-full.log为309套件3436项、0失败/错误/跳过，Android源码编译与两独立复核通过；本片11新增主机例，实际仪器／目标设备未运行。无运行作业，overall complete=false。
 新接口/后续顺序：docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。R1先撤除逐对象身份/画布锚点，仅页面UUID；B2c取消。整包副本页面UUID也需更新。R2安全激活/SAF；R3页面多来源闭环；R4跳转/反向引用/恢复/双窗格；R5文件网络及A2剩余交互。
 历史证据：审查修复068e1c2c全量2828项通过、Android仪器源码编译，实际未运行；5314a887 Header/Snapshot12项通过，writer接入未完成。旧文档中的对象身份计划已由页面级决定替代，不沿用为当前产品语义。
 待执行：按source-loop-production-gaps-2026-11-08.md继续生产owner稳定事务屏障/native+working会话统一，补cold pending4受控完成、live转交、旧/unbound无写权恢复及new/copy持久交接，然后原字节页身份激活→页面多来源/预览→跳转返回/backlinks→局部/全库文件网络。只读catalog仅基础API，不宣称页面来源UI已可用。A2线命中/多选/无中心仍保留。保存后放弃继续保留已写版本，不自动回滚；不打包APK。
@@ -75,3 +75,5 @@ A2新建关联原子模型7fd75b83、空白草稿与来源保护686c8f4b已提�
 本轮全部阶段已本地提交，最后代码b6e41ba0；最新完整证据tmp/reference-catalog-full.log为307/3409，0失败/错误/跳过。后续直接沿上列依赖续作，无需重新授权常规编码/测试/本地提交。
 
 2026-11-09：步骤1取消前置已完成并验证（reference-stable-capture-2026-11-09.md）。生产stable gate/native+cache捕获尚未接通；下一片先丢弃换文档reset遗留polygon/tap/dwell，不能用新模型恢复旧手势，再接实际owner事务结束通知与所有保存出口。原完整范围保持，不打APK。
+
+2026-11-09：reset片已验证与独立复核完成，证据reference-stable-capture-2026-11-09.md（6 shared reset+3 shared真实画布宿主+2 host计时）。原dirty/redo与取消16例保留；新编辑undo/redo不读旧baseline，颜色generation无条件退休。下一步实际owner稳定事务通知与所有原生/工作会话保存出口；仍需生产native/cache/恢复/new-copy持久交接、页激活/多来源/跳转返回/backlinks/文件网络和A2余项，不打APK。

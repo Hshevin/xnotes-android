@@ -408,4 +408,5 @@
 - [x] R2严格keepWrittenSave：typed候选/真实target版本、事务内登记核对、最后target/marker guard、PDF实际SHA/取消，3284全量/Android源码编译/独立复核；未接生产放弃/会话。
 
 - [x] R2生产稳定捕获前置：分页／画布选择缩放旋转取消、双指接管和清选择精确回滚，成功回调切工具不撤回已确认内容；16新增事件、完整3425项主机及Android源码编译、独立复核通过。
-- [ ] R2继续：换文档reset丢弃旧草稿/连击/dwell；实际owner稳定事务屏障、同owner原生与工作会话捕获及恢复接线（完整来源闭环仍未完成）。
+- [x] R2换文档reset纯丢旧草稿/连击/dwell/几何与preview引用，嵌套PDF/插空scroll取消及实际画布style/color退休；最终3436项主机、Android源码编译和独立复核通过。
+- [ ] R2继续：实际owner稳定事务屏障、同owner原生与工作会话捕获及恢复接线（完整来源闭环仍未完成）。

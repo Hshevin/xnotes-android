@@ -126,3 +126,7 @@ review_input_plan独立源码审核发现preflight→Main另一owner新D被覆�
 ## 来源保存前置的取消边界（2026-11-09）
 
 两独立代理先发现并复核分页RESIZE/TRANSFORM、画布非lift取消、二指覆盖旧mode及clearSelection丢baseline；随后补成功commit→自动切工具的重入反例。成员先于follow恢复，实际索引通知不推进dirty，全部6个画布正常提交出口先构造command再IDLE再回调。16 shared真实事件覆盖初始dirty/redo保留及成功resize/rotate/MOVE/JOINT同步clear，最终tmp/selection-cancel-full.log为308套件3425项、0失败/错误/跳过，Android仪器入口编译且登记runner；实际未运行。步骤1独立复核无剩余必修，stable gate与producer未宣称完成。下一片reset纯草稿跨文档残留另修。
+
+## 换文档丢弃旧临时状态（2026-11-09）
+
+独立审核要求newNote纯reset先于clear、嵌套PDF press与InsertSpace autoscroll失效，实施后另补page长按借用、InfiniteEditor样式baseline及无条件颜色generation退休。4个polygon/tap、2个实际style undo、2个tool/color宿主反例均真实先红后绿；最终tmp/document-reset-full.log为309套件3436项、0失败/错误/跳过及Android源码编译成功。新增11项含实际Main计时，最终两独立窄复核无剩余必修。color已结束在途AddFill仅源码核实，仪器/真机未运行；producer稳定捕获与替换前保存仍未完成，不把reset当保存凭据。

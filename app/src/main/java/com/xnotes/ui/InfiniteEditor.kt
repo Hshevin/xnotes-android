@@ -2465,6 +2465,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     fun replaceDocument(next: InfiniteDocument) {
         AudioRecording.stopFor(this) // closing the canvas places its recording
         AudioPlayback.closeFor(this)
+        // A completed drag can still have a worker result queued. Always retire its generation.
+        colorDropper.cancel()
+        dropWindow = null
+        dropItems = emptyList()
+        restyleBaseline = null
+        refillBaseline = null
         clearFading() // whatever was melting belongs to the outgoing canvas
         // An open label belongs to the outgoing canvas too; its history goes with it.
         editingLabel?.labelHidden = false

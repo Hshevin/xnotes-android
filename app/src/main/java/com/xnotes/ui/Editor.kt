@@ -9523,8 +9523,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         rebuildPdfSource() // close the outgoing note's PDF source (a blank note has none)
         adoptOpenPdf(state.document) // and reclaim its temp PDF file now it's released
         history.clear()
-        controller.clearSelection()
         controller.resetGestureState() // drop the outgoing note's fling/elastic so it can't bleed in
+        controller.clearSelection() // reset first: the old gesture cannot be restored through the new model
         clearPageSelection()
         state.invalidateAllCaches()
         state.relayout()

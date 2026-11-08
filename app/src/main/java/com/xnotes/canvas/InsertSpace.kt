@@ -197,6 +197,20 @@ internal class InsertSpaceGesture(
         drop(state.document.pages.getOrNull(pageIndex))
     }
 
+    /** The owner has changed models: drop old runtime state without restoring or editing either. */
+    fun discardForDocumentChange() {
+        autoscroll.stopAutoscroll()
+        kind = null
+        pageIndex = -1
+        room = null
+        follow = GlueFollow.NONE
+        moving = emptySet()
+        lifted.clear()
+        hover = null
+        penViewport = null
+        state.roomView = null
+    }
+
     private fun drop(page: Page?) {
         if (state.roomView?.live == true) {
             state.roomView = null

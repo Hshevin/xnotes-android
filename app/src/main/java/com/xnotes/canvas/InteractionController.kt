@@ -4356,18 +4356,105 @@ class InteractionController(
      * new document at (or believing it is at) its bottom, spuriously arming add-page on first scroll.
      */
     fun resetGestureState() {
+        // The host may already have adopted the next document. Never end/restore the old gesture
+        // through that document; its owner must settle it before replacement.
+        mode = PointerMode.IDLE
+        touchTakenBack = true // only a fresh DOWN belongs to the new document
         stopFling()
         stopPageFlipAnimation()
         state.flipOffsetX = 0.0
+        state.zoomingInProgress = false
         clearOverscroll()
+        cancelLongPress()
+        longPressPrevTool = null
         cancelDwell()
         clearFading()
+        insertSpace.discardForDocumentChange()
+        pdfText?.clear() // invalidate asynchronous presses as well as their visible selection
         crossedSegments.clear() // they belong to the outgoing document, whose history is gone
+        liveStroke = null
+        strokePageIndex = null
+        drawingPointerId = -1
         dwellEligible = false
-        mode = PointerMode.IDLE
+        snappedSelectionPendingMenu = false
+        strokeDismissedSelection = false
+        polygonDraft = null
+        polygonPage = null
+        pendingShape = null
+        shapePageIndex = null
+        pendingTape = null
+        tapePageIndex = null
+        tapeStart = null
+        tapePath.clear()
+        connectorDraft = null
+        connectorPage = -1
+        connectHot = emptyList()
+        jointEdit = null
+        jointPage = -1
+        slideSel = null
+        slideBefore = null
+        looseBefore = null
+        resizeItem = null
+        resizeHandle = null
+        resizeOldGeom = null
+        resizePageIndex = -1
+        txItems = emptyList()
+        txSnaps = emptyList()
+        txStartObb = null
+        txHandle = null
+        follows = emptyList()
+        followed = emptySet()
+        followedFrom = emptyList()
+        clearVertex()
+        lastVertexTap = null
+        lastVertexTapAt = 0L
+        lastWaypointTap = -1
+        lastWaypointTapAt = 0L
+        tapCandidate = false
+        tapDownSelected = emptySet()
+        lastTapSelected = emptySet()
+        lastTapViewport = null
+        lastTapTime = 0L
+        bandRect = null
+        lassoPoints.clear()
+        moveOffset = Pt.ZERO
+        selection.clear()
+        selObb = null
+        refillBaseline = null
+        restyleBaseline = null
+        editingText = null
+        editingOldText = ""
+        editingIsNew = false
+        editingPageIndex = -1
+        editingLabel = null
+        labelBefore = null
+        labelPageIndex = -1
+        textDragRect = null
+        textDragPageIndex = -1
+        screenshotRect = null
+        roomButton = null
+        hoverActionTool = null
+        stylusButtons.reset()
+        eraseRemovals.clear()
+        eraseSnapshots.clear()
+        eraseMarkups.clear()
+        eraseUnfilled.clear()
+        eraserCursor = null
+        snapEngaged = false
+        snapRunStartEdge = null
+        snapCurrentEdge = null
+        snapPenViewport = null
+        lockedPressAt = null
         dismissPressAt = null
+        markupPressAt = null
+        panMayCommitText = false
+        downView = null
         lastPan = Pt.ZERO
         panVel = Pt.ZERO
+        onSelectionMenu(null)
+        onScreenshotMenu(null)
+        onSelectionChanged(false)
+        onTextEditEnd()
     }
 
     private fun stepOverscrollSettle(frameTimeNanos: Long) {
