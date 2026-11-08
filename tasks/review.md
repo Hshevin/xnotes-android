@@ -122,3 +122,7 @@ review_input_plan计划指出锁外check后的rename窗口，已加同cache短�
 ## 同head交接持久化半段（2026-11-08）
 
 review_input_plan独立源码审核发现preflight→Main另一owner新D被覆盖、返回派发取消Read泄漏；主代理自查旧T为新失败attempt背书。三个真反例先红后绿，分别以held Read exact head/owner原子注册+previous二次核、AtomicRefs/NonCancellable finally、runtime generation下限修复；独立窄复核全部确认。14新JVM场景含Root最后检查后失效、cold future全字节保留/schema1/PDF变化与更晚同owner成功等。最终303套件3348项与Android源码编译全过，仪器/目标设备未执行。native4续写未开放，actualB恢复/claim与生产仍后续。
+
+## 来源保存前置的取消边界（2026-11-09）
+
+两独立代理先发现并复核分页RESIZE/TRANSFORM、画布非lift取消、二指覆盖旧mode及clearSelection丢baseline；随后补成功commit→自动切工具的重入反例。成员先于follow恢复，实际索引通知不推进dirty，全部6个画布正常提交出口先构造command再IDLE再回调。16 shared真实事件覆盖初始dirty/redo保留及成功resize/rotate/MOVE/JOINT同步clear，最终tmp/selection-cancel-full.log为308套件3425项、0失败/错误/跳过，Android仪器入口编译且登记runner；实际未运行。步骤1独立复核无剩余必修，stable gate与producer未宣称完成。下一片reset纯草稿跨文档残留另修。

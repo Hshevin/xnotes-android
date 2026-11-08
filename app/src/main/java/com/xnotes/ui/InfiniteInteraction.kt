@@ -388,6 +388,18 @@ class InfiniteInteraction(
 
     private fun movingView(): Boolean = mode == CanvasPointerMode.PAN || mode == CanvasPointerMode.PINCH
 
+    private fun selectionGestureActive(): Boolean = when (mode) {
+        CanvasPointerMode.MOVE, CanvasPointerMode.RESIZE, CanvasPointerMode.ROTATE,
+        CanvasPointerMode.VERTEX, CanvasPointerMode.JOINT, CanvasPointerMode.SLIDE -> true
+        else -> false
+    }
+
+    /** The host may switch tools and clear the selection as soon as this command is recorded. */
+    private fun publishSelectionCommit(command: com.xnotes.core.history.Command?) {
+        mode = CanvasPointerMode.IDLE
+        onCommitSelection(command)
+    }
+
     /** Android took this touch back, as its palm rejection does with a resting hand: drop the
      *  gesture, and put back a view it scrolled or zoomed, as the paged canvas does. */
     private fun takeBackTouch() {
@@ -680,6 +692,7 @@ class InfiniteInteraction(
             if (mode == CanvasPointerMode.TAPE) abandonTape()
             // A finger erase yields to a pinch: commit what it already removed rather than lose it.
             if (mode == CanvasPointerMode.ERASE) endErase()
+            if (selectionGestureActive()) abortGesture()
             beginPinch(e)
         }
     }
@@ -781,6 +794,9 @@ class InfiniteInteraction(
     }
 
     private fun abortGesture() {
+        val selectionGesture = selectionGestureActive()
+        tapCandidate = false
+        dismissPressAt = null
         cancelLongPress()
         if (mode == CanvasPointerMode.TEXT_BOX || mode == CanvasPointerMode.SCREENSHOT) clearCapture()
         if (mode == CanvasPointerMode.DRAW) abandonStroke()
@@ -800,15 +816,16 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.JOINT) abandonJoint()
         if (mode == CanvasPointerMode.SLIDE) abandonSlide()
         if (mode == CanvasPointerMode.POLYGON) showPolygonDraft(null)
-        if ((mode == CanvasPointerMode.ROTATE || mode == CanvasPointerMode.RESIZE) && liftedTransform) {
-            selection()?.previewBack()
-            if (bakedInLift.isNotEmpty()) selection()?.applyLiveTo(bakedInLift, Affine.IDENTITY)
-            selection()?.unfollow()
+        if (mode == CanvasPointerMode.ROTATE || mode == CanvasPointerMode.RESIZE) {
+            selection()?.cancelTransform()
             onLiftSelection(emptyList(), LiftTransform.NONE)
             endLift()
-            onSelectionChanged()
+            grabHandle = null
+            transformPointer = Pt.ZERO
+            transformMargin = 0.0
         }
         mode = CanvasPointerMode.IDLE
+        if (selectionGesture) onSelectionChanged()
         setInteractive(false, true)
         stopFling()
         requestRender()
@@ -1005,6 +1022,7 @@ class InfiniteInteraction(
 
     /** Clear the selection and its chrome, for a tool change or a document swap. */
     fun clearSelection() {
+        if (selectionGestureActive()) abortGesture()
         // A long-press grab only borrowed the selection tool; putting the selection away returns it.
         longPressPrevTool?.let {
             longPressPrevTool = null
@@ -1092,7 +1110,7 @@ class InfiniteInteraction(
         val before = slideBefore
         slideItem = null
         slideBefore = null
-        if (before != null && item.snapshotGeometry() != before) onCommitSelection(selection()?.commandFor(listOf(item), listOf(before)))
+        if (before != null && item.snapshotGeometry() != before) publishSelectionCommit(selection()?.commandFor(listOf(item), listOf(before)))
         selection()?.itemChanged(item)
     }
 
@@ -1230,7 +1248,7 @@ class InfiniteInteraction(
         sel.moveLive(movedBy.x, movedBy.y)
         if (movedBy != Pt.ZERO) sel.loneConnector?.letGo()
         onLiftSelection(emptyList(), LiftTransform.NONE)
-        onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
+        publishSelectionCommit(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()
     }
@@ -1311,7 +1329,7 @@ class InfiniteInteraction(
             onLiftSelection(emptyList(), LiftTransform.NONE)
             endLift()
         }
-        onCommitSelection(sel.buildCommand(movedOnly = false))
+        val command = sel.buildCommand(movedOnly = false)
         // A resize of an upright box snaps onto the real bounds, which is what keeps the chrome
         // honest around a text box that refused to shrink past its own text. A turned box cannot be
         // re-derived at all: item bounds are axis aligned, so measuring one and then tilting the
@@ -1319,6 +1337,7 @@ class InfiniteInteraction(
         // exception, since it carries its own frame.
         val upright = sel.box?.let { kotlin.math.abs(it.angle) < 1e-9 } == true
         if ((wasResize && upright) || sel.isFramedShape) sel.refreshBox()
+        publishSelectionCommit(command)
         onSelectionChanged()
         requestRender()
     }
@@ -1392,7 +1411,7 @@ class InfiniteInteraction(
         val sel = selection()
         val spot = vertexSpot
         if (vertexMoved) {
-            onCommitSelection(sel?.buildCommand(movedOnly = false))
+            publishSelectionCommit(sel?.buildCommand(movedOnly = false))
             lastVertexTap = null
         } else {
             vertexBefore?.let { shape.restoreGeometry(it) }
@@ -1403,7 +1422,7 @@ class InfiniteInteraction(
                 shape.toFree()
                 if (shape.deleteVertex(spot)) {
                     sel?.followEdit()
-                    onCommitSelection(sel?.buildCommand(movedOnly = false))
+                    publishSelectionCommit(sel?.buildCommand(movedOnly = false))
                 } else {
                     vertexBefore?.let { shape.restoreGeometry(it) }
                 }
@@ -1487,7 +1506,7 @@ class InfiniteInteraction(
         if (jointMoved || removing) {
             val items = listOf<CanvasItem>(c) + jointFollow.items
             val before = listOf(edit.before) + jointFollow.startSnapshots
-            onCommitSelection(selection()?.commandFor(items, before))
+            publishSelectionCommit(selection()?.commandFor(items, before))
         }
         selection()?.itemChanged(c)
         jointFollow.items.forEach { selection()?.itemChanged(it) }

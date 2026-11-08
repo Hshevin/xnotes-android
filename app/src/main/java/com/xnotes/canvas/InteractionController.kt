@@ -687,6 +687,12 @@ class InteractionController(
 
     private fun movingView(): Boolean = mode == PointerMode.PAN || mode == PointerMode.PINCH
 
+    private fun selectionGestureActive(): Boolean = when (mode) {
+        PointerMode.MOVE, PointerMode.RESIZE, PointerMode.TRANSFORM,
+        PointerMode.VERTEX, PointerMode.JOINT, PointerMode.SLIDE -> true
+        else -> false
+    }
+
     /** Android took this touch back, as its palm rejection does with a resting hand: drop the
      *  gesture, and put back a view it scrolled or zoomed, since the hand never meant to. */
     private fun takeBackTouch() {
@@ -1036,7 +1042,11 @@ class InteractionController(
             if (erasingWithFinger && e.pointerCount >= 2) { endErase(); beginPinch(e) }
             return
         }
-        if (e.pointerCount >= 2) beginPinch(e)
+        if (e.pointerCount >= 2) {
+            // A pinch takes over the view, not the uncommitted geometry beneath it.
+            if (selectionGestureActive()) abortGesture()
+            beginPinch(e)
+        }
     }
 
     private fun handleMove(e: MotionEvent) {
@@ -3542,6 +3552,7 @@ class InteractionController(
     }
 
     fun clearSelection() {
+        if (selectionGestureActive()) abortGesture()
         // Restore the tool a long-press grab temporarily switched away from.
         longPressPrevTool?.let {
             tool = it
@@ -4478,6 +4489,9 @@ class InteractionController(
     }
 
     private fun abortGesture() {
+        val selectionGesture = selectionGestureActive()
+        tapCandidate = false
+        dismissPressAt = null
         cancelLongPress()
         cancelDwell()
         dwellEligible = false
@@ -4498,6 +4512,22 @@ class InteractionController(
         if (mode == PointerMode.ROOM) insertSpace.abort()
         roomButton = null
         if (mode == PointerMode.MOVE) moveOffset = Pt.ZERO
+        if (mode == PointerMode.RESIZE) {
+            resizeOldGeom?.let { (resizeItem as? Resizable)?.setGeometry(it) }
+            resizeItem = null
+            resizeHandle = null
+            resizeOldGeom = null
+            resizePageIndex = -1
+            selObb = selectionBox()
+        }
+        if (mode == PointerMode.TRANSFORM) {
+            txItems.forEachIndexed { i, sel -> sel.item.restoreGeometry(txSnaps[i]) }
+            selObb = txStartObb
+            txItems = emptyList()
+            txSnaps = emptyList()
+            txStartObb = null
+            txHandle = null
+        }
         if (mode == PointerMode.MOVE || mode == PointerMode.TRANSFORM || mode == PointerMode.VERTEX || mode == PointerMode.JOINT) {
             for ((_, f) in follows) f.restore()
         }
@@ -4524,6 +4554,7 @@ class InteractionController(
             state.invalidateCachesForZoom()
         }
         mode = PointerMode.IDLE
+        if (selectionGesture) refreshSelectionMenu()
     }
 
     private fun resolvePressure(e: MotionEvent, pointerIndex: Int, toolType: Int): Double =
