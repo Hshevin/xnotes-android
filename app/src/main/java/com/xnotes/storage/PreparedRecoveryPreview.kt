@@ -25,6 +25,7 @@ internal class PreparedRecoveryPreview private constructor(
     @Volatile private var closed=false
     val pageCount get()=if(kind==DocumentKind.NOTE) requireNotNull(note).pages.size else 1
     private fun checkOpen() {check(!closed) {"Recovery preview is closed"}}
+    internal fun ensureOpen()=checkOpen()
 
     /** The displayed model is deliberately not encoded: unknown original payload must survive. */
     fun prepareCopy(targetDocumentId:String,directory:File,checkActive:()->Unit={}):BundleMigration.Prepared {

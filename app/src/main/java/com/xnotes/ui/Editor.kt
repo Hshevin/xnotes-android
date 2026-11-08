@@ -3064,19 +3064,26 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * layout, so [flow]'s code blocks are parsed synchronously here — cheap (blocks are
      * small) and safe off-thread (the highlighter is stateless per call).
      */
-    private fun themedFlowLayout(flow: com.xnotes.core.text.TextFlow): FlowLayout {
+    /** Explicit colours for a historical preview; no live note or preferences are consulted. */
+    private data class SnapshotPaint(
+        val paper:Rgba=Rgba(255,255,255),val autoText:Rgba=Rgba(28,28,28),
+        val accent:Rgba=Rgba(0,0,0),val rule:Rgba=Rgba(100,100,100),
+        val codeTheme:com.xnotes.core.text.HighlightTheme=com.xnotes.core.text.HighlightTheme.LIGHT,
+    )
+    private fun themedFlowLayout(flow: com.xnotes.core.text.TextFlow,style:SnapshotPaint?=null,checkActive:()->Unit={}): FlowLayout {
         val layout = FlowLayout(textMeasurer, com.xnotes.platform.MathRendering.Blocking)
-        val theme = activeCodeTheme()
+        val theme = style?.codeTheme ?: activeCodeTheme()
         layout.codeBackground = { theme.background }
-        layout.autoColor = { defaultTextColor() }
-        val accent = palette.accent
+        layout.autoColor = { style?.autoText ?: defaultTextColor() }
+        val accent = style?.accent ?: palette.accent
         layout.accentColor = { accent }
-        val rule = tableRuleColor()
+        val rule = style?.rule ?: tableRuleColor()
         layout.ruleColor = { rule }
         val hl = highlighter ?: return layout
         val spans = HashMap<Paragraph, List<com.xnotes.core.text.CodeSpan>>()
         var i = 0
         while (i < flow.paragraphs.size) {
+            checkActive()
             val lang = flow.paragraphs[i].codeLang
             if (lang.isNullOrEmpty() || !hl.supports(lang)) {
                 i++
@@ -3090,6 +3097,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 ?.sortedBy { it.start } ?: continue
             var offset = 0
             for (p in paras) {
+                checkActive()
                 val len = p.length
                 spans[p] = sorted.mapNotNull { s ->
                     val a = (s.start - offset).coerceAtLeast(0)
@@ -4542,64 +4550,81 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Page [index] whole, [heightPx] tall once turned by [rotation], at the page's own shape. */
-    private fun renderDocPage(doc: Document, index: Int, heightPx: Int, filter: com.xnotes.canvas.PdfPageFilter, rotation: Int = 0): android.graphics.Bitmap? {
+    private fun renderDocPage(doc: Document, index: Int, heightPx: Int, filter: com.xnotes.canvas.PdfPageFilter, rotation: Int = 0,
+                              style:SnapshotPaint?=null,maxSidePx:Int?=null,strictPdf:Boolean=false,checkActive:()->Unit={}): android.graphics.Bitmap? {
+        checkActive()
         val page = doc.pages.getOrNull(index) ?: return null
         val cover = exportFootprint(doc, page)
         val turned = rotation == 90 || rotation == 270
-        val scale = heightPx.coerceAtLeast(1) / (if (turned) cover.w else cover.h)
-        val w = (cover.w * scale).roundToInt().coerceAtLeast(1)
-        val h = (cover.h * scale).roundToInt().coerceAtLeast(1)
-        return paintDocPage(doc, index, w, h, scale, rotation, filter)
+        val requested = heightPx.coerceAtLeast(1) / (if (turned) cover.w else cover.h)
+        val scale = minOf(requested,maxSidePx?.let {it.coerceAtLeast(1)/maxOf(cover.w,cover.h)} ?: Double.POSITIVE_INFINITY)
+        val limit=maxSidePx?.coerceAtLeast(1) ?: Int.MAX_VALUE
+        val w = (cover.w * scale).roundToInt().coerceIn(1,limit)
+        val h = (cover.h * scale).roundToInt().coerceIn(1,limit)
+        return paintDocPage(doc,index,w,h,scale,rotation,filter,style,strictPdf,checkActive)
     }
 
     /** Page [index] painted from its top-left corner at [scale] onto a [w]×[h] surface, then turned by [rotation]. */
     private fun paintDocPage(
         doc: Document, index: Int, w: Int, h: Int, scale: Double, rotation: Int, filter: com.xnotes.canvas.PdfPageFilter,
+        style:SnapshotPaint?=null,strictPdf:Boolean=false,checkActive:()->Unit={},
     ): android.graphics.Bitmap? {
+        checkActive()
         val page = doc.pages.getOrNull(index) ?: return null
         val cover = exportFootprint(doc, page)
         val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
-        // Resolve the paper colour against this note's own document/page style (not the open note's).
-        surface.fill(page.resolvedPageColor(doc, state.pageColorOverride) ?: state.palette.paper)
-        val r = surface.renderer()
-        r.scale(scale, scale)
-        r.translate(-cover.left, -cover.top)
-        // A pixel per 300 px of tile, so the ruling survives the disk cache's half-size decode.
-        TemplateLibrary.paint(r, doc, page, cover, cover, maxOf(1.0, maxOf(w, h) / 300.0) / scale)
-        doc.pdfFile?.let { file ->
-            runCatching {
-                com.xnotes.platform.PdfSource.create(file)?.let { src ->
-                    page.pdfKey?.let { pi ->
-                        // The page as it was, before any room: drawn in bands through the room inserted since.
-                        val sw = page.sourceWidth
-                        val sh = page.sourceHeight
-                        val pw = (sw * scale).toInt().coerceAtLeast(1)
-                        val ph = (sh * scale).toInt().coerceAtLeast(1)
-                        com.xnotes.platform.PdfSource.withPriority(com.xnotes.platform.PdfPriority.THUMBNAIL) {
-                            src.renderPage(pi, pw, ph, filter, page.markups)
-                        }?.let { bg ->
-                            com.xnotes.core.model.Rooms.drawBanded(r, bg, Rect(0.0, 0.0, sw, sh), page.rooms, sw, sh)
-                            bg.recycle()
-                        }
-                    }
-                    src.close()
+        var result:android.graphics.Bitmap?=null
+        var transferred=false
+        try {
+            surface.fill(page.resolvedPageColor(doc,if(style==null) state.pageColorOverride else null) ?: (style?.paper ?: state.palette.paper))
+            val r = surface.renderer()
+            r.scale(scale, scale)
+            r.translate(-cover.left, -cover.top)
+            checkActive()
+            TemplateLibrary.paint(r,doc,page,cover,cover,maxOf(1.0,maxOf(w,h)/300.0)/scale)
+            fun paintPdf() {
+                val pi=page.pdfKey ?: return
+                val file=doc.pdfFile ?: if(strictPdf) throw java.io.IOException(appContext.getString(R.string.layers_preview_failed)) else return
+                checkActive()
+                // Open first so a failing page-count wait still has a source to close.
+                val src=com.xnotes.platform.PdfSource.open(file)
+                try {
+                    if(src.pageCount<=0) throw java.io.IOException(appContext.getString(R.string.layers_preview_failed))
+                    val sw=page.sourceWidth;val sh=page.sourceHeight
+                    val pdfScale=if(strictPdf) minOf(scale,maxOf(w,h).toDouble()/maxOf(sw,sh)) else scale
+                    val pw=(sw*pdfScale).toInt().coerceAtLeast(1);val ph=(sh*pdfScale).toInt().coerceAtLeast(1)
+                    checkActive()
+                    val bg=com.xnotes.platform.PdfSource.withPriority(com.xnotes.platform.PdfPriority.THUMBNAIL) {
+                        src.renderPage(pi,pw,ph,filter,page.markups)
+                    } ?: throw java.io.IOException(appContext.getString(R.string.layers_preview_failed))
+                    try {checkActive();com.xnotes.core.model.Rooms.drawBanded(r,bg,Rect(0.0,0.0,sw,sh),page.rooms,sw,sh)}
+                    finally {bg.recycle()}
+                } finally {src.close()}
+            }
+            if(strictPdf) paintPdf() else runCatching {paintPdf()}.exceptionOrNull()?.let {
+                if(it is java.util.concurrent.CancellationException) throw it
+            }
+            checkActive()
+            if(page.pdfPage==null) MarkupPainter.paint(r,page.markups,doc.dpi/72.0)
+            val items=if(style==null) itemsSnapshot(page) else page.layers.ordered(page.items.toList())
+            PageLayers.paint(items, {
+                checkActive()
+                if(!doc.flow.isEmpty) {
+                    val frame=themedFlowLayout(doc.flow,style,checkActive)
+                        .layout(doc.flow,doc.pages.map {PageBox(it.sourceWidth,it.sourceHeight)},doc.dpi,throughPage=index,firstPage=flowStart(doc))
+                    checkActive();FlowPainter.paintPage(r,frame,index,Rect(0.0,0.0,page.width,page.height))
                 }
-            }
+            }) {checkActive();it.paint(r)}
+            checkActive()
+            val bmp=surface.bitmap
+            result=if(rotation==0) bmp else android.graphics.Bitmap.createBitmap(bmp,0,0,bmp.width,bmp.height,
+                android.graphics.Matrix().apply {postRotate(rotation.toFloat())},true)
+            checkActive();transferred=true
+            return result
+        } finally {
+            if(!transferred && result!==surface.bitmap) result?.recycle()
+            if(!transferred || result!==surface.bitmap) surface.recycle()
         }
-        if (page.pdfPage == null) MarkupPainter.paint(r, page.markups, doc.dpi / 72.0)
-        // A closed note's flow is laid out locally (the published snapshot serves the open note only),
-        // and only as far as this page, so a tile never sets the formulas further on.
-        PageLayers.paint(itemsSnapshot(page), {
-            if (!doc.flow.isEmpty) {
-                val frame = themedFlowLayout(doc.flow)
-                    .layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, throughPage = index, firstPage = flowStart(doc))
-                FlowPainter.paintPage(r, frame, index, Rect(0.0, 0.0, page.width, page.height))
-            }
-        }) { it.paint(r) }
-        val bmp = surface.bitmap
-        if (rotation == 0) return bmp
-        val m = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
-        return android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
     }
 
     /**
@@ -4618,26 +4643,50 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         doc: com.xnotes.core.infinite.InfiniteDocument,
         wPx: Int,
         hPx: Int,
+        style:SnapshotPaint?=null,checkActive:()->Unit={},
     ): android.graphics.Bitmap? {
+        checkActive()
         val w = wPx.coerceAtLeast(1)
         val h = hPx.coerceAtLeast(1)
         val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
-        surface.fill(doc.background.paperColor ?: state.palette.paper)
-        val bounds = doc.layers.ordered(doc.items).map { it.paintBounds() }.reduceOrNull { a, rect -> a.union(rect) }
-        if (bounds != null && bounds.w > 0.0 && bounds.h > 0.0) {
-            val r = surface.renderer()
-            val margin = minOf(w, h) * 0.06
-            val scale = minOf((w - 2 * margin) / bounds.w, (h - 2 * margin) / bounds.h).coerceAtMost(1.0)
-            // Centre the content in the tile, whichever way round it is.
-            r.translate(
-                margin + (w - 2 * margin - bounds.w * scale) / 2.0,
-                margin + (h - 2 * margin - bounds.h * scale) / 2.0,
-            )
-            r.scale(scale, scale)
-            r.translate(-bounds.left, -bounds.top)
-            for (item in doc.layers.ordered(doc.items.toList())) item.paint(r)
-        }
-        return surface.bitmap
+        var transferred=false
+        try {
+            surface.fill(doc.background.paperColor ?: (style?.paper ?: state.palette.paper))
+            val items=doc.layers.ordered(doc.items.toList())
+            val bounds=items.map {checkActive();it.paintBounds()}.reduceOrNull {a,rect->a.union(rect)}
+            if(bounds!=null && bounds.w>0.0 && bounds.h>0.0) {
+                val r=surface.renderer();val margin=minOf(w,h)*0.06
+                val scale=minOf((w-2*margin)/bounds.w,(h-2*margin)/bounds.h).coerceAtMost(1.0)
+                r.translate(margin+(w-2*margin-bounds.w*scale)/2.0,margin+(h-2*margin-bounds.h*scale)/2.0)
+                r.scale(scale,scale);r.translate(-bounds.left,-bounds.top)
+                for(item in items) {checkActive();item.paint(r)}
+            }
+            checkActive();transferred=true;return surface.bitmap
+        } finally {if(!transferred) surface.recycle()}
+    }
+
+    /** Render a held historical model without adopting it or borrowing the current note's view settings. */
+    internal suspend fun renderRecoveryPreviewPage(prepared:com.xnotes.storage.PreparedRecoveryPreview,pageIndex:Int,maxSidePx:Int,
+                                                   checkActive:()->Unit={}):android.graphics.Bitmap? {
+        val owned=java.util.concurrent.atomic.AtomicReference<android.graphics.Bitmap?>()
+        try {
+            val result=withContext(thumbDispatcher) {
+                val context=kotlinx.coroutines.currentCoroutineContext()
+                val check={context.ensureActive();prepared.ensureOpen();checkActive()}
+                check();require(pageIndex in 0 until prepared.pageCount)
+                val side=maxSidePx.coerceIn(1,2048);val style=SnapshotPaint()
+                val bitmap=when(prepared.kind) {
+                    DocumentKind.NOTE->renderDocPage(requireNotNull(prepared.note),pageIndex,side,com.xnotes.canvas.PdfPageFilter.NONE,
+                        style=style,maxSidePx=side,strictPdf=true,checkActive=check)
+                    DocumentKind.CANVAS->renderCanvasThumbnail(requireNotNull(prepared.canvas),side,side,style,check)
+                    else->throw IllegalArgumentException("Unsupported recovery preview kind")
+                }
+                owned.set(bitmap);check();bitmap
+            }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();prepared.ensureOpen();checkActive()
+            owned.compareAndSet(result,null)
+            return result
+        } finally {owned.getAndSet(null)?.recycle()}
     }
 
     /** The square thumbnail for the canvas at [uri]; null when it is not a readable canvas. */
