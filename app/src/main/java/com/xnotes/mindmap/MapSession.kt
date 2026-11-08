@@ -77,6 +77,9 @@ class MapSession() : ViewModel() {
     }
     private fun retireConnectedDraft() {
         selectedRelation=null
+        nodeSelectionMode=false
+        replaceNodeSelection(emptySet())
+        selectionRevision++
         connectedDraft?.let {cancelConnectedNode(it.token)};connectedEpoch++
         existingSourceRequest=null;existingSourceJobs.toList().forEach {it.cancel()};existingSourceJobs.clear()
     }
@@ -181,10 +184,55 @@ class MapSession() : ViewModel() {
     }
     fun reportInkLimit() {limitError=true}
     var document by mutableStateOf<MindMapDocument?>(null); private set
-    private var selectedNode by mutableStateOf<String?>(null)
+    var selectedNodes by mutableStateOf<Set<String>>(emptySet());private set
+    var nodeSelectionMode by mutableStateOf(false);private set
+    private var selectionRevision=0L
+    internal val contentRevision:Long get()=revision
     var selected:String?
-        get()=selectedNode
-        set(value) {selectedNode=value;selectedRelation=null}
+        get()=selectedNodes.singleOrNull()
+        set(value) {replaceNodeSelection(value?.let(::setOf) ?: emptySet());selectedRelation=null}
+    private fun replaceNodeSelection(ids:Set<String>) {
+        if(selectedNodes!=ids) {selectedNodes=ids.toSet();selectionRevision++}
+    }
+    private fun selectionReady() = !closing && !replacingDocument && !inkContact &&
+        textDraft==null && textRestore==null && connectedDraft==null
+    fun setNodeSelectionMode(enabled:Boolean):Boolean {
+        if(!selectionReady()) return false
+        if(nodeSelectionMode==enabled) return true
+        nodeSelectionMode=enabled;selectedRelation=null;selectionRevision++
+        if(!enabled && selectedNodes.size>1) selected=document?.nodes?.firstOrNull {it.id in selectedNodes}?.id
+        return true
+    }
+    fun selectNodes(ids:Set<String>):Boolean {
+        if(!selectionReady() || !nodeSelectionMode && ids.size>1) return false
+        val visible=document?.visible()?.mapTo(hashSetOf()) {it.id} ?: return false
+        if(!visible.containsAll(ids)) return false
+        replaceNodeSelection(ids);selectedRelation=null
+        return true
+    }
+    internal fun selectNodes(capture:MapNodeSelectionCapture,ids:Set<String>):Boolean =
+        accepts(capture) && selectNodes(ids)
+    internal fun captureNodes(expected:MindMapDocument,ids:Set<String>,expectedSelection:Set<String> = selectedNodes):MapNodeSelectionCapture? {
+        if(!selectionReady() || expected!==document || expectedSelection!=selectedNodes) return null
+        val visible=expected.visible().mapTo(hashSetOf()) {it.id}
+        if(!visible.containsAll(ids)) return null
+        return MapNodeSelectionCapture(expected,ids,this,connectedEpoch,revision,selectionRevision)
+    }
+    private fun accepts(capture:MapNodeSelectionCapture):Boolean = selectionReady() &&
+        capture.owner===this && capture.document===document && capture.epoch==connectedEpoch &&
+        capture.revision==revision && capture.selectionRevision==selectionRevision
+    internal fun moveNodes(capture:MapNodeSelectionCapture,dx:Double,dy:Double):Boolean {
+        if(!accepts(capture)) return false
+        return operate {it.translateNodes(capture.ids,dx,dy)}.also {if(it) selectNodes(capture.ids)}
+    }
+    internal fun deleteNodes(capture:MapNodeSelectionCapture):Boolean {
+        if(!accepts(capture)) return false
+        return operate {it.deleteNodes(capture.ids)}
+    }
+    internal fun alignNodes(capture:MapNodeSelectionCapture,alignment:MapAlignment):Boolean {
+        if(!accepts(capture)) return false
+        return operate {it.alignNodes(capture.ids,alignment)}
+    }
     var selectedRelation by mutableStateOf<String?>(null);private set
     fun selectRelation(id:String?):Boolean {
         if(closing || replacingDocument || inkContact || textDraft!=null || textRestore!=null) return false
@@ -192,7 +240,8 @@ class MapSession() : ViewModel() {
         val doc=document ?: return false
         val visible=doc.visible().mapTo(hashSetOf()) {it.id}
         if(doc.relations.none {it.id==id && it.from in visible && it.to in visible}) return false
-        selectedNode=null;selectedRelation=id
+        nodeSelectionMode=false;selectionRevision++
+        replaceNodeSelection(emptySet());selectedRelation=id
         return true
     }
     var loading by mutableStateOf(true); private set
@@ -263,7 +312,8 @@ class MapSession() : ViewModel() {
         document = h.document
         val visible=h.document.visible().mapTo(hashSetOf()) {it.id}
         if(h.document.relations.none {it.id==selectedRelation && it.from in visible && it.to in visible}) selectedRelation=null
-        if(selectedRelation!=null) selectedNode=null
+        if(selectedRelation!=null) replaceNodeSelection(emptySet())
+        else if(nodeSelectionMode) replaceNodeSelection(selectedNodes.intersect(visible))
         else if (h.document.nodes.none { it.id == selected }) selected = h.document.root.id
         canUndo = h.canUndo; canRedo = h.canRedo; dirty = true; copySaved = false; revision++
         debounce?.cancel()

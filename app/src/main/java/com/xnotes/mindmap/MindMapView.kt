@@ -16,7 +16,7 @@ import kotlin.math.hypot
 /** One native surface for the graph; no nested AndroidViews or wet-ink Surface reattachment. */
 class MindMapView(context: Context) : View(context) {
     var document = MindMapDocument()
-        set(value) { if (field != value) {
+        set(value) { if (field !== value) {
             val differentDocument=field.id!=value.id
             discardCapturedGesture()
             if(connectionFrom!=null && (value.id!=connectionDocumentId || value.visible().none {it.id==connectionFrom})) cancelConnection()
@@ -28,20 +28,39 @@ class MindMapView(context: Context) : View(context) {
             if(new!=null) inkInput.ink=new.ink
             painter.retainInk(value.nodes.flatMap {it.ink});invalidate()
         } }
-    private var nodeSelection:String?=null
+    private var nodeSelections:Set<String> = emptySet()
     private var relationSelection:String?=null
     var selected:String?
-        get()=nodeSelection
+        get()=nodeSelections.singleOrNull()
         set(value) {updateSelection(value,null)}
     var selectedRelation:String?
         get()=relationSelection
-        set(value) {updateSelection(if(value==null) nodeSelection else null,value)}
+        set(value) {if(value==null) {relationSelection=null;invalidate()} else updateSelection(null,value)}
     /** A same-ID file reload still retires gestures belonging to the previous open session. */
     var documentEpoch:Long=0L
         set(value) {if(field!=value) {cancelDetectors();discardCapturedGesture();relationSelection=null;field=value;invalidate()}}
+    var documentRevision:Long=0L
+        set(value) {if(field!=value) {cancelDetectors();discardCapturedGesture();field=value}}
+    private var selectionQuickScale:Boolean?=null
+    var nodeSelectionMode=false
+        set(value) {if(field!=value) {
+            cancelDetectors();discardCapturedGesture();cancelConnection()
+            if(value) {selectionQuickScale=scaleDetector.isQuickScaleEnabled;scaleDetector.isQuickScaleEnabled=false}
+            else {selectionQuickScale?.let {scaleDetector.isQuickScaleEnabled=it};selectionQuickScale=null}
+            field=value;invalidate()
+        }}
+    internal var onCaptureNodes:(MindMapDocument,Set<String>,Set<String>)->MapNodeSelectionCapture?={doc,ids,_->MapNodeSelectionCapture(doc,ids)}
+    internal var onMoveNodes:(MapNodeSelectionCapture,Double,Double)->Boolean={_,_,_->false}
+    internal var onSelectNodes:(MapNodeSelectionCapture,Set<String>)->Boolean={_,_->true}
+    fun setSelectedNodes(ids:Set<String>) {
+        val visible=document.visible().mapTo(hashSetOf()) {it.id}
+        val next=ids.filterTo(linkedSetOf()) {it in visible}
+        if(next!=nodeSelections) discardCapturedGesture()
+        nodeSelections=next;relationSelection=null;invalidate()
+    }
     fun updateSelection(node:String?,relation:String?) {
         val edge=relation?.takeIf(::relationVisible)
-        nodeSelection=if(edge!=null) null else node
+        nodeSelections=if(edge!=null || node==null) emptySet() else setOf(node)
         relationSelection=edge
         invalidate()
     }
@@ -72,6 +91,7 @@ class MindMapView(context: Context) : View(context) {
     private var pressedStream=false
     private var connectionDrain=false
     private var relationDrain=false
+    private var nodeSelectionDrain=false
     private var connectionEnterHeld=false
     var connectionFrom:String?=null;private set
     var connectionTarget:String?=null;private set
@@ -121,6 +141,14 @@ class MindMapView(context: Context) : View(context) {
         }
         override fun onLongPress(e: MotionEvent) { if (!dragging) hit(e.x, e.y)?.takeUnless {it.kind==NodeKind.INK}?.let { onEdit(it.id) }; cancelGesture() }
     })
+    private val nodeSelector=MapNodeSelectionGesture(
+        {document},{nodeSelections},{x,y->point(x,y)},{scale.toDouble()},slop.toDouble(),
+        {x,y->x>=0 && y>=0 && x<width && y<height},
+        {doc,ids,original->onCaptureNodes(doc,ids,original)},{onInkContact(it)},
+        {capture,ids->onSelectNodes(capture,ids).also {if(it) setSelectedNodes(ids)}},
+        {capture,dx,dy->onMoveNodes(capture,dx,dy).also {if(it) setSelectedNodes(capture.ids)}},
+        ::cancelDetectors,{scaleDetector.onTouchEvent(it)},{dx,dy->panText(dx,dy)},
+        {nodeSelectionDrain=pressedStream},{invalidate()})
     init {
         inkInput.onCommit={old,next ->
             val id=inkOwner
@@ -140,17 +168,18 @@ class MindMapView(context: Context) : View(context) {
     private fun hit(x: Float, y: Float, doc: MindMapDocument = document) = doc.visible().lastOrNull { it.bounds.contains(point(x, y)) }
     private fun hitRelations(x:Float,y:Float)=MapRelationGeometry.hits(painter.relationGeometry(document),point(x,y),
         MapRelationGeometry.hitRadius(resources.displayMetrics.density.toDouble(),scale.toDouble()))
-    private fun discardRelationPress() {
-        if(relationPress==null) return
-        discardCapturedGesture()
-    }
     private fun discardCapturedGesture() {
+        if(!nodeSelector.dispatchingCamera) {
+            if(nodeSelector.active) {nodeSelectionDrain=pressedStream;cancelDetectors()}
+            nodeSelector.cancel()
+        }
         if(before==null && relationPress==null) return
         cancelDetectors();cancelGesture();pointer=-1;suppressRemainingTouch=true
     }
+    fun cancelNodeSelectionGesture() {discardCapturedGesture();cancelDetectors()}
     fun fit() {
         if (width == 0 || height == 0 || inkInput.active || connectionPen) return
-        discardRelationPress()
+        discardCapturedGesture()
         val b = painter.drawingBounds(document)
         val s = minOf(width / b.w, height / b.h).toFloat().coerceAtMost(resources.displayMetrics.density * 1.5f)
         zoom = (s / resources.displayMetrics.density).coerceIn(.05f, 4f)
@@ -160,7 +189,7 @@ class MindMapView(context: Context) : View(context) {
     }
     fun centerOn(id: String) {
         if(inkInput.active || connectionPen) return
-        discardRelationPress()
+        discardCapturedGesture()
         document.nodes.firstOrNull { it.id == id }?.bounds?.let {
             panX = width / 2f - it.centerX.toFloat() * scale
             panY = height / 2f - it.centerY.toFloat() * scale
@@ -175,6 +204,11 @@ class MindMapView(context: Context) : View(context) {
         if(connectionFrom!=null && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {cancelConnection();return true}
         if(connectionPen) return true
         if(!isEnabled || inkInput.active) return false
+        if(nodeSelectionMode) {
+            if(nodeSelector.penContact) return true
+            if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {discardCapturedGesture();cancelDetectors();return true}
+            if(keyCode==android.view.KeyEvent.KEYCODE_ENTER) return true
+        }
         if(connectionFrom==null && selectedRelation!=null && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
             updateSelection(null,null);onSelectRelation(null);return true
         }
@@ -189,8 +223,11 @@ class MindMapView(context: Context) : View(context) {
         when (keyCode) {
             android.view.KeyEvent.KEYCODE_DPAD_DOWN, android.view.KeyEvent.KEYCODE_DPAD_UP -> {
                 val next = if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) at + 1 else at - 1
-                selected = visible[next.coerceIn(0, visible.lastIndex)].id
-                onSelect(selected); centerOn(requireNotNull(selected)); return true
+                val id=visible[next.coerceIn(0,visible.lastIndex)].id
+                if(nodeSelectionMode) onCaptureNodes(document,setOf(id),nodeSelections)?.let {capture->
+                    if(onSelectNodes(capture,setOf(id))) {setSelectedNodes(setOf(id));centerOn(id)}
+                } else {selected=id;onSelect(id);centerOn(id)}
+                return true
             }
             android.view.KeyEvent.KEYCODE_ENTER -> {
                 if(!pressedStream) selectedRelation?.let {onEditRelation(it);return true}
@@ -216,12 +253,12 @@ class MindMapView(context: Context) : View(context) {
     }
     fun panText(dx:Float,dy:Float) {
         if(inkInput.active || connectionPen || !dx.isFinite() || !dy.isFinite()) return
-        discardRelationPress()
+        discardCapturedGesture()
         panX+=dx;panY+=dy;invalidate();onViewportChanged()
     }
     fun restoreViewport(saved:Viewport,oldWidth:Int,oldHeight:Int,oldDensity:Float) {
         if(width<=0 || height<=0 || oldDensity<=0 || inkInput.active || connectionPen) return
-        discardRelationPress()
+        discardCapturedGesture()
         zoom=saved.zoom.coerceIn(.05f,4f)
         val oldScale=oldDensity*saved.zoom
         panX=width/2f-(oldWidth/2f-saved.panX)/oldScale*scale
@@ -240,23 +277,29 @@ class MindMapView(context: Context) : View(context) {
     fun zoomBy(factor: Float) = scaleAt(factor, width / 2f, height / 2f)
     private fun scaleAt(factor: Float, x: Float, y: Float) {
         if(inkInput.active || connectionPen) return
-        discardRelationPress()
+        discardCapturedGesture()
         val p = point(x, y)
         zoom = (zoom * factor).coerceIn(.05f, 4f)
         panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
         invalidate();onViewportChanged()
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { discardRelationPress();cancelConnection();inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { discardCapturedGesture();cancelConnection();inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
     override fun setEnabled(enabled:Boolean) {if(inputReady && !enabled) {cancelDetectors();discardCapturedGesture();cancelConnection()};super.setEnabled(enabled)}
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         canvas.save(); canvas.translate(panX, panY); canvas.scale(scale, scale)
         val owner=document.nodes.firstOrNull {it.id==inkOwner}
         painter.retainInk(document.nodes.flatMap {it.ink})
-        val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else preview ?: document
-        painter.draw(canvas, shown, dark, selected, connectionTarget ?: dropTarget,editingText,
-            connectionFrom?.let {from->connectionPreview?.let {from to it}},selectedRelation=selectedRelation)
-        if(owner!=null && selected==owner.id) {
+        val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else nodeSelector.preview ?: preview ?: document
+        painter.draw(canvas, shown, dark, if(nodeSelectionMode) null else selected, connectionTarget ?: dropTarget,editingText,
+            connectionFrom?.let {from->connectionPreview?.let {from to it}},selectedRelation=selectedRelation,
+            selectedNodes=nodeSelector.previewSelection ?: nodeSelections)
+        nodeSelector.marquee?.let {r->
+            portPaint.color=if(dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            portPaint.style=android.graphics.Paint.Style.STROKE;portPaint.strokeWidth=Space.s2.value/zoom
+            canvas.drawRect(r.left.toFloat(),r.top.toFloat(),r.right.toFloat(),r.bottom.toFloat(),portPaint)
+        }
+        if(!nodeSelectionMode && owner!=null && selected==owner.id) {
             canvas.save();canvas.translate(owner.x.toFloat(),owner.y.toFloat())
             canvas.clipRect(0f,0f,owner.width.toFloat(),owner.height.toFloat())
             inkInput.drawSelection(canvas,if(dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE,scale)
@@ -279,7 +322,7 @@ class MindMapView(context: Context) : View(context) {
     }
     /** Screen-space target: never shrink it with zoom or place it over editable node content. */
     internal fun connectionPort():Rect? {
-        if(!isEnabled || inkInput.active || editingText!=null || connectionFrom!=null || pointer>=0 || width<=0 || height<=0) return null
+        if(nodeSelectionMode || !isEnabled || inkInput.active || editingText!=null || connectionFrom!=null || pointer>=0 || width<=0 || height<=0) return null
         val visible=document.visible();val node=visible.firstOrNull {it.id==selected} ?: return null
         fun screenBounds(n:MapNode):Rect {
             val a=screenPoint(n.bounds.topLeft);val b=screenPoint(Pt(n.bounds.right,n.bounds.bottom))
@@ -297,7 +340,7 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     fun beginConnection(from:String):Boolean {
-        if(!isEnabled || inkInput.active || pressedStream || pointer>=0 || editingText!=null || document.visible().none {it.id==from}) return false
+        if(nodeSelectionMode || !isEnabled || inkInput.active || pressedStream || pointer>=0 || editingText!=null || document.visible().none {it.id==from}) return false
         armConnection(from);return true
     }
     private fun armConnection(from:String) {
@@ -386,7 +429,7 @@ class MindMapView(context: Context) : View(context) {
     private fun inkBody(n:MapNode,p:Pt):Boolean = n.kind==NodeKind.INK &&
         p.x in n.x+8..n.x+n.width-8 && p.y in n.y+8..n.y+n.height-(if(n.sources.isEmpty()) 8 else 28)
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if(e.actionMasked==MotionEvent.ACTION_DOWN) {pressedStream=true;connectionDrain=false}
+        if(e.actionMasked==MotionEvent.ACTION_DOWN) {pressedStream=true;connectionDrain=false;nodeSelectionDrain=false}
         return try {handleTouch(e)} finally {
             if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL) pressedStream=false
         }
@@ -395,6 +438,7 @@ class MindMapView(context: Context) : View(context) {
         if(!isEnabled) return true
         // Connection cancellation drains independently of ink's deliberate pen-over-palm priority.
         if(connectionDrain) return true
+        if(nodeSelectionDrain) return true
         if(relationDrain) {
             if(e.actionMasked==MotionEvent.ACTION_DOWN || e.actionMasked==MotionEvent.ACTION_POINTER_DOWN && isPen(e,e.actionIndex)) relationDrain=false
             else {
@@ -405,6 +449,7 @@ class MindMapView(context: Context) : View(context) {
         if(inkInput.active) {
             inkInput.handle(e,{x,y->point(x,y)},{false});invalidate();return true
         }
+        if(nodeSelectionMode) return nodeSelector.handle(e)
         if(e.actionMasked==MotionEvent.ACTION_DOWN) suppressRemainingTouch=false
         if(connectionFrom!=null && handleConnection(e)) return true
         if(e.actionMasked==MotionEvent.ACTION_DOWN && hit(e.x,e.y)==null && connectionPort()?.contains(Pt(e.x.toDouble(),e.y.toDouble()))==true) {
@@ -511,8 +556,8 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     override fun onWindowFocusChanged(hasWindowFocus:Boolean) {
-        if(!hasWindowFocus) {cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
+        if(!hasWindowFocus) {discardCapturedGesture();cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
         super.onWindowFocusChanged(hasWindowFocus)
     }
-    override fun onDetachedFromWindow() { cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel(); cancelGesture();pointer=-1; super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { discardCapturedGesture();cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel(); cancelGesture();pointer=-1; super.onDetachedFromWindow() }
 }

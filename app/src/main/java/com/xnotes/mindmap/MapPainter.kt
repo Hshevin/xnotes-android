@@ -59,7 +59,7 @@ class MapPainter {
     }
     fun clear() { strokes.clear(); layouts.clear() }
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
-             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null) {
+             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null,selectedNodes:Set<String> = emptySet()) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
         val visible = doc.visible()
@@ -101,7 +101,7 @@ class MapPainter {
             canvas.drawText(edge.label.take(80),line.labelAnchor.x.toFloat(),line.labelAnchor.y.toFloat(),text)
         }
         for (n in visible) {
-            val active = n.id == selected
+            val active = n.id == selected || n.id in selectedNodes
             val color = if (active) bg else fg
             canvas.save(); canvas.translate(n.x.toFloat(), n.y.toFloat())
             paint.style = Paint.Style.FILL; paint.color = if (active) fg else bg

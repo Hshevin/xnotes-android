@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="graph_node_selection">Node selection</string>
+    <string name="graph_delete_nodes_confirm">Delete the selected nodes and their descendants? The central topic and original files will be kept. You can undo this operation.</string>
+    <string name="graph_node_selection_hint">Tap to toggle nodes. Drag blank space to select a group, or drag a selected node to move the group. Use two fingers to pan and zoom. Leave node selection to write or lasso ink.</string>
+    <string name="graph_selected_nodes">Selected: %1$d</string>
+    <string name="graph_align_left">Align left</string>
+    <string name="graph_align_center_x">Align horizontal centers</string>
+    <string name="graph_align_right">Align right</string>
+    <string name="graph_align_top">Align top</string>
+    <string name="graph_align_center_y">Align vertical centers</string>
+    <string name="graph_align_bottom">Align bottom</string>
     <string name="graph_edit_relation">Edit relationship</string>
     <string name="graph_free">Free node</string>
     <string name="graph_detach">Detach branch</string>

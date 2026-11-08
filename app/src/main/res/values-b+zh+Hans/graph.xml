@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="graph_node_selection">节点选择</string>
+    <string name="graph_delete_nodes_confirm">删除所选节点及其子节点？中心主题和原文件会保留。可撤销。</string>
+    <string name="graph_node_selection_hint">轻点切换节点选择；在空白处拖动框选，拖动已选节点移动整组；双指平移缩放。退出节点选择后可书写或套索笔迹。</string>
+    <string name="graph_selected_nodes">已选：%1$d</string>
+    <string name="graph_align_left">左对齐</string>
+    <string name="graph_align_center_x">水平居中对齐</string>
+    <string name="graph_align_right">右对齐</string>
+    <string name="graph_align_top">上对齐</string>
+    <string name="graph_align_center_y">垂直居中对齐</string>
+    <string name="graph_align_bottom">下对齐</string>
     <string name="graph_edit_relation">编辑关系</string>
     <string name="graph_free">自由放置节点</string>
     <string name="graph_detach">脱离分支</string>

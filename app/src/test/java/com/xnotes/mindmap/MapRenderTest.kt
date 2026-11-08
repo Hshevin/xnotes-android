@@ -19,6 +19,64 @@ import java.io.File
 @Config(manifest = Config.NONE, sdk = [35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MapRenderTest {
+    @Test fun multipleNodeHighlightsAreMonochromeAndStayOutOfThumbnailsAndPdfExports() {
+        val context=RuntimeEnvironment.getApplication()
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,x=-200.0,width=100.0),
+            MapNode(id="b",parent=null,free=true,x=200.0,width=100.0)))
+        val bytes=MapCodec.encode(doc)
+        val file=File.createTempFile("node-selection-render-",".xmap",context.cacheDir).apply {writeBytes(bytes)}
+        val uri=Uri.fromFile(file).toString()
+        try {
+            val before=MapFiles.thumbnail(context,uri,600,400)
+            val view=MindMapView(context).apply {document=doc;nodeSelectionMode=true;layout(0,0,1000,600);fit();setSelectedNodes(setOf("a","b"))}
+            for(dark in listOf(false,true)) {
+                view.dark=dark
+                val bitmap=Bitmap.createBitmap(1000,600,Bitmap.Config.ARGB_8888)
+                try {
+                    view.draw(Canvas(bitmap))
+                    for(n in doc.nodes) {
+                        val p=view.screenPoint(com.xnotes.core.geometry.Pt(n.x+8,n.y+8))
+                        assertEquals(if(dark) Color.WHITE else Color.BLACK,bitmap.getPixel(p.x.toInt(),p.y.toInt()))
+                    }
+                    val pixels=IntArray(1000*600);bitmap.getPixels(pixels,0,1000,0,0,1000,600)
+                    assertTrue(pixels.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
+                } finally {bitmap.recycle()}
+            }
+            val after=MapFiles.thumbnail(context,uri,600,400)
+            try {assertTrue(before.sameAs(after))} finally {before.recycle();after.recycle()}
+            val output=ByteArrayOutputStream();MapFiles.exportPdf(context,uri,output){false}
+            com.tom_roush.pdfbox.pdmodel.PDDocument.load(output.toByteArray()).use {pdf->
+                val resources=pdf.getPage(0).resources
+                val exported=(resources.getXObject(resources.xObjectNames.single()) as com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject).image
+                val ordinary=MapFiles.thumbnail(context,uri,exported.width,exported.height)
+                try {assertTrue(ordinary.sameAs(exported))} finally {ordinary.recycle();exported.recycle()}
+            }
+            assertArrayEquals(bytes,MapCodec.encode(view.document));assertArrayEquals(bytes,file.readBytes())
+        } finally {file.delete()}
+    }
+    @Test fun aNodeMarqueePreviewReplacesThePriorSingletonHighlightAndCancelsWithoutPersisting() {
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="b",parent=null,x=-300.0,width=100.0),MapNode(id="a",parent=null,free=true,x=300.0,width=100.0)))
+        val bytes=MapCodec.encode(doc)
+        for(dark in listOf(false,true)) {
+            val view=MindMapView(RuntimeEnvironment.getApplication()).apply {document=doc;nodeSelectionMode=true;layout(0,0,1000,600);fit();setSelectedNodes(setOf("a"));this.dark=dark}
+            fun event(action:Int,p:com.xnotes.core.geometry.Pt) {
+                val e=android.view.MotionEvent.obtain(100,200,action,p.x.toFloat(),p.y.toFloat(),0)
+                try {view.onTouchEvent(e)} finally {e.recycle()}
+            }
+            fun pixel(id:String):Int {
+                val image=Bitmap.createBitmap(1000,600,Bitmap.Config.ARGB_8888)
+                try {view.draw(Canvas(image));val n=doc.node(id);val p=view.screenPoint(com.xnotes.core.geometry.Pt(n.x+8,n.y+8));return image.getPixel(p.x.toInt(),p.y.toInt())}
+                finally {image.recycle()}
+            }
+            val paper=if(dark) Color.BLACK else Color.WHITE;val selected=if(dark) Color.WHITE else Color.BLACK
+            assertEquals(selected,pixel("a"));assertEquals(paper,pixel("b"))
+            event(android.view.MotionEvent.ACTION_DOWN,view.screenPoint(com.xnotes.core.geometry.Pt(-320.0,-20.0)))
+            event(android.view.MotionEvent.ACTION_MOVE,view.screenPoint(com.xnotes.core.geometry.Pt(-180.0,100.0)))
+            assertEquals("Only the preview set is inverted",paper,pixel("a"));assertEquals(selected,pixel("b"))
+            event(android.view.MotionEvent.ACTION_CANCEL,view.screenPoint(com.xnotes.core.geometry.Pt(-180.0,100.0)))
+            assertEquals(selected,pixel("a"));assertEquals(paper,pixel("b"));assertArrayEquals(bytes,MapCodec.encode(view.document))
+        }
+    }
     @Test fun relationLabelGeometryMatchesTheLeftAlignedTruncatedTextAndSelectionIsTransient() {
         val label="relationship description ".repeat(8)
         val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,width=100.0,x=-300.0),

@@ -58,7 +58,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         var viewRevision by remember { mutableIntStateOf(0) }
         var editing by remember { mutableStateOf<String?>(null) }
         var propertiesFor by remember {mutableStateOf<String?>(null)}
-        var deleting by remember { mutableStateOf(false) }
+        var deleting by remember { mutableStateOf<MapNodeSelectionCapture?>(null) }
         var discardingRecovery by remember { mutableStateOf(false) }
         var choosing by remember { mutableStateOf(false) }
         var reparenting by remember { mutableStateOf(false) }
@@ -120,7 +120,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             else if(session.textRestore!=null) Unit
             else if(editing!=null) editing=null
             else if(connectingFrom!=null) view?.cancelConnection()
-            else if(session.inkContact) view?.inkInput?.cancel()
+            else if(session.inkContact) {if(session.nodeSelectionMode) view?.cancelNodeSelectionGesture() else view?.inkInput?.cancel()}
             else if (!session.closing) close()
         }
         val palette = LocalPalette.current
@@ -156,7 +156,22 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 val doc = session.document
                 val node = doc?.nodes?.firstOrNull { it.id == session.selected }
                 val relation=doc?.relations?.firstOrNull {it.id==session.selectedRelation}
+                val nodeMode=session.nodeSelectionMode
                 if (doc != null && textDraft==null) {
+                    val actionCapture=session.captureNodes(doc,session.selectedNodes)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
+                        MapButton(R.string.graph_node_selection,selected=nodeMode,enabled=!session.closing) {session.setNodeSelectionMode(!nodeMode)}
+                        if(nodeMode) {
+                            Text(stringResource(R.string.graph_selected_nodes,session.selectedNodes.size),fontSize=TextSize.body,modifier=Modifier.align(Alignment.CenterVertically))
+                            for(alignment in MapAlignment.entries) MapButton(when(alignment) {
+                                MapAlignment.LEFT->R.string.graph_align_left;MapAlignment.CENTER_X->R.string.graph_align_center_x
+                                MapAlignment.RIGHT->R.string.graph_align_right;MapAlignment.TOP->R.string.graph_align_top
+                                MapAlignment.CENTER_Y->R.string.graph_align_center_y;MapAlignment.BOTTOM->R.string.graph_align_bottom
+                            },enabled=actionCapture!=null && doc.canAlignNodes(actionCapture.ids) && !session.closing) {
+                                actionCapture?.let {session.alignNodes(it,alignment)}
+                            }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         fun add(kind: NodeKind, sibling: Boolean) {
                             val parent = if (sibling) node?.parent else node?.id
@@ -169,38 +184,38 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                                 if (accepted) { session.selected = added; editing = added }
                             }
                         }
-                        MapButton(R.string.map_add_text, enabled = node != null && !session.closing) { add(NodeKind.TEXT, false) }
-                        MapButton(R.string.map_add_ink, enabled = node != null && !session.closing) { add(NodeKind.INK, false) }
-                        MapButton(R.string.map_add_sibling, enabled = node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
+                        MapButton(R.string.map_add_text, enabled = !nodeMode && node != null && !session.closing) { add(NodeKind.TEXT, false) }
+                        MapButton(R.string.map_add_ink, enabled = !nodeMode && node != null && !session.closing) { add(NodeKind.INK, false) }
+                        MapButton(R.string.map_add_sibling, enabled = !nodeMode && node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
                         MapButton(when {relation!=null->R.string.graph_edit_relation;node?.kind==NodeKind.INK->R.string.ink_enlarge;else->R.string.map_edit},
-                            enabled = (node != null || relation!=null) && !session.closing) {
+                            enabled = !nodeMode && (node != null || relation!=null) && !session.closing) {
                             if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
                         }
-                        MapButton(if (node?.collapsed == true) R.string.map_expand else R.string.map_collapse, enabled = node != null && doc.children(node.id).isNotEmpty()) {
+                        MapButton(if (node?.collapsed == true) R.string.map_expand else R.string.map_collapse, enabled = !nodeMode && node != null && doc.children(node.id).isNotEmpty()) {
                             node?.let { session.operate { d -> MapLayout.arrange(d.update(it.id) { n -> n.copy(collapsed = !n.collapsed) }) } }
                         }
-                        MapButton(R.string.delete, enabled = node != null && node.id != doc.root.id && !session.closing) { deleting = true }
+                        MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.root.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
                     }
                     run {
-                        MapInkTools(session)
+                        CompositionLocalProvider(LocalInkBusy provides (LocalInkBusy.current || nodeMode)) {MapInkTools(session)}
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                            MapButton(R.string.ink_fit_content,enabled=node?.kind==NodeKind.INK){node?.let {n->session.operate {it.update(n.id) {it.fitInkContent()}}}}
-                            MapButton(R.string.ink_properties,enabled=node!=null){propertiesFor=node?.id}
+                            MapButton(R.string.ink_fit_content,enabled=!nodeMode && node?.kind==NodeKind.INK){node?.let {n->session.operate {it.update(n.id) {it.fitInkContent()}}}}
+                            MapButton(R.string.ink_properties,enabled=!nodeMode && node!=null){propertiesFor=node?.id}
                         }
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
-                        MapButton(R.string.graph_free) { addFree=true }
-                        MapButton(R.string.graph_detach,enabled=node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
-                        MapButton(R.string.graph_relations) { relationToEdit=null;pendingRelation=null;graphTools=true }
-                        MapButton(R.string.graph_connect_canvas,enabled=node!=null,selected=connectingFrom!=null) {
+                        MapButton(R.string.graph_free,enabled=!nodeMode) { addFree=true }
+                        MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
+                        MapButton(R.string.graph_relations,enabled=!nodeMode) { relationToEdit=null;pendingRelation=null;graphTools=true }
+                        MapButton(R.string.graph_connect_canvas,enabled=!nodeMode && node!=null,selected=connectingFrom!=null) {
                             if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
                         }
-                        MapButton(R.string.graph_sources,enabled=node!=null) { sourcesFor=node?.id }
-                        MapButton(R.string.map_nodes) { choosing = true; reparenting = false }
-                        MapButton(R.string.map_change_parent, enabled = node?.parent != null && !session.closing) { choosing = true; reparenting = true }
-                        MapButton(R.string.map_layout, enabled = !session.closing) { layoutMenu=true }
+                        MapButton(R.string.graph_sources,enabled=!nodeMode && node!=null) { sourcesFor=node?.id }
+                        MapButton(R.string.map_nodes,enabled=!nodeMode) { choosing = true; reparenting = false }
+                        MapButton(R.string.map_change_parent, enabled = !nodeMode && node?.parent != null && !session.closing) { choosing = true; reparenting = true }
+                        MapButton(R.string.map_layout, enabled = !nodeMode && !session.closing) { layoutMenu=true }
                         MapButton(R.string.map_fit) { view?.fit() }
                         MapButton(R.string.map_zoom_in) { view?.zoomBy(1.25f) }
                         MapButton(R.string.map_zoom_out) { view?.zoomBy(.8f) }
@@ -224,7 +239,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                                 session.commitInk(id,old,next).also { accepted -> if(accepted) session.document?.let {v.document=it} }
                             }
                             v.documentEpoch=graphEpoch
-                            v.document = proposed ?: doc; v.dark = dark; v.updateSelection(session.selected,session.selectedRelation)
+                            v.documentRevision=session.contentRevision;v.nodeSelectionMode=nodeMode
+                            v.document = proposed ?: doc; v.dark = dark
+                            if(session.selectedRelation!=null) v.selectedRelation=session.selectedRelation else v.setSelectedNodes(session.selectedNodes)
+                            v.onCaptureNodes=session::captureNodes;v.onMoveNodes=session::moveNodes;v.onSelectNodes={capture,ids->session.selectNodes(capture,ids)}
                             v.contentDescription = context.getString(R.string.map_canvas_description)
                             v.onSelect = { session.selected = it }; v.onSources={sourcesFor=it}; v.onEdit = { if (!session.closing) { if(doc.node(it).kind==NodeKind.REFERENCE) sourcesFor=it else editing = it } }; v.onChange = { session.commit(it) }
                             v.onSelectRelation={session.selectRelation(it)};v.onEditRelation=::editExistingRelation
@@ -250,7 +268,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.cancel) {view?.cancelConnection()}
                     }
                 }
-                if(textDraft==null) Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
+                if(textDraft==null) Text(stringResource(if(nodeMode) R.string.graph_node_selection_hint else R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
           }
         }
@@ -307,10 +325,10 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             text = { Text(stringResource(R.string.map_conflict_use_file_confirm), fontSize = TextSize.body) },
             confirmButton = { MapButton(R.string.map_conflict_use_file) { session.useFileVersion(); discardingRecovery = false } },
             dismissButton = { MapButton(R.string.cancel) { discardingRecovery = false } })
-        if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.delete), fontSize = TextSize.heading) },
-            text = { Text(stringResource(R.string.map_delete_confirm), fontSize = TextSize.body) },
-            confirmButton = { MapButton(R.string.delete) { session.selected?.let { id -> session.operate { d -> d.delete(id) } }; deleting = false } },
-            dismissButton = { MapButton(R.string.cancel) { deleting = false } })
+        deleting?.let {captured->AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.delete), fontSize = TextSize.heading) },
+            text = { Text(stringResource(R.string.graph_delete_nodes_confirm), fontSize = TextSize.body) },
+            confirmButton = { MapButton(R.string.delete) { session.deleteNodes(captured);deleting = null } },
+            dismissButton = { MapButton(R.string.cancel) { deleting = null } })}
         if (choosing) {
             val doc = session.document
             val id = session.selected
