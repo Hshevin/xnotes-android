@@ -181,7 +181,7 @@ class NativeWorkingRecoveryTest {
         f.beforeRead={fail("Unbound drafts must not be matched to any file")}
         assertSame(NativeWorkingSession.Recovery.Empty,f.recover())
         val store=f.store();store.publish(store.capture(Document.blank(),null,f.view));val cache=f.cacheBytes()
-        assertTrue(f.recover() is NativeWorkingSession.Recovery.Unbound);assertEquals(cache,f.cacheBytes())
+        (f.recover() as NativeWorkingSession.Recovery.Unbound).use {assertEquals(cache,f.cacheBytes())}
     }
     @Test fun permissionLossAndPendingNativePublicationDoNotGrantOrConsumeARecovery() {
         for(pending in listOf(false,true)) scenario {f->

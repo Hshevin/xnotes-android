@@ -98,15 +98,7 @@ internal class NativeSourceSnapshot private constructor(
         verifyContainer()
     }
     private fun verifyNote(document:Document,info:BundleReferenceInfo) {
-        if(document.identity.documentId!=version.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
-        val anchored=info.header.anchors!=null
-        if(document.hasReferenceAnchors!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-        val actual=document.pages.map {checkActive();it.referenceIdentity.id}
-        if(anchored) {
-            if(actual.size!=info.pageIds.size || actual.toSet()!=info.pageIds)
-                throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-        } else if(actual.any {it!=null}) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-        verifyOriginalPdf(document,info)
+        NativeDecodedContract.note(document,info,version.documentId,checkActive)
     }
     fun verify(document:InfiniteDocument) {
         synchronized(gate) {checkOpen()};checkActive()
@@ -134,22 +126,6 @@ internal class NativeSourceSnapshot private constructor(
         verifyWorkingContract(info)
         if(version.kind!=DocumentKind.CANVAS || document.identity!=info.header.identity)
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-    }
-    private fun verifyOriginalPdf(document:Document,info:BundleReferenceInfo) {
-        // v1 may carry an unused stale resource field; only the verified manifest/PDF contract
-        // determines whether an original exists and what its bytes must be.
-        val expected=info.originalPdfHash
-        if(document.identity!=info.header.identity && (expected==null || document.identity.pdfResource!=expected))
-            throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
-        val original=document.pdfFile
-        if(expected==null) {
-            if(original!=null) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
-            return
-        }
-        if(original==null) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-        val actual=try {BundleMigration.hash(original) {checkActive();false}}
-            catch(error:java.io.IOException) {throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error)}
-        if(actual!=expected) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
     }
     private fun verifyContainer() {
         if(BundleMigration.hash(file) {checkActive();false}!=version.sha256)

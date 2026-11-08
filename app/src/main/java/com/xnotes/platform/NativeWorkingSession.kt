@@ -16,6 +16,7 @@ import com.xnotes.format.DocumentCodec
 import com.xnotes.storage.PdfResources
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.storage.PreparedNativeOpen
+import com.xnotes.storage.PreparedRecoveryPreview
 import com.xnotes.storage.ReferenceContractViolation
 import com.xnotes.storage.StorageMsg
 import org.json.JSONObject
@@ -61,7 +62,10 @@ internal class NativeWorkingSession(
     }
     sealed interface Recovery {
         data object Empty:Recovery
-        data class Unbound(val kind:WorkingSessionCache.Kind,val documentId:String,val metadata:Metadata):Recovery
+        class Unbound internal constructor(val kind:WorkingSessionCache.Kind,val documentId:String,val metadata:Metadata,
+                                           val prepared:PreparedRecoveryPreview):Recovery,AutoCloseable {
+            override fun close()=prepared.close()
+        }
         class Bound internal constructor(internal val session:NativeWorkingSession,val prepared:PreparedNativeOpen,internal val held:Read):Recovery,AutoCloseable {
             val metadata get()=held.metadata
             private var closed=false
@@ -372,9 +376,19 @@ internal class NativeWorkingSession(
         }}} catch(_:ExpiredSource) {WorkingSessionCache.Publication(write.ticket,false)}
     }
     /** Lease + data only. The caller must still verify the actual source before any writable restoration. */
-    fun load(checkActive:()->Unit={}):Read? {
-        val held=cache.load(checkActive) ?: return null
-        try {return Read(readIssuer,held,parseMetadata(held.kind,held.documentId,held.metadataJson))}
+    fun load(checkActive:()->Unit={}):Read? = (loadState(checkActive) as? LoadState.Active)?.read
+    sealed interface LoadState {
+        data object Absent:LoadState
+        data object Cleared:LoadState
+        class Active(val read:Read):LoadState
+    }
+    fun loadState(checkActive:()->Unit={}):LoadState {
+        val held=when(val state=cache.loadState(checkActive)) {
+            WorkingSessionCache.LoadState.Absent->return LoadState.Absent
+            WorkingSessionCache.LoadState.Cleared->return LoadState.Cleared
+            is WorkingSessionCache.LoadState.Active->state.read
+        }
+        try {return LoadState.Active(Read(readIssuer,held,parseMetadata(held.kind,held.documentId,held.metadataJson)))}
         catch(error:Throwable) {try {held.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
     }
 
@@ -426,7 +440,8 @@ internal class NativeWorkingSession(
             read=load(checkActive) ?: return Recovery.Empty
             val current=read
             current.let {
-                val origin=it.metadata.source ?: return Recovery.Unbound(it.kind,it.documentId,it.metadata).also {current.close();read=null}
+                val origin=it.metadata.source ?: return Recovery.Unbound(it.kind,it.documentId,it.metadata,
+                    PreparedRecoveryPreview.readWorking(this,it,resources,noteCodec,canvasCodec,pdfDir,assetRoot,checkActive)).also {read=null}
                 storage.openSource(origin.uri,origin.kind,checkActive).use {source->
                     prepared=PreparedNativeOpen.readWorking(this,it,source,resources,noteCodec,canvasCodec,pdfDir,assetRoot,checkActive)
                 }
