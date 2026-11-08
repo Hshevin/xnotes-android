@@ -31,6 +31,13 @@ class NotebookStorage internal constructor(private val context:Context,
             if(owner!==issuer || consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
             consumed=true
         }
+        @Synchronized internal fun retry(owner:Any):StagedSave {
+            if(owner!==issuer || !consumed || handoffId==null) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            // This retains the old witness; commit must still revalidate the exact record and all
+            // original/candidate/target bytes. It is not a newly observed source or a receipt.
+            return StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId,anchored,originalPdfHash)
+        }
+        internal val wasConsumed get()=synchronized(this) {consumed}
         internal fun verifyWorkingContract(info:com.xnotes.format.BundleReferenceInfo) {
             if(info.format!=original.kind.extension || info.header.identity?.documentId!=original.documentId ||
                 (info.header.anchors!=null)!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
@@ -191,7 +198,7 @@ class NotebookStorage internal constructor(private val context:Context,
         return digest.digest().joinToString("") {"%02x".format(it)}
     }
     private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose,stage:StagedSave?=null,
-                            checkActive:()->Unit={}):NativeSourceVersion {
+                            checkActive:()->Unit={},acknowledgement:NativeHandoffAcknowledgement?=null):NativeSourceVersion {
         checkActive()
         val pending=journal(uri,checkActive)
         if(stage!=null && (registry.locationKey(uri)!=stage.original.locationKey || pending.directoryPath!=stage.journalPath))
@@ -213,7 +220,7 @@ class NotebookStorage internal constructor(private val context:Context,
                 current.header.identity?.let {registry.expectationForId(it.documentId)})
             checkActive();protectPending(uri,original,candidate);verified=candidate
         },afterVerified={registerVerified(uri,requireNotNull(verified),name,strict=stage!=null,checkActive=checkActive)},
-            expectedRecordDigest=stage?.recordDigest,checkActive=checkActive)
+            expectedRecordDigest=stage?.recordDigest,checkActive=checkActive,acknowledgement=acknowledgement)
         releaseCompletedPin(uri)
         return requireNotNull(receipt)
     }
@@ -418,9 +425,16 @@ class NotebookStorage internal constructor(private val context:Context,
         stageExisting(uri,candidate,expected.kind,expected,handoffId,checkActive)
     }
     internal fun commitStaged(stage:StagedSave,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
-        stage.consume(saveIssuer);checkActive()
         if(stage.handoffId!=null) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        stage.consume(saveIssuer);checkActive()
         publishSave(stage.uri,name,purpose(stage.original.kind.extension),stage,checkActive)
+    }
+    internal fun retryStaged(stage:StagedSave):StagedSave=synchronized(lock) {stage.retry(saveIssuer)}
+    internal fun commitHandoff(stage:StagedSave,acknowledgement:NativeHandoffAcknowledgement,name:String,
+                               checkActive:()->Unit):NativeSourceVersion=synchronized(lock) {
+        acknowledgement.checkStage(stage);acknowledgement.checkCurrent(checkActive)
+        stage.consume(saveIssuer)
+        publishSave(stage.uri,name,purpose(stage.original.kind.extension),stage,checkActive,acknowledgement)
     }
     private fun stageExisting(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,version:NativeSourceVersion?,
                               handoffId:String?,checkActive:()->Unit):StagedSave {

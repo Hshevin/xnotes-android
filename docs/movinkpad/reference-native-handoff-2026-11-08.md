@@ -105,3 +105,14 @@ preflight明确要求已有普通bound working checkpoint且由这个runtime own
 定向tmp/native-handoff-persistence-review-fixed.log与tmp/native-handoff-persistence-boundaries.log通过、Android测试源码编译成功，14新增JVM包括真实post-stage C+T、旧/重复/false permit、更晚成功、Root最后check后失效、跨owner/adapter、cold拒写、坏future T全字节保留、schema1、PDF变化无grant及派发取消GC。完整tmp/native-handoff-persistence-full.log：303套件3348项全过（0失败/错误/跳过），Android测试源码编译成功。native4 ack commit、accepted ID/completion、actualB恢复claim和生产稳定输入仍继续，不取消后续需求。
 
 持久化半段独立窄复核确认三个窗口已闭合。所有后续生产native保存必须统一经过协调协议，不能在未解决T期间混用native-only写入；格式相同SHA不能证明另一次普通保存未发生。当前Editor/旧session尚未迁移，不开启半套生产流程。下一半以私有HandoffPublication绑定确切Staged/canonical journal/record，才授native4写入；再实现accepted ID与actualB恢复认领。
+
+
+## 受控 native4 发布与失败重试
+
+NativeHandoffAcknowledgement 私有构造，仅从实际 HandoffPublication.verify 的当前同 owner C+T head 签发，绑定同一 Staged 的原生 witness、canonical journal、交接 ID 和 record SHA。core 将其 live 检查贯穿 retained 散列、目标读取、写前、读回、登记和清日志；旧 ensure/native-only 无 ack 仍拒绝 v4。Publication 在提交前重新加载更晚同 owner 同 T 的实际正文；已签 ack 在 head 推进或 close 后不能写。
+
+成功提交才生成原请求 Receipt 并带交接 ID，实际 EditSource.accept 推进 epoch 后把 accepted ID 带入只读 Observation。失败不制造回执；已消费的 v4 witness 仅能原样重试，必须重新核实全部 journal/原件/候选/target 契约。provider 已写 B 后报错或登记失败时保留 B+T+pending；重试核实实际 target=B 后只补登记/读回，不重复写 B。来源失活、close 或旧 ack 均不得覆盖原文件。
+
+21 项 NativeHandoffPersistenceTest 定向通过（tmp/native-handoff-ack-boundaries.log），含新增的目标散列中来源失活/Publication close 零写与写后登记契约冲突重试；Android 测试源码编译成功。独立源码复核未发现确定性必修，并建议的两类失败边界已补齐。完整 tmp/native-handoff-ack-full.log：303 套件、3355 项全部通过（0失败/错误/跳过），Android 测试源码编译成功。
+
+本片仍不激活生产 Editor/旧 SessionStore；accepted-ID completion、actual B 恢复/认领、稳定输入屏障与生产统一 writer 仍是后续必须工作。未运行 Android 仪器或 MovinkPad 真机，不打包/安装/推送/发布。

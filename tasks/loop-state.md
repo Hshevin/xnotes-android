@@ -3,7 +3,7 @@
 目标：思维导图与文件关系网络，overall complete=false。2026-11-08 用户明确恢复，先检查新渲染架构继续开发；历史 goal 工具可能仍显示 paused，以本次用户明确恢复为准。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。恢复前 HEAD=0a2f27fe，工作树干净，已有进度与审查修复全部保留。
 授权：源码、验证、文档和本地提交；用户明确授权同步 master54f05b0f（含主线已有更新）。不打包、安装、推送或发布，不合入其他开发分支。
-当前阶段：R2b2b3a活模型来源/快照proof/请求配对实际发布receipt已实现并独立复核通过；tmp/native-edit-source-final-full.log 295套件3216项全部通过、Android源码编译成功，真实平台/目标设备未运行。本片已提交c2dd1ab5；原普通writer/SessionStore尚未切换。R2b2b2b同源打开已提交0257bd59；R2b2c0新建上下文已提交d272728a。整体引用闭环仍未完成。无运行作业。
+历史阶段记录：R2b2b3a活模型来源/快照proof/请求配对实际发布receipt已实现并独立复核通过；tmp/native-edit-source-final-full.log 295套件3216项全部通过、Android源码编译成功，真实平台/目标设备未运行。本片已提交c2dd1ab5；原普通writer/SessionStore尚未切换。R2b2b2b同源打开已提交0257bd59；R2b2c0新建上下文已提交d272728a。整体引用闭环仍未完成。无运行作业。
 新接口/后续顺序：docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。R1先撤除逐对象身份/画布锚点，仅页面UUID；B2c取消。整包副本页面UUID也需更新。R2安全激活/SAF；R3页面多来源闭环；R4跳转/反向引用/恢复/双窗格；R5文件网络及A2剩余交互。
 历史证据：审查修复068e1c2c全量2828项通过、Android仪器源码编译，实际未运行；5314a887 Header/Snapshot12项通过，writer接入未完成。旧文档中的对象身份计划已由页面级决定替代，不沿用为当前产品语义。
 待执行：R2b1b已提交，继续R2b2另存前目标证明与活模型新Doc/page scope、session/历史。已有pending下新save不能盲resume后覆盖，需要证明同内容/owner；恢复UI须保留当前模型。用户已确认保存后放弃：保留已写入版本，只放弃之后的新修改，不回滚原件。后续按reference-discard-written-2026-11-08.md继续pending/producer接线。页激活/来源UI/跳转backlinks网络/A2均保留，overall complete=false；不打APK。详情reference-native-save-2026-11-08.md。
@@ -56,3 +56,5 @@ R2轻量source observation/按需正文已实现/独立复核通过：tmp/native
 同head持久化半段已实现并完成独立源码复核：metadata2/读1、2，真实Staged+单次Main seal→当前C+T持久→HandoffPublication私有actual head证明，原文件仍A/native4续写未开放。Root注册原子actual Read head/owner核对、previous hook owner/source复核；派发取消AtomicRefs清理；actual runtime generation>=本次fresh ticket防旧T背书。三个反例先红后绿；14新增JVM定向+Android源码编译通过，完整tmp/native-handoff-persistence-full.log 303套件3348项全过，Android源码编译成功。半段待本地提交；继续native4 typed ack→真实Receipt accepted ID→B恢复/claim，cold T现全部failclosed可读不可普通写。overall complete=false。
 
 同head持久化半段无运行作业、独立复核通过，native4仍默认拒写。下一半private Ack实际current head→同Staged/record/path核实→Native4 commit/实际Receipt T ID，再accepted sourceB completion与B恢复claim。不得混用native-only绕过未解决T，生产UI/稳定输入后续未激活。overall complete=false。
+
+2026-11-08 恢复后完成 native4 typed ack/commit/实际Receipt accepted-ID半段；独立复核通过，tmp/native-handoff-ack-full.log 完整303套件3355项全过、Android测试源码编译成功。新增目标散列中失活零写/写后登记契约冲突重试零重写两组。无运行作业，待本地提交后继续accepted-ID completion；actualB恢复/claim、生产稳定输入与统一writer及来源UI/backlinks/网络仍保留，overall complete=false，不打APK。

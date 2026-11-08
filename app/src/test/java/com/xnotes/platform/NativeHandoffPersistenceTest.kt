@@ -50,10 +50,16 @@ class NativeHandoffPersistenceTest {
             override fun getCacheDir()=File(root,"cache").apply {mkdirs()}
         }
         val file=File(root,"source");val directory=File(root,"working");var writes=0
+        var afterWrite:(()->Unit)?=null
+        var duringRead:(()->Unit)?=null
         var event:((WorkingSessionCache.Event,File)->Unit)?=null
         val storage=NotebookStorage(context,targetOverride={object:MigrationPublication.Target {
-            override fun read()=file.inputStream()
-            override fun write(source:File) {writes++;source.copyTo(file,overwrite=true)}
+            override fun read()=object:java.io.FilterInputStream(file.inputStream()) {
+                override fun read(bytes:ByteArray,offset:Int,length:Int):Int {
+                    val count=super.read(bytes,offset,length);duringRead?.invoke();return count
+                }
+            }
+            override fun write(source:File) {writes++;source.copyTo(file,overwrite=true);afterWrite?.invoke()}
         }})
         val notes=DocumentCodec(FakeImageCodec(),FakeTextMeasurer())
         val canvases=CanvasCodec(FakeImageCodec(),FakeTextMeasurer())
@@ -278,5 +284,99 @@ class NativeHandoffPersistenceTest {
         assertThrows(ReferenceContractViolation::class.java) {runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.close()}
         assertArrayEquals(original,f.file.readBytes());assertEquals(0,f.writes)
         f.store.load()!!.use {assertNotNull(it.metadata.handoff)} // Preserve the data, without a normal-source grant.
+    }
+    @Test fun onlyTheActualPersistedPublicationCanCommitNative4AndIssueItsRequestReceipt()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(10.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        doc.pages.single().items.add(ink(200.0));doc.dirty=true
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            assertThrows(MigrationPublication.RecoveryRequired::class.java) {f.storage.ensure(f.uri,"source","xnote")}
+            assertEquals(0,f.writes)
+            val receipt=stage.commit(publication)
+            assertEquals(stage.handoffId,receipt.handoffId);assertEquals(stage.candidate.sha256,receipt.version.sha256)
+            assertEquals(1,f.writes);assertFalse(f.storage.hasRecovery(f.uri))
+            assertEquals(1,f.file.inputStream().use {f.notes.read(it)}.pages.single().items.size)
+            f.store.load()!!.use {assertEquals(2,it.body.inputStream().use {f.notes.read(it)}.pages.single().items.size)}
+            assertTrue(source.accept(request,receipt));assertTrue(doc.dirty)
+            assertThrows(ReferenceContractViolation::class.java) {stage.commit(publication)}
+            assertEquals(1,f.writes)
+        }
+    }
+    @Test fun publicationRevalidatesTheLaterSameOwnerHeadBeforeWritingTheFixedNativeCandidate()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(10.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            doc.pages.single().items.add(ink(300.0));doc.dirty=true
+            assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+            val receipt=stage.commit(publication)
+            assertEquals(stage.candidate.sha256,receipt.version.sha256);assertEquals(1,f.writes)
+            assertEquals(1,f.file.inputStream().use {f.notes.read(it)}.pages.single().items.size)
+            f.store.load()!!.use {assertEquals(2,it.body.inputStream().use {f.notes.read(it)}.pages.single().items.size)}
+        }
+    }
+    @Test fun aProviderFailureAfterWritingBRetainsTAndRetryDoesNotRewriteB()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(20.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            f.afterWrite={throw java.io.IOException("provider failed after write")}
+            assertThrows(MigrationPublication.RecoveryRequired::class.java) {stage.commit(publication)}
+            assertEquals(1,f.writes);assertTrue(f.storage.hasRecovery(f.uri))
+            assertEquals(stage.candidate.sha256,com.xnotes.format.BundleMigration.hash(f.file))
+            f.afterWrite=null
+            val receipt=stage.commit(publication)
+            assertEquals(1,f.writes);assertFalse(f.storage.hasRecovery(f.uri));assertTrue(source.accept(request,receipt))
+        }
+    }
+    @Test fun closingOrAdvancingTheHeadAfterAckCreationCannotWriteFromThatOldAck()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(20.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc);val original=f.file.readBytes()
+        val publication=runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}
+        val ack=com.xnotes.storage.NativeHandoffAcknowledgement.verify(stage,publication,{})
+        doc.pages.single().items.add(ink(400.0));doc.dirty=true
+        assertTrue(f.store.publish(f.store.capture(doc,source,f.view)).published)
+        assertThrows(ReferenceContractViolation::class.java) {f.storage.commitHandoff(stage.nativeWitness(),ack,"source",{})}
+        assertArrayEquals(original,f.file.readBytes());assertEquals(0,f.writes)
+        val refreshed=com.xnotes.storage.NativeHandoffAcknowledgement.verify(stage,publication,{})
+        publication.close()
+        assertThrows(ReferenceContractViolation::class.java) {f.storage.commitHandoff(stage.nativeWitness(),refreshed,"source",{})}
+        assertArrayEquals(original,f.file.readBytes());assertEquals(0,f.writes)
+    }
+    @Test fun anAckCannotAuthorizeAnotherNativeStageEvenWhenBothAreValid()=scenario {f->scenario {other->
+        val (doc,source)=f.open();f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+        val (od,os)=other.open();other.store.publish(other.store.capture(od,os,other.view));val wrong=other.stage(os,od)
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            val ack=com.xnotes.storage.NativeHandoffAcknowledgement.verify(stage,publication,{})
+            assertThrows(ReferenceContractViolation::class.java) {other.storage.commitHandoff(wrong.nativeWitness(),ack,"source",{})}
+            assertEquals(0,f.writes);assertEquals(0,other.writes)
+        }
+    }}
+    @Test fun losingPublicationOrSourceDuringTargetHashNeverWrites() {
+        for(closePublication in listOf(false,true)) scenario {f->
+            val (doc,source)=f.open();doc.pages.single().items.add(ink(30.0));doc.dirty=true
+            f.store.publish(f.store.capture(doc,source,f.view));val stage=f.stage(source,doc)
+            val original=f.file.readBytes()
+            runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+                f.duringRead={f.duringRead=null;if(closePublication) publication.close() else source.invalidate()}
+                assertThrows(ReferenceContractViolation::class.java) {stage.commit(publication)}
+                assertEquals(0,f.writes);assertArrayEquals(original,f.file.readBytes());assertTrue(f.storage.hasRecovery(f.uri))
+                f.store.load()!!.use {assertEquals(stage.handoffId,it.metadata.handoff!!.id)}
+            }
+        }
+    }
+    @Test fun registrationFailureAfterWritingBRetainsRecoveryAndRetryOnlyRegisters()=scenario {f->
+        val (doc,source)=f.open();doc.pages.single().items.add(ink(30.0));doc.dirty=true
+        f.store.publish(f.store.capture(doc,source,f.view));val request=source.capture(doc)
+        val stage=request.prepareForHandoff(f.storage,f.notes,f.canvases,File(f.root,"scratch"),"source")
+        runBlocking {f.store.persistHandoff(stage) {it.capture(doc,source,f.view)}}.use {publication->
+            f.afterWrite={f.storage.registry.register(java.util.UUID.randomUUID().toString(),"xnote","other",f.uri)}
+            assertThrows(ReferenceContractViolation::class.java) {stage.commit(publication)}
+            assertEquals(1,f.writes);assertTrue(f.storage.hasRecovery(f.uri))
+            assertEquals(stage.candidate.sha256,com.xnotes.format.BundleMigration.hash(f.file))
+            f.storage.registry.register(doc.identity.documentId,"xnote","source",f.uri);f.afterWrite=null
+            val receipt=stage.commit(publication)
+            assertEquals(1,f.writes);assertFalse(f.storage.hasRecovery(f.uri));assertTrue(source.accept(request,receipt))
+        }
     }
 }

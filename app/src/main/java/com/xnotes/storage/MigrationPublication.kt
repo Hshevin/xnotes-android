@@ -82,34 +82,36 @@ class MigrationPublication internal constructor(private val directory:File,priva
         publishValidated(target,validate={requireLegacy(it.purpose);validate(it.original,it.candidate,it.current)},afterVerified=afterVerified)
 
     internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={},
-                                  protectCandidate:(File)->Unit={},expectedRecordDigest:String?=null,checkActive:()->Unit={}) {
-        checkActive()
+                                  protectCandidate:(File)->Unit={},expectedRecordDigest:String?=null,checkActive:()->Unit={},
+                                  acknowledgement:NativeHandoffAcknowledgement?=null) {
+        val check={if(acknowledgement!=null) acknowledgement.checkCurrent(checkActive) else checkActive()}
+        check()
         val record=readRecord()
         if(expectedRecordDigest!=null && record.digest!=expectedRecordDigest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-        // No acknowledgement authority exists at this layer yet. In particular, ordinary open /
-        // retry after a restart must never publish B before the working body + handoff is durable.
-        if(record.handoffId!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        if(record.handoffId!=null && acknowledgement?.matches(directoryPath,record.handoffId,record.digest)!=true)
+            throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        if(record.handoffId==null && acknowledgement!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         // Only dependency protection, never identity authority. The caller owns its lease on every path.
-        checkActive();protectCandidate(candidate)
-        val kept=retained(checkActive=checkActive)
+        check();protectCandidate(candidate)
+        val kept=retained(checkActive=check)
         val oldHash=kept.original.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         val newHash=kept.candidate.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         checkRecord(record,kept,checkCandidate=true)
-        val currentHash=fingerprint(target,checkActive)
+        val currentHash=fingerprint(target,check)
         val current=when(currentHash) {
             newHash -> candidate
             oldHash -> original
             else -> throw failure(StorageMsg.MIGRATION_INTERRUPTED)
         }
-        checkActive();validate(Validation(original,candidate,current,record.purpose))
-        unchanged(kept,checkActive=checkActive)
-        if(fingerprint(target,checkActive)!=currentHash) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
-        checkActive()
-        if(currentHash!=newHash) writeVerified(target,candidate,newHash,currentHash,StorageMsg.MIGRATION_VERIFY_FAILED,checkActive)
-        register {checkActive();afterVerified(candidate)}
-        if(fingerprint(target,checkActive)!=newHash) throw failure(StorageMsg.MIGRATION_VERIFY_FAILED)
-        unchanged(kept,checkActive=checkActive)
-        checkActive()
+        check();validate(Validation(original,candidate,current,record.purpose))
+        unchanged(kept,checkActive=check)
+        if(fingerprint(target,check)!=currentHash) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
+        check()
+        if(currentHash!=newHash) writeVerified(target,candidate,newHash,currentHash,StorageMsg.MIGRATION_VERIFY_FAILED,check)
+        register {check();afterVerified(candidate)}
+        if(fingerprint(target,check)!=newHash) throw failure(StorageMsg.MIGRATION_VERIFY_FAILED)
+        unchanged(kept,checkActive=check)
+        check()
         clear()
     }
 

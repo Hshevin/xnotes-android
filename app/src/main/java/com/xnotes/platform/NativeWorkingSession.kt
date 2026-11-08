@@ -144,13 +144,30 @@ internal class NativeWorkingSession(
     }
     /** Issued only after reading the adapter's durable current C+T head. No native write yet. */
     class HandoffPublication private constructor(private val store:NativeWorkingSession,private val intent:Intent,
-                                                  private val read:Read,private val minimumGeneration:Long):AutoCloseable {
+                                                  private var read:Read,private val minimumGeneration:Long):AutoCloseable {
+        private var closed=false
         val handoff get()=intent.handoff
-        internal fun verify(staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,checkActive:()->Unit={}) {
-            if(staged!==intent.staged) throw WorkingSessionCache.Conflict()
-            store.checkHead(read,intent,checkActive,minimumGeneration)
+        @Synchronized internal fun checkLive(staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,checkActive:()->Unit) {
+            checkActive()
+            if(closed || staged!==intent.staged || synchronized(store.rootState) {store.rootState.intent!==intent} ||
+                !read.owns(store.cache,intent.owner,minimumGeneration))
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            staged.checkCurrent()
         }
-        override fun close()=read.close()
+        @Synchronized internal fun verify(staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,checkActive:()->Unit={}) {
+            check(!closed) {"Handoff publication is closed"}
+            if(staged!==intent.staged) throw WorkingSessionCache.Conflict()
+            staged.checkCurrent()
+            // Editing may have persisted a newer C1+T since the proof was handed back. It must
+            // meet the same actual-owner/generation/native contract; never silently use old C0.
+            val current=store.load(checkActive) ?: throw WorkingSessionCache.Conflict()
+            var transferred=false
+            try {
+                store.checkHead(current,intent,checkActive,minimumGeneration)
+                val old=read;read=current;transferred=true;old.close()
+            } finally {if(!transferred) current.close()}
+        }
+        @Synchronized override fun close() {if(closed) return;closed=true;read.close()}
         companion object {
             internal suspend fun persist(store:NativeWorkingSession,staged:PreparedNativeOpen.SaveRequest.Receipt.Staged,
                                          capture:(CapturePermit)->Write):HandoffPublication {

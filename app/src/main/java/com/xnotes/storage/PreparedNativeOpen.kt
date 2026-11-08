@@ -72,6 +72,7 @@ internal class PreparedNativeOpen private constructor(
         private var generation=0L
         private var active=true
         private var base=initial
+        private var acceptedHandoffId:String?=null
         private fun same(document:Document)=note===document && base.kind==DocumentKind.NOTE &&
             document.identity.documentId==base.documentId && document.path?.let {resources.registry.locationKey(it)}==base.locationKey
         private fun same(document:InfiniteDocument)=canvas===document && base.kind==DocumentKind.CANVAS &&
@@ -83,15 +84,15 @@ internal class PreparedNativeOpen private constructor(
         private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && generation==epoch && base===expected}
         /** Read-only epoch, with no native body or publication capability. */
         class Observation private constructor(private val source:EditSource,private val epoch:Long,val expected:NativeSourceVersion,
-                                              internal val ownerToken:Any) {
+                                              internal val ownerToken:Any,internal val acceptedHandoffId:String?) {
             fun isCurrent()=source.authorize(epoch,expected)
             internal fun matches(request:SaveRequest)=isCurrent() && request.expected===expected && request.issuedBy(source.issuer,epoch)
             companion object {
                 internal fun capture(source:EditSource,document:Document):Observation=synchronized(source) {
-                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken)
+                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken,source.acceptedHandoffId)
                 }
                 internal fun capture(source:EditSource,document:InfiniteDocument):Observation=synchronized(source) {
-                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken)
+                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken,source.acceptedHandoffId)
                 }
             }
         }
@@ -114,6 +115,7 @@ internal class PreparedNativeOpen private constructor(
             if(next.kind!=base.kind || next.documentId!=base.documentId || next.locationKey!=base.locationKey) return false
             // Byte-identical publication still consumes the epoch; no digest-based "same base" shortcut.
             generation=Math.incrementExact(generation);base=next
+            acceptedHandoffId=receipt.handoffId
             return true
         }
         companion object {
@@ -169,15 +171,17 @@ internal class PreparedNativeOpen private constructor(
                 canvasCodec.write(snapshot,output,isCancelled={checkActive();false})
             }
         }
-        class Receipt private constructor(private val request:SaveRequest,private val expected:NativeSourceVersion,val version:NativeSourceVersion) {
+        class Receipt private constructor(private val request:SaveRequest,private val expected:NativeSourceVersion,val version:NativeSourceVersion,
+                                          internal val handoffId:String?=null) {
             internal fun matches(candidate:SaveRequest)=request===candidate && expected===candidate.expected
             /** Private pairing prevents one request from claiming another request's retained body. */
             class Staged private constructor(private val request:SaveRequest,private val storage:NotebookStorage,
-                                              private val stage:NotebookStorage.StagedSave,private val name:String) {
+                                              @Volatile private var stage:NotebookStorage.StagedSave,private val name:String) {
                 val handoffId get()=stage.handoffId
                 val original get()=stage.original
                 val candidate get()=stage.candidate
                 internal val recordDigest get()=stage.recordDigest
+                internal fun nativeWitness()=stage
                 internal val uri get()=request.uri
                 internal val ownerToken:Any get()=when(request) {is Note->request.snapshot.snapshotOwnerToken;is Canvas->request.snapshot.snapshotOwnerToken}
                 internal fun checkCurrent() {request.checkCurrent({});check(handoffId!=null)}
@@ -196,6 +200,13 @@ internal class PreparedNativeOpen private constructor(
                     check()
                     val version=storage.commitStaged(stage,name,check)
                     return Receipt(request,request.expected,version)
+                }
+                @Synchronized fun commit(publication:NativeWorkingSession.HandoffPublication,checkActive:()->Unit={}):Receipt {
+                    val check={request.checkCurrent(checkActive)};check()
+                    if(stage.wasConsumed) stage=storage.retryStaged(stage)
+                    val acknowledgement=NativeHandoffAcknowledgement.verify(this,publication,check)
+                    val version=storage.commitHandoff(stage,acknowledgement,name,check)
+                    return Receipt(request,request.expected,version,requireNotNull(handoffId))
                 }
                 companion object {
                     /** IO-only; durable stage/pin is complete before releasing the temporary PDF lease. */
