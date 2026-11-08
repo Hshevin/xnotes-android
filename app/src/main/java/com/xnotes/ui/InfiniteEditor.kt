@@ -346,6 +346,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.crossPaneTouchGate.shouldBlock = { otherPenInContact() }
         view.genericMotion = { beforePenInput(it); proPenInput.motion(it); interaction.onGenericMotion(it) }
         view.onInputLost = { proPenInput.surfaceDetached() }
+        view.onFirstFrame = { opening = false }
         view.hover = { beforePenInput(it); proPenInput.motion(it); interaction.onHover(it) }
         view.afterLayout = { applyInitialView() }
         view.onContextReady = { renderFailure = view.failure }
@@ -2462,6 +2463,25 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         replaceDocument(InfiniteDocument())
     }
 
+    /**
+     * True from opening a canvas until its first frame is on screen, or [OPENING_HOLD_MS] at most.
+     * The host keeps the pane invisible meanwhile, so the screen the user came from stays in view
+     * instead of an empty GL surface flashing black while the context and shaders come up.
+     */
+    var opening by mutableStateOf(false)
+        private set
+    private var openingGeneration = 0
+
+    private fun beginOpening() {
+        val generation = ++openingGeneration
+        opening = true
+        val end = Runnable { if (generation == openingGeneration) opening = false }
+        mainHandler.postDelayed(end, OPENING_HOLD_MS)
+        // A surface that is already up draws the new document without being recreated, so its
+        // first-frame callback will not come; the next swapped frame ends the hold instead.
+        view.publishThen { mainHandler.post(end) }
+    }
+
     fun replaceDocument(next: InfiniteDocument) {
         AudioRecording.stopFor(this) // closing the canvas places its recording
         AudioPlayback.closeFor(this)
@@ -2488,6 +2508,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         applyInitialView()
         refresh()
         view.publish()
+        beginOpening()
     }
 
     // --- view ---
@@ -2667,6 +2688,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     companion object {
+        /** Longest a newly opened canvas stays hidden waiting for its first frame. */
+        const val OPENING_HOLD_MS = 600L
+
         /** Zoom step for the keyboard, matching a comfortable notch of a pinch. */
         const val ZOOM_STEP = 1.25
 

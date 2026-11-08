@@ -200,7 +200,14 @@ class GlRenderer(
     override fun onDrawFrame(unused: GL10?) {
         val target = diagnosticTarget
         val f = frame
-        if (f.widthPx <= 0 || f.heightPx <= 0) return
+        if (f.widthPx <= 0 || f.heightPx <= 0) {
+            // Nothing to lay out yet, but GLSurfaceView still swaps this buffer: make it paper rather
+            // than whatever the driver left in it, which is usually black.
+            val paper = f.paper
+            GLES30.glClearColor(paper.r / 255f, paper.g / 255f, paper.b / 255f, 1f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            return
+        }
         // Taken before the frame, not after: something added while this one draws is waiting on
         // the next frame, not on this one.
         val after = ArrayList<() -> Unit>(afterFrame.size)
