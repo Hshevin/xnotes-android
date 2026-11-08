@@ -188,7 +188,10 @@ class ConnectedNodeSessionTest {
         val worker=s.viewModelScope.coroutineContext[Job]!!.children.first {it !in beforeJobs}
         shadowOf(Looper.getMainLooper()).idle();assertTrue(s.document!!.root.sources.isEmpty())
         val stroke=MapInk(listOf(InkPoint(10.0,20.0,.6,30.0)));assertTrue(s.commitInk("r",emptyList(),listOf(stroke)))
-        val beforeSource=s.document;s.inkContact=false;await {worker.isCompleted}
+        val beforeSource=s.document
+        // No Composition runs here to send global snapshot notifications to the waiting flow.
+        androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {s.inkContact=false}
+        await {worker.isCompleted}
         assertEquals(listOf(source),s.document!!.root.sources);assertEquals(listOf(stroke),s.document!!.root.ink)
         val saved=s.document;s.undo();assertEquals(beforeSource,s.document);s.redo();assertEquals(saved,s.document)
         s.save();await {!s.saving};assertEquals(saved,MapCodec.decode(file.readBytes()))
