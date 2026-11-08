@@ -46,7 +46,18 @@ internal object AnchorManifest {
     /** Every open must address the same immutable snapshot, not the mutable external document. */
     fun inspect(input:()->InputStream,anchored:Boolean,cancelled:()->Boolean={false}):Plan = plan(input,anchored,false,cancelled)
 
-    private fun plan(input:()->InputStream,anchored:Boolean,rekey:Boolean,cancelled:()->Boolean):Plan {
+    /** Projects actual candidate IDs into an unmarked source without minting or adopting orphan IDs. */
+    fun inspectActivation(input:()->InputStream,orderedPageIds:List<String>,cancelled:()->Boolean={false}):Plan {
+        val supplied=orderedPageIds.toList();val unique=hashSetOf<String>()
+        require(supplied.isNotEmpty() && supplied.size<=MAX_ANCHORS) {"Invalid activation page count"}
+        for(id in supplied) {
+            check(!cancelled()) {"Anchor upgrade cancelled"}
+            require(UUID.fromString(id).toString()==id && unique.add(id)) {"Invalid or duplicate activation UUID"}
+        }
+        return plan(input,false,false,cancelled,supplied)
+    }
+
+    private fun plan(input:()->InputStream,anchored:Boolean,rekey:Boolean,cancelled:()->Boolean,activationIds:List<String>?=null):Plan {
         val format=reader(input(),cancelled).use { r ->
             val p=JsonPull(r,strict=true);p.beginObject()
             var found:String?=null
@@ -86,6 +97,7 @@ internal object AnchorManifest {
                                 place==Place.ROOT && key=="version" -> require(p.nextInt()==1) {"Unsupported anchor manifest version"}
                                 place==Place.ROOT && key=="pages" && format=="xnote" -> array(Place.PAGE,::value)
                                 place==Place.PAGE && key=="reference_id" -> {
+                                    require(activationIds==null) {"Unmarked page identities require explicit recovery"}
                                     require(p.peek()==JsonPull.Token.STRING) {"Page identity must be a string"}
                                     val start=p.position
                                     val id=p.nextString()
@@ -100,7 +112,10 @@ internal object AnchorManifest {
                         if(place==Place.ROOT) require(names.containsAll(listOf("format","version","pages"))) {"Missing anchor manifest structure"}
                         if(place==Place.PAGE && !hasId) {
                             require(!anchored) {"Upgraded document lost an anchor identity"}
-                            missing++;val id=UUID.randomUUID().toString();check(ids.add(id))
+                            missing++
+                            val id=if(activationIds==null) UUID.randomUUID().toString() else
+                                requireNotNull(activationIds.getOrNull(orderedIds.size)) {"Activation page count changed"}
+                            check(ids.add(id))
                             orderedIds.add(id)
                             insertions+=Insertion(p.position,(if(names.isEmpty()) "" else ",")+"\"reference_id\":\"$id\"")
                         }
@@ -116,6 +131,8 @@ internal object AnchorManifest {
         }
         require(targets>0) {"A referenced note must have a page"}
         require(existing==0 || missing==0) {"Partially missing anchor identities require explicit recovery"}
+        require(activationIds==null || targets==activationIds.size) {"Activation page count changed"}
+        check(!cancelled()) {"Anchor upgrade cancelled"}
         if(rekey) {
             // Generate only after validating every old ID, including pages later in the manifest.
             val fresh=ArrayList<String>();val issued=hashSetOf<String>()

@@ -4,6 +4,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -13,6 +14,49 @@ internal object BundleAnchors {
     const val ENTRY=AnchorMetadata.ENTRY
     private const val MANIFEST="manifest.json"
     data class Prepared(val file:File,val identity:BundleIdentity,val sourceHash:String,val anchorCount:Int)
+
+    /**
+     * Proves only the raw missing-page-ID insertion, including for a retained candidate after restart.
+     * Caller owns immutable snapshots and separately binds their versions to a publication request.
+     * No source/model write capability is created here, and neither input is changed or removed.
+     */
+    fun verifyActivation(original:File,candidate:File,cancelled:()->Boolean={false}) {
+        val before=BundleEntries.digests(original,cancelled,boundedManifest=true)
+        require(MANIFEST in before && ENTRY !in before) {"Only an unmarked note can activate page identities"}
+        val after=BundleEntries.digests(candidate,cancelled,boundedManifest=true)
+        require(after.keys==before.keys+ENTRY) {"Activation changed bundle entries"}
+        require(after.filterKeys {it!=MANIFEST && it!=ENTRY}==before.filterKeys {it!=MANIFEST}) {
+            "Activation changed original payload"
+        }
+        // A byte-preserving edit cannot repair an invalid native/PDF container. In particular,
+        // absence of a marker alone does not make an undeclared or missing PDF activatable.
+        val originalHeader=BundleReferenceInfo.inspectStrict(original,cancelled).header
+        val identity=requireNotNull(originalHeader.identity) {"Document identity required before anchor upgrade"}
+        require(originalHeader.anchors==null) {"Page identities already activated"}
+        val candidateHeader=BundleReferenceInfo.inspectStrict(candidate,cancelled).header
+        require(candidateHeader.identity==identity && candidateHeader.anchors?.documentId==identity.documentId) {
+            "Activation changed document identity"
+        }
+        val expectedMarker=MessageDigest.getInstance("SHA-256").digest(markerBytes(identity))
+        require(after[ENTRY]==hex(expectedMarker)) {"Activation marker changed"}
+        ZipFile(original).use {source->ZipFile(candidate).use {target->
+            val actual=AnchorManifest.inspect({target.getInputStream(target.getEntry(MANIFEST))},true,cancelled)
+            val open={source.getInputStream(source.getEntry(MANIFEST))}
+            val projection=AnchorManifest.inspectActivation(open,actual.orderedPageIds,cancelled)
+            val digest=MessageDigest.getInstance("SHA-256")
+            val output=object:OutputStream() {
+                override fun write(b:Int) {check(!cancelled());digest.update(b.toByte())}
+                override fun write(bytes:ByteArray,offset:Int,length:Int) {
+                    check(!cancelled());digest.update(bytes,offset,length)
+                }
+            }
+            // Strict UTF-8 decoding/encoding preserves every original byte, including escape and
+            // number spellings. Only the validated candidate's direct page IDs are inserted.
+            AnchorManifest.write(open,output,projection,cancelled)
+            require(after[MANIFEST]==hex(digest.digest())) {"Activation changed original manifest content"}
+        }}
+        check(!cancelled()) {"Anchor upgrade cancelled"}
+    }
 
     fun prepare(source:File,directory:File,expectedAnchored:Boolean=false,cancelled:()->Boolean={false}):Prepared {
         val sourceHash=BundleMigration.hash(source,cancelled)
@@ -78,6 +122,7 @@ internal object BundleAnchors {
     fun publish(prepared:Prepared,destination:File) = BundleMigration.publish(BundleMigration.Prepared(prepared.file,prepared.identity,prepared.sourceHash),destination)
 
     private fun markerBytes(identity:BundleIdentity)=AnchorMetadata(identity.documentId).bytes()
+    private fun hex(bytes:ByteArray)=bytes.joinToString("") {"%02x".format(it)}
     private fun readMarker(input:InputStream,identity:BundleIdentity) {
         require(AnchorMetadata.read(input).documentId==identity.documentId) {"Anchor metadata belongs to another document"}
     }
