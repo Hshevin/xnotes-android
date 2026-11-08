@@ -10,10 +10,12 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.CancellationException
 
 /** Owner serializes access per URI. Backups survive until file read-back AND registration succeed. */
-class MigrationPublication internal constructor(private val directory:File,private val hashFile:(File)->String,
+class MigrationPublication internal constructor(private val directory:File,private val hashFile:(File,()->Unit)->String,
                                                private val markerOpen:(File)->InputStream) {
+    internal constructor(directory:File,hashFile:(File)->String,markerOpen:(File)->InputStream):this(directory,
+        {file,check->check();hashFile(file).also {check()}},markerOpen)
     internal constructor(directory:File,hashFile:(File)->String):this(directory,hashFile,{it.inputStream()})
-    constructor(directory:File):this(directory,{BundleMigration.hash(it)})
+    constructor(directory:File):this(directory,{file,check->BundleMigration.hash(file) {check();false}},{it.inputStream()})
     interface Target {
         fun read():InputStream
         /** Positive backend evidence only; a failed read or lost permission is not proof of absence. */
@@ -44,29 +46,34 @@ class MigrationPublication internal constructor(private val directory:File,priva
     private enum class Inspection { PUBLISH, RESTORE, KEEP_CURRENT }
 
     val purpose:Purpose? get()=readRecord().purpose
+    internal val directoryPath:String get()=directory.canonicalPath
 
     fun stage(source:File,replacement:File,purpose:Purpose?=null,expectedCandidateHash:String?=null,
-              expectedOriginalHash:String?=null,handoffId:String?=null) {
+              expectedOriginalHash:String?=null,handoffId:String?=null,checkActive:()->Unit={}):String {
         // A handoff record is durable intent, not permission to publish. The coordinated producer
         // will supply both inspected hashes; old callers cannot accidentally opt in via a new default.
         require(handoffId==null || (canonicalUuid(handoffId) && purpose!=null && !purpose.creation &&
             expectedOriginalHash?.matches(SHA256)==true && expectedCandidateHash?.matches(SHA256)==true))
+        checkActive()
         check(!pending) {StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING)}
         check(directory.isDirectory || directory.mkdirs())
-        copyDurable(source,original);copyDurable(replacement,candidate)
-        val oldHash=BundleMigration.hash(original);val newHash=BundleMigration.hash(candidate)
+        copyDurable(source,original,checkActive);copyDurable(replacement,candidate,checkActive)
+        fun hash(file:File)=BundleMigration.hash(file) {checkActive();false}
+        val oldHash=hash(original);val newHash=hash(candidate)
         if(expectedCandidateHash!=null && newHash!=expectedCandidateHash || expectedOriginalHash!=null && oldHash!=expectedOriginalHash)
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        check(BundleMigration.hash(source)==oldHash && BundleMigration.hash(replacement)==newHash) {StorageText.t(StorageMsg.MIGRATION_VERIFY_FAILED)}
+        check(hash(source)==oldHash && hash(replacement)==newHash) {StorageText.t(StorageMsg.MIGRATION_VERIFY_FAILED)}
         val temp=File(directory,"pending.tmp")
-        try {
-            FileOutputStream(temp).use {val record=when {
-                handoffId!=null -> "4\n$oldHash\n$newHash\n${requireNotNull(purpose).key}\n$handoffId"
-                purpose!=null -> "3\n$oldHash\n$newHash\n${purpose.key}"
-                else -> "2\n$oldHash\n$newHash"
-            }
-                it.write(record.toByteArray(Charsets.UTF_8));it.fd.sync()}
-            Files.move(temp.toPath(),marker.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+        val record=when {
+            handoffId!=null -> "4\n$oldHash\n$newHash\n${requireNotNull(purpose).key}\n$handoffId"
+            purpose!=null -> "3\n$oldHash\n$newHash\n${purpose.key}"
+            else -> "2\n$oldHash\n$newHash"
+        }.toByteArray(Charsets.UTF_8)
+        return try {
+            FileOutputStream(temp).use {it.write(record);it.fd.sync()}
+            checkActive();Files.move(temp.toPath(),marker.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+            // Bind the bytes THIS call wrote, never a later marker read controlled by another writer.
+            java.security.MessageDigest.getInstance("SHA-256").digest(record).joinToString("") {"%02x".format(it)}
         } finally {temp.delete()}
     }
 
@@ -75,30 +82,34 @@ class MigrationPublication internal constructor(private val directory:File,priva
         publishValidated(target,validate={requireLegacy(it.purpose);validate(it.original,it.candidate,it.current)},afterVerified=afterVerified)
 
     internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={},
-                                  protectCandidate:(File)->Unit={}) {
+                                  protectCandidate:(File)->Unit={},expectedRecordDigest:String?=null,checkActive:()->Unit={}) {
+        checkActive()
         val record=readRecord()
+        if(expectedRecordDigest!=null && record.digest!=expectedRecordDigest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         // No acknowledgement authority exists at this layer yet. In particular, ordinary open /
         // retry after a restart must never publish B before the working body + handoff is durable.
         if(record.handoffId!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
         // Only dependency protection, never identity authority. The caller owns its lease on every path.
-        protectCandidate(candidate)
-        val kept=retained()
+        checkActive();protectCandidate(candidate)
+        val kept=retained(checkActive=checkActive)
         val oldHash=kept.original.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         val newHash=kept.candidate.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         checkRecord(record,kept,checkCandidate=true)
-        val currentHash=fingerprint(target)
+        val currentHash=fingerprint(target,checkActive)
         val current=when(currentHash) {
             newHash -> candidate
             oldHash -> original
             else -> throw failure(StorageMsg.MIGRATION_INTERRUPTED)
         }
-        validate(Validation(original,candidate,current,record.purpose))
-        unchanged(kept)
-        if(fingerprint(target)!=currentHash) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
-        if(currentHash!=newHash) writeVerified(target,candidate,newHash,currentHash,StorageMsg.MIGRATION_VERIFY_FAILED)
-        register {afterVerified(candidate)}
-        if(fingerprint(target)!=newHash) throw failure(StorageMsg.MIGRATION_VERIFY_FAILED)
-        unchanged(kept)
+        checkActive();validate(Validation(original,candidate,current,record.purpose))
+        unchanged(kept,checkActive=checkActive)
+        if(fingerprint(target,checkActive)!=currentHash) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
+        checkActive()
+        if(currentHash!=newHash) writeVerified(target,candidate,newHash,currentHash,StorageMsg.MIGRATION_VERIFY_FAILED,checkActive)
+        register {checkActive();afterVerified(candidate)}
+        if(fingerprint(target,checkActive)!=newHash) throw failure(StorageMsg.MIGRATION_VERIFY_FAILED)
+        unchanged(kept,checkActive=checkActive)
+        checkActive()
         clear()
     }
 
@@ -147,10 +158,11 @@ class MigrationPublication internal constructor(private val directory:File,priva
         clear()
     }
 
-    private fun writeVerified(target:Target,file:File,hash:String,expectedCurrentHash:String?,verifyFailure:StorageMsg) {
+    private fun writeVerified(target:Target,file:File,hash:String,expectedCurrentHash:String?,verifyFailure:StorageMsg,checkActive:()->Unit={}) {
         try {
+            checkActive()
             target.write(file,expectedCurrentHash)
-            if(fingerprint(target)!=hash) throw failure(verifyFailure)
+            if(fingerprint(target,checkActive)!=hash) throw failure(verifyFailure)
         } catch(error:Exception) {
             rethrowControlFlow(error)
             throw failure(StorageMsg.MIGRATION_WRITE_INCOMPLETE,error)
@@ -162,19 +174,22 @@ class MigrationPublication internal constructor(private val directory:File,priva
             throw failure(StorageMsg.MIGRATION_INDEX_INCOMPLETE,error)
         }
     }
-    private fun fingerprint(target:Target):String? = try {
+    private fun fingerprint(target:Target,checkActive:()->Unit={}):String? = try {
+        checkActive()
         val digest=java.security.MessageDigest.getInstance("SHA-256")
-        target.read().use {input->val buffer=ByteArray(65536);while(true) {val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
+        target.read().use {input->val buffer=ByteArray(65536);while(true) {checkActive();val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
+        checkActive()
         digest.digest().joinToString("") {"%02x".format(it)}
     } catch(error:Exception) {rethrowControlFlow(error);null}
 
-    private fun retained(mode:Inspection=Inspection.PUBLISH):Retained {
+    private fun retained(mode:Inspection=Inspection.PUBLISH,checkActive:()->Unit={}):Retained {
         fun inspect(file:File,strict:Boolean):FileProof {
+            checkActive()
             val exists=file.exists();val regular=file.isFile;val size=file.length();val modified=file.lastModified()
             val digest=if(!exists || !regular) {
                 if(exists && strict) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
                 null
-            } else try {hashFile(file)} catch(error:Exception) {
+            } else try {hashFile(file,checkActive)} catch(error:Exception) {
                 rethrowControlFlow(error)
                 if(strict) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID,error)
                 null
@@ -183,8 +198,8 @@ class MigrationPublication internal constructor(private val directory:File,priva
         }
         return Retained(inspect(original,mode!=Inspection.KEEP_CURRENT),inspect(candidate,mode==Inspection.PUBLISH),inspect(marker,mode!=Inspection.KEEP_CURRENT))
     }
-    private fun unchanged(before:Retained,mode:Inspection=Inspection.PUBLISH):Retained {
-        val after=retained(mode)
+    private fun unchanged(before:Retained,mode:Inspection=Inspection.PUBLISH,checkActive:()->Unit={}):Retained {
+        val after=retained(mode,checkActive)
         fun merge(old:FileProof,next:FileProof,lenient:Boolean):FileProof {
             if(old.copy(digest=null)!=next.copy(digest=null) ||
                 (!lenient && old.digest!=next.digest) ||
@@ -262,11 +277,14 @@ class MigrationPublication internal constructor(private val directory:File,priva
         if(error is ReferenceContractViolation || error is RecoveryRequired || error is CancellationException) throw error
     }
     private fun failure(reason:StorageMsg,cause:Throwable?=null)=RecoveryRequired(StorageText.t(reason),cause,reason)
-    private fun copyDurable(source:File,destination:File) {
+    private fun copyDurable(source:File,destination:File,checkActive:()->Unit) {
         val tmp=File(directory,destination.name+".tmp")
         try {
-            FileOutputStream(tmp).use {out->source.inputStream().use {it.copyTo(out)};out.fd.sync()}
-            Files.move(tmp.toPath(),destination.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+            FileOutputStream(tmp).use {out->source.inputStream().use {input->
+                val buffer=ByteArray(65536)
+                while(true) {checkActive();val n=input.read(buffer);if(n<0) break;out.write(buffer,0,n)}
+            };checkActive();out.fd.sync()}
+            checkActive();Files.move(tmp.toPath(),destination.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
         } finally {tmp.delete()}
     }
     private fun clear() {

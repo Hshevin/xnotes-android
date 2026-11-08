@@ -125,6 +125,11 @@ internal class PreparedNativeOpen private constructor(
         protected abstract fun encode(output:java.io.OutputStream,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,checkActive:()->Unit)
         fun publish(storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,tempDir:File,name:String,
                     checkActive:()->Unit={}):Receipt=Receipt.publish(this,storage,noteCodec,canvasCodec,tempDir,name,checkActive)
+        fun prepare(storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,tempDir:File,name:String,
+                    checkActive:()->Unit={}):Receipt.Staged=Receipt.Staged.prepare(this,storage,noteCodec,canvasCodec,tempDir,name,null,checkActive)
+        fun prepareForHandoff(storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,tempDir:File,name:String,
+                              checkActive:()->Unit={}):Receipt.Staged=Receipt.Staged.prepare(this,storage,noteCodec,canvasCodec,tempDir,name,
+            java.util.UUID.randomUUID().toString(),checkActive)
 
         class Note internal constructor(issuer:Any,generation:Long,expected:NativeSourceVersion,uri:String,resources:PdfResources,
                                         pdfIds:Set<String>,private val externalPdf:Boolean,val snapshot:Document,authorized:()->Boolean)
@@ -150,35 +155,54 @@ internal class PreparedNativeOpen private constructor(
         }
         class Receipt private constructor(private val request:SaveRequest,private val expected:NativeSourceVersion,val version:NativeSourceVersion) {
             internal fun matches(candidate:SaveRequest)=request===candidate && expected===candidate.expected
-            companion object {
-                /** IO-only. A successful storage return, rather than a read/inspect version, issues the receipt. */
-                internal fun publish(request:SaveRequest,storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
-                                     tempDir:File,name:String,checkActive:()->Unit):Receipt {
+            /** Private pairing prevents one request from claiming another request's retained body. */
+            class Staged private constructor(private val request:SaveRequest,private val storage:NotebookStorage,
+                                              private val stage:NotebookStorage.StagedSave,private val name:String) {
+                val handoffId get()=stage.handoffId
+                val original get()=stage.original
+                val candidate get()=stage.candidate
+                fun commit(checkActive:()->Unit={}):Receipt {
                     val check={request.checkCurrent(checkActive)}
                     check()
-                    // The lease precedes PDF hashing and encoding, including when a source was just closed/deleted.
-                    val lease=request.resources.holdResolved(request.pdfIds)
-                    var failure:Throwable?=null;var committed=false
-                    var candidate:File?=null
-                    try {
-                        request.validatePdf(check);check()
-                        if(!tempDir.isDirectory && !tempDir.mkdirs()) throw java.io.IOException("Cannot create native save directory")
-                        val file=File.createTempFile("native-request-", ".zip",tempDir);candidate=file
-                        file.outputStream().use {request.encode(it,noteCodec,canvasCodec,check)}
+                    val version=storage.commitStaged(stage,name,check)
+                    return Receipt(request,request.expected,version)
+                }
+                companion object {
+                    /** IO-only; durable stage/pin is complete before releasing the temporary PDF lease. */
+                    internal fun prepare(request:SaveRequest,storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
+                                         tempDir:File,name:String,handoffId:String?,checkActive:()->Unit):Staged {
+                        val check={request.checkCurrent(checkActive)}
                         check()
-                        val version=storage.publishExpected(request.uri,file,request.expected,name)
-                        committed=true
-                        return Receipt(request,request.expected,version)
-                    } catch(error:Throwable) {failure=error;throw error}
-                    finally {
-                        candidate?.delete()
-                        try {lease.close()} catch(close:Throwable) {
-                            if(failure!=null) failure.addSuppressed(close)
-                            else if(committed) android.util.Log.w("xnotes.storage","Retained PDF lease after confirmed save",close)
-                            else throw close
+                        // The lease precedes PDF hashing and encoding, including when a source was just closed/deleted.
+                        val lease=request.resources.holdResolved(request.pdfIds)
+                        var failure:Throwable?=null;var retained=false
+                        var candidate:File?=null
+                        try {
+                            request.validatePdf(check);check()
+                            if(!tempDir.isDirectory && !tempDir.mkdirs()) throw java.io.IOException("Cannot create native save directory")
+                            val file=File.createTempFile("native-request-", ".zip",tempDir);candidate=file
+                            file.outputStream().use {request.encode(it,noteCodec,canvasCodec,check)}
+                            check()
+                            val stage=storage.prepareExpected(request.uri,file,request.expected,handoffId,check)
+                            retained=true
+                            return Staged(request,storage,stage,name)
+                        } catch(error:Throwable) {failure=error;throw error}
+                        finally {
+                            candidate?.delete()
+                            try {lease.close()} catch(close:Throwable) {
+                                if(failure!=null) failure.addSuppressed(close)
+                                else if(retained) android.util.Log.w("xnotes.storage","Retained PDF lease after durable stage",close)
+                                else throw close
+                            }
                         }
                     }
                 }
+            }
+            companion object {
+                /** Only a successful commit of the request's own retained stage issues the receipt. */
+                internal fun publish(request:SaveRequest,storage:NotebookStorage,noteCodec:DocumentCodec,canvasCodec:CanvasCodec,
+                                     tempDir:File,name:String,checkActive:()->Unit):Receipt =
+                    Staged.prepare(request,storage,noteCodec,canvasCodec,tempDir,name,null,checkActive).commit(checkActive)
             }
         }
     }

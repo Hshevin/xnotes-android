@@ -106,6 +106,55 @@ class PublicationHandoffTest {
             assertTrue(journal.pending)
         }
     }
+    @Test fun cancellingAStageCopyNeverPublishesItsMarkerOrChangesTheTarget()=scenario {current,next,dir->
+        next.writeBytes(ByteArray(3*65536) {42});val journal=MigrationPublication(dir)
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE,checkActive={
+                if(File(dir,"candidate.zip.tmp").length()>=65536) throw java.util.concurrent.CancellationException()
+            })
+        }
+        assertEquals("A",current.readText());assertFalse(journal.pending)
+        assertFalse(File(dir,"candidate.zip.tmp").exists());assertEquals("A",File(dir,"original.zip").readText())
+    }
+    @Test fun revokedAuthorityDuringRetainedHashingIsCheckedAgainBeforeTheTargetWrite()=scenario {current,next,dir->
+        var active=true;var committing=false;var candidateHashes=0
+        val journal=MigrationPublication(dir,{file->
+            val hash=BundleMigration.hash(file)
+            if(committing && file.name=="candidate.zip" && ++candidateHashes==2) active=false
+            hash
+        })
+        journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE);committing=true
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            journal.publishValidated(target(current),validate={},checkActive={if(!active) throw java.util.concurrent.CancellationException()})
+        }
+        assertEquals(2,candidateHashes);assertEquals("A",current.readText());assertTrue(journal.pending)
+    }
+    @Test fun ordinaryJournalChecksCancellationInsideLargeRetainedHashesBeforeReadingTheTarget()=scenario {current,next,dir->
+        current.writeBytes(ByteArray(3*1024*1024) {1});next.writeBytes(ByteArray(3*1024*1024) {2})
+        val journal=MigrationPublication(dir);journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE)
+        var checks=0;var targetReads=0
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            journal.publishValidated(object:MigrationPublication.Target {
+                override fun read()=current.inputStream().also {targetReads++}
+                override fun write(source:File) {fail("cancel must precede write")}
+            },validate={},checkActive={if(++checks==20) throw java.util.concurrent.CancellationException()})
+        }
+        assertEquals(0,targetReads);assertTrue(journal.pending)
+    }
+    @Test fun theReturnedStageDigestBelongsToItsOwnBytesAndRejectsALaterReplacement()=scenario {current,next,dir->
+        val journal=MigrationPublication(dir)
+        val digest=journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE,
+            expectedOriginalHash=BundleMigration.hash(current),expectedCandidateHash=BundleMigration.hash(next),handoffId=id)
+        val marker=File(dir,"pending");assertEquals(BundleMigration.hash(marker),digest)
+        marker.writeText(marker.readText().split('\n').take(4).joinToString("\n").replaceFirst("4\n","3\n"))
+        assertNotEquals(BundleMigration.hash(marker),digest)
+        var called=false
+        val failure=assertThrows(MigrationPublication.RecoveryRequired::class.java) {
+            journal.publishValidated(target(current),validate={called=true},protectCandidate={called=true},expectedRecordDigest=digest)
+        }
+        assertEquals(StorageMsg.MIGRATION_RECOVERY_INVALID,failure.reason);assertFalse(called)
+        assertEquals("A",current.readText());assertTrue(journal.pending)
+    }
     @Test fun malformedHandoffsNeverFallBackToLegacyKeepOrWrite()=scenario {current,next,dir->
         val marker=stage(current,next,dir)
         for(text in listOf(marker.replace(id,"bad"),marker.replace(id,id.uppercase()),marker+"\nextra",

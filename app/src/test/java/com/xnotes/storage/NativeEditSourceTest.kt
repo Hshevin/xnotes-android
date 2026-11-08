@@ -71,6 +71,70 @@ class NativeEditSourceTest {
     private fun ink()=com.xnotes.core.model.Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN)).apply {
         addSample(Sample(10.0,20.0,.4,t=10.0));addSample(Sample(30.0,40.0,.8,t=20.0))
     }
+    @Test fun realRequestStagesItsOwnBodyBeforeTheOwnerAcceptsAnyReceipt()=scenario {f->
+        f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        doc.pages.single().items.add(ink());doc.dirty=true
+        val before=f.current.readBytes();val request=source.capture(doc)
+        val stage=request.prepare(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        assertEquals(0,f.writes);assertArrayEquals(before,f.current.readBytes());assertTrue(f.storage.hasRecovery(f.uri))
+        assertEquals(request.expected.sha256,source.version(doc).sha256)
+        assertTrue(f.scratch.listFiles().orEmpty().isEmpty())
+        val receipt=stage.commit()
+        assertTrue(source.accept(request,receipt));assertTrue(doc.dirty);assertEquals(1,f.writes)
+        assertEquals(stage.candidate.sha256,source.version(doc).sha256)
+    }
+    @Test fun coordinatedRequestNeverIssuesAReceiptBeforeAWorkingCacheAcknowledgementExists()=scenario {f->
+        f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        doc.pages.single().items.add(ink());doc.dirty=true;val request=source.capture(doc)
+        val original=f.current.readBytes();val stage=request.prepareForHandoff(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        assertNotNull(stage.handoffId);assertEquals(0,f.writes)
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {stage.commit()}
+        assertArrayEquals(original,f.current.readBytes());assertEquals(request.expected.sha256,source.version(doc).sha256)
+        assertTrue(f.storage.hasRecovery(f.uri));assertEquals(0,f.writes)
+    }
+    @Test fun revokingTheActualSourceDuringCommitTargetValidationPreventsAnyWrite()=scenario {f->
+        f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        doc.pages.single().items.add(ink());doc.dirty=true
+        val stage=source.capture(doc).prepare(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        val original=f.current.readBytes();f.beforeRead={source.invalidate()}
+        assertThrows(ReferenceContractViolation::class.java) {stage.commit()}
+        assertArrayEquals(original,f.current.readBytes());assertEquals(0,f.writes);assertTrue(f.storage.hasRecovery(f.uri))
+    }
+    @Test fun stagedExternalPdfHasADurableMigrationPinBetweenTemporaryLeaseAndCommit()=scenario {f->
+        val resources=f.storage.pdfResources;val pdf=resources.admit("%PDF-staged-original".byteInputStream(),"original")
+        f.note(pdf);val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        doc.pages.single().items.add(ink());doc.dirty=true
+        val noteOwner="note:${doc.identity.documentId}";resources.pin(noteOwner,emptySet())
+        val request=source.capture(doc);val stage=request.prepare(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        val key=f.storage.registry.locationKey(f.uri)
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") {"%02x".format(it)}
+        assertEquals(setOf(pdf.nameWithoutExtension),resources.references("migration:$hash"))
+        f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0")
+        resources.collect();assertTrue(pdf.isFile);assertEquals(0,f.writes)
+        val receipt=stage.commit();assertTrue(source.accept(request,receipt))
+        assertEquals(setOf(pdf.nameWithoutExtension),resources.references(noteOwner))
+        assertTrue(resources.references("migration:$hash").isEmpty());resources.collect();assertTrue(pdf.isFile)
+    }
+    @Test fun canvasUsesTheSameStagedRequestAndReceiptContract()=scenario {f->
+        f.canvas();val p=f.prepare(DocumentKind.CANVAS);val doc=requireNotNull(p.canvas);val source=p.editSource()
+        doc.add(ink());doc.dirty=true;val original=f.current.readBytes()
+        val request=source.capture(doc);val other=source.capture(doc)
+        val stage=request.prepare(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"canvas")
+        assertArrayEquals(original,f.current.readBytes());assertEquals(0,f.writes)
+        val receipt=stage.commit();assertFalse(source.accept(other,receipt));assertTrue(source.accept(request,receipt))
+        assertEquals(stage.candidate.sha256,source.version(doc).sha256);assertEquals(1,f.writes)
+    }
+    @Test fun lossOfTheOwnerAfterProviderWritePreservesTheWrittenBytesWithoutIssuingAReceipt()=scenario {f->
+        f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
+        doc.pages.single().items.add(ink());doc.dirty=true
+        val stage=source.capture(doc).prepare(f.storage,f.noteCodec,f.canvasCodec,f.scratch,"source")
+        f.beforeWrite={source.invalidate()}
+        assertThrows(ReferenceContractViolation::class.java) {stage.commit()}
+        assertEquals(1,f.writes);assertEquals(stage.candidate.sha256,BundleMigration.hash(f.current))
+        assertTrue(f.storage.hasRecovery(f.uri));assertTrue(doc.dirty)
+        f.beforeWrite=null
+        assertEquals(stage.candidate.sha256,f.storage.keepWrittenSave(f.uri,DocumentKind.NOTE).sha256)
+    }
     @Test fun aPreparedAdoptionIssuesOnlyOneContextAndItsSnapshotKeepsPageAndInkIdentity()=scenario {f->
         f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
         assertSame(source,p.editSource());val page=doc.pages.single().referenceIdentity.id

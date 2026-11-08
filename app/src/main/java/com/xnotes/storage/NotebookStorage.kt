@@ -19,6 +19,22 @@ class NotebookStorage internal constructor(private val context:Context,
     internal val pdfResources by lazy {PdfResources(context,registry)}
     private val lock = Any()
     private val creationIssuer=Any()
+    private val saveIssuer=Any()
+    /** An actual retained stage, not a source context or evidence that a working cache is durable. */
+    internal class StagedSave private constructor(
+        private val issuer:Any,internal val uri:String,internal val journalPath:String,internal val recordDigest:String,
+        val original:NativeSourceVersion,val candidate:NativeSourceVersion,val handoffId:String?,
+    ) {
+        private var consumed=false
+        @Synchronized internal fun consume(owner:Any) {
+            if(owner!==issuer || consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            consumed=true
+        }
+        companion object {
+            internal fun issue(issuer:Any,uri:String,journalPath:String,recordDigest:String,original:NativeSourceVersion,
+                               candidate:NativeSourceVersion,handoffId:String?)=StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId)
+        }
+    }
     /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
     fun identity(uri: String,checkActive:()->Unit={}): BundleIdentity? = synchronized(lock) {
         try {
@@ -51,7 +67,8 @@ class NotebookStorage internal constructor(private val context:Context,
     private fun journal(uri:String,checkActive:()->Unit={}):MigrationPublication {
         val candidates=journalCandidates(uri);val pending=candidates.filter {MigrationPublication(it).pending}
         if(pending.size>1) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
-        return MigrationPublication(pending.singleOrNull() ?: candidates.first(),{file->BundleMigration.hash(file) {checkActive();false}})
+        return MigrationPublication(pending.singleOrNull() ?: candidates.first(),
+            {file,check->BundleMigration.hash(file) {checkActive();check();false}},{it.inputStream()})
     }
     private fun migrationOwner(uri:String)="migration:${hashKey(registry.locationKey(uri))}"
     private fun recovery(reason:StorageMsg)=MigrationPublication.RecoveryRequired(StorageText.t(reason),reason=reason)
@@ -166,21 +183,30 @@ class NotebookStorage internal constructor(private val context:Context,
         checkActive()
         return digest.digest().joinToString("") {"%02x".format(it)}
     }
-    private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose):NativeSourceVersion {
-        val pending=journal(uri);val backend=target(uri)
+    private fun publishSave(uri:String,name:String,expected:MigrationPublication.Purpose,stage:StagedSave?=null,
+                            checkActive:()->Unit={}):NativeSourceVersion {
+        checkActive()
+        val pending=journal(uri,checkActive)
+        if(stage!=null && (registry.locationKey(uri)!=stage.original.locationKey || pending.directoryPath!=stage.journalPath))
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        val backend=target(uri)
         var verified:com.xnotes.format.BundleReferenceInfo?=null
         var receipt:NativeSourceVersion?=null
         pending.publishValidated(backend,validate={state->
             if(state.purpose!=expected) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
-            val original=inspect(state.original)
+            checkActive()
+            val original=inspect(state.original,checkActive)
             val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),
-                if(expected==MigrationPublication.Purpose.SAVE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS)
+                if(expected==MigrationPublication.Purpose.SAVE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS,checkActive)
             val candidate=checked.info;receipt=checked.version
+            if(stage!=null && (BundleMigration.hash(state.original) {checkActive();false}!=stage.original.sha256 ||
+                checked.version.sha256!=stage.candidate.sha256)) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
             val current=when(state.current) {state.original->original;state.candidate->candidate;else->error("Unbound publication version")}
             NativeSaveContract.verify(original,candidate,current,expected,registry.expectationAt(uri),
                 current.header.identity?.let {registry.expectationForId(it.documentId)})
-            protectPending(uri,original,candidate);verified=candidate
-        },afterVerified={registerVerified(uri,requireNotNull(verified),name)})
+            checkActive();protectPending(uri,original,candidate);verified=candidate
+        },afterVerified={registerVerified(uri,requireNotNull(verified),name,strict=stage!=null,checkActive=checkActive)},
+            expectedRecordDigest=stage?.recordDigest,checkActive=checkActive)
         releaseCompletedPin(uri)
         return requireNotNull(receipt)
     }
@@ -376,25 +402,45 @@ class NotebookStorage internal constructor(private val context:Context,
     }
     private fun publishExisting(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String,
                                 version:NativeSourceVersion?):NativeSourceVersion {
-        val pending=journal(uri)
+        val stage=stageExisting(uri,candidate,kind,version,null,{})
+        return commitStaged(stage,name)
+    }
+    /** IO-only; returns with no storage lock held and without writing the target. */
+    internal fun prepareExpected(uri:String,candidate:File,expected:NativeSourceVersion,handoffId:String?=null,
+                                 checkActive:()->Unit={}):StagedSave = synchronized(lock) {
+        stageExisting(uri,candidate,expected.kind,expected,handoffId,checkActive)
+    }
+    internal fun commitStaged(stage:StagedSave,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
+        stage.consume(saveIssuer);checkActive()
+        if(stage.handoffId!=null) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        publishSave(stage.uri,name,purpose(stage.original.kind.extension),stage,checkActive)
+    }
+    private fun stageExisting(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,version:NativeSourceVersion?,
+                              handoffId:String?,checkActive:()->Unit):StagedSave {
+        checkActive()
+        val pending=journal(uri,checkActive)
         if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         val expected=purpose(kind.extension)
         if(version!=null && version.locationKey!=registry.locationKey(uri))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        sourceSnapshot(target(uri)).use {source->
-            val original=inspect(source.file);val next=inspect(candidate)
+        return sourceSnapshot(target(uri),checkActive).use {source->
+            val location=registry.locationKey(uri)
+            val original=NativeSourceVersion.inspect(source.file,location,kind,checkActive)
+            val next=NativeSourceVersion.inspect(candidate,location,kind,checkActive)
             if(version!=null) {
-                if(original.header.identity?.documentId!=version.documentId)
+                if(original.version.documentId!=version.documentId)
                     throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
                 if(source.sourceHash!=version.sha256)
                     throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
             }
-            NativeSaveContract.verify(original,next,original,expected,registry.expectationAt(uri),
-                original.header.identity?.let {registry.expectationForId(it.documentId)})
-            protectPending(uri,original,next)
-            pending.stage(source.file,candidate,expected)
+            NativeSaveContract.verify(original.info,next.info,original.info,expected,registry.expectationAt(uri),
+                original.info.header.identity?.let {registry.expectationForId(it.documentId)})
+            checkActive();protectPending(uri,original.info,next.info);checkActive()
+            val recordDigest=pending.stage(source.file,candidate,expected,expectedCandidateHash=next.version.sha256,
+                expectedOriginalHash=original.version.sha256,handoffId=handoffId,checkActive=checkActive)
+            checkActive()
+            StagedSave.issue(saveIssuer,uri,pending.directoryPath,recordDigest,original.version,next.version,handoffId)
         }
-        return publishSave(uri,name,expected)
     }
 
     /** Called at an explicit new/create/Save-As action, before handing control to a file picker. No IO. */

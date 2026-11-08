@@ -102,3 +102,7 @@ review_input_plan 独立复核发现候选损坏阻止恢复、读取失败混�
 ## 原生交接 v4 拒写保护（2026-11-08）
 
 review_input_plan 独立计划与源码复核通过：仅canonical UUID+SAVE+预检A/B摘要可stage v4；任何callback/target读取前默认拒绝publish，重启/别名不绕过；typed restore/keep仅暴露ID数据，坏record不降级。完整300套件3293项与Android源码编译通过，新增owned provider场景只编译未执行。无ack/生产切换/渲染改动；后续prepare/commit与活动内容事务屏障另审。
+
+## 原生两阶段保存证明（2026-11-08）
+
+review_input_plan独立计划/源码复核：绑定storage issuer、canonical journal、实际A/B与本次record；取消/epoch贯穿写前、读回、登记，已消费stage不补发Receipt。发现stage后读取替换marker签错证明、retained散列漏core取消，两个反例先红后绿。窄复核确认stage直接返回写入字节SHA、callback前CAS、v4 handle额外拒写、逐块检查与PDF pin间隙闭合。最终301套件3312项和Android源码编译全过；真实provider新增例只编译，目标设备未运行。完整cache/ack/稳定内容capture仍后续。

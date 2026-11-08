@@ -18,6 +18,29 @@ import org.junit.Test
 
 /** Real owned provider/PFD/SQLite boundary. Compile-only until explicitly run on Android. */
 class NativeStorageSaveAndroidTest {
+    @Test fun preparingAProviderSaveDoesNotWriteUntilItsExactStageCommits() {
+        val base=PenTestRunner.instance.targetContext;val key="staged-save-${UUID.randomUUID()}"
+        val folder=File(AppStorageDocumentsProvider.rootDir(base),key).apply {mkdir()}
+        val privateRoot=File(base.cacheDir,key).apply {mkdir()}
+        val context=object:ContextWrapper(base) {override fun getNoBackupFilesDir()=privateRoot}
+        val storage=NotebookStorage(context)
+        try {
+            val id=UUID.randomUUID().toString();val page=UUID.randomUUID().toString()
+            val current=File(folder,"source.xnote");val next=File(privateRoot,"next.xnote")
+            bundle(current,id,page,"A");bundle(next,id,page,"B");val original=current.readBytes();val expected=next.readBytes()
+            val uri=DocumentsContract.buildDocumentUri(base.packageName+".documents","root/$key/source.xnote").toString()
+            val version=storage.openSource(uri,DocumentKind.NOTE).use {it.version}
+            val stage=storage.prepareExpected(uri,next,version)
+            assertArrayEquals(original,current.readBytes());assertTrue(storage.hasRecovery(uri))
+            val executor=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {assertTrue(executor.submit<Boolean> {storage.hasRecovery(uri)}.get(5,java.util.concurrent.TimeUnit.SECONDS))}
+            finally {executor.shutdownNow()}
+            next.delete()
+            val saved=storage.commitStaged(stage,"source")
+            assertArrayEquals(expected,current.readBytes());assertEquals(BundleMigration.hash(current),saved.sha256)
+            assertFalse(storage.hasRecovery(uri));assertTrue(storage.registry.expectationForId(id).requiresPages)
+        } finally {storage.registry.close();folder.deleteRecursively();privateRoot.deleteRecursively()}
+    }
     @Test fun reopeningAnUnacknowledgedHandoffDoesNotWriteTheOwnedProvider() {
         val base=PenTestRunner.instance.targetContext;val key="handoff-gate-${UUID.randomUUID()}"
         val folder=File(AppStorageDocumentsProvider.rootDir(base),key).apply {mkdir()}

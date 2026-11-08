@@ -1,7 +1,7 @@
 # 原生保存到工作会话的持久交接（2026-11-08）
 
 用户要求：继续思维导图保存/重开闭环；保留已写入版本，只丢之后修改；不要打包APK。
-状态：整体交接计划已独立审核；首片 v4 持久拒写保护已实现；完整 JVM 300 套件 / 3293 项通过，Android 测试源码编译成功，独立源码复核通过；完整协调交接尚未实施。
+状态：整体交接计划已独立审核；首片 v4 持久拒写保护已实现；完整 JVM 300 套件 / 3293 项通过，Android 测试源码编译成功，独立源码复核通过；实际阶段证明/prepare→commit也已实现并独立复核；完整协调交接尚未实施。
 本轮边界：源码、测试、文档、本地提交；不打包、安装、推送、合并或发布。
 
 ## 要解决的真实窗口
@@ -46,3 +46,25 @@ MigrationPublication stage新增可选handoff ID，仅接受canonical UUID、SAV
 进一步源码核实：Document.copyWriteSnapshot共享item；CanvasSelection.applyLive/resizeLive及跟随连线可在确认前修改几何、取消后还原。主线程fresh capture和bodyRevision本身不证明内容已稳定。协调交接实施前必须纳入活动内容事务屏障/稳定writer状态验证，不能复用未确认变换的旧正文证明；本片不修改渲染或笔迹采样。
 
 首片验证：tmp/native-handoff-gate-red.log 的先行4个核心用例中2项失败；实现后 tmp/native-handoff-gate-focused.log 定向回归通过，tmp/native-handoff-gate-full.log 完整300套件3293项全过（0失败/错误/跳过），Android测试源码编译成功。新增owned provider重建storage场景仅编译；未执行Android仪器或MovinkPad/Android15/ProPen3验收。无前缓冲、Surface或GPU修改。
+
+## 下一片规格：实际阶段证明与释放存储锁
+
+输入为已签发SaveRequest/NativeSourceVersion，输出为同storage私有issuer绑定的一次性StagedSave，不接受任意tuple作为来源证明。NotebookStorage准备阶段在锁内核实实际A/B原生kind、UUID、canonical key、完整页/PDF契约，并以两个实际SHA固定journal；返回前释放锁，目标仍为A。证明绑定持久record摘要、两份实际version及handoff ID；原生-only路径继续v3并同步prepare→commit，协调prepare生成新UUID写v4。
+
+commit只接受同storage证明，一次尝试；重新核对同record摘要、retained A/B与实际target和registry契约，才沿原发布路径写入/回读/登记，登记使用事务内observed契约。v4仍无ack入口、默认拒写；本片不实现cache交接或source自动重基。record被替换/target外改/源epoch撤销/取消均保留资料、不签成功receipt。prepare不是可写source上下文。
+
+SaveRequest封装实际编码、PDF lease和候选临时文件，stage成功由持久migration pin保护依赖后才释放临时lease；准备结果私有配对原请求/确切storage/阶段，只有其实际成功commit才签回该请求Receipt，不能用另一请求的stage签回执。主线程获得证明后无需持storage锁等待；双线程latch覆盖prepare返回后进入Main/另线程读取不会互等。
+
+验收：真实NOTE/CANVAS/PDF prepare不写目标、预检摘要与固定候选一致；原生v3 commit一步成功、不可重复/跨storage使用、候选临时更改不影响固定B；v4 prepare返回后旧ensure及其commit拒写；record/retained/target/registry改变及取消/登记失败保留恢复资料；原请求失活后不写；双线程锁释放；现有真实SaveRequest/PDF/创建/恢复与全量回归。平台provider例保留编译/运行边界，不打APK。活动编辑事务屏障、cache schema2/ack、重启认领、生产接线仍未完成。
+
+第二片独立计划审核通过，补充绑定：StagedSave绑定确切storage issuer、canonical location与实际journal路径/record摘要；另一相同内容journal不能替换。原请求epoch/取消检查必须贯穿commit验证、大包hash之后的实际写前、读回和登记，而非仅入口；补失活发生在commit验证期间的反例。stage被其它恢复入口消费后，旧handle不因target=B而签Receipt。
+
+## 第二片结果
+
+NotebookStorage.StagedSave已绑定实际storage issuer、canonical journal路径、本次stage写入字节的摘要及实际A/B版本；一次commit重新检查恢复资料、目标、kind/UUID/页面/PDF/登记契约。SaveRequest.Receipt.Staged私有配对原请求与确切storage，prepare封装候选编码及PDF lease，实际commit才签发receipt。已有同步native publish走v3两步；prepareForHandoff生成v4，尚无ack权限、仍默认拒绝commit。返回Main前不持storage锁。prepare并非保存成功，也不授予恢复模型保存权限。
+
+独立复核发现并修复两项：stage之后读取现存marker可能签下替换record；大包retained散列未接core取消。tmp/native-staged-save-review-red.log两个反例先失败，修复后tmp/native-staged-save-review-fix.log定向通过。stage直接返回本次immutable字节SHA，expectedRecordDigest在任何callbacks前核验，handle自身交接ID再默认拒4。默认journal及NotebookStorage的实际retained/unchanged/复制/目标读回逐块检查取消与源epoch；原Function1散列仅保留内部测试seam适配。取消不吞异常；写后失活保留实际B与pending，不发伪receipt，可显式keepWrittenSave。
+
+最终tmp/native-staged-save-full.log：完整301套件3312项全部通过（0失败/错误/跳过），Android测试源码编译成功。新增19个JVM行为例，含record降级/散列中取消、来源失活、target/retained/registry变化、精确journal/跨storage/重复或被恢复消费、NOTE/CANVAS、PDF migration pin间隙和锁释放；新增真实owned provider两阶段场景仅编译，未在Android执行。未打包、安装、推送或发布。无渲染/GPU改动。
+
+后续仍需：稳定内容capture及活动事务屏障、同head cache schema2/ack和重启认领、生产Editor/旧session迁移、新建/另存copy pending、页面来源/预览/往返/backlinks/网络；整体未完成。不得只凭本片阶段证明清空旧工作缓存或采用陈旧预读来源。
