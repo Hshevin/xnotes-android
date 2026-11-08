@@ -1,12 +1,12 @@
 # 自主推进恢复点：已恢复
 
 目标：思维导图与文件关系网络，active，overall complete=false。沿已同步的新渲染架构继续完整需求，用户要求持续推进；2026-11-09 的“完工了吗”是状态询问，不是暂停或缩减范围。
-工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。当前代码已本地提交19574fe1（此前662a2762 checked store、fef07d7c FIFO、47cc562e输入事务）；文档随本恢复点同步提交。无用户修改被覆盖。
+工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。当前代码已本地提交5c43056b普通关系线选择；d7610f5b来源重开修复、b6600235 headless测试通知修正。文档随本恢复点同步提交，无用户修改被覆盖。
 授权：源码、验证、文档和本地提交；用户明确授权同步 master54f05b0f（含主线已有更新）。不打包、安装、推送或发布，不合入其他开发分支。
-当前阶段：verified，实际owner稳定事务捕获已接旧native3及旧SessionStore/CanvasSessionStore，不半启NativeWorkingSession。最终tmp/editor-owner-capture-full.log：313套件3483项，0失败/错误/跳过，Android测试源码编译成功；新增47主机例。15 shared实际Editor及6输入场景已登记设备runner，仅编译未运行。两独立源码复核通过；table undo、等待时modal、单文档恢复、共享关闭、显式discard新建、共享临时PDF编码寿命、最后稳定重核、退休owner及锁外唤醒均修。规格/证据reference-owner-capture-2026-11-09.md。所有Gradle作业已结束（最后session64537退出0），无运行作业，未打包APK。实际SAF／仪器／MovinkPad Android15 ProPen3／GPU／性能仍未验收。
+当前阶段：verified。source phase实际4红→8绿，见reference-open-after-save-2026-11-09.md。普通线共享几何/48dp命中、互斥runtime选择、existing草稿/完整列表、黑白反馈已落地；笔掌、旧计时/preview跨文档回退均有真实红→绿与独立复核，见mind-map-relation-hit-2026-11-09.md。最终tmp/map-relation-hit-notified-full.log：315套件3520项，0失败/错误/跳过，Android测试源码编译成功；比基线新增37项（source8/UI29）。一次旧来源等待测试缺headless snapshot apply通知已最小修测试(b6600235)，官方文档/本机runtime字节码核实，单类15及最终完整通过，不改生产/不放宽timeout。所有Gradle结束（54794退出0），无运行作业。新增shared Source8/输入13及Compose2只编译Android，实际窗口／SAF／MovinkPad Android15 ProPen3／GPU／性能未验收，不打包APK。
 新接口/后续顺序：docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。R1先撤除逐对象身份/画布锚点，仅页面UUID；B2c取消。整包副本页面UUID也需更新。R2安全激活/SAF；R3页面多来源闭环；R4跳转/反向引用/恢复/双窗格；R5文件网络及A2剩余交互。
 历史证据：审查修复068e1c2c全量2828项通过、Android仪器源码编译，实际未运行；5314a887 Header/Snapshot12项通过，writer接入未完成。旧文档中的对象身份计划已由页面级决定替代，不沿用为当前产品语义。
-待执行：已有owner稳定屏障后，按source-loop-production-gaps-2026-11-08.md继续native4生产/回执→同head工作会话持久交接、cold pending4受控完成、live转交、旧/unbound无写权恢复及new/copy持久交接。包含已开始native IO跨Activity采用保护，不能拿旧会话FIFO冒充；旧正文/sidecar崩溃原子性仍旧格式边界。未保存画布无目标目前拒绝关闭，待明确保存/放弃UI。之后原字节页身份激活→页面多来源/预览→跳转返回/backlinks→局部/全库文件网络。只读catalog仅基础API，不宣称页面来源UI已可用。A2线命中/多选/无中心仍保留。保存后放弃继续保留已写版本，不自动回滚；不打包APK。
+待执行：按source-loop-production-gaps-2026-11-08.md继续native4生产/回执→同head工作会话持久交接、cold pending4受控完成、live转交、旧/unbound无写权恢复及new/copy持久交接。最新实际接口/缺口在reference-native-handoff-2026-11-08.md末节：非suspend post-stage Main capture需busy检查/同stage重试；T/completion失败保留；Unbound缺实际body decode、pending4/cold A和active Root转交缺失，不能只换writeNoteSafely。包含已开始native IO跨Activity整个逻辑writer寿命/采用保护，不能拿旧缓存FIFO冒充；旧正文/sidecar崩溃原子性仍旧格式边界。未保存画布无目标目前拒绝关闭，待明确保存/放弃UI。之后原字节页身份激活→页面多来源/预览→跳转返回/backlinks→局部/全库文件网络。只读catalog仅基础API，页面来源UI尚未可用。A2多选/对齐/无中心/同级插入/边缘自动平移仍保留，普通线命中已完成；整体complete=false。保存后放弃保留已写版本，不自动回滚，不打包APK。
 
 R2b2a模型scope/确定性新页ID/冻结投影/采用已实现，计划已独立审核；tmp/page-copy-scope-full.log 289套件3106项全通过、Android源码编译成功，代码独立复核通过，已提交bb40c14c。详细规格reference-copy-scope-2026-11-08.md。实际检查发现SessionStore正文/sidecar无绑定和代次，CanvasSession仍同步写活模型，需R2b2b处理；不要先把新scope半接到旧Save-As输出流。Document.deepCopy目前保留doc身份，泛用语义不轻改。
 

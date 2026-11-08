@@ -142,3 +142,17 @@ Prepared 仅由实际 decode 链持私有 session/Read/T 绑定。真正采用�
 定向 tmp/native-handoff-recovery-boundaries.log 已通过，含真实B/C恢复并继续保存、C1首次重写、first body失败gate、两个Prepared竞争、关闭/错模型、actualA/外部版本资料保全，以及同SHA画布和external PDF冷恢复。新增真实Android provider交接→恢复→首次持久化场景只编译，未运行。完整 tmp/native-handoff-recovery-final-full.log：303套件3367项全部通过（0失败/错误/跳过），Android测试源码编译成功，含新增真实provider场景仅编译；生产Editor/旧SessionStore尚未迁移，不把本片当作整项功能完成。
 
 仍需受控pending4固定B续写、活owner恢复转交、稳定输入屏障、生产统一native/cache writer、新建/另存持久copy交接、页身份激活与来源菜单/多来源预览、跳转往返/backlinks、关系网络及剩余导图交互。
+
+## 2026-11-09 生产入口核查恢复点
+
+`19574fe1` 已把稳定输入／固定捕获接到旧 native3 和旧会话；3483 项主机及 Android 源码编译通过。它不激活本文件的新协议。实际迁移仍需整个闭环同时采用，不能只替换 `writeNoteSafely`：NativeWorkingSession.capture/publish 先建本 runtime 普通 checkpoint → EditSource.capture 固定 B → request.prepareForHandoff → persistHandoff 的 Main permit 捕获稳定当前 C 并持久 C+T → stage.commit(publication) → Main source.accept → 再捕获／publish completion 清 T。
+
+独立源码核查确认仍缺的生产前提：
+
+- persistHandoff 的 Main capture callback 非 suspend；其 preflight IO 结束后输入可能重新 busy。必须检查并保留同一个 staged 以重试，或建立明确的短编辑屏障，不能把活动预览当稳定 C。prepare／commit 失败要保留实际 request＋stage；accept 后 completion 失败仍有 T，不能由 job 已结束或 dirty=false 允许另起 stage／关闭。
+- 当前旧会话在 nativeJob active 时不捕获；新协议必须允许稳定当前 C+T 继续 checkpoint，不能把整个逻辑 writer 塞进会话 FIFO 并堵住更新。
+- 新恢复有 head（含 tombstone、损坏或未来 head）不得落回旧 cache。无 T 的 Bound 与 T＋actualB 的 claim／首次新正文链已有 API；Unbound 目前只返 metadata，没有草稿正文解码接口。旧 cache 的 path 不能变原文件写权，也不能给旧模型贴上另一次 prepareOpen 的 EditSource。
+- cold actualA／pending4 受控固定 B 续写仍未实现；active Root 的 intent／completion／recovered 不能被 cold claim 抢占。旧 owner 退休会令 UI capture 等待失败，须在新实例采用前真正完成／转交整个逻辑 writer，不仅等待缓存 accepted prefix。已开始 native IO 的寿命包含编码、publication、回执及会话 completion。
+- MainActivity 另存输出、createNoteFile、forkNote／forkCanvas、PDF 插入／粘贴的来源变化尚非此普通同 UUID 链。新空目标接口已经具备，活模型复制仍需持久 copy transition；schema2 同 UUID T 不代表 CREATE，不能退回旧 writer 绕过 PDF 或页身份校验。
+
+上述是当前 API／真实入口的核查，不是新流程交付或设备验收。来源重开 A→保存 B→采用 B 的直接修复和普通关系线选择可并行实施，完整页面引用、往返、反向引用和文件网络继续保留。

@@ -90,7 +90,7 @@
 - 主菜单打开普通文档进入单文档模式；窗格内首页打开文件只替换所在窗格；只有显式打开或恢复分屏才恢复双窗格。
 - 替换工作区前等待保存完成，避免异步关闭回调误关新文档；文档未打开成功时，不得因预检查失败丢弃当前工作区。
 - 换模型后的输入 reset 只丢弃旧草稿、连击、预览和异步请求，不通过新模型恢复或补交旧手势。嵌套自动滚动、PDF 文字请求和颜色拖放任务也须退休；旧事务的确认／取消／保存由替换前的 owner 流程处理。见 `docs/movinkpad/reference-stable-capture-2026-11-09.md`。
-- 原生笔记/画布完整同源准备后才能替换；采用前重新settle所有相关documentOwner并最终同步核对model、dirty、在途写与笔接触。打开/诊断/保存续接/选择器回调绑定实际模型，迟到不作用于新模型；打开登记在同一存储锁内拒绝未知pending保存，不用分开的预查冒充原子保护。详情见 `docs/movinkpad/reference-verified-open-2026-11-08.md`。
+- 原生笔记/画布完整同源准备后才能替换；采用前重新settle所有相关documentOwner，并重新核实实际来源版本，自己保存改变来源时须真正重读新模型。最后IO前后核runtime owner、所有相关model的revision/路径及两个native job身份，不能只凭dirty再次为false采用旧读；最终同步核工作区、在途写与笔接触。打开/诊断/保存续接/选择器回调绑定实际模型，迟到不作用于新模型；打开登记在同一存储锁内拒绝未知pending保存。见 `docs/movinkpad/reference-verified-open-2026-11-08.md`、`docs/movinkpad/reference-open-after-save-2026-11-09.md`。
 - 分屏文档的关闭 / 返回先显示该窗格的文件选择首页，关闭首页才移除窗格。暂留文档由已有的保存 / 放弃保护处理替换与最终关闭；同文件共享视图关闭拥有者时，保留另一侧首页的物理位置。
 - 文件树只为已确认存在子文件夹的节点显示展开箭头。
 - 分页编辑器跨 AndroidView 宿主重挂时，必须通过 `Editor.surfacesForAttach()` 替换 GlWetPad / FrontInk：先归还暂存笔迹并断开旧回调，保留文档、普通画布、缓存及前缓冲开关。未经目标设备回归不要恢复复用旧湿墨 View。底层 RenderNode / crop 机制仍为推断，不把该修复扩大为全部场景或其他设备的验收。详见 `docs/movinkpad/split-wet-ink-2026-11-04.md`。
@@ -138,6 +138,8 @@
 
 - 画布连线只把节点对送入同一普通线草稿，确认前不写文档。连接余流使用独立drain，在普通ink接管前拦截，不改旧笔优先规则；armed时禁quick-scale，笔接触冻结相机，取消/失焦/resize/disable归还busy。提示用图内覆盖层、工具栏标题限单行，避免重排取消模式；支持touch-mode焦点。详见 `docs/movinkpad/mind-map-canvas-connect-2026-11-08.md`。
 - 普通关系编辑以initial edge和draft分开，经MapSession从latest文档提交；创建/修改/删除各一次commit，取消零写入。重复定位返回latest已有线，不携带另一线草稿说明；无向端点互换为语义no-op。端点/线失效不崩溃、不覆盖；英文“引用自”用“A references B”，不反转箭头语义。详见 `docs/movinkpad/mind-map-relation-editing-2026-11-08.md`。
+- 普通线、箭翼与说明的绘制／命中共用MapRelationGeometry，48dp为屏幕目标全宽，按density/当前scale换算；节点、来源条、手绘正文及连接入口优先，父子线不混入普通关系命中。节点／线选择互斥且仅为会话状态，不进内容历史／导出；现有线必须以actual initial进入原草稿，全部关系列表保持可达。
+- 导图native press/preview绑定内容与会话epoch；相同内容重载、禁用或内容更新也退休旧拖动，避免旧UP回退新来源／正文。结束POINTER_UP、失焦／卸载须清detector定时与适当余流，不阻碍下一次笔接管；正常同会话节点双击保留。见 `docs/movinkpad/mind-map-relation-hit-2026-11-09.md`。
 
 ## AI
 
