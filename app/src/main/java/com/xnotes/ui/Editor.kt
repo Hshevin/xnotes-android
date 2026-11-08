@@ -6998,7 +6998,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     // --- history ---
 
     fun undo() {
-        flowText.flushBurst() // the open typing burst is the first thing Ctrl+Z takes back
+        controller.finishSelectionPreviews()
+        sharedPeer()?.controller?.finishSelectionPreviews()
+        flowText.flushPendingEdits() // the open typing burst is the first thing Ctrl+Z takes back
         if (controller.isEditingLabel) controller.commitTextEdit() // and so is a label being typed
         val command = history.nextUndo
         val pagesBefore = state.document.pages.toList()
@@ -7011,7 +7013,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     fun redo() {
-        flowText.flushBurst()
+        controller.finishSelectionPreviews()
+        sharedPeer()?.controller?.finishSelectionPreviews()
+        flowText.flushPendingEdits()
         if (controller.isEditingLabel) controller.commitTextEdit()
         val command = history.nextRedo
         val pagesBefore = state.document.pages.toList()

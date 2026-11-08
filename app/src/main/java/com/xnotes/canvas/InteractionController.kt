@@ -186,6 +186,27 @@ class InteractionController(
     /** The inline-flow caret controller; TEXT-tool gestures route here (installed by the Editor). */
     var flowText: FlowTextController? = null
 
+    /** Main-thread notification only; capture must be posted after the input operation returns. */
+    var onContentTransactionChanged: (() -> Unit)? = null
+
+    /** A live content preview cannot be included in a stable writer capture. View gestures can. */
+    val hasPendingContentTransaction: Boolean
+        get() = when (mode) {
+            PointerMode.DRAW, PointerMode.ERASE, PointerMode.MOVE, PointerMode.RESIZE,
+            PointerMode.TRANSFORM, PointerMode.VERTEX, PointerMode.JOINT, PointerMode.SLIDE,
+            PointerMode.ROOM, PointerMode.SHAPE, PointerMode.TAPE, PointerMode.CONNECT,
+            PointerMode.TEXT_DRAG -> true
+            else -> false
+        } || editingText?.let { it.text != editingOldText } == true || labelContentChanged() ||
+            !restyleBaseline.isNullOrEmpty() || !refillBaseline.isNullOrEmpty() || flowText?.hasPendingBurst == true
+
+    private fun labelContentChanged(): Boolean {
+        val shape = editingLabel ?: return false
+        val after = shape.label?.takeIf { it.text.isNotBlank() }
+        val before = labelBefore?.takeIf { it.text.isNotBlank() }
+        return if (after == null) before != null else !after.sameAs(before)
+    }
+
     /** Host hook for tap-to-open PDF links. A finger tap landed on page [pageIndex] at [pageLocal]
      *  (page-local content px). Returns true if it hit a known link and was handled, so the tap is
      *  consumed (skipping the selection-dismiss / fling). The host parses link rects lazily off the
@@ -614,6 +635,7 @@ class InteractionController(
         tool = t
         onToolChanged(t)
         requestRender()
+        onContentTransactionChanged?.invoke()
     }
 
     fun rulerVisible(): Boolean = ruler.visible
@@ -652,7 +674,10 @@ class InteractionController(
 
     // --- touch entry point ---
 
-    fun onTouch(e: MotionEvent): Boolean {
+    fun onTouch(e: MotionEvent): Boolean =
+        try { dispatchTouch(e) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun dispatchTouch(e: MotionEvent): Boolean {
         if (touchTakenBack && e.actionMasked != MotionEvent.ACTION_DOWN) return true
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -708,9 +733,13 @@ class InteractionController(
         eraserCursor = null
         connectHot = emptyList()
         requestRender()
+        onContentTransactionChanged?.invoke()
     }
 
-    fun onHover(e: MotionEvent): Boolean {
+    fun onHover(e: MotionEvent): Boolean =
+        try { dispatchHover(e) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun dispatchHover(e: MotionEvent): Boolean {
         if (handleHoverAction(e)) return true
         if (hoverConnect(e)) return true
         if (tool == Tool.INSERT_SPACE && mode == PointerMode.IDLE) {
@@ -781,6 +810,7 @@ class InteractionController(
      *  here also ends an in-progress hover gesture even if the pen has not moved. */
     fun onGenericMotion(e: MotionEvent) {
         if (stylusButtons.onGenericMotion(e) && hoverActionTool != null) endHoverAction()
+        onContentTransactionChanged?.invoke()
     }
 
     /** Feeder C: Bluetooth/USI pens often deliver the side button only as a KeyEvent, never in any
@@ -789,6 +819,7 @@ class InteractionController(
     fun onStylusButtonKey(keyCode: Int, down: Boolean): Boolean {
         if (!stylusButtons.onKey(keyCode, down)) return false
         if (!stylusButtons.held && hoverActionTool != null) endHoverAction()
+        onContentTransactionChanged?.invoke()
         return true
     }
 
@@ -2875,7 +2906,10 @@ class InteractionController(
     }
 
     /** Keep the model in sync with the live editor field (for auto-grow / commit). */
-    fun updateEditingText(text: String) {
+    fun updateEditingText(text: String) =
+        try { updateTextDraft(text) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun updateTextDraft(text: String) {
         editingLabel?.let { shape ->
             shape.label = shape.label?.withText(text)
             // The lines stay centred on the shape, so the field moves as they wrap.
@@ -2926,7 +2960,10 @@ class InteractionController(
      * a box with content is kept and its change recorded. The single source of truth for
      * ending an edit — the field no longer commits itself, so there is no double-commit.
      */
-    fun commitTextEdit(finalText: String? = null, restoreTool: Boolean = false) {
+    fun commitTextEdit(finalText: String? = null, restoreTool: Boolean = false) =
+        try { finishTextEdit(finalText, restoreTool) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun finishTextEdit(finalText: String?, restoreTool: Boolean) {
         if (editingLabel != null) return commitLabelEdit(finalText)
         val item = editingText ?: return
         finalText?.let { item.text = it }
@@ -3039,6 +3076,7 @@ class InteractionController(
         shape.label = l.withStyle(change(l.style))
         onTextEditStart(editingField())
         requestRender()
+        onContentTransactionChanged?.invoke()
         return true
     }
 
@@ -3528,6 +3566,7 @@ class InteractionController(
     // --- selection management ---
 
     private fun setSelection(picked: List<Selected>) {
+        finishSelectionPreviews()
         // A member picked brings its whole group along, from its own page: a group never spans pages.
         val onPages = picked.map { it.pageIndex }.distinct().asSequence()
             .flatMap { i -> state.document.pages.getOrNull(i)?.editableItems.orEmpty().asSequence().map { Selected(i, it) } }
@@ -3551,8 +3590,11 @@ class InteractionController(
         refreshSelectionMenu()
     }
 
-    fun clearSelection() {
+    fun clearSelection() = try { clearSelectedContent() } finally { onContentTransactionChanged?.invoke() }
+
+    private fun clearSelectedContent() {
         if (selectionGestureActive()) abortGesture()
+        finishSelectionPreviews()
         // Restore the tool a long-press grab temporarily switched away from.
         longPressPrevTool?.let {
             tool = it
@@ -3682,6 +3724,7 @@ class InteractionController(
 
     fun deleteSelection() {
         if (selection.isEmpty()) return
+        finishSelectionPreviews()
         val removals = selection.map { state.document.pages[it.pageIndex] to it.item }
         for ((page, item) in removals) page.items.remove(item)
         history.push(EraseItems(removals))
@@ -3781,7 +3824,10 @@ class InteractionController(
     /** Recolour the selected shapes' fills in [color], each keeping its opacity; null matches each outline. */
     fun refillSelection(color: Rgba?, preview: Boolean = false) {
         val shapes = selection.mapNotNull { (it.item as? ShapeItem)?.takeIf { s -> s.fillRgba != null } }
-        if (shapes.isEmpty()) return
+        if (shapes.isEmpty()) {
+            if (!preview) finishSelectionPreviews()
+            return
+        }
         val baseline = refillBaseline ?: shapes.associateWith { it.fillRgba }
         refillBaseline = if (preview) baseline else null
         com.xnotes.core.history.RefillShapes(com.xnotes.core.history.RefillShapes.of(shapes, color)).redo()
@@ -3794,6 +3840,7 @@ class InteractionController(
         state.document.dirty = true
         onContentChanged()
         requestRender()
+        onContentTransactionChanged?.invoke()
     }
 
     /** The fills as a refill preview found them, so its settling call records them as one step. */
@@ -3821,6 +3868,27 @@ class InteractionController(
     /** Styles held from the first [restyleSelection] preview, so a slider drag undoes in one step. */
     private var restyleBaseline: MutableMap<CanvasItem, DrawStyle>? = null
 
+    /** Settle previews exactly as shown, without applying a new colour or changing selection. */
+    fun finishSelectionPreviews() {
+        val fill = refillBaseline
+        val styles = restyleBaseline
+        refillBaseline = null
+        restyleBaseline = null
+        val fillEntries = fill.orEmpty().mapNotNull { (shape, before) ->
+            shape.fillRgba.takeIf { it != before }?.let { com.xnotes.core.history.RefillShapes.Entry(shape, before, it) }
+        }
+        val styleEntries = styles.orEmpty().mapNotNull { (item, before) ->
+            DrawStyle.of(item)?.takeIf { it != before }?.let { RestyleItems.Entry(item, before, it) }
+        }
+        if (fillEntries.isNotEmpty()) history.push(com.xnotes.core.history.RefillShapes(fillEntries))
+        if (styleEntries.isNotEmpty()) history.push(RestyleItems(styleEntries))
+        if (fillEntries.isNotEmpty() || styleEntries.isNotEmpty()) {
+            state.document.dirty = true
+            onContentChanged()
+        }
+        if (fill != null || styles != null) onContentTransactionChanged?.invoke()
+    }
+
     /**
      * Recolour and/or re-thicken the selection's strokes and shapes. A null [color] or [width]
      * leaves that half of each item's style alone, so a mixed selection can be recoloured without
@@ -3832,7 +3900,10 @@ class InteractionController(
      * No cache repair is needed: a selected item is lifted, so it is drawn live rather than baked.
      */
     fun restyleSelection(color: Rgba?, width: Double?, preview: Boolean = false) {
-        if (selection.isEmpty()) return
+        if (selection.isEmpty()) {
+            if (!preview) finishSelectionPreviews()
+            return
+        }
         val baseline = restyleBaseline ?: HashMap<CanvasItem, DrawStyle>().also { map ->
             for (s in selection) DrawStyle.of(s.item)?.let { map[s.item] = it }
         }
@@ -3853,6 +3924,7 @@ class InteractionController(
         state.document.dirty = true
         onContentChanged()
         requestRender()
+        onContentTransactionChanged?.invoke()
     }
 
     fun escape() {
@@ -3913,6 +3985,7 @@ class InteractionController(
 
     fun duplicateSelection() {
         if (selection.isEmpty()) return
+        finishSelectionPreviews()
         val pageIndex = selection.first().pageIndex
         // Offset slightly from the originals, leaving the clipboard as it was.
         val clones = selection.map { it.item }.deepCopyAll(textMeasurer)
@@ -4455,6 +4528,7 @@ class InteractionController(
         onScreenshotMenu(null)
         onSelectionChanged(false)
         onTextEditEnd()
+        onContentTransactionChanged?.invoke()
     }
 
     private fun stepOverscrollSettle(frameTimeNanos: Long) {

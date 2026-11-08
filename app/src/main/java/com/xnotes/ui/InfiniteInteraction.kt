@@ -131,6 +131,21 @@ class InfiniteInteraction(
     private val onScreenshot: (Rect?) -> Unit = {},
 ) {
 
+    /** Main-thread wake-up only. Hosts must post any writer capture after event dispatch. */
+    var onContentTransactionChanged: (() -> Unit)? = null
+
+    /** The host settles selection-style previews while the old selection is still available. */
+    var onSelectionWillChange: (() -> Unit)? = null
+
+    val hasPendingContentTransaction: Boolean
+        get() = when (mode) {
+            CanvasPointerMode.DRAW, CanvasPointerMode.ERASE, CanvasPointerMode.MOVE,
+            CanvasPointerMode.RESIZE, CanvasPointerMode.ROTATE, CanvasPointerMode.VERTEX,
+            CanvasPointerMode.JOINT, CanvasPointerMode.SLIDE, CanvasPointerMode.SHAPE,
+            CanvasPointerMode.TAPE, CanvasPointerMode.CONNECT, CanvasPointerMode.TEXT_BOX -> true
+            else -> false
+        }
+
     private val choreographer = Choreographer.getInstance()
 
     companion object {
@@ -180,6 +195,7 @@ class InfiniteInteraction(
             if (value != field && value != Tool.SHAPE) finishPolygonDraft()
             if (value != field) clearCapture()
             field = value
+            onContentTransactionChanged?.invoke()
         }
 
     /** Whether a finger draws, or pans instead. Mirrors the paged canvas's preference. */
@@ -346,7 +362,10 @@ class InfiniteInteraction(
     // Android took back a finger of this touch, so the rest of it is ignored.
     private var touchTakenBack = false
 
-    fun onTouch(e: MotionEvent): Boolean {
+    fun onTouch(e: MotionEvent): Boolean =
+        try { dispatchTouch(e) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun dispatchTouch(e: MotionEvent): Boolean {
         if (rulerController.touch(e, viewport.widthPx, viewport.heightPx, devicePxPerDp())) {
             stopFling(); cancelLongPress(); requestRender(); return true
         }
@@ -477,10 +496,12 @@ class InfiniteInteraction(
      */
     fun onGenericMotion(e: MotionEvent) {
         stylusButtons.onGenericMotion(e)
+        onContentTransactionChanged?.invoke()
     }
 
     /** Latch a side button delivered as a key event, which is all Bluetooth and USI pens send. */
-    fun onStylusButtonKey(keyCode: Int, down: Boolean): Boolean = stylusButtons.onKey(keyCode, down)
+    fun onStylusButtonKey(keyCode: Int, down: Boolean): Boolean =
+        try { stylusButtons.onKey(keyCode, down) } finally { onContentTransactionChanged?.invoke() }
 
     /** Drop any in-flight gesture and stop a glide, so a document swap cannot bleed into the next. */
     fun resetGestureState() {
@@ -537,6 +558,7 @@ class InfiniteInteraction(
         onLiftSelection(emptyList(), LiftTransform.NONE)
         setInteractive(false, true)
         stylusButtons.reset()
+        onContentTransactionChanged?.invoke()
     }
 
     // --- pointer handling ---
@@ -1061,8 +1083,11 @@ class InfiniteInteraction(
     private fun frameMargin(): Double = OverlayTessellator.FRAME_MARGIN_PX / viewport.zoom
 
     /** Clear the selection and its chrome, for a tool change or a document swap. */
-    fun clearSelection() {
+    fun clearSelection() = try { clearSelectedContent() } finally { onContentTransactionChanged?.invoke() }
+
+    private fun clearSelectedContent() {
         if (selectionGestureActive()) abortGesture()
+        onSelectionWillChange?.invoke()
         // A long-press grab only borrowed the selection tool; putting the selection away returns it.
         longPressPrevTool?.let {
             longPressPrevTool = null

@@ -126,6 +126,102 @@ abstract class InfiniteSurfaceAttachContract {
         assertNull(editor.colorDrag)
     }
 
+    @Test fun contentCaptureWaitsForEditedLabelsButNotUnchangedOpenLabels() = withEditor { editor ->
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0), Rgba(0, 0, 0, 255))
+        editor.document.add(shape)
+        editor.selectAll()
+        editor.labelSelection()
+        assertNotNull(editor.editingField)
+        assertFalse(editor.hasPendingContentTransaction)
+        val seen = ArrayList<Boolean>()
+        editor.onContentTransactionChanged = { seen += editor.hasPendingContentTransaction }
+        editor.updateEditingText("pending")
+        assertTrue(editor.hasPendingContentTransaction)
+        editor.updateEditingText("")
+        assertFalse(editor.hasPendingContentTransaction)
+        editor.updateEditingText("confirmed")
+        editor.commitText(null)
+        assertFalse(editor.hasPendingContentTransaction)
+        assertEquals(false, seen.last())
+        assertEquals("confirmed", shape.label!!.text)
+    }
+
+    @Test fun clearingSelectionSettlesTheCanvasFillPreviewExactlyAsShown() = withEditor { editor ->
+        val original = Rgba(64, 64, 64, 255)
+        val shown = Rgba(128, 128, 128, 255)
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0),
+            Rgba(0, 0, 0, 255), fillRgba = original)
+        editor.document.add(shape)
+        editor.selectAll()
+        editor.refillSelection(shown, preview = true)
+        assertTrue(editor.hasPendingContentTransaction)
+        assertFalse(editor.canUndo)
+        editor.interaction.clearSelection()
+        assertFalse(editor.hasPendingContentTransaction)
+        assertEquals(shown, shape.fillRgba)
+        assertTrue(editor.canUndo)
+        editor.undo()
+        assertEquals(original, shape.fillRgba)
+        assertFalse(editor.history.canUndo)
+        editor.redo()
+        assertEquals(shown, shape.fillRgba)
+    }
+
+    @Test fun undoSettlesTheCanvasStylePreviewBeforeTakingTheNextHistoryEntry() = withEditor { editor ->
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0),
+            Rgba(0, 0, 0, 255), strokeWidth = 3.0)
+        val original = DrawStyle.of(shape)
+        editor.document.add(shape)
+        editor.history.push(AddCanvasItem(editor.document, shape))
+        editor.selectAll()
+        editor.restyleSelection(Rgba(128, 128, 128, 255), 8.0, preview = true)
+        val shown = DrawStyle.of(shape)
+        assertNotEquals(original, shown)
+        editor.undo()
+        assertSame(shape, editor.document.items.single())
+        assertEquals(original, DrawStyle.of(shape))
+        assertTrue(editor.canUndo)
+        assertTrue(editor.canRedo)
+        editor.redo()
+        assertEquals(shown, DrawStyle.of(shape))
+        assertTrue(editor.canUndo)
+        assertFalse(editor.canRedo)
+        editor.undo()
+        editor.undo()
+        assertTrue(editor.document.items.isEmpty())
+        assertFalse(editor.canUndo)
+        assertTrue(editor.canRedo)
+        editor.redo()
+        assertSame(shape, editor.document.items.single())
+        assertEquals(original, DrawStyle.of(shape))
+        editor.redo()
+        assertEquals(shown, DrawStyle.of(shape))
+    }
+
+    @Test fun redoSettlesTheNewCanvasPreviewAndDoesNotReplayItsAbandonedRedo() = withEditor { editor ->
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(100.0, 100.0), Pt(220.0, 240.0),
+            Rgba(0, 0, 0, 255), strokeWidth = 3.0)
+        val original = DrawStyle.of(shape)
+        editor.document.add(shape)
+        editor.history.push(AddCanvasItem(editor.document, shape))
+        editor.selectAll()
+        editor.restyleSelection(Rgba(64, 64, 64, 255), 4.0, preview = false)
+        editor.undo()
+        assertEquals(original, DrawStyle.of(shape))
+        assertTrue(editor.canRedo)
+        editor.selectAll()
+        editor.restyleSelection(Rgba(128, 128, 128, 255), 8.0, preview = true)
+        val shown = DrawStyle.of(shape)
+        editor.redo()
+        assertSame(shape, editor.document.items.single())
+        assertEquals(shown, DrawStyle.of(shape))
+        assertTrue(editor.canUndo)
+        assertFalse(editor.canRedo)
+        editor.undo()
+        assertEquals(original, DrawStyle.of(shape))
+        assertTrue(editor.canUndo)
+    }
+
     @Test fun firstHostKeepsTheNeverAttachedSurfaces() = withEditor { editor ->
         val view = editor.view
         val pad = editor.pad

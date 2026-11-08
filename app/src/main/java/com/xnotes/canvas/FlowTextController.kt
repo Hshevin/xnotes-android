@@ -61,6 +61,12 @@ class FlowTextController(
     /** Fired whenever the caret/selection moves (the host's format bar keys on it). */
     var onCaretChanged: () -> Unit = {}
 
+    /** A Main-thread wake-up only. Hosts must defer capture until the input call has returned. */
+    var onTransactionChanged: (() -> Unit)? = null
+
+    /** An applied typing burst or slash-prefix edit still waiting for its history boundary. */
+    val hasPendingBurst: Boolean get() = burstPara != null || pendingPrefix != null
+
     /** Style for the next typed run (set by the format bar on a collapsed caret). */
     var pendingStyle: CharStyle? = null
 
@@ -94,6 +100,10 @@ class FlowTextController(
      * the user looking at half a command.
      */
     var pendingPrefix: Command? = null
+        set(value) {
+            field = value
+            onTransactionChanged?.invoke()
+        }
 
     /** Installed by the input layer to mirror caret/selection moves to the IME. */
     var imeSync: () -> Unit = {}
@@ -175,13 +185,15 @@ class FlowTextController(
         requestRender()
     }
 
-    fun endSession() {
+    fun endSession() = try { endSessionContent() } finally { onTransactionChanged?.invoke() }
+
+    private fun endSessionContent() {
         handler.removeCallbacks(longPressRun)
         handles.stopAutoscroll()
         draggingHandle = null
         handleFixed = null
+        flushPendingEdits()
         if (!active) return
-        flushBurst()
         active = false
         state.flowLifted = false
         invalidateFlowPages()
@@ -424,7 +436,10 @@ class FlowTextController(
      * coalesce into the open burst; anything structural flushes first and lands
      * as its own undo step. Returns the caret position after the edit.
      */
-    fun applyReplace(range: FlowRange, text: String, style: CharStyle? = null): FlowPos {
+    fun applyReplace(range: FlowRange, text: String, style: CharStyle? = null): FlowPos =
+        try { applyReplaceContent(range, text, style) } finally { onTransactionChanged?.invoke() }
+
+    private fun applyReplaceContent(range: FlowRange, text: String, style: CharStyle?): FlowPos {
         val r = range.normalized()
         if (r.start.para != r.end.para) {
             val cells = CellIndex(flow().paragraphs)
@@ -523,7 +538,10 @@ class FlowTextController(
     }
 
     /** Apply an already-built (and applied) command from the format bar / menus. */
-    fun commitEdit(cmd: Command?, caretTo: FlowPos?) {
+    fun commitEdit(cmd: Command?, caretTo: FlowPos?) =
+        try { commitEditContent(cmd, caretTo) } finally { onTransactionChanged?.invoke() }
+
+    private fun commitEditContent(cmd: Command?, caretTo: FlowPos?) {
         val prefix = pendingPrefix?.also { pendingPrefix = null }
         val head = when {
             prefix == null -> cmd
@@ -545,7 +563,15 @@ class FlowTextController(
     }
 
     /** Push the open typing burst (plus any auto-added pages) as one undo step. */
-    fun flushBurst() {
+    fun flushBurst() = try { flushPendingBurst() } finally { onTransactionChanged?.invoke() }
+
+    /** Explicit save/blur boundary: settle applied edits while preserving the live caret/session. */
+    fun flushPendingEdits() {
+        flushBurst()
+        if (pendingPrefix != null) commitEdit(null, null)
+    }
+
+    private fun flushPendingBurst() {
         handler.removeCallbacks(idleFlush)
         val para = burstPara ?: return
         val before = burstBefore
