@@ -99,7 +99,8 @@
 ## 存储、PDF 与迁移
 
 - 笔记完全本地离线保存，无账号、同步或应用后端。修改须持久化；涉及存储、导入、删除、迁移的变更，验证恢复路径与失败行为。
-- 新native请求固定捕获item写入字段；NativeWorkingSession先以实际owner只读epoch observation预约，只有requiresBody才固定正文，view-only不持模型正文、不遍历item、不授保存权限；Stroke仅pin不可变Samples前缀，不复制/重编码采样。每页/画布单独映射胶合与图层，复制嵌套可变容器；画布不支持TextItem时拒绝而非略去。旧默认浅快照保持，活动事务稳定屏障与生产接线未完成；见 `docs/movinkpad/reference-frozen-writer-2026-11-08.md`。
+- 新native请求固定捕获item写入字段；NativeWorkingSession先以实际owner只读epoch observation预约，只有requiresBody才固定正文，view-only不持模型正文、不遍历item、不授保存权限；Stroke仅pin不可变Samples前缀，不复制/重编码采样。每页/画布单独映射胶合与图层，复制嵌套可变容器；画布不支持TextItem时拒绝而非略去。旧默认浅快照保持；Editor实际保存已接固定视图与稳定屏障，NativeWorkingSession生产迁移仍未完成。见 `docs/movinkpad/reference-frozen-writer-2026-11-08.md`、`docs/movinkpad/reference-owner-capture-2026-11-09.md`。
+- 生产保存先等旧编码，再在Main完整dispatch之后核actual owner／模型／笔接触／内容事务，固定捕获后才交IO；不自动确认或取消笔、选择、样式或表格预览。显式保存按原blur语义提交文字与flow burst，等待输入时不弹阻断确认的modal。共享文档核两侧输入，关闭／替换最后重新核实；退役实例不开始新捕获，已接受IO不取消。旧会话目录FIFO及checked写入不授native权限，正文复用只凭同runtime模型／bodyRevision成功记录；未采用secondary与失效文档占位不清旧恢复资料。
 - NativeWorkingSession写metadata schema2、兼容1；T与当前正文同head持久，须实际staged/private Main permit/owner/head代次证明，不能拿旧T背书新失败尝试。cold未认领T只可读资料、不可普通写/clear；native4受控ack与actual Receipt accepted-ID完成已实现，cold actualB恢复/认领已实现（实际采用/Read转交与首次新正文提交后才开保存）；活owner接管与生产未启用，不能切半套生产或混用native-only写入绕过T。见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
 - 原生普通保存可prepare固定候选后再commit：阶段证明绑定实际storage issuer、canonical journal、本次写入record摘要与A/B版本；仅实际成功commit签请求receipt，prepare不等于保存成功。协调v4 stage仅接受实际同head Publication的typed ack，重启及旧ensure均拒写；完整cache/producer接线仍待完成。验证/复制/读回逐块检查源epoch与取消；见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
 - 严格保留已写版本须有有效typed SAVE、实际目标=候选摘要及完整原生契约；事务登记重查URI/kind/页契约，最后大包hash后重读target、再有界核marker后清日志。返回实际读版本不冒充请求发布receipt；external PDF实际SHA在lease内核对。生产producer接线仍待完成，见 `docs/movinkpad/reference-keep-written-save-2026-11-08.md`。

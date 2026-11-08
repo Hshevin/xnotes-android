@@ -477,3 +477,9 @@ reference-native-creation-2026-11-08.md 的新建上下文/CREATE发布/explicit
 ### R2b2b3a 活模型来源与请求配对回执（2026-11-08）
 
 reference-edit-source-2026-11-08.md已实现/独立复核通过，16新JVM反例、总3216项/Android源码编译通过，平台未运行。Editor真实打开持唯一context；主线程source+snapshot请求、真实publish后私有receipt、no-op代次/retire/原PDF核验均具备。生产writer/会话尚未迁移，后续b3b/c2必须统一成功receipt时序、旧cache恢复、所有替换调用保存等待、copy持久切换。背景PDF显式变更不能借普通save放松原件保护。
+
+### 实际 owner 稳定保存已验证（2026-11-09）
+
+输入事务、固定writer、旧native3和旧会话捕获/恢复/关闭已实际接通：等待输入结束不取消笔或预览，Main完整dispatch之后再捕获；按目录FIFO处理已接受写入/清理/新实例恢复，失败不建立正文复用证明。表格事务绑定实际模型，历史前收尾；共享全部关闭、明确放弃新建、单笔记恢复可见、共享PDF编码寿命和退休等待均已验证。当前代码19574fe1，完整313套件3483项主机通过、Android源码编译及双独立复核完成，真实平台未运行。详情reference-owner-capture-2026-11-09.md。
+
+后续保留顺序：统一native4实际producer/成功回执与同head会话持久交接、恢复权限和new/copy切换（含已开始native IO跨Activity采用）；再启用原字节页面身份并接页面/区域来源、多来源预览状态、来源往返/反向引用和文件网络。旧会话两文件崩溃原子性及无目标canvas的明确保存/放弃交互尚待完成。A2多选、无中心画布和线命中等交互不取消；整体未完工，不打包APK。
