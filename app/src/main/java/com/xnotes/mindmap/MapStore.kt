@@ -15,13 +15,18 @@ interface MapTarget {
 class MapConflict : IOException()
 
 /** Caller serializes operations. A durable private journal precedes every external write. */
-class MapStore(directory: File, key: String, private val target: MapTarget) {
-    private val journal = File(directory, hash(key.toByteArray()) + ".json")
+class MapStore(directory: File, key: String, private val target: MapTarget, legacyKeys:Set<String> = emptySet()) {
+    private val journals=(listOf(key)+legacyKeys).distinct().map {File(directory,hash(it.toByteArray())+".json")}
+    private var journal=journals.first()
     private var expectedHash: String? = null
     @Volatile var journalReady = false; private set
     data class Opened(val document: MindMapDocument, val recovered: Boolean = false, val conflict: Boolean = false)
 
     fun open(): Opened {
+        if(journals.any {staging(it).exists()}) throw IOException("Unfinished recovery checkpoint")
+        val existing=journals.filter {it.exists()}
+        if(existing.size>1) throw IOException("Conflicting recovery journals")
+        journal=existing.singleOrNull() ?: journals.first()
         val remote = runCatching { target.read() }.getOrNull()
         val remoteHash = remote?.let(::hash)
         // A corrupt journal is retained; do not mask an otherwise readable original or overwrite it.
@@ -50,6 +55,32 @@ class MapStore(directory: File, key: String, private val target: MapTarget) {
         val doc = decoded ?: throw IOException("Unreadable mind map")
         expectedHash = remoteHash
         return Opened(doc)
+    }
+
+    /** A new copy may claim only a readable, empty destination without any earlier recovery work. */
+    fun create(doc:MindMapDocument,checkActive:()->Unit={}) {
+        checkActive()
+        val bytes=MapCodec.encode(doc)
+        checkActive()
+        if(journals.any {it.exists() || staging(it).exists()}) throw IOException("Destination has recovery work")
+        val before=target.read()
+        checkActive()
+        if(before.isNotEmpty()) throw MapConflict()
+        expectedHash=hash(before)
+        journalReady=false
+        checkpoint(doc,pending=true,checkActive)
+        checkActive()
+        val current=target.read()
+        checkActive()
+        if(current.isNotEmpty()) throw MapConflict()
+        target.write(bytes)
+        checkActive()
+        val written=target.read()
+        checkActive()
+        if(!written.contentEquals(bytes)) throw IOException("Destination verification failed")
+        expectedHash=hash(bytes)
+        checkpoint(doc,pending=false,checkActive)
+        checkActive()
     }
 
     fun save(doc: MindMapDocument) {
@@ -93,19 +124,32 @@ class MapStore(directory: File, key: String, private val target: MapTarget) {
         return Opened(doc)
     }
 
-    private fun checkpoint(doc: MindMapDocument, pending: Boolean) {
+    private fun checkpoint(doc: MindMapDocument, pending: Boolean,checkActive:()->Unit={}) {
+        checkActive()
         val data = JSONObject().put("baseHash", requireNotNull(expectedHash))
             .put("pending", pending).put("document", MapCodec.toJson(doc)).toString().toByteArray(Charsets.UTF_8)
         // Envelope adds a small fixed overhead to the document's size.
         require(data.size <= MapCodec.MAX_BYTES)
         check(journal.parentFile!!.isDirectory || journal.parentFile!!.mkdirs())
-        val staging = File(journal.parentFile, journal.name + ".pending")
+        val staging=staging(journal)
+        checkActive()
+        if(!staging.createNewFile()) throw IOException("Unfinished recovery checkpoint")
+        var synced=false
         try {
-            FileOutputStream(staging).use { it.write(data); it.fd.sync() }
+            FileOutputStream(staging).use {out->
+                var offset=0
+                while(offset<data.size) {checkActive();val count=minOf(8192,data.size-offset);out.write(data,offset,count);offset+=count}
+                out.fd.sync();synced=true
+            }
             Files.move(staging.toPath(), journal.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             journalReady = true
-        } finally { staging.delete() }
+        } finally {
+            // This invocation owns the incomplete file. A fully synced checkpoint remains
+            // recovery material if its atomic move fails; earlier staging files are never ours.
+            if(!synced) staging.delete()
+        }
     }
+    private fun staging(file:File)=File(file.parentFile,file.name+".pending")
     companion object {
         /** Base for a destination that could not be read; never equal to a content hash. */
         private const val ABSENT = "absent"

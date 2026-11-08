@@ -21,11 +21,15 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private object MapSaves {
+internal object MapSaves {
     // Writes survive an Activity being stopped or destroyed. Each document owns its serialization lock.
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
-    fun lockFor(uri: Uri) = locks.getOrPut(uri.toString()) { Mutex() }
+    fun key(uri:Uri):String {
+        if(uri.scheme=="file") return Uri.fromFile(File(requireNotNull(uri.path)).canonicalFile).toString()
+        return runCatching {"${uri.authority}|${android.provider.DocumentsContract.getDocumentId(uri)}"}.getOrDefault(uri.toString())
+    }
+    fun lockFor(uri: Uri) = locks.getOrPut(key(uri)) { Mutex() }
 }
 
 class MapSession() : ViewModel() {
@@ -271,9 +275,10 @@ class MapSession() : ViewModel() {
         if (opened) return
         opened = true; app = context.applicationContext
         lock = MapSaves.lockFor(uri)
-        store = MapStore(File(app.noBackupFilesDir, "mind-map-recovery"), uri.toString(), target(uri))
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { lock.withLock { runCatching { store.open() } } }
+            val result = withContext(Dispatchers.IO) { lock.withLock { runCatching {
+                store=MapFiles.store(app,uri,target(uri));store.open()
+            } } }
             result.onSuccess {
                 history = MapHistory(it.document); document = it.document; selected = it.document.root.id
                 recovered = it.recovered; conflict = it.conflict; dirty = it.recovered
@@ -282,10 +287,7 @@ class MapSession() : ViewModel() {
             loading = false
         }
     }
-    private fun target(uri: Uri) = targetOverride?.invoke(uri) ?: object : MapTarget {
-        override fun read() = checkNotNull(app.contentResolver.openInputStream(uri)).use(MapCodec::readBytes)
-        override fun write(bytes: ByteArray) { checkNotNull(app.contentResolver.openOutputStream(uri, "wt")).use { it.write(bytes) } }
-    }
+    private fun target(uri: Uri) = targetOverride?.invoke(uri) ?: MapFiles.target(app,uri)
     fun commit(next: MindMapDocument): Boolean {
         if (closing || replacingDocument) return false
         val h = history ?: return false
@@ -417,15 +419,14 @@ class MapSession() : ViewModel() {
     /** A copy is a new document: it gets its own id so the registry never sees two files claim one. */
     fun saveCopy(uri: Uri, onComplete: () -> Unit) {
         val doc = document?.copy(id = java.util.UUID.randomUUID().toString()) ?: return
-        saving = true
+        saving = true;copySaved=false
         MapSaves.scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching {
-                val bytes = MapCodec.encode(doc)
-                target(uri).write(bytes)
-                check(target(uri).read().contentEquals(bytes))
-            } }
-            saving = false
-            if (result.isSuccess) { copySaved = true; onComplete() } else saveFailed = true
+            try {
+                val result=try {MapFiles.create(app,uri,doc,targetOverride?.invoke(uri));Result.success(Unit)}
+                    catch(error:java.util.concurrent.CancellationException) {throw error}
+                    catch(error:Exception) {Result.failure(error)}
+                if (result.isSuccess) { copySaved = true; onComplete() } else saveFailed = true
+            } finally {saving=false}
         }
     }
 }

@@ -13,9 +13,68 @@ import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import android.net.Uri
 import java.io.OutputStream
 import java.util.UUID
+import java.io.File
+import java.io.FilterInputStream
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** Stored-file helpers keep explorer actions out of the notebook/PDF bundle codecs. */
 object MapFiles {
+    internal fun target(context:Context,uri:Uri,checkActive:()->Unit={}):MapTarget=object:MapTarget {
+        override fun read():ByteArray {
+            checkActive()
+            return (context.contentResolver.openInputStream(uri) ?: throw IOException("Unreadable mind map")).use {input->
+                MapCodec.readBytes(object:FilterInputStream(input) {
+                    override fun read():Int {checkActive();return super.read()}
+                    override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return super.read(bytes,offset,length)}
+                }).also {checkActive()}
+            }
+        }
+        override fun write(bytes:ByteArray) {
+            checkActive()
+            (context.contentResolver.openOutputStream(uri,"wt") ?: throw IOException("Unwritable mind map")).use {out->
+                var offset=0
+                while(offset<bytes.size) {checkActive();val count=minOf(8192,bytes.size-offset);out.write(bytes,offset,count);offset+=count}
+            }
+            checkActive()
+        }
+    }
+    /** Also discovers the raw URI journal written by older versions; never guesses unknown aliases. */
+    internal fun store(context:Context,uri:Uri,target:MapTarget=target(context,uri),checkActive:()->Unit={}):MapStore {
+        checkActive()
+        val key=MapSaves.key(uri)
+        val aliases=linkedSetOf(uri.toString(),key)
+        runCatching {android.provider.DocumentsContract.buildDocumentUri(requireNotNull(uri.authority),
+            android.provider.DocumentsContract.getDocumentId(uri)).toString()}.getOrNull()?.let(aliases::add)
+        if(uri.scheme=="content") {
+            val registry=com.xnotes.storage.NotebookStorage.get(context).registry
+            registry.uriAtLocation(uri.toString())?.takeIf {MapSaves.key(Uri.parse(it))==key}?.let(aliases::add)
+        }
+        checkActive()
+        return MapStore(File(context.noBackupFilesDir,"mind-map-recovery"),key,target,aliases)
+    }
+    internal suspend fun create(context:Context,uri:Uri,doc:MindMapDocument,providedTarget:MapTarget?=null,checkActive:()->Unit={}) =
+        withContext(Dispatchers.IO) {
+            val coroutine=currentCoroutineContext();val check={coroutine.ensureActive();checkActive()}
+            MapSaves.lockFor(uri).withLock {
+                check();store(context,uri,providedTarget ?: target(context,uri,check),check).create(doc,check)
+            }
+        }
+    /** Checked independent JSON copy for explorer actions. Neither the source nor a live model is adopted. */
+    suspend fun copyToDestination(context:Context,source:String,destination:Uri,checkActive:()->Unit={}) = withContext(Dispatchers.IO) {
+        val coroutine=currentCoroutineContext();val check={coroutine.ensureActive();checkActive()}
+        val sourceUri=Uri.parse(source)
+        check()
+        if(MapSaves.key(sourceUri)==MapSaves.key(destination)) throw MapConflict()
+        val copied=MapSaves.lockFor(sourceUri).withLock {
+            check();MapCodec.decode(target(context,sourceUri,check).read()).also {check()}.copy(id=UUID.randomUUID().toString())
+        }
+        create(context,destination,copied,checkActive=check)
+    }
     fun read(context: Context, uri: String): MindMapDocument = checkNotNull(context.contentResolver.openInputStream(Uri.parse(uri))).use(MapCodec::read)
     fun assignCopy(context: Context, uri: Uri) {
         val copied = read(context, uri.toString()).copy(id = UUID.randomUUID().toString())
