@@ -227,6 +227,8 @@ fun Backstage(
     onImportTemplate: () -> Unit = {},
     /** The New note screen asked to make a cover or page template from a picture. */
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
+    /** Preview historical recovery material from this physical pane without replacing its workspace. */
+    onPreviewRecovery: () -> Unit = {},
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -250,7 +252,7 @@ fun Backstage(
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
-        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument)
+        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery)
     }
 }
 
@@ -288,6 +290,7 @@ private fun BackstageContent(
     onImportFont: () -> Unit,
     onBackup: (Boolean) -> Unit,
     initialDocument: String?,
+    onPreviewRecovery: () -> Unit,
 ) {
     val palette = LocalPalette.current
     var createMode by remember { mutableStateOf(CreateMode.NONE) }
@@ -363,7 +366,7 @@ private fun BackstageContent(
     LaunchedEffect(editor.browseRoot) { editor.browseRoot?.let { r -> withContext(Dispatchers.IO) { editor.purgeExpiredTrash(r, prefs.trashDays) } } }
     // Kept while its inputs hold, so folding the sidebar never recomposes the rail or the sidebar.
     val showRecent = prefs.sidebarRecent && editor.browseRoot != null
-    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder) {
+    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery) {
         SidebarNav(
             allowSplits = calls.allowSplits,
             view = view,
@@ -382,6 +385,7 @@ private fun BackstageContent(
             onForgetColor = { c -> scope.launch { withContext(Dispatchers.IO) { editor.setColorName(c, null) } } },
             onOpenPin = { selectView(BackstageView.HOME); explorerNav = ExplorerNav(it.uri) },
             onUnpin = { editor.unpinFolder(it.uri) },
+            onPreviewRecovery = { animateClose=false;drawerOpen=false;onPreviewRecovery() },
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -498,6 +502,7 @@ private class SidebarNav(
     val onForgetColor: (Rgba) -> Unit,
     val onOpenPin: (PinnedFolder) -> Unit,
     val onUnpin: (PinnedFolder) -> Unit,
+    val onPreviewRecovery: () -> Unit,
 )
 
 /** The full sidebar: a pane on wide screens, a slide-over drawer on phones. */
@@ -526,6 +531,7 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                Command(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.colors.isNotEmpty()) {
                     SidebarLabel(stringResource(R.string.toolbar_colours))
@@ -580,6 +586,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
                 nav.pins.forEachIndexed { i, pin ->

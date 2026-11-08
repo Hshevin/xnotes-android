@@ -1,86 +1,32 @@
-# 自主推进恢复点：已恢复
+# 思维导图与文件关系网络：当前恢复点
 
-当前续作（2026-11-09）：恢复只读正文基础6c00efa0/8873f200、CREATE首发与typed重试be7bdb68、隔离live配置渲染0e05feca均已本地提交。实际physical slot loader、可取消正文校验、RecoveryCopy backend及Editor薄桥已写并独立复核，准备提交；tmp/recovery-preview-slot-copy-focused.log（9690退出0）6套25项全过、Android测试源码编译成功。此前完整tmp/recovery-copy-stage-render-full.log为325套3582项0失败/错误/跳过。无运行Gradle。
-当前阶段in_progress：真实Backstage预览Host/Controller、系统选择器、失败继续与重启显式目标选择。实际UI测试2条已移AndroidTest，92054退出1（tmp/recovery-host-consumer-api-red.log），明确缺Host/Controller与新资源，main及Editor薄桥已编译；cancel_event_tests独占RecoveryPreviewHost.kt/MainActivity少量根接线/三recovery.xml，允许按已独审计划实现，不运行Gradle。Root不碰其文件。UI测试只编译不等于仪器执行。
-上一目标轮仅回应“完工了吗”，属状态说明；本轮已重新核权威状态，移真实UI测试取API红并继续生产接线。整体目标仍active/complete=false，不打APK。source_loop_audit并行只读梳理下一native4生产完整路径，review_input_plan复核本批backend薄桥。关闭/切换预览先失效并等待IO后释放资料；旧picker占位结果消费前不得被B替换。真实消费者尚未可用，完成后继续统一producer/页身份激活/R3-R5，不把恢复副本替代来源闭环。
+目标：按原需求继续实现，active，overall complete=false。用户询问“完工了吗”已明确答复未整体完成；不是暂停或缩小范围。
+工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
+授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
+规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
 
-目标：思维导图与文件关系网络，active，overall complete=false。沿已同步的新渲染架构继续完整需求；用户“完工了吗”是状态询问，不是暂停或缩减范围，已明确答复整体尚未完成。
-工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。本片模型2b0d1fdc、完整节点多选交互5cd2552e已本地提交；本片文档随本恢复点同步本地提交，无用户修改被覆盖。此前来源重开d7610f5b、普通线选择5c43056b保留。
-授权：源码、验证、文档和本地提交；master54f05b0f同步的既有明确授权已执行。不打包、安装、推送或发布，不合入其他开发分支。
-当前阶段：verified。节点选择/框选/子树并集移动/批量删除/free主题六轴对齐完成，票据核owner/doc/epoch/正文revision/selectionRevision与签发前View原集，root删除先排除后union。规格与独立审核/红绿证据mind-map-node-selection-2026-11-09.md。root模型/Session及UI分别独立复核通过，8个行为反例实际先红后绿；finalfocus104通过，最终tmp/map-node-selection-full.log 318套件3552项，0失败/错误/跳过，tmp/map-node-selection-android-compile.log源码编译通过。相对3520新增32主机（模型7/会话8/shared事件13/计时取消2/nativeCPU2）；新增Android实际界面2和shared13仅编译，未运行。最终68967/72274均退出0，无运行作业。实际窗口/SAF/MovinkPad Pro14 Android15 ProPen3/GPU/性能仍未验收。代码冻结后只改文档；不打包APK。
-下一片：优先解除来源生产迁移的真实消费者缺口，tmp/source-next-consumer-plan.txt已由独立只读审查者整理（仅建议、未实施，需计划审核）；Unbound/旧实际恢复正文只读预览+验证独立副本，严格不回绑原文件、不清新head、不从模型重编码副本，消费既有NativeCreation/raw BundleCopy并明确targetUUID。cold pending4实际A固定B续写、active logical writer寿命、统一producer/new-copy/页激活仍必做，不以安全历史副本替代这些需求。然后页面多来源/预览/往返/backlinks/文件网络；A2无中心、同级插入、边缘自动平移保留。
-新接口/后续顺序：docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。R1先撤除逐对象身份/画布锚点，仅页面UUID；B2c取消。整包副本页面UUID也需更新。R2安全激活/SAF；R3页面多来源闭环；R4跳转/反向引用/恢复/双窗格；R5文件网络及A2剩余交互。
-历史证据：审查修复068e1c2c全量2828项通过、Android仪器源码编译，实际未运行；5314a887 Header/Snapshot12项通过，writer接入未完成。旧文档中的对象身份计划已由页面级决定替代，不沿用为当前产品语义。
-待执行：按source-loop-production-gaps-2026-11-08.md继续native4生产/回执→同head工作会话持久交接、cold pending4受控完成、live转交、旧/unbound无写权恢复及new/copy持久交接。最新实际接口/缺口在reference-native-handoff-2026-11-08.md末节：非suspend post-stage Main capture需busy检查/同stage重试；T/completion失败保留；Unbound缺实际body decode、pending4/cold A和active Root转交缺失，不能只换writeNoteSafely。包含已开始native IO跨Activity整个逻辑writer寿命/采用保护，不能拿旧缓存FIFO冒充；旧正文/sidecar崩溃原子性仍旧格式边界。未保存画布无目标目前拒绝关闭，待明确保存/放弃UI。之后原字节页身份激活→页面多来源/预览→跳转返回/backlinks→局部/全库文件网络。只读catalog仅基础API，页面来源UI尚未可用。A2无中心/同级插入/边缘自动平移仍保留，普通线命中已完成；整体complete=false。保存后放弃保留已写版本，不自动回滚，不打包APK。
+## 已完成与本轮状态
 
-R2b2a模型scope/确定性新页ID/冻结投影/采用已实现，计划已独立审核；tmp/page-copy-scope-full.log 289套件3106项全通过、Android源码编译成功，代码独立复核通过，已提交bb40c14c。详细规格reference-copy-scope-2026-11-08.md。实际检查发现SessionStore正文/sidecar无绑定和代次，CanvasSession仍同步写活模型，需R2b2b处理；不要先把新scope半接到旧Save-As输出流。Document.deepCopy目前保留doc身份，泛用语义不轻改。
+- 导图节点文本／手绘原位和放大、层级／折叠、三种布局、普通关系线、空白落点新建并连接、多来源FILE列表、节点多选／框选／组移动／删除／自由主题对齐与xmap保存已实现；各边界见README及对应docs，不代表PAGE闭环或文件网络已完成。
+- 恢复只读正文基础6c00efa0/8873f200、CREATE首发与typed继续be7bdb68、隔离配置渲染0e05feca、真实物理槽读取与原字节副本2081c753已本地提交。
+- 本轮UI消费者已接通Backstage实际窗格入口、Controller/Host、Main根接线及三语资源。已独审发现并修复旧UI帧动作、主动取消永加载、另resume清无关pending三口；最终窄复核通过，准备本地提交。Root只改文档；全部生产和测试冻结。
+- 最新验证：tmp/recovery-host-consumer-reviewed-full.log，22244终态0，328套3599项主机，0失败／错误／跳过，Android测试源码编译成功。此前6207定向Controller5+Copy5全过。无运行Gradle。两中文recovery.xml一致，git diff --check通过。
+- 真红证据：50535两行为红及tmp/recovery-host-review-behavior-red.xml（owner退休LOADING、Retained另resume）；77769 Actions API红。最初92054消费者API红、首版92209完整3596、修后22244完整3599均有日志。
+- 真执行包括旧picker A/B、旧帧所有Actions、owner退休终态、FIFO与真实复制IO的dispose等待、SQLite写后失败/原副本typed重试且writes1。Android真实UI两条仅编译，不是执行；系统DocumentsUI／真实SAF／MovinkPad Android15 ProPen3／GPU／大文件性能未验收。
 
-R2b2b0共用WorkingSessionCache事务组件已实现，27新增测试，tmp/session-cache-full.log 290套件3133项全通过、Android源码编译成功；计划/代码独立复核均完成，已提交aeccdc71。详情reference-session-cache-2026-11-08.md。b1生产适配器/Editor、b2原生来源凭据继续保留，不半接尚未配套的旧会话。无运行作业。
+## 下一条实际产品路径（已纠偏）
 
-R2b2b1a正文计数/画布owner token已实现，tmp/session-body-revision-full.log 291套件3142项全通过/Android源码编译/独立复核通过，已提交d3100c6e。详情reference-session-cache末节。已确认Editor.bookmarkVersion与重绘contentVersion并非统一正文计数；不要据此复用过时正文。实际会话接线与native来源摘要需一并审，不半接恢复后自动覆盖。
+独立源码核查证明完整native4不是R3硬前置。NativeSaveContract及单调登记可以拒绝已启用原件被旧unanchored普通保存覆盖，但外层直接输出仍须修。正式下一阶段规格：docs/movinkpad/reference-page-ui-first-2026-11-09.md，tmp/reference-page-ui-next-plan.txt仅辅助原始交接；以正式规格为准。
 
-R2b2b2a源版本API已实现并独立复核，全量tmp/native-source-version-full.log 292套件3163项全通过/Android源码编译成功，已提交c1411332；详情reference-native-source-version-2026-11-08.md。先有与真实读取快照同源的SHA、严格expected版本保存与staged receipt，再统一实际session/Editor接线；不把FileStamp当内容证明，不半接unsafe恢复。无运行作业。
+1. 同一有限交付先修Main createLauncher/saveCopyLauncher在打开流前保护、Editor.save(output)/createNoteFile以及另存/分叉身份复用。复用NativeCreation+PageReferenceCopy，不删除provider返回的未知/非空目标；同目标走checked普通保存。已有saving modal与稳定捕获可冻结这次编辑，Main采用核原owner/model/revision/票据，失败不改scope/path/dirty。
+2. 原字节页启用复用现journal与PDF保护。新purpose明确穷尽处理；retained A→B须验证只有页ID literal/marker改变，不能仅验UUID/摘要；反例伪造合法marker却改ink/PDF/unknown payload必须拒。
+3. 成功后fresh catalog→PAGE来源→已有/新节点→xmap保存重开；Editor“引用此页”须真实member ID匹配，不按页序猜，不拿旧lastReadSourceVersion作最新回执。
+4. 继续来源多预览／刷新／失效修复、跳转与返回／定位轮廓／双窗格／反向引用、局部及文件库网络；A2无中心／同级插入／边缘自动平移继续保留。
 
-R2b2c0：NativeCreationIntent/prepareNewTarget/publishCreated、CREATE用途与explicit complete已实现；计划/代码独立审核通过，四处发现均有修复/回归（候选SHA、异常suppressed、pre-retained租约、257字节日志预算）。tmp/native-creation-final-full.log 293套件3191项全通过、Android源码编译成功，实际仪器/设备未运行。已提交d272728a。详情reference-native-creation-2026-11-08.md。实际UI仍先openOutputStream，不能半接copyScope；native/cache时序与另存后旧cache写回原件风险仍保留。下一片R2b2b2b先接真实Editor同源打开/采用，规格reference-verified-open-2026-11-08.md已独立审核，需PreparedOpen先完整验证再detach、实际保存重新settle+同步最终检查、model/revision绑定Discard、统一简单OpenRequest及IO外资源holder；已接真实打开流程，8新增JVM+1原子open guard回归；独立复核发现Save续接、secondary释放、诊断迟到、pending预查竞态、picker重入均已修，最后独立复核通过。tmp/verified-native-open-final-review.log全量294套件3200项/Android源码编译成功；8个新实际Editor仪器场景只编译未执行。资源文字微调后tmp/verified-native-open-resources-final.log同样全部通过，已提交0257bd59。之后native/cache成功receipt时序与会话适配、copy持久切换仍保留。无运行作业。
+完整native4／同head及冷pending4是独立保存恢复改造方案，按真实失败行为决定，不再将未使用API无限提升为所有来源前置。原产品保存失败／异常恢复等安全需求仍全部保留。历史阶段证据保存在docs/movinkpad/，旧断点备份在ignored tmp/，不要沿已被上述决策替代的旧依赖顺序重复造基础API。
 
+## 协作与恢复
 
-下一片R2b2b3a规格reference-edit-source-2026-11-08.md已实现/独立复核通过/3216项主机与Android源码编译通过，已提交c2dd1ab5：只从已采用actual模型签发长期NativeEditSource，主线程快照与来源proof成对，严格publish回执确认不能迟到/回退；普通native/cache实际接线与Save-As持久切换仍需统一，不能半接旧缓存自动覆盖。用户现已选择保留已写入版本、只放弃之后修改，不自动回滚；相关producer/pending接线待实现。overall complete=false，无运行作业。
+cancel_event_tests持有并冻结本轮UI生产及AndroidUI测试；review_input_plan持有并冻结Controller主机测试、负责UI窄复核与R3计划审核；source_loop_audit已交付R3有限计划并完成只读任务。无agent运行Gradle或提交；root统一验证和本地提交。完成agent需followup_task唤醒，send_message不启动新turn。
 
-R2b2b3a详情reference-edit-source-2026-11-08.md。16新增JVM真实publish/PDF/no-op反例，两个实际Editor生命周期仪器场景只编译未执行；普通writer尚未用context，不得误宣称生产cache/native已迁移。下一片b3b需统一native成功receipt→当前live捕获→cache reserve，旧cache不可靠则保留草稿不自动写原文件，另存A→B需持久copy pending防旧A恢复写回，分屏未采用草稿不能被clear掉。所有替换（键盘newNote等）迁移前要改保存等待；显式PDF插入/合并背景需要来源变更事务，不能放松普通PDF核验。无运行作业，overall complete=false。
-
-R2b2b3b0已实现：原生会话codec/typed metadata/view-only proof/portable PDF/Read SHA、strict head envelope和所有verify路径metadata保护。tmp/native-working-session-final-full.log 296套件3237项全过、Android源码编译/独立复核通过；两个PDF复核发现均已修并留反例。实际仪器/目标设备未运行，生产Editor/旧SessionStore仍未切换。详情reference-native-session-adapter-2026-11-08.md。已提交4802a45c，无运行作业。
-R2b2b3b1已实现/独立复核通过；tmp/native-working-recovery-final-full.log 297套件3248项全部通过，Android源码编译成功（新provider恢复发布仪器只编译）；实际目标设备未运行。source实际SHA/kind/id/key、cache自身页集、整个source.identity/PDF包装、Read issuer/open与cache admission lease交接已覆盖。新11个JVM，含真实发布/pending/外部变更/权限/来源缺失/GC/取消/伪造Read。详情reference-working-recovery-2026-11-08.md；已提交ea9d9854，无运行作业。
-生产Editor旧SessionStore尚未切换；unbound/旧缓存草稿、producer协调/copy持久切换、页激活/页面来源/往返backlinks/网络全部保留，overall complete=false。保存后放弃语义已确认保留已写入版本；待安全producer/pending接线。
-A2普通关系列表事务/端点编辑已实现并独立复核通过：tmp/map-relation-editing-full.log 298套件3257项全过、Android源码编译；最终英语方向/按钮保护小改后tmp/map-relation-editing-final.log 12项定向及Android编译通过。GraphDialogs经MapSession.latest合并，draft/取消零写入/duplicate latest E2/无向no-op/满额/失效占位/一步undo均覆盖；3个AndroidHost场景仅编译未运行。两中文graph.xml一致、53键无重复，diff --check通过。详情mind-map-relation-editing-2026-11-08.md。已提交78b0c471，无运行作业。
-后续继续R2来源producer/new/copy持久切换/页激活、R3页面多来源/预览、R4跳转返回/backlinks、R5文件网络；A2画布连线/空白新节点连接/多选/无中心仍保留，overall complete=false。不要半接生产旧SessionStore恢复。保存后放弃语义已确认保留已写入版本，只放弃之后修改；不会自动回滚原文件。
-
-A2画布点击连线已实现/独立复核通过：tmp/map-canvas-connect-full.log 298套件3267项全过；最终tmp/map-canvas-connect-focus-verified.log 29输入+3绘制=32项及Android源码编译全过。五项复核发现（余流/HUD重排/Enter repeat/多行标题/touch焦点）均修并留反例。新9共享事件+1 Canvas，2实际Host场景仅编译，真实Android15/MovinkPad/ProPen3未执行。spec mind-map-canvas-connect-2026-11-08.md，阶段已提交8b09a40c；无运行作业。
-2026-11-08用户明确保存后放弃：保留已写入版本，只丢之后的新修改；reference-discard-written-2026-11-08.md，AGENTS/todo已更新，不自动restore旧原件。未核实部分写入仍留pending并显式恢复，不冒充完整版本。此前产品决定阻塞已解除，下一阶段继续来源producer/native save receipt/cache/head与UI采用/新建另存copy pending等真实接线，页激活/多来源/跳转backlinks网络和A2剩余交互均保留。整体complete=false，不打APK。
-
-R2严格keepWrittenSave已实现/验证/独立复核通过：tmp/native-keep-written-final-full.log 299套件3284项全过，Android测试源码编译成功；15新增native+2core，实际Androidprovider例只编译未运行。最后target beforeClear→有界typed marker、事务内URI/kind/page重检、early PDF lease/实际SHA、取消均完成；重复无取消header扫描已移除，同stamp坏原件反例先红后绿。详情reference-keep-written-save-2026-11-08.md；阶段已提交e9c4c582，无运行作业。不是SaveRequest.Receipt，不半接旧Editor放弃或缓存。
-下一阶段统一producer/native save→receipt→当前live缓存的durable handoff、new/copy持久切换及UI采用/未采用草稿保留；旧legacy缓存不能变保存权限。用户放弃决定已确认（保留已写B，只丢后续C，不restore A），不再等待答复。R3页面来源/预览/往返backlinks/文件网络和A2剩余交互继续保留，overall complete=false，不打APK。
-
-下一阶段持久native→cache交接计划reference-native-handoff-2026-11-08.md已重大修订，独立审核已通过、补native journal v4 needs-ack gate后可实施，尚未代码：旧snapshot共享Stroke，不能只给旧head附记录，必须B固定stage后owner主线程fresh capture C，再按普通latest发布C+handoff成功ack后commit B。prepare/commit拆段释放storage锁跨Main，避免锁反序；native metadata schema2在同一现envelope v1 head，native协调stage持久v4 handoff ID/needs-ack，旧ensure/native-only续写必须拒绝（旧v3保留），后续同ownercapture继承intent。不凭A+无pending认定显式保留A，本片对未解决A failclosed；no-op关联stage ID/epoch；恢复claim只认领owner、跨重启首次正文重写，不给C0背书C1counter。下一步待审后实现整片（不是只方案），生产/new/copy/旧缓存与source UI仍需配套，overall complete=false。
-
-R2交接首片v4 durable gate已实现/独立审核通过：tmp/native-handoff-gate-full.log 300套件3293项全过，Android源码编译成功；新增8个core+1storage JVM及1owned provider仪器（仅编译未运行）。canonical handoff UUID/仅SAVE/两份预检SHA、callback前拒写、重启/URI别名、no-op、显式keep/restore、坏record保留均覆盖；无ack API，生产仍v3，不等于完整交接完成。已确认活动选区变换可能暂改共享item，后续协调capture须建立稳定事务屏障，不能仅bodyRevision/fresh callback。阶段已提交92334288，无运行作业。下一片实际stage proof与prepare/commit释放锁，随后cache/ack/恢复认领/生产/new-copy/页面来源闭环。overall complete=false。
-
-R2实际阶段证明/prepare→commit已实现、独立复核通过：tmp/native-staged-save-full.log 301套件3312项全过，Android源码编译成功。stage返回本次写入immutable record摘要，不事后读取替换marker签证明；两项复核反例先红后绿，实际散列/复制/读回逐块sourceepoch/取消。Storage issuer+canonical journal+recordSHA+A/B版本绑定，一次提交、私有SaveRequest/Receipt.Staged配对；prepare释放storage锁且目标仍A，PDF lease→durable迁移pin→成功note pin闭合。v4 prepare仍无ack默认拒写，不激活生产cache或旧恢复；19新增JVM，1 provider仪器只编译未执行。阶段已提交16557eca，无运行作业。下一步稳定writer capture/内容事务屏障，再cache同head durable交接/ack/重启认领，后续new-copy/页激活/来源UI/往返/backlinks/网络仍保留。overall complete=false。
-
-下一片固定writer快照计划reference-frozen-writer-2026-11-08.md待独立审核：新native capture冻结可写item状态、Stroke共享不可变Samples前缀避免全量样本复制；保留原浅快照默认与新渲染，活动内容事务屏障仍另片且不激活生产。overall complete=false。
-
-R2固定writer视图已实现/独立复核通过：tmp/native-frozen-writer-final-full.log 302套件3326项全过，Android测试源码编译成功；14新增JVM（含真实native/cache/七类整ZIP oracle/表格别名先红后绿）。Stroke pin已发布Samples前缀、不复制点数组；其它字段/嵌套容器/每页胶合/层/PDF与永久页ID保持；默认浅快照不切换、不增临时成员副本。新SaveRequest/NativeWorkingSession接固定路径，生产仍未接。活动预览capture屏障和view-only前O(items)副本性能债待下一片，不能视为真机/性能验收。阶段已提交ffaec942，无运行作业。下一片轻量source observation/按需正文计划reference-lightweight-capture-2026-11-08.md正在独立审核。overall complete=false。
-
-R2轻量source observation/按需正文已实现/独立复核通过：tmp/native-light-capture-full.log 302套件3329项全过，Android源码编译成功。3新JVM场景+真实same-SHA noop扩展；note prepare页ID后一次key，reserve→仅requiresBody固定，view-only无body/不访问items、失败旧head保持；Observer私有actual owner factory、IO只epoch不读live、不授native保存能力。两probe先红后绿。阶段已提交b216132a，无运行作业；不激活生产，活动事务屏障、同head handoff/ack/恢复认领、新建另存copy pending、页激活/来源UI/往返/backlinks/网络仍继续，overall complete=false。
-
-下一阶段同head交接内核计划已据固定writer/轻量Observation更新至reference-native-handoff-2026-11-08.md末尾，待独立审核。schema2 T/一次性fresh permit/root intent/previous-head锁外钩子/真实head ack/v4受控commit/accepted ID/恢复claim仍未代码；UI稳定输入屏障和生产迁移另后续保留，不启用旧生产。overall complete=false。
-
-同head交接内核计划独立复核可实施，补Root注册/claim/完成先短cache锁invalidate旧reservation再发布intent，guard读同Root锁。基础API WorkingSessionCache previous-head锁外hook/forceBody/invalidate/actual Read issuer+head验证已实现并独立源码复核通过；tmp/native-handoff-transition-first.log定向+Android源码编译通过，完整tmp/native-handoff-transition-full.log 302套件3334项全过，Android源码编译成功。5新增JVM（含最后check后卡住的write/clear竞态），无native授权/schema2激活。继续T/permit/root/ack/B恢复claim实际内核；整体complete=false。
-
-交接previous-head/代次/forceBody/Read基础片完整验证与独立复核完成，已提交9d5bfd10；无运行作业。下一步在这些接口上实施schema2 T、一次性capture permit、共享root intent、私有真实head ack/v4 commit和actual B恢复claim，不能把基础片当作交接闭环。overall complete=false。
-
-同head持久化半段已实现并完成独立源码复核：metadata2/读1、2，真实Staged+单次Main seal→当前C+T持久→HandoffPublication私有actual head证明，原文件仍A/native4续写未开放。Root注册原子actual Read head/owner核对、previous hook owner/source复核；派发取消AtomicRefs清理；actual runtime generation>=本次fresh ticket防旧T背书。三个反例先红后绿；14新增JVM定向+Android源码编译通过，完整tmp/native-handoff-persistence-full.log 303套件3348项全过，Android源码编译成功。半段待本地提交；继续native4 typed ack→真实Receipt accepted ID→B恢复/claim，cold T现全部failclosed可读不可普通写。overall complete=false。
-
-同head持久化半段无运行作业、独立复核通过，native4仍默认拒写。下一半private Ack实际current head→同Staged/record/path核实→Native4 commit/实际Receipt T ID，再accepted sourceB completion与B恢复claim。不得混用native-only绕过未解决T，生产UI/稳定输入后续未激活。overall complete=false。
-
-2026-11-08 恢复后完成 native4 typed ack/commit/实际Receipt accepted-ID半段；独立复核通过，tmp/native-handoff-ack-full.log 完整303套件3355项全过、Android测试源码编译成功。新增目标散列中失活零写/写后登记契约冲突重试零重写两组。无运行作业，待本地提交后继续accepted-ID completion；actualB恢复/claim、生产稳定输入与统一writer及来源UI/backlinks/网络仍保留，overall complete=false，不打APK。
-
-当前恢复点：native4受控ack已提交eec10da5；accepted-ID完成转换已实现并独立复核，tmp/native-handoff-completion-full.log完整303套件3363项全过/Android源码编译成功（实际仪器/目标设备未运行）。8新增JVM，含after-commit来源退休卡Root先红后绿、last-check旧T写、两个completion交错、新T不被旧收尾清除、head成功返回失败重试、真实sameSHA canvas与PDF资源。成功收尾主动失效reservation，后续producer不能用published&&isCurrent判断completion。待本地提交，下一阶段actualB恢复/claim计划审核中；生产/稳定事务屏障和来源闭环仍保留，overall complete=false，无运行作业，不打APK。
-
-当前恢复点：completion已提交50d413a1。cold actualB恢复/claim已实现并完成独立复核；tmp/native-handoff-recovery-final-full.log 完整303套件3367项全过、Android测试源码编译（新增实际provider链只编译）。四个新增JVM方法及canvas/PDF扩展、跨adapter/换head/双Prepared/closed/错模型/firstbody失败gate/C1重写/实际A或外部原件保全已覆盖。复核的Unit注册/Observation提升保存权限两口改typed私有cap；后者已实际先红后绿。Bound持Read至close，claim只转移previous-head能力不背书旧body；首次无T/B新正文成功才开native。任何live Root拒接管。生产/稳定输入和pending4受控续写仍未完成；整体complete=false，无运行作业，准备本地提交，不打APK。
-
-当前恢复点：cold actualB恢复/claim已提交814616e6；导图折叠隐藏数已实现/独立复核通过，tmp/map-collapse-count-full.log完整304套件3371项全过、Android源码编译；新增实际Android中英文/双主题场景仅编译（tmp/map-collapse-count-android-compile.log）。三模型+一renderer新例，主图fit/thumbnail/PDF共享badge几何，最大998右下主题边界、来源关系忽略、undo/reopen/黑白图已查。文档mind-map-collapse-count-2026-11-08.md，待本地提交；目标设备与PDF字形人工验收未运行。整体complete=false；下一步A2连线拖动/空白新建连接，及pending4/生产输入屏障/来源/backlinks/网络保持，暂无运行作业，不打APK。
-
-当前恢复点：折叠计数已提交f80fc5d9。A2节点边缘拖动连线入口已实现并独立复核，tmp/map-port-connect-full.log完整304套件3379项全过，Android源码编译（7新增shared真实Android事件仅编译未运行）与diff检查通过。View屏幕覆盖层48dp四向避让，actual node优先，private arm只新DOWN，slop与非首pen接管/取消/drain/twofinger均复用现状态机；1新增双主题overlay像素/导出几何隔离。两测试红→绿；后续fixture接线/空间假设已纠正。说明mind-map-connection-port-2026-11-08.md，待本地提交；无运行作业。用户持续推进授权有效、overall complete=false，不打APK。
-下一步可继续A2空白落下新建文本/手绘/引用节点并连接，需完整draft/取消零数据与一次undo；然后普通线命中/多选/无中心。来源主线仍需pending4受控固定B完成、稳定内容输入屏障、统一production native/cache、live owner恢复、新建另存copy交接/页激活，再R3页面来源多预览/R4跳转往返backlinks/R5网络。已完成本轮eec10da5/50d413a1/814616e6/f80fc5d9，当前ports片准备提交。Android仪器/任意SAF provider/MovinkPad Android15 ProPen3/GPU与性能均未验收，不把宿主结果当完成。
-
-2026-11-08 本轮A2空白落点新建并连接已实现/独立复核通过，初版与最终完整tmp/map-connected-node-reviewed-full.log为306套件3400项全过、Android源码编译；真实Host仅编译。newfree+RELATED一次commit/undo，中心锚点、Session全body草稿及disposed回调保护；引用选择id/epoch/attempt从launch绑定，close/reload/clear取消。复核发现reload在途新draft、图外UP、普通source迟到与来源UI连调问题均修，SourceListEditor同步续接自成功值、外部变更拒旧列表，正文/笔迹保留。最后加old sync断言后final-focus定向15项及Android编译通过，无运行作业，准备本地提交；整体complete=false，不打APK。只读页面闭环核查source-loop-production-gaps-2026-11-08.md已记录依赖；下一片只读有序页目录计划独立审核中，不激活页ID/旧Editor生产。
-
-A2新建关联原子模型7fd75b83、空白草稿与来源保护686c8f4b已提交。随后只读有序页目录已实现/双独立复核通过，tmp/reference-catalog-full.log完整307套件3409项全过及Android源码编译；8目录+1copy新JVM方法，2新增真实provider/PDF取消场景仅编译。Plan仅有ordered IDs真相，BundleInfo保集合兼容，Catalog纯数据不泄NativeSourceVersion/File/model/lease；checkedResolve保持GC gate且hash可取消。文档reference-page-catalog-2026-11-08.md，准备本地提交，无运行作业，不打APK。整体complete=false，生产统一/显式页激活/来源状态预览/往返backlinks/网络及A2其余交互继续。
-
-本轮全部阶段已本地提交，最后代码b6e41ba0；最新完整证据tmp/reference-catalog-full.log为307/3409，0失败/错误/跳过。后续直接沿上列依赖续作，无需重新授权常规编码/测试/本地提交。
-
-2026-11-09：步骤1取消前置已完成并验证（reference-stable-capture-2026-11-09.md）。生产stable gate/native+cache捕获尚未接通；下一片先丢弃换文档reset遗留polygon/tap/dwell，不能用新模型恢复旧手势，再接实际owner事务结束通知与所有保存出口。原完整范围保持，不打APK。
-
-2026-11-09：reset片已验证与独立复核完成，证据reference-stable-capture-2026-11-09.md（6 shared reset+3 shared真实画布宿主+2 host计时）。原dirty/redo与取消16例保留；新编辑undo/redo不读旧baseline，颜色generation无条件退休。下一步实际owner稳定事务通知与所有原生/工作会话保存出口；仍需生产native/cache/恢复/new-copy持久交接、页激活/多来源/跳转返回/backlinks/文件网络和A2余项，不打APK。
-
-本轮两个代码阶段均已本地提交（a168d62b、b53d358c），未打包/安装/推送/合并。下一阶段独立只读计划初结论：先沿旧native3/旧cache统一owner Main pending保存泵，显式persist/关闭/替换按现blur结束文字和flow burst；自动保存不取消笔/selection/style/table预览，不以flow.active或键盘可见永久阻塞；提交/输入回调仅标pending并Main post合并，待整个dispatch和dirty/history更新结束再固定捕获。必须覆盖两类原生写与两个cache及旧写等待/owner重核，不半接NativeWorkingSession。详细真实接线审核仍进行，不宣称已实施。
+当前待root：提交已通过最终窄复核的本轮UI/测试/文档；记录提交号并保持干净工作区。随后直接按已复核R3规格写真实失败反例、实现有限出口与原字节激活/UI，不再重开整套存储方案讨论；常规实现/验证/本地提交无需再向用户确认。

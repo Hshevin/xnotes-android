@@ -1,5 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="recovery_materials">Recovery materials</string>
+    <string name="recovery_preview_primary">Recovery materials from the primary pane</string>
+    <string name="recovery_preview_secondary">Recovery materials from the secondary pane</string>
+    <string name="recovery_preview_loading">Preparing the preview…</string>
+    <string name="recovery_preview_empty">No recovery materials are available in this pane.</string>
+    <string name="recovery_preview_choose">Choose the saved recovery material to preview.</string>
+    <string name="recovery_preview_note">Preview note recovery material</string>
+    <string name="recovery_preview_canvas">Preview canvas recovery material</string>
+    <string name="recovery_preview_cleared">Recovery materials for this pane have been cleared.</string>
+    <string name="recovery_preview_source_required">These recovery materials need their original file to be verified before they can be restored.</string>
+    <string name="recovery_preview_failed">The recovery preview could not be displayed. The saved materials are kept.</string>
+    <string name="recovery_preview_historical">Saved recovery material</string>
+    <string name="recovery_preview_details">%1$s · %2$s</string>
+    <string name="recovery_preview_body">Preview this previously saved material and preserve it as an independent copy.</string>
+    <string name="recovery_preview_previous">Previous page</string>
+    <string name="recovery_preview_next">Next page</string>
+    <string name="recovery_preview_page">%1$d / %2$d</string>
+    <string name="recovery_preview_save_copy">Save independent copy</string>
+    <string name="recovery_copy_note_name">Recovered note</string>
+    <string name="recovery_copy_canvas_name">Recovered canvas</string>
+    <string name="recovery_copy_filename">%1$s copy.%2$s</string>
+    <string name="recovery_copy_working">Saving the recovery copy…</string>
+    <string name="recovery_copy_failed">The recovery copy could not be completed. The recovery materials are kept.</string>
+    <string name="recovery_copy_retry_failed">Completion failed. You can continue this same copy again.</string>
+    <string name="recovery_copy_continue">Continue this copy</string>
+    <string name="recovery_copy_saved">Recovery copy saved</string>
+    <string name="recovery_copy_resume_pick">Continue an unfinished copy…</string>
+    <string name="recovery_picker_waiting">Finish or cancel the open file picker before choosing another destination.</string>
+    <string name="recovery_picker_failed">The file picker could not be opened. Please try again.</string>
     <!-- Document upgrade recovery dialog -->
     <string name="recovery_title">This document needs attention</string>
     <string name="recovery_restore_backup">Restore the backup from before the upgrade</string>

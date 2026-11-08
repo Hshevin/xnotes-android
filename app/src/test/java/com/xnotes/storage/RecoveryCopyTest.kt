@@ -131,6 +131,14 @@ class RecoveryCopyTest {
         val ids=BundleReferenceInfo.inspectStrict(f.native.current).orderedPageIds
         assertTrue(f.native.marker.isFile);assertTrue(f.temp.listFiles()!!.isEmpty());b.preview.ensureOpen()
         b.preview.close();assertFalse(b.held.exists());f.native.failAfterWrite=false
+        val retainedFiles=f.native.retainedBytes()
+        f.native.beforeRead={throw SecurityException("temporary provider permission loss")}
+        localized(RecoveryCopyRequest.complete(f.storage,result.pending) as RecoveryCopyResult.Failed)
+        assertTrue(f.native.marker.isFile);assertEquals(1,f.native.writes)
+        assertArrayEquals(published,f.native.current.readBytes())
+        val afterFailure=f.native.retainedBytes();assertEquals(retainedFiles.keys,afterFailure.keys)
+        for((name,bytes) in retainedFiles) assertArrayEquals(bytes,afterFailure.getValue(name))
+        f.native.beforeRead=null
         assertTrue(RecoveryCopyRequest.complete(f.storage,result.pending) is RecoveryCopyResult.Saved)
         assertEquals(1,f.native.writes);assertArrayEquals(published,f.native.current.readBytes());assertEquals(hash,BundleMigration.hash(f.native.current))
         assertEquals(ids,BundleReferenceInfo.inspectStrict(f.native.current).orderedPageIds);assertFalse(f.native.marker.exists())

@@ -348,6 +348,8 @@ private fun EditorScreen(
     onImportConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val recoveryPreview=remember(editor) {com.xnotes.ui.RecoveryPreviewController(context.applicationContext)}
+    com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
     val snackbar = remember { SnackbarHostState() }
     // The LaTeX renderer resolves its fonts through the composition, so this is the
     // only place it can be built; the flow reaches it through MathRendering after.
@@ -1176,6 +1178,7 @@ private fun EditorScreen(
                 onSelectView = { if (target == null) backstageView = it else paneView = it },
                 allowSplits = target == null,
                 initialDocument = target?.let { paneHomes[it.pane] },
+                onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
                 backEnabled = target == null || homeFocus == target.pane,
                 onExitApp = { if (target == null) (context as? android.app.Activity)?.finish() else closePaneHome(target) },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
