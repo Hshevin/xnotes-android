@@ -10,7 +10,9 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.CancellationException
 
 /** Owner serializes access per URI. Backups survive until file read-back AND registration succeed. */
-class MigrationPublication internal constructor(private val directory:File,private val hashFile:(File)->String) {
+class MigrationPublication internal constructor(private val directory:File,private val hashFile:(File)->String,
+                                               private val markerOpen:(File)->InputStream) {
+    internal constructor(directory:File,hashFile:(File)->String):this(directory,hashFile,{it.inputStream()})
     constructor(directory:File):this(directory,{BundleMigration.hash(it)})
     interface Target {
         fun read():InputStream
@@ -21,7 +23,10 @@ class MigrationPublication internal constructor(private val directory:File,priva
         /** Atomic backends recheck this version immediately before replacing their destination. */
         fun write(source:File,expectedCurrentHash:String?) {write(source)}
     }
-    enum class Purpose(val key:String) { SAVE_NOTE("save-note"), SAVE_CANVAS("save-canvas") }
+    enum class Purpose(val key:String) {
+        SAVE_NOTE("save-note"), SAVE_CANVAS("save-canvas"), CREATE_NOTE("create-note"), CREATE_CANVAS("create-canvas");
+        internal val creation get()=this==CREATE_NOTE || this==CREATE_CANVAS
+    }
     internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?)
     internal data class RestoreValidation(val original:File,val purpose:Purpose?,val currentHash:String?,val candidateHash:String?,val candidateStageProof:Boolean)
     internal data class KeepValidation(val original:File?,val candidate:File?,val purpose:Purpose?,val recordValid:Boolean,
@@ -38,11 +43,13 @@ class MigrationPublication internal constructor(private val directory:File,priva
 
     val purpose:Purpose? get()=readRecord().purpose
 
-    fun stage(source:File,replacement:File,purpose:Purpose?=null) {
+    fun stage(source:File,replacement:File,purpose:Purpose?=null,expectedCandidateHash:String?=null) {
         check(!pending) {StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING)}
         check(directory.isDirectory || directory.mkdirs())
         copyDurable(source,original);copyDurable(replacement,candidate)
         val oldHash=BundleMigration.hash(original);val newHash=BundleMigration.hash(candidate)
+        if(expectedCandidateHash!=null && newHash!=expectedCandidateHash)
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         check(BundleMigration.hash(source)==oldHash && BundleMigration.hash(replacement)==newHash) {StorageText.t(StorageMsg.MIGRATION_VERIFY_FAILED)}
         val temp=File(directory,"pending.tmp")
         try {
@@ -54,10 +61,14 @@ class MigrationPublication internal constructor(private val directory:File,priva
 
     /** Validation borrows immutable retained files. current is the version matching the target SHA. */
     fun publish(target:Target,validate:(File,File,File)->Unit={_,_,_->},afterVerified:(File)->Unit={}) =
-        publishValidated(target,validate={validate(it.original,it.candidate,it.current)},afterVerified=afterVerified)
+        publishValidated(target,validate={requireLegacy(it.purpose);validate(it.original,it.candidate,it.current)},afterVerified=afterVerified)
 
-    internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={}) {
-        val record=readRecord();val kept=retained()
+    internal fun publishValidated(target:Target,validate:(Validation)->Unit,afterVerified:(File)->Unit={},
+                                  protectCandidate:(File)->Unit={}) {
+        val record=readRecord()
+        // Only dependency protection, never identity authority. The caller owns its lease on every path.
+        protectCandidate(candidate)
+        val kept=retained()
         val oldHash=kept.original.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         val newHash=kept.candidate.digest ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         checkRecord(record,kept,checkCandidate=true)
@@ -79,7 +90,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
 
     /** Explicit recovery. A damaged/missing candidate must not prevent restoring the verified original. */
     fun restore(target:Target,validate:(File)->Unit={},afterVerified:(File)->Unit={}) =
-        restoreValidated(target,validate={validate(it.original)},afterVerified=afterVerified)
+        restoreValidated(target,validate={requireLegacy(it.purpose);validate(it.original)},afterVerified=afterVerified)
 
     internal fun restoreValidated(target:Target,validate:(RestoreValidation)->Unit,afterVerified:(File)->Unit={}) {
         val record=readRecord();var kept=retained(Inspection.RESTORE)
@@ -99,13 +110,14 @@ class MigrationPublication internal constructor(private val directory:File,priva
 
     /** Caller validates the captured current file/version; pure validation is repeated after DB commit. */
     fun keepCurrent(validate:(File?,File?)->Unit={_,_->},afterVerified:()->Unit={}) =
-        keepCurrentValidated(validate={validate(it.original,it.candidate)},afterVerified=afterVerified)
+        keepCurrentValidated(validate={requireLegacy(it.purpose);validate(it.original,it.candidate)},afterVerified=afterVerified)
 
     internal fun keepCurrentValidated(validate:(KeepValidation)->Unit,afterVerified:()->Unit={}) {
         // Explicit keep can discard a malformed historical record, after the caller validates current.
-        val record=try {readRecord()} catch(_:RecoveryRequired) {null}
+        val raw=readMarker(forKeep=true)
+        val record=try {parseRecord(raw)} catch(error:RecoveryRequired) {if(raw.typed) throw error else null}
         var kept=retained(Inspection.KEEP_CURRENT)
-        if(record!=null && record.digest!=kept.marker.digest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        if(raw.digest!=kept.marker.digest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         fun validateCurrent() {validate(KeepValidation(original.takeIf {kept.original.regular},
             candidate.takeIf {kept.candidate.regular},record?.purpose,record!=null,record?.original,record?.candidate,
             record?.original!=null && record.original==kept.original.digest,
@@ -166,35 +178,57 @@ class MigrationPublication internal constructor(private val directory:File,priva
         return Retained(merge(before.original,after.original,mode==Inspection.KEEP_CURRENT),
             merge(before.candidate,after.candidate,mode!=Inspection.PUBLISH),merge(before.marker,after.marker,mode==Inspection.KEEP_CURRENT))
     }
-    private fun readRecord():Record {
+    private fun requireLegacy(purpose:Purpose?) {
+        if(purpose!=null) throw failure(StorageMsg.MIGRATION_RECOVERY_PENDING)
+    }
+    private data class RawMarker(val bytes:ByteArray,val digest:String,val size:Long) {
+        // No integer conversion: even an overflowing future version must remain typed.
+        val typed:Boolean get() {
+            val prefix=String(bytes,Charsets.UTF_8)
+            if('\n' !in prefix && size>=257 && prefix.all {it in '0'..'9'}) return true
+            val version=prefix.substringBefore('\n').trim().trimStart('0')
+            return version.isNotEmpty() && version.all {it in '0'..'9'} && (version.length>1 || version[0]>'2')
+        }
+    }
+    /** Strict paths read at most 257 bytes; only explicit malformed legacy keep hashes the remainder. */
+    private fun readMarker(forKeep:Boolean=false):RawMarker {
         try {
             if(!marker.isFile) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-            val out=ByteArrayOutputStream()
-            marker.inputStream().use {input->
+            val out=ByteArrayOutputStream();val digest=java.security.MessageDigest.getInstance("SHA-256");var size=0L
+            markerOpen(marker).use {input->
                 val buffer=ByteArray(257)
-                while(out.size()<=256) {
-                    val n=input.read(buffer,0,minOf(buffer.size,257-out.size()));if(n<0) break
-                    out.write(buffer,0,n)
+                while(out.size()<257) {
+                    val n=input.read(buffer,0,257-out.size());if(n<0) break
+                    out.write(buffer,0,n);digest.update(buffer,0,n);size+=n
+                }
+                val prefix=RawMarker(out.toByteArray(),"",size)
+                if(size>256) {
+                    if(!forKeep || prefix.typed) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                    // Historical garbage can still be explicitly kept, with one digest over the same
+                    // stream as its bounded classification. Unknown typed records never reach here.
+                    val rest=ByteArray(65536)
+                    while(true) {val n=input.read(rest);if(n<0) break;digest.update(rest,0,n);size+=n}
                 }
             }
-            if(out.size()>256) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-            val bytes=out.toByteArray()
-            val digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}
-            val body=String(bytes,Charsets.UTF_8)
-            if(body=="1") return Record(null,null,digest,null) // Historical records prove call-time consistency only.
-            val parts=body.split('\n');val hash=Regex("[a-f0-9]{64}")
-            val purpose=when {
-                parts.size==3 && parts[0]=="2" -> null
-                parts.size==4 && parts[0]=="3" -> Purpose.entries.singleOrNull {it.key==parts[3]}
-                    ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-                else -> throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-            }
-            if(!parts[1].matches(hash) || !parts[2].matches(hash)) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
-            return Record(parts[1],parts[2],digest,purpose)
+            return RawMarker(out.toByteArray(),digest.digest().joinToString("") {"%02x".format(it)},size)
         } catch(error:Exception) {
-            rethrowControlFlow(error)
-            throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID,error)
+            rethrowControlFlow(error);throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID,error)
         }
+    }
+    private fun readRecord():Record=parseRecord(readMarker())
+    private fun parseRecord(raw:RawMarker):Record {
+        if(raw.size>256) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        val body=String(raw.bytes,Charsets.UTF_8)
+        if(body=="1") return Record(null,null,raw.digest,null) // Historical records prove call-time consistency only.
+        val parts=body.split('\n');val hash=Regex("[a-f0-9]{64}")
+        val purpose=when {
+            parts.size==3 && parts[0]=="2" -> null
+            parts.size==4 && parts[0]=="3" -> Purpose.entries.singleOrNull {it.key==parts[3]}
+                ?: throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+            else -> throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        }
+        if(!parts[1].matches(hash) || !parts[2].matches(hash)) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
+        return Record(parts[1],parts[2],raw.digest,purpose)
     }
     private fun checkRecord(record:Record,kept:Retained,checkCandidate:Boolean) {
         if(record.digest!=kept.marker.digest || record.original!=null && record.original!=kept.original.digest || checkCandidate && record.candidate!=null && record.candidate!=kept.candidate.digest)

@@ -36,6 +36,9 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         try { val result = block(db); db.setTransactionSuccessful(); return result } finally { db.endTransaction() }
     }
     fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
+        register(db,id,kind,name,uri,pageReferences)
+    }
+    private fun register(db:SQLiteDatabase,id:String,kind:String,name:String,uri:String,pageReferences:Boolean) {
         require(UUID.fromString(id).toString() == id)
         db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
@@ -43,6 +46,25 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
         db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE location_key=?", arrayOf(id,locationKey(uri)))
         if(pageReferences) db.execSQL("INSERT OR IGNORE INTO page_reference_contracts(document_id) VALUES(?)",arrayOf(id))
+    }
+    /** Includes unavailable locations and orphaned monotonic contracts; an empty file is not identity proof. */
+    internal fun verifyCreation(id:String,kind:String,uri:String,allowRegisteredHere:Boolean=false,pageReferences:Boolean=false) {
+        verifyCreation(readableDatabase,id,kind,uri,allowRegisteredHere,pageReferences)
+    }
+    private fun verifyCreation(db:SQLiteDatabase,id:String,kind:String,uri:String,allowRegisteredHere:Boolean,pageReferences:Boolean) {
+        val key=locationKey(uri)
+        val here=db.rawQuery("SELECT document_id FROM locations WHERE location_key=?",arrayOf(key)).use {if(it.moveToFirst()) it.getString(0) else null}
+        val locations=db.rawQuery("SELECT location_key FROM locations WHERE document_id=?",arrayOf(id)).use {c->buildList {while(c.moveToNext()) add(c.getString(0))}}
+        val knownKind=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        val anchored=db.rawQuery("SELECT 1 FROM page_reference_contracts WHERE document_id=?",arrayOf(id)).use {it.moveToFirst()}
+        val fresh=here==null && locations.isEmpty() && knownKind==null && !anchored
+        val same=allowRegisteredHere && here==id && locations.isNotEmpty() && locations.all {it==key} && knownKind==kind && (!anchored || pageReferences)
+        if(!fresh && !same) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    /** The final recheck and registration are indivisible even if another caller updated the index during IO. */
+    internal fun registerCreated(id:String,kind:String,name:String,uri:String,pageReferences:Boolean) = transaction {db->
+        verifyCreation(db,id,kind,uri,true,pageReferences)
+        register(db,id,kind,name,uri,pageReferences)
     }
     /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
     fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(

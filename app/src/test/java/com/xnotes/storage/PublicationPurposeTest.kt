@@ -84,4 +84,76 @@ class PublicationPurposeTest {
         }
     }
 
+    @Test fun legacyWrappersCannotConsumeTypedSaveOrCreationRecords() = scenario {root->
+        for(purpose in MigrationPublication.Purpose.entries) {
+            val current=File(root,"current-${purpose.key}").apply {writeText("original")}
+            val next=File(root,"next-${purpose.key}").apply {writeText("candidate")}
+            val journal=MigrationPublication(File(root,"journal-${purpose.key}"));journal.stage(current,next,purpose)
+            val target=object:MigrationPublication.Target {
+                override fun read()=current.inputStream()
+                override fun write(source:File) {fail("legacy entry cannot consume typed record")}
+            }
+            for(action in listOf<()->Unit>({journal.publish(target)},{journal.restore(target)},{journal.keepCurrent()})) {
+                assertThrows(MigrationPublication.RecoveryRequired::class.java) {action()}
+                assertTrue(journal.pending);assertEquals("original",current.readText())
+            }
+        }
+    }
+    @Test fun malformedOrUnknownTypedRecordsNeverBecomeLegacyKeepRequests() = scenario {root->
+        val current=File(root,"current").apply {writeText("original")};val next=File(root,"next").apply {writeText("candidate")}
+        for((index,text) in listOf("3\nfuture", "3\n"+"a".repeat(64)+"\n"+"b".repeat(64)+"\nunknown-create",
+            "9".repeat(257)+"\nfuture", "000000000000003\ninvalid", "0".repeat(300)+"3\nfuture").withIndex()) {
+            val directory=File(root,"journal-$index");val journal=MigrationPublication(directory);journal.stage(current,next)
+            File(directory,"pending").writeText(text)
+            assertThrows(MigrationPublication.RecoveryRequired::class.java) {journal.keepCurrent()}
+            assertTrue(journal.pending);assertEquals(text,File(directory,"pending").readText())
+            assertEquals("original",File(directory,"original.zip").readText());assertEquals("candidate",File(directory,"candidate.zip").readText())
+        }
+    }
+
+    @Test fun malformedLegacyClassificationIsBoundToTheMarkerBytesUsedForValidation() = scenario {root->
+        val current=File(root,"current").apply {writeText("original")};val next=File(root,"next").apply {writeText("candidate")}
+        val directory=File(root,"journal");val journal=MigrationPublication(directory);journal.stage(current,next)
+        val marker=File(directory,"pending");val typed="3\nfuture"
+        marker.writeText("historical broken record")
+        var replaced=false
+        val racing=MigrationPublication(directory) {file->
+            if(!replaced) {replaced=true;marker.writeText(typed)}
+            com.xnotes.format.BundleMigration.hash(file)
+        }
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {racing.keepCurrent()}
+        assertTrue(replaced);assertEquals(typed,marker.readText());assertTrue(racing.pending)
+    }
+
+    @Test fun stagingMustBindTheRetainedCandidateToThePreviouslyInspectedHash() = scenario {root->
+        val current=File(root,"current").apply {writeText("")};val next=File(root,"next").apply {writeText("inspected candidate A")}
+        val inspected=com.xnotes.format.BundleMigration.hash(next)
+        next.writeText("replacement B before stage")
+        val directory=File(root,"journal");val journal=MigrationPublication(directory)
+        assertThrows(ReferenceContractViolation::class.java) {journal.stage(current,next,MigrationPublication.Purpose.CREATE_NOTE,expectedCandidateHash=inspected)}
+        assertFalse(journal.pending);assertEquals("",current.readText())
+    }
+    @Test fun strictAndTypedKeepMarkerReadsStopAtTheEnvelopeBudget() = scenario {root->
+        val current=File(root,"current").apply {writeText("original")};val next=File(root,"next").apply {writeText("candidate")}
+        for((index,body) in listOf("3\n"+"x".repeat(100000), "9".repeat(100000)).withIndex()) {
+            val directory=File(root,"journal-$index");MigrationPublication(directory).stage(current,next)
+            File(directory,"pending").writeText(body)
+            var bytes=0
+            val journal=MigrationPublication(directory,{com.xnotes.format.BundleMigration.hash(it)},markerOpen={file->
+                object:java.io.FilterInputStream(file.inputStream()) {
+                    override fun read():Int=super.read().also {if(it>=0) bytes++}
+                    override fun read(b:ByteArray,off:Int,len:Int):Int=`in`.read(b,off,len).also {if(it>0) bytes+=it}
+                }
+            })
+            val target=object:MigrationPublication.Target {
+                override fun read()=current.inputStream()
+                override fun write(source:File) {fail("oversized record must never write")}
+            }
+            for(action in listOf<()->Unit>({journal.purpose},{journal.publish(target)},{journal.restore(target)},{journal.keepCurrent()})) {
+                bytes=0;assertThrows(MigrationPublication.RecoveryRequired::class.java) {action()}
+                assertTrue("strict or typed record read more than 257 bytes: $bytes",bytes<=257);assertTrue(journal.pending)
+            }
+        }
+    }
+
 }

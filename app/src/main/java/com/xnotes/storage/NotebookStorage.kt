@@ -18,6 +18,7 @@ class NotebookStorage internal constructor(private val context:Context,
     val registry = DocumentRegistry(context)
     internal val pdfResources by lazy {PdfResources(context,registry)}
     private val lock = Any()
+    private val creationIssuer=Any()
     /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
     fun identity(uri: String,checkActive:()->Unit={}): BundleIdentity? = synchronized(lock) {
         try {
@@ -124,6 +125,7 @@ class NotebookStorage internal constructor(private val context:Context,
         else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
     private fun verifyKind(info:com.xnotes.format.BundleReferenceInfo,expected:MigrationPublication.Purpose?) {
+        if(expected?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         if(expected!=null && purpose(info.format.orEmpty())!=expected) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
     private fun registerVerified(uri:String,info:com.xnotes.format.BundleReferenceInfo,name:String?=null) {
@@ -182,6 +184,7 @@ class NotebookStorage internal constructor(private val context:Context,
         val pending=journal(uri);val backend=target(uri)
         var verified:com.xnotes.format.BundleReferenceInfo?=null
         pending.restoreValidated(backend,validate={state->
+            if(state.purpose?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
             val original=inspect(state.original)
             verifyKind(original,state.purpose);verifyObserved(uri,original)
             if(state.currentHash!=null) sourceSnapshot(backend).use {current->
@@ -208,8 +211,10 @@ class NotebookStorage internal constructor(private val context:Context,
         val pending=journal(uri);val backend=target(uri)
         sourceSnapshot(backend).use {snapshot->
             protectCurrentHeader(uri,snapshot.file)
-            val current=inspect(snapshot.file)
+            var checkedCurrent:com.xnotes.format.BundleReferenceInfo?=null
             pending.keepCurrentValidated(validate={state->
+                if(state.purpose?.creation==true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                val current=checkedCurrent ?: inspect(snapshot.file).also {checkedCurrent=it}
                 verifyKind(current,state.purpose);verifyObserved(uri,current)
                 if(currentHash(backend)!=snapshot.sourceHash) throw recovery(StorageMsg.MIGRATION_INTERRUPTED)
                 // With no location evidence, an explicit keep still must not reassign a known backup UUID.
@@ -241,7 +246,7 @@ class NotebookStorage internal constructor(private val context:Context,
                 if(!knownCurrent && historical.any {it.originalPdfHash!=current.originalPdfHash})
                     throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
                 protectPending(uri,current)
-            },afterVerified={registerVerified(uri,current)})
+            },afterVerified={registerVerified(uri,requireNotNull(checkedCurrent))})
         }
         releaseCompletedPin(uri)
     }
@@ -317,6 +322,113 @@ class NotebookStorage internal constructor(private val context:Context,
             pending.stage(source.file,candidate,expected)
         }
         return publishSave(uri,name,expected)
+    }
+
+    /** Called at an explicit new/create/Save-As action, before handing control to a file picker. No IO. */
+    internal fun beginCreation(kind:com.xnotes.core.util.DocumentKind)=NativeCreationIntent.issue(creationIssuer,kind)
+
+    /** IO-only. The caller must bind this request to its original model before accepting a picker result. */
+    internal fun prepareNewTarget(intent:NativeCreationIntent,uri:String,checkActive:()->Unit={}):NativeCreationPermit = synchronized(lock) {
+        intent.consume(creationIssuer);checkActive()
+        if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        registry.verifyCreation(intent.documentId,intent.kind.extension,uri)
+        requireEmptyTarget(target(uri),checkActive)
+        NativeCreationPermit.issue(creationIssuer,intent,registry.locationKey(uri))
+    }
+    private fun requireEmptyTarget(backend:MigrationPublication.Target,checkActive:()->Unit) {
+        checkActive()
+        backend.read().use {input->
+            if(input.read()!=-1) throw ReferenceContractViolation(StorageMsg.NATIVE_CREATION_TARGET_INVALID)
+            checkActive()
+        }
+    }
+    private class CreationProtection(val ids:Set<String>,private val lease:AutoCloseable):AutoCloseable {
+        override fun close()=lease.close()
+    }
+    /** Hold external originals before a fallback Header/full payload scan, not after it. */
+    private fun acquireCreationProtection(file:File,checkActive:()->Unit):CreationProtection {
+        var lease:AutoCloseable?=null;var ids:Set<String>?=null
+        try {
+            BundleHeader.readWithPdfProtection(file,protect={hint->
+                check(lease==null) {"Creation dependency protection was requested twice"}
+                lease=pdfResources.holdResolved(hint);ids=hint.toSet();sourceValidationHook?.invoke()
+            }) {checkActive();false}
+            return CreationProtection(requireNotNull(ids),requireNotNull(lease))
+        } catch(error:Throwable) {
+            val failure=if(error !is ReferenceContractViolation && error !is MigrationPublication.RecoveryRequired &&
+                error !is java.util.concurrent.CancellationException && error !is PdfResources.Unavailable &&
+                (error is IllegalArgumentException || error is IllegalStateException || error is java.util.zip.ZipException))
+                ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID,error) else error
+            try {lease?.close()} catch(close:Throwable) {failure.addSuppressed(close)}
+            throw failure
+        }
+    }
+    private fun <T> withCreationCandidate(file:File,uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit,
+                                         action:(NativeSourceVersion.Inspected)->T):T = acquireCreationProtection(file,checkActive).use {protection->
+        val inspected=NativeSourceVersion.inspect(file,registry.locationKey(uri),kind,checkActive)
+        if(protection.ids!=dependencies(inspected.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+        action(inspected)
+    }
+    /** Full candidate is private and complete before this call. A permit grants one attempt, never replacement of a nonempty file. */
+    internal fun publishCreated(uri:String,candidate:File,permit:NativeCreationPermit,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
+        permit.consume(creationIssuer);checkActive()
+        if(permit.locationKey!=registry.locationKey(uri)) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        val pending=journal(uri)
+        if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        registry.verifyCreation(permit.documentId,permit.kind.extension,uri)
+        requireEmptyTarget(target(uri),checkActive)
+        withCreationCandidate(candidate,uri,permit.kind,checkActive) {checked->
+            if(checked.version.documentId!=permit.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            registry.verifyCreation(permit.documentId,permit.kind.extension,uri)
+            checkActive();protectPending(uri,checked.info)
+            // The explicit empty observation is rechecked against this original SHA before any target write.
+            val empty=File.createTempFile("native-created-", ".empty",context.cacheDir)
+            try {pending.stage(empty,candidate,creationPurpose(permit.kind),expectedCandidateHash=checked.version.sha256)} finally {empty.delete()}
+        }
+        publishCreation(uri,name,creationPurpose(permit.kind),permit.documentId,checkActive)
+    }
+    /** Explicit recovery of exactly the retained creation. Does not accept a replacement candidate or restore an empty file. */
+    internal fun completeCreation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
+        checkActive();val expected=journal(uri).purpose
+        if(expected?.creation!=true) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        publishCreation(uri,name,expected,null,checkActive)
+    }
+    private fun creationPurpose(kind:com.xnotes.core.util.DocumentKind)=when(kind) {
+        com.xnotes.core.util.DocumentKind.NOTE -> MigrationPublication.Purpose.CREATE_NOTE
+        com.xnotes.core.util.DocumentKind.CANVAS -> MigrationPublication.Purpose.CREATE_CANVAS
+        else -> throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    private fun publishCreation(uri:String,name:String,expected:MigrationPublication.Purpose,expectedId:String?,checkActive:()->Unit):NativeSourceVersion {
+        val pending=journal(uri);var verified:com.xnotes.format.BundleReferenceInfo?=null;var receipt:NativeSourceVersion?=null
+        var protection:CreationProtection?=null;var failure:Throwable?=null;var committed=false
+        try {
+            pending.publishValidated(target(uri),protectCandidate={file->
+                protection=acquireCreationProtection(file,checkActive)
+            },validate={state->
+                checkActive()
+                if(state.purpose!=expected || !expected.creation) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+                if(state.original.length()!=0L) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
+                val kind=if(expected==MigrationPublication.Purpose.CREATE_NOTE) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS
+                val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),kind,checkActive)
+                if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+                if(expectedId!=null && checked.version.documentId!=expectedId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+                registry.verifyCreation(checked.version.documentId,kind.extension,uri,true,checked.info.header.anchors!=null)
+                protectPending(uri,checked.info);verified=checked.info;receipt=checked.version
+            },afterVerified={
+                checkActive();val info=requireNotNull(verified);val id=requireNotNull(info.header.identity).documentId
+                pdfResources.protect("note:$id",dependencies(info))
+                registry.registerCreated(id,requireNotNull(info.format),name,uri,info.header.anchors!=null)
+            })
+            committed=true
+        } catch(error:Throwable) {failure=error;throw error}
+        finally {
+            try {protection?.close()} catch(close:Throwable) {
+                if(failure!=null) failure.addSuppressed(close)
+                else if(committed) android.util.Log.w("xnotes.storage","Retained PDF lease after committed creation",close)
+                else throw close
+            }
+        }
+        releaseCompletedPin(uri);return requireNotNull(receipt)
     }
 
     private fun migrate(uri: String, copy: Boolean): BundleIdentity {

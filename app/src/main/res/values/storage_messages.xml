@@ -32,4 +32,5 @@
     <string name="storage_msg_reference_metadata_invalid">Unable to verify the document identity or page references. The source file was not changed. Check the original file or use recovery data.</string>
     <string name="storage_msg_reference_write_context_invalid">This save does not match the original document type, page reference state, or original PDF. The file was not overwritten. Use the corresponding copy, recovery, or upgrade operation.</string>
     <string name="storage_msg_reference_source_changed">The source file content has changed. Saving was blocked and your edits are retained. Check the source or save a separate copy.</string>
+    <string name="storage_msg_native_creation_target_invalid">The target is not a verified new empty file and was not overwritten. Please choose a new file.</string>
 </resources>

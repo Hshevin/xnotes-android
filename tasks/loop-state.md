@@ -14,4 +14,6 @@ R2b2b0共用WorkingSessionCache事务组件已实现，27新增测试，tmp/sess
 
 R2b2b1a正文计数/画布owner token已实现，tmp/session-body-revision-full.log 291套件3142项全通过/Android源码编译/独立复核通过，已提交d3100c6e。详情reference-session-cache末节。已确认Editor.bookmarkVersion与重绘contentVersion并非统一正文计数；不要据此复用过时正文。实际会话接线与native来源摘要需一并审，不半接恢复后自动覆盖。
 
-R2b2b2a源版本API已实现并独立复核，全量tmp/native-source-version-full.log 292套件3163项全通过/Android源码编译成功，待提交；详情reference-native-source-version-2026-11-08.md。先有与真实读取快照同源的SHA、严格expected版本保存与staged receipt，再统一实际session/Editor接线；不把FileStamp当内容证明，不半接unsafe恢复。无运行作业。
+R2b2b2a源版本API已实现并独立复核，全量tmp/native-source-version-full.log 292套件3163项全通过/Android源码编译成功，已提交c1411332；详情reference-native-source-version-2026-11-08.md。先有与真实读取快照同源的SHA、严格expected版本保存与staged receipt，再统一实际session/Editor接线；不把FileStamp当内容证明，不半接unsafe恢复。无运行作业。
+
+R2b2c0：NativeCreationIntent/prepareNewTarget/publishCreated、CREATE用途与explicit complete已实现；计划/代码独立审核通过，四处发现均有修复/回归（候选SHA、异常suppressed、pre-retained租约、257字节日志预算）。tmp/native-creation-final-full.log 293套件3191项全通过、Android源码编译成功，实际仪器/设备未运行。准备本地提交。详情reference-native-creation-2026-11-08.md。实际UI仍先openOutputStream，不能半接copyScope；native/cache时序与另存后旧cache写回原件风险仍保留。下一片实际session/native owner绑定及会话适配规格，尚未新代码。无运行作业。

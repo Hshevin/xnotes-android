@@ -90,6 +90,10 @@ class MigrationCommitTest {
             f.current.writeText("original");f.journal.stage(f.original,f.next);marker.writeText(text)
             assertThrows(MigrationPublication.RecoveryRequired::class.java) {f.journal.publish(f.target)}
             assertEquals("original",f.current.readText());f.backups()
+            if(text.startsWith("3\n")) {
+                assertThrows(MigrationPublication.RecoveryRequired::class.java) {f.journal.keepCurrent()};f.backups()
+                marker.writeText("1") // Test cleanup only: production never downgrades a typed record.
+            }
             f.journal.keepCurrent()
         }
     }
