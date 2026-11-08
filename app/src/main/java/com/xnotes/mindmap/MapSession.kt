@@ -142,6 +142,13 @@ class MapSession : ViewModel() {
         val doc = document ?: return false
         return try { commit(block(doc)) } catch (_: IllegalArgumentException) { limitError = true; false }
     }
+    /** Dialog drafts may outlive other edits; only the latest owner document is merged. */
+    internal fun changeRelation(initial:MapRelation?,proposed:MapRelation?):RelationEditResult {
+        if(closing || inkContact) return RelationEditResult.Conflict
+        val doc=document ?: return RelationEditResult.Conflict
+        val result=doc.changeRelation(initial,proposed)
+        return if(result is RelationEditResult.Applied && !commit(result.document)) RelationEditResult.Invalid else result
+    }
     fun undo() { if (!closing && !inkContact) history?.let { it.undo(); if (it.document != document) publish(it) } }
     fun redo() { if (!closing && !inkContact) history?.let { it.redo(); if (it.document != document) publish(it) } }
     private fun publish(h: MapHistory) {

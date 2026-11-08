@@ -5,9 +5,9 @@
     <string name="graph_relations">普通关系线</string>
     <string name="graph_connect">从选中节点连线</string>
     <string name="graph_related">关联（无方向）</string>
-    <string name="graph_referenced">起点引用自终点</string>
-    <string name="graph_belongs">起点属于终点</string>
-    <string name="graph_depends">起点依赖于终点</string>
+    <string name="graph_referenced">引用自</string>
+    <string name="graph_belongs">属于</string>
+    <string name="graph_depends">依赖于</string>
     <string name="graph_reverse">交换端点</string>
     <string name="graph_description">关系说明</string>
     <string name="graph_invalid">关系重复或无效，已有数据保持不变。</string>
@@ -39,4 +39,18 @@
     <string name="ink_properties">节点属性</string>
     <string name="ink_live_hint">每笔直接保存到图中。返回恢复原图视图，两处共用撤销历史。</string>
     <string name="ink_properties_hint">在此编辑名称或绘图区大小。可在节点内直接书写，或使用放大编辑。调整绘图区不会缩放笔迹。</string>
+    <string name="graph_missing_node">节点已删除</string>
+    <string name="graph_numbered_node">%1$d. %2$s</string>
+    <string name="graph_sentence_related">%1$s 与 %2$s 关联（无方向）</string>
+    <string name="graph_sentence_referenced">%1$s 引用自 %2$s</string>
+    <string name="graph_sentence_belongs">%1$s 属于 %2$s</string>
+    <string name="graph_sentence_depends">%1$s 依赖于 %2$s</string>
+    <string name="graph_relation_changed">关系或端点已变化。请返回列表重新打开；草稿未应用。</string>
+    <string name="graph_relation_duplicate">相同关系已存在，已打开下方这条连线。两条已有连线均未修改。</string>
+    <string name="graph_choose_from">选择起点节点</string>
+    <string name="graph_choose_to">选择终点节点</string>
+    <string name="graph_endpoint_from">起点：%1$s</string>
+    <string name="graph_endpoint_to">终点：%1$s</string>
+    <string name="graph_relation_list">返回关系列表</string>
+    <string name="graph_back">返回</string>
 </resources>

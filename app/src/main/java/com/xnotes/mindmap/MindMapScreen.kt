@@ -241,7 +241,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         proposed?.let { preview -> AlertDialog(onDismissRequest={proposed=null},title={Text(stringResource(R.string.graph_preview),fontSize=TextSize.heading)},
             text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
             confirmButton={MapButton(R.string.map_done){session.commit(preview);proposed=null}},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
-        if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::commit){graphTools=false} }
+        if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::changeRelation){graphTools=false} }
         sourcesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id==id }?.let { n ->
             GraphSourcesDialog(n, { edited -> session.operate { it.update(id) { edited } } }, { pendingSourceNode=id;sourcePicker.launch(arrayOf("application/octet-stream","application/zip")) }) { sourcesFor=null }
         } }

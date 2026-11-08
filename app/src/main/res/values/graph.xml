@@ -5,9 +5,9 @@
     <string name="graph_relations">Relations</string>
     <string name="graph_connect">Connect selected node</string>
     <string name="graph_related">Related (undirected)</string>
-    <string name="graph_referenced">Source → target: referenced from</string>
-    <string name="graph_belongs">Source → target: belongs to</string>
-    <string name="graph_depends">Source → target: depends on</string>
+    <string name="graph_referenced">References</string>
+    <string name="graph_belongs">Belongs to</string>
+    <string name="graph_depends">Depends on</string>
     <string name="graph_reverse">Swap endpoints</string>
     <string name="graph_description">Relationship description</string>
     <string name="graph_invalid">Duplicate or invalid relationship; existing data kept.</string>
@@ -39,4 +39,18 @@
     <string name="ink_properties">Node properties</string>
     <string name="ink_live_hint">Each stroke is saved to the graph. Back restores the graph view; undo works across both views.</string>
     <string name="ink_properties_hint">Edit the name or paper size here. Write directly in the node or use Enlarge edit. Resizing paper does not scale ink.</string>
+    <string name="graph_missing_node">Node removed</string>
+    <string name="graph_numbered_node">%1$d. %2$s</string>
+    <string name="graph_sentence_related">%1$s is related to %2$s (undirected)</string>
+    <string name="graph_sentence_referenced">%1$s references %2$s</string>
+    <string name="graph_sentence_belongs">%1$s belongs to %2$s</string>
+    <string name="graph_sentence_depends">%1$s depends on %2$s</string>
+    <string name="graph_relation_changed">The relationship or an endpoint changed. Return to the list and reopen it; the draft was not applied.</string>
+    <string name="graph_relation_duplicate">This relationship already exists. It is now open below. Neither existing line was changed.</string>
+    <string name="graph_choose_from">Choose start node</string>
+    <string name="graph_choose_to">Choose end node</string>
+    <string name="graph_endpoint_from">Start: %1$s</string>
+    <string name="graph_endpoint_to">End: %1$s</string>
+    <string name="graph_relation_list">Return to relationship list</string>
+    <string name="graph_back">Back</string>
 </resources>

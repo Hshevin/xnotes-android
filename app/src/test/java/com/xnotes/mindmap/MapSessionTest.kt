@@ -76,5 +76,36 @@ class MapSessionTest {
         assertEquals(node.x,edited.x,0.0);assertEquals(node.y,edited.y,0.0)
         s.undo();assertEquals("",s.document!!.root.text);assertEquals(listOf(source),s.document!!.root.sources)
     }
+    @Test fun relationConfirmationUsesTheLatestGraphAndIsOnePersistedUndoStep() {
+        val context=RuntimeEnvironment.getApplication()
+        val initial=MapRelation(id="e",from="a",to="b")
+        val original=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null),MapNode(id="b",parent="a"),MapNode(id="c",parent="a")),relations=listOf(initial))
+        val file=File.createTempFile("relation-session-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(original))}
+        val s=MapSession();s.open(context,Uri.fromFile(file));await {!s.loading}
+        val source=MapSource(documentId="00000000-0000-0000-0000-000000000001")
+        s.operate {it.update("b") {n->n.copy(text="later",sources=listOf(source))}}
+        val before=s.document
+        val proposed=initial.copy(from="c",to="a",kind=RelationKind.BELONGS_TO,label="one operation")
+        assertTrue(s.changeRelation(initial,proposed) is RelationEditResult.Applied)
+        assertEquals(before!!.nodes,s.document!!.nodes);assertEquals(proposed,s.document!!.relations.single())
+        s.undo();assertEquals(before,s.document);s.redo();val saved=s.document
+        assertEquals(RelationEditResult.Conflict,s.changeRelation(initial,initial.copy(label="stale")))
+        assertEquals(saved,s.document)
+        s.save();await {!s.saving};assertEquals(saved,MapCodec.decode(file.readBytes()))
+    }
+    @Test fun duplicateOrUndirectedSwapDoesNotAddHistoryAndPenContactRejectsConfirmation() {
+        val context=RuntimeEnvironment.getApplication()
+        val initial=MapRelation(id="e",from="a",to="b",label="existing")
+        val original=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null),MapNode(id="b",parent="a")),relations=listOf(initial))
+        val file=File.createTempFile("relation-duplicate-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(original))}
+        val s=MapSession();s.open(context,Uri.fromFile(file));await {!s.loading}
+        assertEquals(RelationEditResult.Duplicate(initial),s.changeRelation(null,initial.copy(id="new",from="b",to="a",label="discard")))
+        assertTrue(s.changeRelation(initial,initial.copy(from="b",to="a")) is RelationEditResult.Applied)
+        assertFalse(s.canUndo);assertEquals(original,s.document)
+        s.inkContact=true
+        assertEquals(RelationEditResult.Conflict,s.changeRelation(initial,initial.copy(label="while writing")))
+        assertEquals(RelationEditResult.Conflict,s.changeRelation(initial,null))
+        s.inkContact=false;assertFalse(s.canUndo);assertEquals(original,s.document)
+    }
 
 }

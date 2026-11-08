@@ -52,3 +52,30 @@ fun MindMapDocument.connect(from: String, to: String, kind: RelationKind): Pair<
     relations.firstOrNull { it.duplicateKey()==edge.duplicateKey() }?.let { return this to it.id }
     return copy(relations=relations+edge).also { it.validate() } to edge.id
 }
+
+/** Result of a single ordinary-edge transaction against the latest graph. */
+internal sealed interface RelationEditResult {
+    data class Applied(val document:MindMapDocument):RelationEditResult
+    data class Duplicate(val relation:MapRelation):RelationEditResult
+    data object Conflict:RelationEditResult
+    data object Invalid:RelationEditResult
+}
+
+/** Null initial creates; null proposed deletes. An existing edge keeps its stable ID. */
+internal fun MindMapDocument.changeRelation(initial:MapRelation?,proposed:MapRelation?):RelationEditResult {
+    if(initial!=null && relations.firstOrNull {it.id==initial.id}!=initial) return RelationEditResult.Conflict
+    if(proposed==null) return if(initial==null) RelationEditResult.Invalid
+        else RelationEditResult.Applied(copy(relations=relations.filterNot {it.id==initial.id}))
+    if(initial!=null && initial.id!=proposed.id || initial==null && relations.any {it.id==proposed.id}) return RelationEditResult.Invalid
+    if(proposed.id.isBlank() || proposed.id.length>128 || proposed.label.length>20_000 || proposed.from==proposed.to ||
+        nodes.none {it.id==proposed.from} || nodes.none {it.id==proposed.to}) return RelationEditResult.Invalid
+    relations.firstOrNull {it.id!=initial?.id && it.duplicateKey()==proposed.duplicateKey()}?.let {
+        return RelationEditResult.Duplicate(it)
+    }
+    // Swapping the representation of the same undirected edge is not a content edit.
+    val normalized=if(initial!=null && !initial.directed && !proposed.directed && initial.duplicateKey()==proposed.duplicateKey())
+        proposed.copy(from=initial.from,to=initial.to) else proposed
+    val next=if(initial==null) copy(relations=relations+normalized)
+        else copy(relations=relations.map {if(it.id==initial.id) normalized else it})
+    return try {next.validate();RelationEditResult.Applied(next)} catch(_:IllegalArgumentException) {RelationEditResult.Invalid}
+}
