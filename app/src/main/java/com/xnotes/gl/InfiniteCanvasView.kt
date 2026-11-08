@@ -92,6 +92,7 @@ class InfiniteCanvasView private constructor(
             it.afterLayout = afterLayout
             it.onContextReady = onContextReady
             it.onInputLost = onInputLost
+            it.onFirstFrame = onFirstFrame
             it.onFourFingerTap = onFourFingerTap
             it.onTwoFingerTap = onTwoFingerTap
             it.onThreeFingerTap = onThreeFingerTap
@@ -110,8 +111,35 @@ class InfiniteCanvasView private constructor(
     var paperColor: Rgba = Rgba(255, 255, 255, 255)
         set(value) {
             field = value
+            if (coverGeneration != 0) setBackgroundColor(value.toArgb())
             publish()
         }
+
+    /**
+     * Non-zero while a paper-coloured cover hides a surface that has no frame on it yet.
+     *
+     * A SurfaceView is a hole in the window, and until the GL thread has made its context, compiled
+     * its shaders and swapped a first frame, that hole shows black: on opening a canvas, for about
+     * 80 ms on an emulator. The view's own background is drawn in the window, above the hole, so a
+     * paper-coloured one covers it until the first real frame has been handed to the compositor.
+     */
+    private var coverGeneration = 0
+
+    /** Main thread, once a new surface's first frame has been swapped and its cover removed. */
+    var onFirstFrame: (() -> Unit)? = null
+
+    private fun coverUntilFirstFrame() {
+        val generation = ++coverGeneration
+        setBackgroundColor(paperColor.toArgb())
+        publishThen {
+            post {
+                if (generation != coverGeneration) return@post
+                coverGeneration = 0
+                setBackground(null)
+                onFirstFrame?.invoke()
+            }
+        }
+    }
 
     var darkAppearance: Boolean = false
         set(value) { field = value; publish() }
@@ -320,6 +348,8 @@ class InfiniteCanvasView private constructor(
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         renderDiagnostics.surfaceCreated()
+        // Every new surface starts empty: on opening, after a host change, on return from the background.
+        coverUntilFirstFrame()
         super.surfaceCreated(holder)
     }
 

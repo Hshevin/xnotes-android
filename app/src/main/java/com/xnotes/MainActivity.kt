@@ -91,6 +91,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -1330,7 +1331,21 @@ private fun EditorScreen(
                     insertPdfLauncher.launch(arrayOf("application/pdf"))
                 },
             )
-            if (!mainMenu) SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null }) { pane ->
+            // A canvas being opened stays hidden until its first GL frame is on screen, so the menu
+            // underneath stays in view rather than an empty surface flashing black. Only while that
+            // menu is actually composed below; otherwise the canvas's own paper cover takes over.
+            val canvasOpening = paneHomes.isEmpty() &&
+                editor.openPanes.any { it.canvasOpen && it.infinite.opening }
+            if (!mainMenu) Box(
+                Modifier.fillMaxSize()
+                    .graphicsLayer(alpha = if (canvasOpening) 0f else 1f)
+                    .then(if (canvasOpening) Modifier.pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                .changes.forEach { it.consume() }
+                        }
+                    } else Modifier),
+            ) { SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null }) { pane ->
                 BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(com.xnotes.ui.theme.LocalPalette.current.bg.toComposeColor())) {
                     val configuration = android.content.res.Configuration(LocalConfiguration.current).apply {
                         screenWidthDp = maxWidth.value.toInt()
@@ -1354,7 +1369,7 @@ private fun EditorScreen(
                         }
                     }
                 }
-            }
+            } }
 
         }
     }
