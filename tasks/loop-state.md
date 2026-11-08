@@ -1,12 +1,12 @@
 # 自主推进恢复点：已恢复
 
 目标：思维导图与文件关系网络，overall complete=false。2026-11-08 用户明确恢复，先检查新渲染架构继续开发；历史 goal 工具可能仍显示 paused，以本次用户明确恢复为准。
-工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。最近代码提交=c8f2d925，工作树代码已全部本地提交。
+工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，codex/mind-map。最近代码提交=b6e41ba0；本轮已提交7fd75b83（原子新建关联）、686c8f4b（空白草稿与来源事务保护）、b6e41ba0（只读有序页目录）。
 授权：源码、验证、文档和本地提交；用户明确授权同步 master54f05b0f（含主线已有更新）。不打包、安装、推送或发布，不合入其他开发分支。
-当前阶段：已完成受控native4发布、accepted-ID完成、cold actualB恢复认领、导图隐藏节点计数、节点边缘拖动连线入口；本轮五个代码阶段均独立复核并提交。最新tmp/map-port-connect-full.log完整304套件3379项全过，Android测试源码编译成功；实际仪器/目标设备未运行。无运行作业，overall complete=false。
+当前阶段：A2空白落点新建文本/手绘框/引用并连线已接真实界面；来源选择/IO/字段编辑的代次、连续回调和正文保留已修。只读有序页目录及checked PDF hash取消已实现。两阶段完整回归分别306套件3400项与307套件3409项全过，Android测试源码编译与独立复核通过；实际仪器/目标设备未运行。无运行作业，overall complete=false。
 新接口/后续顺序：docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。R1先撤除逐对象身份/画布锚点，仅页面UUID；B2c取消。整包副本页面UUID也需更新。R2安全激活/SAF；R3页面多来源闭环；R4跳转/反向引用/恢复/双窗格；R5文件网络及A2剩余交互。
 历史证据：审查修复068e1c2c全量2828项通过、Android仪器源码编译，实际未运行；5314a887 Header/Snapshot12项通过，writer接入未完成。旧文档中的对象身份计划已由页面级决定替代，不沿用为当前产品语义。
-待执行：A2空白落点新建文本/手绘/引用节点并连线（完整draft/取消零数据/一次undo），随后线命中/多选/无中心；来源主线仍需pending4受控完成、活动内容稳定屏障和统一生产native/cache writer、live owner转交、新建另存copy交接与页激活，再页面多来源/预览、跳转返回/backlinks和文件网络。保存后放弃仍保留已写版本，不自动回滚。
+待执行：按source-loop-production-gaps-2026-11-08.md继续生产owner稳定事务屏障/native+working会话统一，补cold pending4受控完成、live转交、旧/unbound无写权恢复及new/copy持久交接，然后原字节页身份激活→页面多来源/预览→跳转返回/backlinks→局部/全库文件网络。只读catalog仅基础API，不宣称页面来源UI已可用。A2线命中/多选/无中心仍保留。保存后放弃继续保留已写版本，不自动回滚；不打包APK。
 
 R2b2a模型scope/确定性新页ID/冻结投影/采用已实现，计划已独立审核；tmp/page-copy-scope-full.log 289套件3106项全通过、Android源码编译成功，代码独立复核通过，已提交bb40c14c。详细规格reference-copy-scope-2026-11-08.md。实际检查发现SessionStore正文/sidecar无绑定和代次，CanvasSession仍同步写活模型，需R2b2b处理；不要先把新scope半接到旧Save-As输出流。Document.deepCopy目前保留doc身份，泛用语义不轻改。
 
@@ -71,3 +71,5 @@ R2轻量source observation/按需正文已实现/独立复核通过：tmp/native
 2026-11-08 本轮A2空白落点新建并连接已实现/独立复核通过，初版与最终完整tmp/map-connected-node-reviewed-full.log为306套件3400项全过、Android源码编译；真实Host仅编译。newfree+RELATED一次commit/undo，中心锚点、Session全body草稿及disposed回调保护；引用选择id/epoch/attempt从launch绑定，close/reload/clear取消。复核发现reload在途新draft、图外UP、普通source迟到与来源UI连调问题均修，SourceListEditor同步续接自成功值、外部变更拒旧列表，正文/笔迹保留。最后加old sync断言后final-focus定向15项及Android编译通过，无运行作业，准备本地提交；整体complete=false，不打APK。只读页面闭环核查source-loop-production-gaps-2026-11-08.md已记录依赖；下一片只读有序页目录计划独立审核中，不激活页ID/旧Editor生产。
 
 A2新建关联原子模型7fd75b83、空白草稿与来源保护686c8f4b已提交。随后只读有序页目录已实现/双独立复核通过，tmp/reference-catalog-full.log完整307套件3409项全过及Android源码编译；8目录+1copy新JVM方法，2新增真实provider/PDF取消场景仅编译。Plan仅有ordered IDs真相，BundleInfo保集合兼容，Catalog纯数据不泄NativeSourceVersion/File/model/lease；checkedResolve保持GC gate且hash可取消。文档reference-page-catalog-2026-11-08.md，准备本地提交，无运行作业，不打APK。整体complete=false，生产统一/显式页激活/来源状态预览/往返backlinks/网络及A2其余交互继续。
+
+本轮全部阶段已本地提交，最后代码b6e41ba0；最新完整证据tmp/reference-catalog-full.log为307/3409，0失败/错误/跳过。后续直接沿上列依赖续作，无需重新授权常规编码/测试/本地提交。
