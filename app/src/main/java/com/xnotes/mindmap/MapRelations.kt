@@ -53,6 +53,20 @@ fun MindMapDocument.connect(from: String, to: String, kind: RelationKind): Pair<
     return copy(relations=relations+edge).also { it.validate() } to edge.id
 }
 
+internal sealed interface ConnectedNodeResult {
+    data class Applied(val document:MindMapDocument):ConnectedNodeResult
+    data object Conflict:ConnectedNodeResult
+    data object Invalid:ConnectedNodeResult
+}
+
+/** Both additions are validated before either enters history. Existing nodes keep their positions. */
+internal fun MindMapDocument.connectNewNode(from:String,node:MapNode):ConnectedNodeResult {
+    if(nodes.none {it.id==from}) return ConnectedNodeResult.Conflict
+    if(node.parent!=null || !node.free || nodes.any {it.id==node.id}) return ConnectedNodeResult.Invalid
+    val next=copy(nodes=nodes+node,relations=relations+MapRelation(from=from,to=node.id))
+    return try {next.validate();ConnectedNodeResult.Applied(next)} catch(_:IllegalArgumentException) {ConnectedNodeResult.Invalid}
+}
+
 /** Result of a single ordinary-edge transaction against the latest graph. */
 internal sealed interface RelationEditResult {
     data class Applied(val document:MindMapDocument):RelationEditResult
