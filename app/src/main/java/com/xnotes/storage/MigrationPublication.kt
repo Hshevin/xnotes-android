@@ -112,7 +112,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
     fun keepCurrent(validate:(File?,File?)->Unit={_,_->},afterVerified:()->Unit={}) =
         keepCurrentValidated(validate={requireLegacy(it.purpose);validate(it.original,it.candidate)},afterVerified=afterVerified)
 
-    internal fun keepCurrentValidated(validate:(KeepValidation)->Unit,afterVerified:()->Unit={}) {
+    internal fun keepCurrentValidated(validate:(KeepValidation)->Unit,afterVerified:()->Unit={},beforeClear:()->Unit={}) {
         // Explicit keep can discard a malformed historical record, after the caller validates current.
         val raw=readMarker(forKeep=true)
         val record=try {parseRecord(raw)} catch(error:RecoveryRequired) {if(raw.typed) throw error else null}
@@ -125,6 +125,11 @@ class MigrationPublication internal constructor(private val directory:File,priva
         validateCurrent();kept=unchanged(kept,Inspection.KEEP_CURRENT)
         register(afterVerified)
         validateCurrent();unchanged(kept,Inspection.KEEP_CURRENT)
+        // The final target read must follow large retained-body hashes. Recheck only the small
+        // typed marker afterwards; an unknown replacement cannot be cleared by this operation.
+        beforeClear()
+        val finalMarker=readMarker(forKeep=!raw.typed)
+        if(finalMarker.digest!=kept.marker.digest) throw failure(StorageMsg.MIGRATION_RECOVERY_INVALID)
         clear()
     }
 

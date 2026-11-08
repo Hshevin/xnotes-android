@@ -404,3 +404,5 @@
 - [x] A2普通线列表端点/方向语义与草稿确认、重复定位、latest合并/冲突、无向no-op与一步undo：3257全量、最后12项定向、Android源码编译/独立复核通过，3Host场景未实际运行。
 
 - [x] A2画布点击已有节点连线→草稿确认、临时预览/目标反馈与pen/palm/drain/quick-scale保护；3267全量+最终32项定向/Android源码编译/独立复核。两个新增Host场景仅编译未运行。
+
+- [x] R2严格keepWrittenSave：typed候选/真实target版本、事务内登记核对、最后target/marker guard、PDF实际SHA/取消，3284全量/Android源码编译/独立复核；未接生产放弃/会话。

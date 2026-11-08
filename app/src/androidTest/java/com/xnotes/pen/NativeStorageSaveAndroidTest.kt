@@ -5,6 +5,7 @@ import android.provider.DocumentsContract
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.AnchorMetadata
 import com.xnotes.format.BundleIdentity
+import com.xnotes.format.BundleMigration
 import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.storage.MigrationPublication
 import com.xnotes.storage.NotebookStorage
@@ -17,6 +18,27 @@ import org.junit.Test
 
 /** Real owned provider/PFD/SQLite boundary. Compile-only until explicitly run on Android. */
 class NativeStorageSaveAndroidTest {
+    @Test fun keepingAnAlreadyWrittenCandidateDoesNotRestoreTheOldProviderBytes() {
+        val base=PenTestRunner.instance.targetContext;val key="keep-written-${UUID.randomUUID()}"
+        val folder=File(AppStorageDocumentsProvider.rootDir(base),key).apply {mkdir()}
+        val privateRoot=File(base.cacheDir,key).apply {mkdir()}
+        val context=object:ContextWrapper(base) {override fun getNoBackupFilesDir()=privateRoot}
+        val storage=NotebookStorage(context)
+        try {
+            val id=UUID.randomUUID().toString();val page=UUID.randomUUID().toString()
+            val current=File(folder,"source.xnote");val next=File(privateRoot,"candidate.xnote")
+            bundle(current,id,page,"A");bundle(next,id,page,"written B");val original=current.readBytes()
+            val uri=DocumentsContract.buildDocumentUri(base.packageName+".documents","root/$key/source.xnote").toString()
+            storage.registry.writableDatabase.execSQL("CREATE TRIGGER fail_keep_index BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'index failure'); END")
+            try {storage.publishNote(uri,next,DocumentKind.NOTE,"source");fail("must retain recovery")}
+            catch(_:MigrationPublication.RecoveryRequired) {}
+            assertFalse(original.contentEquals(current.readBytes()));assertArrayEquals(next.readBytes(),current.readBytes());assertTrue(storage.hasRecovery(uri))
+            storage.registry.writableDatabase.execSQL("DROP TRIGGER fail_keep_index")
+            val result=storage.keepWrittenSave(uri,DocumentKind.NOTE)
+            assertEquals(BundleMigration.hash(current),result.sha256);assertEquals(id,result.documentId)
+            assertFalse(storage.hasRecovery(uri));assertArrayEquals(next.readBytes(),current.readBytes());assertTrue(storage.registry.expectationForId(id).requiresPages)
+        } finally {storage.registry.close();folder.deleteRecursively();privateRoot.deleteRecursively()}
+    }
     @Test fun ownedSaveAndRegistryFailureRetryKeepPageContractWithoutLosingRecovery() {
         val base=PenTestRunner.instance.targetContext
         val key="native-save-test-${UUID.randomUUID()}"

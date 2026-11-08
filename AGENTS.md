@@ -97,6 +97,7 @@
 ## 存储、PDF 与迁移
 
 - 笔记完全本地离线保存，无账号、同步或应用后端。修改须持久化；涉及存储、导入、删除、迁移的变更，验证恢复路径与失败行为。
+- 严格保留已写版本须有有效typed SAVE、实际目标=候选摘要及完整原生契约；事务登记重查URI/kind/页契约，最后大包hash后重读target、再有界核marker后清日志。返回实际读版本不冒充请求发布receipt；external PDF实际SHA在lease内核对。生产producer接线仍待完成，见 `docs/movinkpad/reference-keep-written-save-2026-11-08.md`。
 - 保存已写入文件而后续步骤失败时，之后选择“放弃修改”保留已写入版本、只放弃之后的新修改，不回滚原文件。未核实的部分写入保留pending资料，不冒充完整版本；见 `docs/movinkpad/reference-discard-written-2026-11-08.md`。
 - 原 PDF 与只读导入原件保持不变；批注与可清理显示缓存分开。大型扫描 PDF 与工具光标方案仅在 `tasks/plan.md`、`tasks/todo.md` 规划，未完成。
 - 导入与格式升级时保留旧笔迹及原 PDF 负载的原始字节；这不构成修改普通笔画简化的授权。迁移须先暂存并校验再发布，不得借模型重新编码来升级元数据或迁移笔迹。

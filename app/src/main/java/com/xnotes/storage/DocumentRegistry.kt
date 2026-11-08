@@ -66,6 +66,15 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         verifyCreation(db,id,kind,uri,true,pageReferences)
         register(db,id,kind,name,uri,pageReferences)
     }
+    /** Existing native recovery cannot reassign a location changed during PDF protection/IO. */
+    internal fun registerObserved(header:com.xnotes.format.BundleHeader,kind:String,name:String,uri:String) = transaction {db->
+        val id=header.identity?.documentId ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISSING)
+        if(kind !in setOf("xnote","xcanvas")) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        if(known!=null && known!=kind) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        ReferenceContract.verifyObserved(expectationAt(uri),expectationForId(id),header)
+        register(db,id,kind,name,uri,header.anchors!=null)
+    }
     /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
     fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(
         "SELECT l.document_id,p.document_id IS NOT NULL FROM locations l LEFT JOIN page_reference_contracts p ON p.document_id=l.document_id WHERE l.location_key=?",

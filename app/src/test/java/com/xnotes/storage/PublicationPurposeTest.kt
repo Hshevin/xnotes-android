@@ -10,6 +10,42 @@ class PublicationPurposeTest {
         val root=Files.createTempDirectory("publication-purpose-").toFile()
         try {block(root)} finally {root.deleteRecursively()}
     }
+    @Test fun aTargetChangedDuringPostRegistrationRetainedHashingCannotLoseItsRecovery()=scenario {root->
+        val current=File(root,"current").apply {writeText("A")};val next=File(root,"next").apply {writeText("B")}
+        val dir=File(root,"journal");var registered=false;var changed=false
+        val journal=MigrationPublication(dir,{file->
+            val hash=com.xnotes.format.BundleMigration.hash(file)
+            if(registered && !changed && file.name=="candidate.zip") {current.writeText("C");changed=true}
+            hash
+        })
+        journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE);next.copyTo(current,overwrite=true)
+        val expected=com.xnotes.format.BundleMigration.hash(current)
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {journal.keepCurrentValidated(
+            validate={assertEquals("B",current.readText())},afterVerified={registered=true},beforeClear={
+                if(com.xnotes.format.BundleMigration.hash(current)!=expected)
+                    throw MigrationPublication.RecoveryRequired("changed",reason=StorageMsg.MIGRATION_INTERRUPTED)
+            })}
+        assertTrue(registered);assertTrue(changed);assertTrue(journal.pending);assertEquals("C",current.readText())
+        assertEquals("A",File(dir,"original.zip").readText());assertEquals("B",File(dir,"candidate.zip").readText())
+    }
+    @Test fun aMarkerChangedDuringTheFinalTargetCheckIsRetainedWithABoundedTypedRead()=scenario {root->
+        for(large in listOf(false,true)) {
+            val current=File(root,"current-$large").apply {writeText("A")};val next=File(root,"next-$large").apply {writeText("B")}
+            val dir=File(root,"journal-$large");var readBytes=0
+            val journal=MigrationPublication(dir,{com.xnotes.format.BundleMigration.hash(it)},{file->
+                object:java.io.FilterInputStream(file.inputStream()) {
+                    override fun read(bytes:ByteArray,offset:Int,length:Int):Int=`in`.read(bytes,offset,length).also {if(it>0)readBytes+=it}
+                }
+            })
+            journal.stage(current,next,MigrationPublication.Purpose.SAVE_NOTE)
+            val marker=File(dir,"pending");val changed=if(large) "9".repeat(1024*1024) else marker.readText().replace("save-note","save-canvas")
+            assertThrows(MigrationPublication.RecoveryRequired::class.java) {journal.keepCurrentValidated(validate={},beforeClear={
+                marker.writeText(changed);readBytes=0
+            })}
+            assertTrue(readBytes<=257);assertTrue(journal.pending);assertEquals(changed,marker.readText())
+            assertEquals("A",File(dir,"original.zip").readText());assertEquals("B",File(dir,"candidate.zip").readText())
+        }
+    }
     @Test fun durablePurposeIsPassedFromTheSameVerifiedRecordToThePreflight() = scenario {root->
         val current=File(root,"current").apply {writeText("old")};val next=File(root,"next").apply {writeText("new")}
         val directory=File(root,"journal");var writes=0;var expected:String?=null
