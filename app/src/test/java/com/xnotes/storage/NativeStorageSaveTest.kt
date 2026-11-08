@@ -271,4 +271,15 @@ class NativeStorageSaveTest {
             assertNull(other.storage.registry.resource(pdf));assertNotEquals(f.storage.pdfResources.directory,other.storage.pdfResources.directory)
         } finally {other.storage.registry.close()}
     }
+    @Test fun anOpenCannotResumeAPendingSaveThatAppearedAfterAnEarlierPreflight() = scenario {f->
+        bundle(f.current,pages=true);val old=f.current.readBytes()
+        val next=bundle(File(f.root,"next"),pages=true,body="pending edit")
+        assertFalse(f.storage.hasRecovery(f.uri))
+        val key=f.storage.registry.locationKey(f.uri)
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") {"%02x".format(it)}
+        MigrationPublication(File(f.context.noBackupFilesDir,"migrations/$hash")).stage(f.current,next,MigrationPublication.Purpose.SAVE_NOTE)
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {f.storage.ensureForOpen(f.alias,"source","xnote")}
+        assertEquals(0,f.writes);assertArrayEquals(old,f.current.readBytes());assertTrue(f.storage.hasRecovery(f.uri))
+    }
+
 }

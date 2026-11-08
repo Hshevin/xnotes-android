@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_open_changed">打开期间文档发生了变化，已保留当前工作区。请重新打开。</string>
+    <string name="native_save_picker_busy">请先完成或取消当前的另存文件选择。</string>
+</resources>

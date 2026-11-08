@@ -367,7 +367,6 @@ private fun EditorScreen(
     var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.HOME) }
     var showShareChooser by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<GuardRequest?>(null) }
-    var pendingAfterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
     // The pane an image was picked for, and where a long-press menu asked it to land. Held together
     // so the picker's result lands in the pane that opened it, whatever the focus does meanwhile.
     var pendingInsert by remember { mutableStateOf<PendingInsert?>(null) }
@@ -439,17 +438,26 @@ private fun EditorScreen(
     val resolver = context.contentResolver
     val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
-    // Which pane a "Save as" writes: the focused one at the moment the picker opened.
-    var savePane by remember { mutableStateOf(editor) }
+    // Bind a picker result before opening its output stream; a late picker must never write a new model.
+    var saveRequest by remember { mutableStateOf<SavePickerRequest?>(null) }
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
-        uri?.let {
-            runCatching { resolver.takePersistableUriPermission(it, rwFlags) }
-            val name = displayNameOf(resolver, it)
-            runCatching { resolver.openOutputStream(it, "wt")?.use { o -> savePane.save(o, it.toString(), name) } }
-                .onSuccess { val p = pendingAfterSave; pendingAfterSave = null; p?.invoke() }
-                .onFailure { editor.message = context.getString(R.string.err_save_note); pendingAfterSave = null }
+        val picked=saveRequest;saveRequest=null
+        val request=picked?.proof
+        val continuation=picked?.afterSave
+        if(uri!=null) {
+            if(request?.applies()!=true) editor.message=context.getString(R.string.native_open_changed)
+            else {
+                runCatching {resolver.takePersistableUriPermission(uri,rwFlags)}
+                val name=displayNameOf(resolver,uri)
+                runCatching {resolver.openOutputStream(uri,"wt")?.use {request.owner.save(it,uri.toString(),name)}}
+                    .onSuccess {
+                        if(request.afterSaveApplies()) continuation?.invoke()
+                        else editor.message=context.getString(R.string.err_save_note)
+                    }
+                    .onFailure {editor.message=context.getString(R.string.err_save_note)}
+            }
         }
     }
 
@@ -689,9 +697,13 @@ private fun EditorScreen(
     }
 
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
-    fun launchSaveAs(target: Editor) {
-        savePane = target.documentOwner
-        createLauncher.launch("${target.title}.xnote")
+    fun launchSaveAs(target:Editor,afterSave:(()->Unit)?=null) {
+        if(saveRequest!=null) {editor.message=context.getString(R.string.native_save_picker_busy);return}
+        if(target.canvasOpen) {editor.message=context.getString(R.string.err_save_note);return}
+        val request=SavePickerRequest(target.documentOwner.discardForOpen(),afterSave)
+        saveRequest=request
+        try {createLauncher.launch("${target.title}.xnote")}
+        catch(_:Exception) {if(saveRequest===request) saveRequest=null;editor.message=context.getString(R.string.err_save_note)}
     }
 
     fun saveOrPrompt() {
@@ -703,7 +715,7 @@ private fun EditorScreen(
     }
 
     // The prompt is about one pane's note, so it asks about — and saves — the pane being acted on.
-    fun guarded(target: Editor = editor.active, onDiscard: () -> Unit = {}, action: () -> Unit) {
+    fun guarded(target: Editor = editor.active, onDiscard: (Editor.OpenDiscard) -> Unit = {}, action: () -> Unit) {
         if (!target.noteOpen) { action(); return }
         if (!target.canvasOpen) { target.commitText(); target.flowText.endSession() }
         if (target.documentOwner !== target) { guarded(target.documentOwner, onDiscard, action); return }
@@ -718,15 +730,15 @@ private fun EditorScreen(
     }
 
     /** Run [action] once every open pane has settled its unsaved changes, prompting one at a time. */
-    fun guardedAll(action: (Set<Editor>) -> Unit) {
+    fun guardedAll(action: (Set<Editor.OpenDiscard>) -> Unit) {
         editor.openPanes.filter { !it.canvasOpen }.forEach { it.commitText(); it.flowText.endSession() }
         val panes = editor.openPanes.map { it.documentOwner }.distinct()
         // This set is local to one guard sequence. Only an actual Discard button click adds an
         // editor; Save, Cancel and unprompted paths never authorize dropping any dirty document.
-        val explicitlyDiscarded = mutableSetOf<Editor>()
+        val explicitlyDiscarded = mutableSetOf<Editor.OpenDiscard>()
         fun step(i: Int) {
             if (i >= panes.size) action(explicitlyDiscarded.toSet())
-            else guarded(panes[i], onDiscard = { explicitlyDiscarded.add(panes[i]) }) { step(i + 1) }
+            else guarded(panes[i], onDiscard = { explicitlyDiscarded.add(it) }) { step(i + 1) }
         }
         step(0)
     }
@@ -875,7 +887,7 @@ private fun EditorScreen(
         }
     }
 
-    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor> = emptySet()) {
+    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor.OpenDiscard> = emptySet()) {
         scope.launch {
             val kind = com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)) ?: "")
             if (kind == com.xnotes.core.util.DocumentKind.SPLIT) {
@@ -1429,19 +1441,29 @@ private fun EditorScreen(
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     guardAction = null
+                    if(!request.discard.applies()) {editor.message=context.getString(R.string.native_open_changed);return@TextButton}
                     val uri = guarded.currentUri
                     if (uri != null) {
                         // Off-thread: what the prompt was guarding runs once the bytes have landed.
-                        guarded.saveToThen(uri) { ok -> if (ok) action() }
+                        guarded.saveToThen(uri) {ok->
+                            if(ok && request.discard.afterSaveApplies()) action()
+                            else if(ok) editor.message=context.getString(R.string.native_open_changed)
+                        }
                     } else {
-                        pendingAfterSave = action
-                        launchSaveAs(guarded)
+                        launchSaveAs(guarded) {
+                            if(request.discard.afterSaveApplies()) action()
+                            else editor.message=context.getString(R.string.native_open_changed)
+                        }
                     }
                 }) { androidx.compose.material3.Text(stringResource(R.string.save)) }
             },
             dismissButton = {
                 androidx.compose.foundation.layout.Row {
-                    androidx.compose.material3.TextButton(onClick = { guardAction = null; request.onDiscard(); action() }) {
+                    androidx.compose.material3.TextButton(onClick = {
+                        guardAction=null
+                        if(request.discard.applies()) {request.onDiscard(request.discard);action()}
+                        else editor.message=context.getString(R.string.native_open_changed)
+                    }) {
                         androidx.compose.material3.Text(stringResource(R.string.discard))
                     }
                     androidx.compose.material3.TextButton(onClick = { guardAction = null }) {
@@ -1502,7 +1524,10 @@ private fun EditorScreen(
 }
 
 /** A pending "unsaved changes" prompt: the pane it asks about, and what to run once it's settled. */
-private class GuardRequest(val editor: Editor, val action: () -> Unit, val onDiscard: () -> Unit)
+private class SavePickerRequest(val proof:Editor.OpenDiscard,val afterSave:(()->Unit)?)
+private class GuardRequest(val editor:Editor,val action:()->Unit,val onDiscard:(Editor.OpenDiscard)->Unit) {
+    val discard=editor.discardForOpen()
+}
 
 /** A picked image on its way into [editor], at [at] when a long-press chose the spot. */
 private class PendingInsert(val editor: Editor, val at: com.xnotes.core.geometry.Pt?)

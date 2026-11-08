@@ -706,9 +706,9 @@ class SplitEditorTest {
                 restored.newNote(); restored.addPageAtEnd()
                 val unsaved = restored.state.document
                 assertFalse("default must protect an unsaved note", restored.openSplitFile(splitUri))
-                assertFalse("discarding another editor is not authorization", restored.openSplitFile(splitUri, setOf(a)))
+                assertFalse("discarding another editor is not authorization", restored.openSplitFile(splitUri, setOf(a.discardForOpen())))
                 assertSame(unsaved, restored.state.document)
-                assertTrue(restored.openSplitFile(splitUri, setOf(restored)))
+                assertTrue(restored.openSplitFile(splitUri, setOf(restored.discardForOpen())))
                 assertTrue(restored.inSplit)
                 assertEquals(files[0].toString(), restored.currentUri)
                 assertEquals(files[1].toString(), restored.secondary!!.visibleDocumentUri)
@@ -729,7 +729,7 @@ class SplitEditorTest {
                     assertNull(outside.autosaveUri)
                     outside.addPageAtEnd()
                     assertTrue(outside.dirty)
-                    assertTrue(outside.openSplitFile(splitUri, setOf(outside)))
+                    assertTrue(outside.openSplitFile(splitUri, setOf(outside.discardForOpen())))
                     assertTrue("explicit Discard must not write existing files", originalBytes.contentEquals(externalNote.readBytes()))
                 } finally { outside.goHomeAll(); externalNote.delete() }
 

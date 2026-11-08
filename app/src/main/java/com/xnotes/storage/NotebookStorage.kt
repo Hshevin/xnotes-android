@@ -94,6 +94,21 @@ class NotebookStorage internal constructor(private val context:Context,
             throw error
         }
     }
+    /** IO-only; decode is paired with the same verified raw source, with a separately owned adoption lease. */
+    internal fun prepareOpen(uri:String,kind:com.xnotes.core.util.DocumentKind,noteCodec:com.xnotes.format.DocumentCodec,
+                             canvasCodec:com.xnotes.format.CanvasCodec,pdfDir:File,assetRoot:File,
+                             timing:com.xnotes.format.DocumentCodec.ReadTiming?=null,checkActive:()->Unit={}):PreparedNativeOpen {
+        var prepared:PreparedNativeOpen?=null
+        try {
+            openSource(uri,kind,checkActive).use {source->
+                prepared=PreparedNativeOpen.read(source,pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,timing,checkActive)
+            }
+            return requireNotNull(prepared)
+        } catch(error:Throwable) {
+            try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            throw error
+        }
+    }
     private fun inspect(file:File):com.xnotes.format.BundleReferenceInfo = try {
         com.xnotes.format.BundleReferenceInfo.inspect(file,validatePayload=true)
     } catch(error:Exception) {
@@ -249,6 +264,12 @@ class NotebookStorage internal constructor(private val context:Context,
             },afterVerified={registerVerified(uri,requireNotNull(checkedCurrent))})
         }
         releaseCompletedPin(uri)
+    }
+    /** Open preparation may migrate a readable legacy source, but must not resume an unknown owner's save. */
+    internal fun ensureForOpen(uri:String,name:String,kind:String,checkActive:()->Unit={}):BundleIdentity = synchronized(lock) {
+        checkActive()
+        if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
+        ensure(uri,name,kind,checkActive)
     }
     fun ensure(uri: String, name: String, kind: String,checkActive:()->Unit={}): BundleIdentity = synchronized(lock) {
         if(journal(uri).pending) publishSave(uri,name,purpose(kind))

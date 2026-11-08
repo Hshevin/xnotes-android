@@ -467,3 +467,8 @@ R2b2b1a正文版本/画布owner快照已实现，3142项全量及独立复核通
 ### R2b2b2a 来源版本 API 已验证
 
 同源SourceSnapshot/私有版本签发、严格publishExpected/staged receipt、PDF早期Header保护与codec entry边界均已完成；21新回归，全量3163项/Android源码编译/独立复核通过。接续实际SourceBinding、会话捕获与成功receipt时序、旧cache保留及来源冲突，另存切换旧cache不得写回原件。新建/另存/fork/merge、页面引用激活、Source UI/反向索引/网络和A2均保留。
+
+
+### R2b2c0 与 R2b2b2b 已实现（2026-11-08）
+
+reference-native-creation-2026-11-08.md 的新建上下文/CREATE发布/explicit完成已提交d272728a，3191项主机测试/Android源码编译/独立复核通过。reference-verified-open-2026-11-08.md 已接真实Editor/首页打开：完整准备后settle并同步检查旧工作区，同源actualModel绑定、PDF handoff、取消/迟到回调、模型绑定Discard、picker占用；3200项主机测试全通过/Android源码编译成功/独立复核通过，平台未运行。接续生产native保存receipt与会话原子配对/旧cache保留/同源SHA恢复、Save-As持久切换与copyScope；不是页面来源/反向引用/网络已完成。

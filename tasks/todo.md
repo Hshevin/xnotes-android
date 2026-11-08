@@ -389,3 +389,8 @@
 - [x] R2b2b1a：bodyRevision与画布snapshot owner，9新增/3142项全量/Android源码编译/独立复核完成。
 
 - [x] R2b2b2a：NativeSourceVersion/openSource/publishExpected、PDF Header/decoder/lease边界；3163全量/Android源码编译/独立复核通过。
+
+
+- [x] R2b2c0 新建目标证明、候选SHA与CREATE恢复（d272728a；主机3191/Android源码编译/独立复核）。
+- [x] R2b2b2b 真实同源打开/采用与首页失败保留工作区（主机3200/Android源码编译/独立复核；8实际Editor仪器场景未执行）。
+- [ ] R2b2b3 接生产native receipt、会话事务和来源恢复；copy持久切换、R3页面来源/R4跳转反向引用/R5网络及A2仍保留。
