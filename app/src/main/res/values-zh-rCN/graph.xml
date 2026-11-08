@@ -55,4 +55,5 @@
     <string name="graph_back">返回</string>
     <string name="graph_connect_canvas">在画布连线</string>
     <string name="graph_connect_hint">点击目标节点，再确认关系。双指操作会退出连线模式并操纵视图。</string>
+    <string name="graph_hidden_nodes_count">+%1$d</string>
 </resources>

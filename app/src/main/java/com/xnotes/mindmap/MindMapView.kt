@@ -95,7 +95,9 @@ class MindMapView(context: Context) : View(context) {
         }
         inkInput.onContact={onInkContact(it);parent?.requestDisallowInterceptTouchEvent(it)}
         inkInput.onLimit={onInkLimit()}
-        painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true;isFocusableInTouchMode=true
+        painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }
+        painter.collapsedLabel={resources.getString(com.xnotes.R.string.graph_hidden_nodes_count,it)}
+        isFocusable = true;isFocusableInTouchMode=true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES;inputReady=true }
     override fun performClick(): Boolean { super.performClick(); return true }
     private val scale get() = resources.displayMetrics.density * zoom
@@ -103,7 +105,7 @@ class MindMapView(context: Context) : View(context) {
     private fun hit(x: Float, y: Float, doc: MindMapDocument = document) = doc.visible().lastOrNull { it.bounds.contains(point(x, y)) }
     fun fit() {
         if (width == 0 || height == 0 || inkInput.active || connectionPen) return
-        val b = MapPainter.bounds(document)
+        val b = painter.drawingBounds(document)
         val s = minOf(width / b.w, height / b.h).toFloat().coerceAtMost(resources.displayMetrics.density * 1.5f)
         zoom = (s / resources.displayMetrics.density).coerceIn(.05f, 4f)
         panX = width / 2f - b.centerX.toFloat() * scale

@@ -14,6 +14,8 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.platform.AndroidRenderer
 import java.util.IdentityHashMap
+import com.xnotes.ui.theme.Space
+import com.xnotes.ui.theme.TextSize
 
 /** Shared by the live view, explorer preview and PDF export. All coordinates are document-local. */
 class MapPainter {
@@ -22,6 +24,23 @@ class MapPainter {
     private val strokes = IdentityHashMap<MapInk, Stroke>()
     private val layouts = hashMapOf<Pair<String, Int>, StaticLayout>()
     var sourceLabel: (Int) -> String = { it.toString() }
+    var collapsedLabel:(Int)->String={it.toString()}
+    private val badgeText=TextPaint(Paint.ANTI_ALIAS_FLAG).apply {textSize=TextSize.label.value}
+    private fun badgeBounds(node:MapNode,label:String):Rect {
+        val width=(badgeText.measureText(label)+Space.s16.value).toDouble()
+        val height=Space.s24.value.toDouble()
+        return Rect(node.width-width/2,node.height-height/2,width,height)
+    }
+    fun drawingBounds(doc:MindMapDocument):Rect {
+        val counts=doc.hiddenNodeCounts()
+        return doc.visible().map {node->
+            val label=counts[node.id]?.let(collapsedLabel)
+            if(label==null) node.bounds else {
+                val badge=badgeBounds(node,label)
+                node.bounds.union(Rect(node.x+badge.x,node.y+badge.y,badge.w,badge.h))
+            }
+        }.reduce {a,b->a.union(b)}.outset(Space.s32.value.toDouble())
+    }
     internal var geometryBuildCount=0; private set
     /** Retain shared immutable strokes; evict only last frame's temporary ink previews. */
     fun retainInk(stable:List<MapInk>) {
@@ -36,7 +55,7 @@ class MapPainter {
         val fg = if (dark) Color.WHITE else Color.BLACK
         val visible = doc.visible()
         val byId = visible.associateBy { it.id }
-        val parents = doc.nodes.mapNotNullTo(hashSetOf()) { it.parent }
+        val hiddenCounts=doc.hiddenNodeCounts()
         paint.color = fg; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f
         connection?.let {(id,end)->byId[id]?.bounds?.center?.let {start->
             paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
@@ -98,12 +117,14 @@ class MapPainter {
                 text.color=color
                 canvas.drawText(sourceLabel(n.sources.size),16f,n.height.toFloat()-10f,text)
             }
-            if (n.collapsed && n.id in parents) {
+            hiddenCounts[n.id]?.let {count->
+                val label=collapsedLabel(count)
+                val bounds=badgeBounds(n,label)
                 paint.style = Paint.Style.FILL; paint.color = fg
-                canvas.drawCircle(n.width.toFloat(), n.height.toFloat(), 12f, paint)
-                paint.color = bg; paint.strokeWidth = 2f
-                canvas.drawLine(n.width.toFloat() - 6, n.height.toFloat(), n.width.toFloat() + 6, n.height.toFloat(), paint)
-                canvas.drawLine(n.width.toFloat(), n.height.toFloat() - 6, n.width.toFloat(), n.height.toFloat() + 6, paint)
+                canvas.drawRoundRect(bounds.left.toFloat(),bounds.top.toFloat(),bounds.right.toFloat(),bounds.bottom.toFloat(),Space.s4.value,Space.s4.value,paint)
+                badgeText.color=bg
+                val baseline=n.height.toFloat()-(badgeText.ascent()+badgeText.descent())/2
+                canvas.drawText(label,n.width.toFloat()-badgeText.measureText(label)/2,baseline,badgeText)
             }
             canvas.restore()
         }
@@ -126,7 +147,7 @@ class MapPainter {
         }
     }
     companion object {
-        fun bounds(doc: MindMapDocument): Rect = doc.visible().map { it.bounds }.reduce { a, b -> a.union(b) }.outset(32.0)
+        fun bounds(doc: MindMapDocument): Rect = MapPainter().drawingBounds(doc)
     }
 }
 

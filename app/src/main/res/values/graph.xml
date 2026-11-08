@@ -55,4 +55,5 @@
     <string name="graph_back">Back</string>
     <string name="graph_connect_canvas">Connect on canvas</string>
     <string name="graph_connect_hint">Tap a target node, then confirm the relationship. Two fingers leave this mode for view gestures.</string>
+    <string name="graph_hidden_nodes_count">+%1$d</string>
 </resources>

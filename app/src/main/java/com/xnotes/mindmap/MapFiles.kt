@@ -25,7 +25,7 @@ object MapFiles {
     }
     fun thumbnail(context: Context, uri: String, width: Int, height: Int): Bitmap {
         val doc = read(context, uri)
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { render(Canvas(it), doc, width, height) }
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { render(context,Canvas(it), doc, width, height) }
     }
     fun exportPdf(context: Context, uri: String, out: OutputStream, cancelled: () -> Boolean) {
         val doc = read(context, uri)
@@ -34,7 +34,7 @@ object MapFiles {
         // First-version PDF is a bounded, flattened reading snapshot. The editable backup is .xmap.
         val bitmap = Bitmap.createBitmap(2382, 1684, Bitmap.Config.ARGB_8888)
         try {
-            render(Canvas(bitmap), doc, bitmap.width, bitmap.height)
+            render(context,Canvas(bitmap), doc, bitmap.width, bitmap.height)
             PDDocument().use { pdf ->
                 val page = PDPage(PDRectangle(1191f, 842f))
                 pdf.addPage(page)
@@ -49,14 +49,15 @@ object MapFiles {
         } finally { bitmap.recycle() }
     }
 
-    private fun render(canvas: Canvas, doc: MindMapDocument, width: Int, height: Int) {
+    private fun render(context:Context,canvas: Canvas, doc: MindMapDocument, width: Int, height: Int) {
         canvas.drawColor(Color.WHITE)
-        val b = MapPainter.bounds(doc)
+        val painter=MapPainter().apply {collapsedLabel={context.getString(com.xnotes.R.string.graph_hidden_nodes_count,it)}}
+        val b = painter.drawingBounds(doc)
         val scale = minOf(width / b.w, height / b.h).toFloat()
         canvas.save()
         canvas.translate(width / 2f - b.centerX.toFloat() * scale, height / 2f - b.centerY.toFloat() * scale)
         canvas.scale(scale, scale)
-        MapPainter().draw(canvas, doc)
+        painter.draw(canvas, doc)
         canvas.restore()
     }
 }

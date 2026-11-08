@@ -57,6 +57,22 @@ data class MindMapDocument(
         }
         return nodes.filter { it.id in visible }
     }
+    /** Derive subtree sizes once in linear time, including nested collapsed descendants. */
+    fun hiddenNodeCounts():Map<String,Int> {
+        val remaining=nodes.groupingBy {it.parent}.eachCount().toMutableMap()
+        val sizes=nodes.associate {it.id to 1}.toMutableMap()
+        val byId=nodes.associateBy {it.id}
+        val leaves=ArrayDeque(nodes.filter {remaining[it.id]==null})
+        while(leaves.isNotEmpty()) {
+            val node=leaves.removeFirst();val parent=byId[node.parent] ?: continue
+            sizes[parent.id]=sizes.getValue(parent.id)+sizes.getValue(node.id)
+            val left=remaining.getValue(parent.id)-1;remaining[parent.id]=left
+            if(left==0) leaves.add(parent)
+        }
+        return visible().mapNotNull {node->
+            (sizes.getValue(node.id)-1).takeIf {node.collapsed && it>0}?.let {node.id to it}
+        }.toMap()
+    }
     fun add(parent: String, kind: NodeKind, text: String): Pair<MindMapDocument, String> {
         require(nodes.size < MAX_NODES)
         node(parent)

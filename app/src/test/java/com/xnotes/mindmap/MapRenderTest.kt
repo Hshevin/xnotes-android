@@ -19,6 +19,16 @@ import java.io.File
 @Config(manifest = Config.NONE, sdk = [35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MapRenderTest {
+    /** This host suite omits app resources; inject only the formatter at the Android boundary. */
+    private fun graphContext():android.content.Context {
+        val app=RuntimeEnvironment.getApplication()
+        return object:android.content.ContextWrapper(app) {
+            private val graphResources=object:android.content.res.Resources(app.resources.assets,app.resources.displayMetrics,app.resources.configuration) {
+                override fun getString(id:Int,vararg formatArgs:Any):String = if(id==com.xnotes.R.string.graph_hidden_nodes_count) "+${formatArgs.single()}" else super.getString(id,*formatArgs)
+            }
+            override fun getResources()=graphResources
+        }
+    }
     private fun example(): MindMapDocument {
         val ink = listOf(MapInk(listOf(InkPoint(24.0, 55.0, .8), InkPoint(65.0, 130.0, .8), InkPoint(110.0, 38.0, .5)), 5.0),
             MapInk(listOf(InkPoint(140.0, 85.0, .8), InkPoint(270.0, 85.0, .8)), 3.0))
@@ -33,7 +43,7 @@ class MapRenderTest {
         )))
     }
     @Test fun nativeGraphDrawsLightAndDarkAndExportsAPdfWithoutChangingTheEditableFile() {
-        val context = RuntimeEnvironment.getApplication()
+        val context = graphContext()
         val doc = example()
         val v = MindMapView(context).apply { document = doc; selected = doc.root.id; layout(0, 0, 1600, 1000); fit() }
         for (dark in listOf(false, true)) {
@@ -108,6 +118,31 @@ class MapRenderTest {
             v.cancelConnection();event(android.view.MotionEvent.ACTION_UP,v.screenPoint(doc.root.bounds.center))
             assertArrayEquals(before,pixels());assertArrayEquals(bytes,MapCodec.encode(v.document))
         }
+    }
+    @Test fun collapsedCountsDrawForVisibleBranchesAndTheirLargestBadgeFitsTheExportBounds() {
+        val root=MapNode(id="root",parent=null,x=-300.0,y=-100.0)
+        val free=MapNode(id="free",parent=null,free=true,collapsed=true,x=300.0,y=150.0)
+        val doc=MindMapDocument(nodes=listOf(root,free)+List(MindMapDocument.MAX_NODES-2) {MapNode(id="child$it",parent="free")})
+        doc.validate();val bytes=MapCodec.encode(doc)
+        for(dark in listOf(false,true)) {
+            val counts=mutableListOf<Int>();val painter=MapPainter().apply {collapsedLabel={counts+=it;"+$it"}}
+            val bounds=painter.drawingBounds(doc);counts.clear()
+            val image=Bitmap.createBitmap(kotlin.math.ceil(bounds.w).toInt(),kotlin.math.ceil(bounds.h).toInt(),Bitmap.Config.ARGB_8888)
+            try {
+                val bg=if(dark) Color.BLACK else Color.WHITE
+                val canvas=Canvas(image);canvas.drawColor(bg);canvas.translate(-bounds.x.toFloat(),-bounds.y.toFloat())
+                painter.draw(canvas,doc,dark,selected="free")
+                assertEquals(listOf(MindMapDocument.MAX_NODES-2),counts)
+                val pixels=IntArray(image.width*image.height);image.getPixels(pixels,0,image.width,0,0,image.width,image.height)
+                assertTrue(pixels.any {it!=bg});assertTrue(pixels.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
+                for(x in 0 until image.width) {assertEquals(bg,image.getPixel(x,0));assertEquals(bg,image.getPixel(x,image.height-1))}
+                for(y in 0 until image.height) {assertEquals(bg,image.getPixel(0,y));assertEquals(bg,image.getPixel(image.width-1,y))}
+                assertEquals(MapPainter().textHeight("Body",220.0),painter.textHeight("Body",220.0),0.0)
+            } finally {image.recycle()}
+        }
+        val plain=MindMapDocument(nodes=listOf(root))
+        assertEquals(root.bounds.outset(32.0),MapPainter().drawingBounds(plain))
+        assertArrayEquals(bytes,MapCodec.encode(doc))
     }
 
 }
