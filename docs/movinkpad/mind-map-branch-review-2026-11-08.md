@@ -1,7 +1,7 @@
 # codex/mind-map 分支复核问题（2026-11-08）
 
 用户要求：复核 Codex 在 `codex/mind-map` 分支（工作树 `~/.codex/worktrees/mind-map/xnotes`）上的代码，把发现的问题记录下来，之后统一修复。
-状态：讨论中。仅记录问题，均未修复。复核基准为已提交 HEAD `cd1dabfb`（相对 master `54f05b0f` 共 45 个提交、193 个文件，约 +18k 行）；Codex 当时尚有未提交的交接确认改动（`NativeHandoffAcknowledgement` 等），不在本次复核范围内。
+状态：讨论中。仅记录问题（P1–P5 为问题，P6 为渲染性能观察），均未修复。复核基准为已提交 HEAD `cd1dabfb`（相对 master `54f05b0f` 共 45 个提交、193 个文件，约 +18k 行）；Codex 当时尚有未提交的交接确认改动（`NativeHandoffAcknowledgement` 等），不在本次复核范围内。
 已验证：在 HEAD 的隔离导出副本中用 JDK 21 跑 `testDebugUnitTest`，303 个套件、3348 项，0 失败、0 错误、0 跳过。仪器测试、模拟器和目标真机均未运行。
 本轮边界：只写本记录并本地提交到 `worktree-mind-map-review` 分支（基于 `cd1dabfb`）；不改源码，不打包、安装、推送或发布，也不改动 Codex 的工作树。
 
@@ -42,6 +42,21 @@
 ### P5 文档
 
 - 分支 AGENTS.md 新增了约 10 条条目，大多是实现进度（例如“生产接线仍待完成”），写法也很密集。这与该文件“只记录当前有效的长期规则”的约定不符。应把进度移到 `docs/movinkpad/`，AGENTS.md 只保留规则。
+
+### P6 渲染性能观察（读代码推断，未实测）
+
+背景：导图有意不接入主应用的 CanvasScene/GL 渲染，见 `mind-map-rendering-resume-2026-11-08.md`。它用单个 `MindMapView` 和 Android `Canvas` 做软件绘制，每次 `invalidate()` 都把整张图全量重绘，与笔记共用的只有笔迹几何（`Stroke` / `AndroidRenderer`）和 `TextEditorOverlay`。节点少时这种做法简单可靠；以下几点在节点多或笔迹多时可能拖慢帧率、增加书写延迟。是否需要处理，以真机测量结果为准。
+
+- **没有视口裁剪：** `MapPainter.draw`（`MapPainter.kt:37` 起）每帧遍历并绘制所有可见节点、父子连线和关系线，不跳过屏幕外的内容。
+- **`visible()` 每帧重复计算：** `MapPainter.kt:37` 和命中测试 `MindMapView.kt:103` 都会调用 `doc.visible()`，它每次都重新分组并广度遍历整棵树；单次手势中还会多次调用。可以按文档实例缓存结果。
+- **每帧都在分配对象：**
+  - 每条父子连线都新建一个 `Path`（`MapPainter.kt:54`）。
+  - `onDraw` 中 `painter.retainInk(document.nodes.flatMap {it.ink})`（`MindMapView.kt:197`）每帧建一个列表和一张 `IdentityHashMap`。
+  - `drawInk`（`MapPainter.kt:120`）每帧为每一笔 `copy` 一次 `ToolConfig`，只为改颜色。
+- **书写时整画布重绘：** 原位书写时每个 MOVE 事件都 `invalidate()`（`MindMapView.kt:294`），整张图和所有笔迹都要重画，没有湿墨层或局部脏区，也没有前缓冲。放大编辑 `InkPadView` 同样每个事件都重绘整个节点。Pro Pen 3 上的书写延迟需要真机验证。
+- **橡皮擦与笔迹总量成正比：** `InkGestureController.kt:109` 每个采样都要对当前预览中的所有笔画逐段做距离检测；单节点笔迹很多时，擦除会变卡。
+- **文字排版缓存整体清空：** `StaticLayout` 缓存超过 2000 条后一次性 `clear()`（`MapPainter.kt:113`），不按 LRU 淘汰，清空后的下一帧需要全部重新排版。
+- **建议的验证方式：** 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上分别用 1000 个节点（上限）和单节点大量笔迹的导图，记录平移/缩放帧时间、书写延迟与擦除耗时，再决定优先改哪一项（视口裁剪、缓存 `visible()` 与连线 `Path`、书写时只重绘局部或加湿墨层）。
 
 ## 已确认无问题
 
