@@ -42,3 +42,5 @@ b3b0已具备实际head/body/metadata配对读取，但来源描述只是数据�
 `tmp/native-working-recovery-final-full.log`：JDK21/SDK36/Gradle8.13离线独立build/project cache执行 `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin`；297套件3248项，0失败/错误/跳过。新增实际Android provider→缓存→真实准备/采用→原生发布用例已加入现runner，只编译未执行。独立计划/代码复核通过，`git diff --check`通过。
 
 生产旧SessionStore仍未切换，不把该组件的成功说成实际会话/自动保存已全迁移。后续producer须协调head/UI采用及未采用草稿保留，不能丢掉此边界。
+
+产品决定更新（2026-11-08）：用户已确认保存后“放弃修改”保留已写入版本，只放弃之后修改，不回滚原件；详见reference-discard-written-2026-11-08.md。上文等待答复是本阶段实施时状态，该产品决定阻塞现已解除，producer/pending接线仍需验证。

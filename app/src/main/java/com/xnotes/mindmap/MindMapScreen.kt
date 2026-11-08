@@ -38,6 +38,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         var sourcesFor by remember { mutableStateOf<String?>(null) }
         var pendingSourceNode by remember { mutableStateOf<String?>(null) }
         var graphTools by remember { mutableStateOf(false) }
+        var pendingRelation by remember {mutableStateOf<MapRelation?>(null)}
+        var connectingFrom by remember {mutableStateOf<String?>(null)}
         var addFree by remember { mutableStateOf(false) }
         var layoutMenu by remember { mutableStateOf(false) }
         var proposed by remember { mutableStateOf<MindMapDocument?>(null) }
@@ -105,6 +107,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             if(session.textDraft!=null) endText(false)
             else if(session.textRestore!=null) Unit
             else if(editing!=null) editing=null
+            else if(connectingFrom!=null) view?.cancelConnection()
             else if(session.inkContact) view?.inkInput?.cancel()
             else if (!session.closing) close()
         }
@@ -175,6 +178,9 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.graph_free) { addFree=true }
                         MapButton(R.string.graph_detach,enabled=node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
                         MapButton(R.string.graph_relations) { graphTools=true }
+                        MapButton(R.string.graph_connect_canvas,enabled=node!=null && doc.nodes.size>1,selected=connectingFrom!=null) {
+                            if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
+                        }
                         MapButton(R.string.graph_sources,enabled=node!=null) { sourcesFor=node?.id }
                         MapButton(R.string.map_nodes) { choosing = true; reparenting = false }
                         MapButton(R.string.map_change_parent, enabled = node?.parent != null && !session.closing) { choosing = true; reparenting = true }
@@ -182,7 +188,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.map_fit) { view?.fit() }
                         MapButton(R.string.map_zoom_in) { view?.zoomBy(1.25f) }
                         MapButton(R.string.map_zoom_out) { view?.zoomBy(.8f) }
-                        Text(node?.text.orEmpty().take(80), fontSize = TextSize.body, modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
+                        Text(node?.text.orEmpty().take(80), fontSize = TextSize.body,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
                     }
                 }
                 val problem = session.problemText()
@@ -192,6 +199,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize(), update = { v ->
                             v.isEnabled=!enlarged && textDraft==null && textRestore==null && !session.closing
                             v.onViewportChanged={viewRevision++}
+                            v.onConnectionModeChanged={connectingFrom=it}
+                            v.onConnectionTarget={from,to->pendingRelation=MapRelation(from=from,to=to);graphTools=true}
                             v.editingText=textDraft?.nodeId
                             v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
                             v.onInkContact={session.inkContact=it};v.onInkLimit=session::reportInkLimit;v.onInk={id,old,next ->
@@ -216,6 +225,11 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                             MapButton(R.string.map_conflict_use_file, enabled = !session.saving) { discardingRecovery = true }
                         }
                     } }
+                    if(connectingFrom!=null) Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(palette.panel.toComposeColor()).padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically) {
+                        Text(stringResource(R.string.graph_connect_hint),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                        MapButton(R.string.cancel) {view?.cancelConnection()}
+                    }
                 }
                 if(textDraft==null) Text(stringResource(R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
@@ -241,7 +255,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         proposed?.let { preview -> AlertDialog(onDismissRequest={proposed=null},title={Text(stringResource(R.string.graph_preview),fontSize=TextSize.heading)},
             text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
             confirmButton={MapButton(R.string.map_done){session.commit(preview);proposed=null}},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
-        if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::changeRelation){graphTools=false} }
+        if(graphTools) session.document?.let { GraphRelationsDialog(it,session.selected,session::changeRelation,pendingRelation){graphTools=false;pendingRelation=null} }
         sourcesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id==id }?.let { n ->
             GraphSourcesDialog(n, { edited -> session.operate { it.update(id) { edited } } }, { pendingSourceNode=id;sourcePicker.launch(arrayOf("application/octet-stream","application/zip")) }) { sourcesFor=null }
         } }

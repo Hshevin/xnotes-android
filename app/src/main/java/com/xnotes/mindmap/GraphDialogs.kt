@@ -45,8 +45,8 @@ private fun RelationChoice(label:String,onClick:()->Unit) {
 
 @Composable
 internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
-                                  change:(MapRelation?,MapRelation?)->RelationEditResult,close:()->Unit) {
-    var draft by remember {mutableStateOf<RelationDraft?>(null)}
+                                  change:(MapRelation?,MapRelation?)->RelationEditResult,newRelation:MapRelation?=null,close:()->Unit) {
+    var draft by remember {mutableStateOf(newRelation?.let {RelationDraft(null,it)})}
     var creatingFrom by remember {mutableStateOf<String?>(null)}
     var choosing by remember {mutableStateOf<RelationEndpoint?>(null)}
     var message by remember {mutableStateOf<Int?>(null)}

@@ -30,13 +30,20 @@ class MapPainter {
         strokes.keys.removeAll { !keep.containsKey(it) }
     }
     fun clear() { strokes.clear(); layouts.clear() }
-    fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null) {
+    fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
+             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
         val visible = doc.visible()
         val byId = visible.associateBy { it.id }
         val parents = doc.nodes.mapNotNullTo(hashSetOf()) { it.parent }
         paint.color = fg; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f
+        connection?.let {(id,end)->byId[id]?.bounds?.center?.let {start->
+            paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
+            paint.pathEffect=android.graphics.DashPathEffect(floatArrayOf(8f,6f),0f)
+            canvas.drawLine(start.x.toFloat(),start.y.toFloat(),end.x.toFloat(),end.y.toFloat(),paint)
+            paint.pathEffect=null
+        }}
         for (n in visible) {
             val p = byId[n.parent] ?: continue
             val right = n.bounds.centerX > p.bounds.centerX

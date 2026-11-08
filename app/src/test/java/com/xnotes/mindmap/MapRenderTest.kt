@@ -86,5 +86,28 @@ class MapRenderTest {
         assertEquals(9,p.geometryBuildCount)
         image.recycle()
     }
+    @Test fun transientConnectionLineDrawsInBothThemesAndDisappearsWithoutChangingTheGraph() {
+        val context=RuntimeEnvironment.getApplication()
+        val doc=MindMapDocument(nodes=listOf(MapNode(id="source",parent=null),MapNode(id="target",parent=null,free=true,x=500.0)))
+        val bytes=MapCodec.encode(doc)
+        val v=MindMapView(context).apply {document=doc;selected="source";layout(0,0,1000,600);fit()}
+        fun pixels():IntArray {
+            val bitmap=Bitmap.createBitmap(1000,600,Bitmap.Config.ARGB_8888)
+            return try {v.draw(Canvas(bitmap));IntArray(1000*600).also {bitmap.getPixels(it,0,1000,0,0,1000,600)}} finally {bitmap.recycle()}
+        }
+        fun event(action:Int,p:com.xnotes.core.geometry.Pt) {
+            val e=android.view.MotionEvent.obtain(100,200,action,p.x.toFloat(),p.y.toFloat(),0)
+            try {v.onTouchEvent(e)} finally {e.recycle()}
+        }
+        for(dark in listOf(false,true)) {
+            v.dark=dark;val before=pixels();assertTrue(v.beginConnection("source"))
+            event(android.view.MotionEvent.ACTION_DOWN,v.screenPoint(doc.root.bounds.center))
+            event(android.view.MotionEvent.ACTION_MOVE,v.screenPoint(com.xnotes.core.geometry.Pt(350.0,36.0)))
+            val preview=pixels();assertTrue(before.indices.count {before[it]!=preview[it]}>20)
+            assertTrue(preview.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
+            v.cancelConnection();event(android.view.MotionEvent.ACTION_UP,v.screenPoint(doc.root.bounds.center))
+            assertArrayEquals(before,pixels());assertArrayEquals(bytes,MapCodec.encode(v.document))
+        }
+    }
 
 }

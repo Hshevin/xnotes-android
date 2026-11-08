@@ -68,7 +68,7 @@
 
 保存使用 `.xmap` v2，兼容读取 v1；旧应用不能打开 v2。当前仍保留中心主题，来源列表尚无实际缩略图／来源跳转，手绘原位与占编辑区域放大已接入；文本原位已接入；页面引用（引用以页面及其上的笔记为单位，[决定记录](docs/movinkpad/reference-page-level-2026-11-07.md)）、反向引用和文件关系网络仍在后续阶段，**完整引用闭环未完成**。详见[扩展规格与阶段进度](docs/movinkpad/graph-network-2026-11-06.md)。2026-11-07 代码审查修复后 2828 项主机测试通过（[审查与修复记录](docs/movinkpad/mind-map-review-fixes-2026-11-07.md)），Android 仪器测试仅编译；未打包、安装、推送或合并，真机验收待执行。
 
-2026-11-08 开发分支已按授权同步 master54f05b0f 的新渲染基线，已有导图文本与手绘编辑保留（[接口检查与续作](docs/movinkpad/mind-map-rendering-resume-2026-11-08.md)）。页面引用基础调整为每页一个永久编号，画布仅使用文档身份；不再给每笔或图片分配引用编号。当前全量3257项主机测试及Android测试源码编译通过，实际仪器/目标设备未运行。[实现边界](docs/movinkpad/page-reference-implementation-2026-11-08.md)及[整包复制记录](docs/movinkpad/reference-bundle-copy-2026-11-08.md)说明了已接通的原字节复制/导出，以及待完成的活模型另存、SAF 激活和页面来源界面，不能视为页面引用闭环已可用。
+2026-11-08 开发分支已按授权同步 master54f05b0f 的新渲染基线，已有导图文本与手绘编辑保留（[接口检查与续作](docs/movinkpad/mind-map-rendering-resume-2026-11-08.md)）。页面引用基础调整为每页一个永久编号，画布仅使用文档身份；不再给每笔或图片分配引用编号。当前全量3267项主机测试及Android测试源码编译通过，实际仪器/目标设备未运行。[实现边界](docs/movinkpad/page-reference-implementation-2026-11-08.md)及[整包复制记录](docs/movinkpad/reference-bundle-copy-2026-11-08.md)说明了已接通的原字节复制/导出，以及待完成的活模型另存、SAF 激活和页面来源界面，不能视为页面引用闭环已可用。
 
 页面引用登记基础已加入数据库升级和单调身份契约，尚未接通生产保存/SAF与来源界面，见[登记契约与验证](docs/movinkpad/reference-contract-registry-2026-11-08.md)。
 
@@ -82,12 +82,12 @@
 
 会话正文与文档身份的原子配对组件已实现，包含旧任务拒绝、读租约及损坏保留，见[会话事务与验证](docs/movinkpad/reference-session-cache-2026-11-08.md)。原生笔记/画布codec、严格来源描述和视口的适配已补齐（[原生会话适配](docs/movinkpad/reference-native-session-adapter-2026-11-08.md)），视口变化可复用便携正文；损坏或未来版本缓存保留并拒绝清理。已绑定工作副本可经真实来源版本核实后准备恢复，支持保留增删/重排页和原PDF包装（[恢复合同与验证](docs/movinkpad/reference-working-recovery-2026-11-08.md)）。编辑器和旧缓存尚待统一接入，来源描述本身不授予覆盖原文件的权限。
 
-原生来源版本 API 已补上同源读取、外部同编号修改的覆盖拒绝、PDF 校验期保护与保存回执，见[来源版本与验证](docs/movinkpad/reference-native-source-version-2026-11-08.md)。实际编辑器与会话入口尚待接线。
+原生来源版本 API 已补上同源读取、外部同编号修改的覆盖拒绝、PDF 校验期保护与保存回执，见[来源版本与验证](docs/movinkpad/reference-native-source-version-2026-11-08.md)。真实打开入口已接入同源核验；普通保存与会话任务的统一接线仍在继续。
 
 原生新建/另存的安全发布接口已补上一次性创建上下文、空目标核实、候选摘要绑定及失败后的显式完成，见[新建发布与验证](docs/movinkpad/reference-native-creation-2026-11-08.md)。该接口尚未接入实际另存界面和会话切换，不能视为这些流程已经全部改造；本轮未打包，Android 测试只编译未执行。
 
 笔记、画布和首页的真实打开入口已改为先完整读取/验证再替换，补上取消、旧保存回调与双窗格保留保护，见[同源打开与采用](docs/movinkpad/reference-verified-open-2026-11-08.md)。新增 Android 工作区场景仍仅编译未运行；新会话事务、保存回执及完整另存切换仍在继续实现。
 
-活模型的来源上下文已加入请求关联保存回执、旧请求失效和 PDF 原件核验，见[保存回执合同与验证](docs/movinkpad/reference-edit-source-2026-11-08.md)。主机累计3216项通过，仪器仍仅编译；实际自动保存和会话缓存尚待统一接入，不能据此宣称暂停恢复或另存已全部改造。
+活模型的来源上下文已加入请求关联保存回执、旧请求失效和 PDF 原件核验，见[保存回执合同与验证](docs/movinkpad/reference-edit-source-2026-11-08.md)。该阶段3216项主机用例通过，仪器仍仅编译；实际自动保存和会话缓存尚待统一接入，不能据此宣称暂停恢复或另存已全部改造。
 
-导图普通关系列表已支持端点选择、明确的方向说明及一次确认/一步撤销；新线确认前不写入，重复关系定位已有线，取消不留下新线。见[关系编辑与验证](docs/movinkpad/mind-map-relation-editing-2026-11-08.md)。画布边缘拖线和多选等仍待实现；Android弹窗交互用例仅编译未运行。
+导图普通关系列表已支持端点选择、明确的方向说明及一次确认/一步撤销；新线确认前不写入，重复关系定位已有线，取消不留下新线。见[关系编辑与验证](docs/movinkpad/mind-map-relation-editing-2026-11-08.md)。画布现可从选中节点点击“在画布连线”，再点目标进入同一确认草稿，取消不写图；支持临时线/目标反馈与笔掌取消保护，见[画布连线与验证](docs/movinkpad/mind-map-canvas-connect-2026-11-08.md)。边缘拖线、空白建节点并连接和多选等仍待实现；Android弹窗/窗口交互用例仅编译未运行。

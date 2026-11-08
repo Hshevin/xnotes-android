@@ -53,3 +53,5 @@ NativeWorkingSession已实现上述capture/publish/load数据适配；Editor/Ses
 两个新增Android仪器场景覆盖平台JSONObject.NULL/转义重复键、便携PDF与view-only、跨NOTE/CANVAS及canvas空视口，只编译未实际执行；不作为MovinkPad验收。
 
 验证证据：`tmp/native-working-session-final-full.log`，JDK21/SDK36/Gradle8.13离线执行 `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin`（独立build/project cache）；3237项全过，0失败/错误/跳过，`git diff --check`通过。新增19个adapter回归、2个generic envelope回归；两个Android仪器用例仅编译。代码独立复核的两处PDF发现已修并最终复核通过。
+
+产品决定更新（2026-11-08）：用户已确认保存后“放弃修改”保留已写入版本，只放弃之后修改，不回滚原件；详见reference-discard-written-2026-11-08.md。上文等待答复是本阶段实施时状态，该产品决定阻塞现已解除，producer/pending接线仍需验证。

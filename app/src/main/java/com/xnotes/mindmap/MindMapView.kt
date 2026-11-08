@@ -14,6 +14,7 @@ import kotlin.math.hypot
 class MindMapView(context: Context) : View(context) {
     var document = MindMapDocument()
         set(value) { if (field != value) {
+            if(connectionFrom!=null && (value.id!=connectionDocumentId || value.visible().none {it.id==connectionFrom})) cancelConnection()
             val old=field.nodes.firstOrNull {it.id==inkOwner}
             val new=value.nodes.firstOrNull {it.id==inkOwner}
             if(inkInput.active && (old==null || new==null || old.bounds!=new.bounds || old.kind!=new.kind || old.ink!=new.ink)) inkInput.cancel()
@@ -40,6 +41,19 @@ class MindMapView(context: Context) : View(context) {
     var onInkLimit:()->Unit={}
     private var inkOwner:String?=null
     private var suppressRemainingTouch=false
+    private var inputReady=false
+    private var pressedStream=false
+    private var connectionDrain=false
+    private var connectionEnterHeld=false
+    var connectionFrom:String?=null;private set
+    var connectionTarget:String?=null;private set
+    internal var connectionPreview:Pt?=null;private set
+    var onConnectionModeChanged:(String?)->Unit={}
+    var onConnectionTarget:(String,String)->Unit={_,_->}
+    private var connectionDocumentId:String?=null
+    private var connectionPointer=-1
+    private var connectionPen=false
+    private var savedQuickScale:Boolean?=null
     private val painter = MapPainter()
     private var zoom = 1f
     private var panX = 0f
@@ -57,6 +71,7 @@ class MindMapView(context: Context) : View(context) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
+            if(connectionFrom!=null) return false
             scaleAt(detector.scaleFactor, detector.focusX, detector.focusY)
             return true
         }
@@ -80,13 +95,14 @@ class MindMapView(context: Context) : View(context) {
         }
         inkInput.onContact={onInkContact(it);parent?.requestDisallowInterceptTouchEvent(it)}
         inkInput.onLimit={onInkLimit()}
-        painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
+        painter.sourceLabel={ resources.getString(com.xnotes.R.string.graph_sources_count,it) }; isFocusable = true;isFocusableInTouchMode=true
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES;inputReady=true }
     override fun performClick(): Boolean { super.performClick(); return true }
     private val scale get() = resources.displayMetrics.density * zoom
     private fun point(x: Float, y: Float) = Pt(((x - panX) / scale).toDouble(), ((y - panY) / scale).toDouble())
     private fun hit(x: Float, y: Float, doc: MindMapDocument = document) = doc.visible().lastOrNull { it.bounds.contains(point(x, y)) }
     fun fit() {
-        if (width == 0 || height == 0 || inkInput.active) return
+        if (width == 0 || height == 0 || inkInput.active || connectionPen) return
         val b = MapPainter.bounds(document)
         val s = minOf(width / b.w, height / b.h).toFloat().coerceAtMost(resources.displayMetrics.density * 1.5f)
         zoom = (s / resources.displayMetrics.density).coerceIn(.05f, 4f)
@@ -95,7 +111,7 @@ class MindMapView(context: Context) : View(context) {
         initialized = true; invalidate();onViewportChanged()
     }
     fun centerOn(id: String) {
-        if(inkInput.active) return
+        if(inkInput.active || connectionPen) return
         document.nodes.firstOrNull { it.id == id }?.bounds?.let {
             panX = width / 2f - it.centerX.toFloat() * scale
             panY = height / 2f - it.centerY.toFloat() * scale
@@ -103,7 +119,19 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(keyCode==android.view.KeyEvent.KEYCODE_ENTER && connectionEnterHeld) {
+            if(event.repeatCount>0) return true
+            connectionEnterHeld=false // A new independent press may follow a lost UP.
+        }
+        if(connectionFrom!=null && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {cancelConnection();return true}
+        if(connectionPen) return true
         if(!isEnabled || inkInput.active) return false
+        if(connectionFrom!=null && keyCode==android.view.KeyEvent.KEYCODE_ENTER) {
+            if(!pressedStream) selected?.takeIf {it!=connectionFrom && document.visible().any {n->n.id==it}}?.let {target->
+                val from=requireNotNull(connectionFrom);connectionEnterHeld=true;cancelConnection();onConnectionTarget(from,target)
+            }
+            return true
+        }
         val visible = document.visible()
         val at = visible.indexOfFirst { it.id == selected }.coerceAtLeast(0)
         when (keyCode) {
@@ -116,10 +144,15 @@ class MindMapView(context: Context) : View(context) {
         }
         return super.onKeyDown(keyCode, event)
     }
+    override fun onKeyUp(keyCode:Int,event:android.view.KeyEvent):Boolean {
+        if(keyCode==android.view.KeyEvent.KEYCODE_ENTER && connectionEnterHeld) {connectionEnterHeld=false;return true}
+        return super.onKeyUp(keyCode,event)
+    }
     data class Viewport(val zoom:Float,val panX:Float,val panY:Float)
     fun viewport()=Viewport(zoom,panX,panY)
     fun contentScale()=scale.toDouble()
     fun prepareTextEditing(id:String) {
+        cancelConnection()
         inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=false
         parent?.requestDisallowInterceptTouchEvent(false)
         val cancel=MotionEvent.obtain(0,0,MotionEvent.ACTION_CANCEL,0f,0f,0)
@@ -127,11 +160,11 @@ class MindMapView(context: Context) : View(context) {
         zoom=maxOf(1f,zoom);centerOn(id)
     }
     fun panText(dx:Float,dy:Float) {
-        if(inkInput.active || !dx.isFinite() || !dy.isFinite()) return
+        if(inkInput.active || connectionPen || !dx.isFinite() || !dy.isFinite()) return
         panX+=dx;panY+=dy;invalidate();onViewportChanged()
     }
     fun restoreViewport(saved:Viewport,oldWidth:Int,oldHeight:Int,oldDensity:Float) {
-        if(width<=0 || height<=0 || oldDensity<=0 || inkInput.active) return
+        if(width<=0 || height<=0 || oldDensity<=0 || inkInput.active || connectionPen) return
         zoom=saved.zoom.coerceIn(.05f,4f)
         val oldScale=oldDensity*saved.zoom
         panX=width/2f-(oldWidth/2f-saved.panX)/oldScale*scale
@@ -149,20 +182,22 @@ class MindMapView(context: Context) : View(context) {
     fun screenPoint(p:Pt)=Pt((panX+p.x*scale).toDouble(),(panY+p.y*scale).toDouble())
     fun zoomBy(factor: Float) = scaleAt(factor, width / 2f, height / 2f)
     private fun scaleAt(factor: Float, x: Float, y: Float) {
-        if(inkInput.active) return
+        if(inkInput.active || connectionPen) return
         val p = point(x, y)
         zoom = (zoom * factor).coerceIn(.05f, 4f)
         panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
         invalidate();onViewportChanged()
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { cancelConnection();inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
+    override fun setEnabled(enabled:Boolean) {if(inputReady && !enabled) cancelConnection();super.setEnabled(enabled)}
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         canvas.save(); canvas.translate(panX, panY); canvas.scale(scale, scale)
         val owner=document.nodes.firstOrNull {it.id==inkOwner}
         painter.retainInk(document.nodes.flatMap {it.ink})
         val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else preview ?: document
-        painter.draw(canvas, shown, dark, selected, dropTarget,editingText)
+        painter.draw(canvas, shown, dark, selected, connectionTarget ?: dropTarget,editingText,
+            connectionFrom?.let {from->connectionPreview?.let {from to it}})
         if(owner!=null && selected==owner.id) {
             canvas.save();canvas.translate(owner.x.toFloat(),owner.y.toFloat())
             canvas.clipRect(0f,0f,owner.width.toFloat(),owner.height.toFloat())
@@ -171,15 +206,95 @@ class MindMapView(context: Context) : View(context) {
         }
         canvas.restore()
     }
+    fun beginConnection(from:String):Boolean {
+        if(!isEnabled || inkInput.active || pressedStream || pointer>=0 || editingText!=null || document.visible().none {it.id==from}) return false
+        cancelConnection();cancelGesture();cancelDetectors()
+        savedQuickScale=scaleDetector.isQuickScaleEnabled;scaleDetector.isQuickScaleEnabled=false
+        connectionDocumentId=document.id;connectionFrom=from;suppressRemainingTouch=false
+        selected=from;onSelect(from);onConnectionModeChanged(from);requestFocus();invalidate()
+        return true
+    }
+    fun cancelConnection() {endConnection(false)}
+    private fun cancelDetectors() {
+        val cancel=MotionEvent.obtain(0,0,MotionEvent.ACTION_CANCEL,0f,0f,0)
+        try {gestures.onTouchEvent(cancel);scaleDetector.onTouchEvent(cancel)} finally {cancel.recycle()}
+    }
+    private fun clearConnectionTouch() {
+        connectionPointer=-1;connectionTarget=null;connectionPreview=null
+        val wasPen=connectionPen;connectionPen=false
+        if(wasPen) onInkContact(false)
+        parent?.requestDisallowInterceptTouchEvent(false);invalidate()
+    }
+    private fun endConnection(keepScale:Boolean) {
+        if(connectionFrom==null) return
+        clearConnectionTouch();connectionFrom=null;connectionDocumentId=null
+        savedQuickScale?.let {scaleDetector.isQuickScaleEnabled=it};savedQuickScale=null
+        suppressRemainingTouch=!keepScale
+        if(!keepScale) connectionDrain=true
+        if(!keepScale) cancelDetectors()
+        cancelGesture();pointer=-1;onConnectionModeChanged(null);invalidate()
+    }
+    private fun isPen(e:MotionEvent,index:Int)=e.getToolType(index) in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER)
+    /** True consumes; false hands a real two-finger stream to the existing viewport path. */
+    private fun handleConnection(e:MotionEvent):Boolean {
+        fun position(index:Int) {
+            connectionPreview=point(e.getX(index),e.getY(index))
+            connectionTarget=hit(e.getX(index),e.getY(index))?.id?.takeUnless {it==connectionFrom}
+            invalidate()
+        }
+        fun begin(index:Int) {
+            clearConnectionTouch();cancelDetectors();suppressRemainingTouch=false
+            connectionPointer=e.getPointerId(index);connectionPen=isPen(e,index)
+            if(connectionPen) onInkContact(true) else scaleDetector.onTouchEvent(e)
+            parent?.requestDisallowInterceptTouchEvent(true);position(index)
+        }
+        if(suppressRemainingTouch && e.actionMasked!=MotionEvent.ACTION_DOWN &&
+            !(e.actionMasked==MotionEvent.ACTION_POINTER_DOWN && isPen(e,e.actionIndex))) return true
+        when(e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> begin(0)
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if(connectionPen) return true // All other pointers are palm contacts.
+                if(isPen(e,e.actionIndex)) begin(e.actionIndex)
+                else if(connectionPointer>=0 && (0 until e.pointerCount).all {e.getToolType(it)==MotionEvent.TOOL_TYPE_FINGER}) {
+                    endConnection(true);return false
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val index=e.findPointerIndex(connectionPointer)
+                if(index>=0) {if(!connectionPen) scaleDetector.onTouchEvent(e);position(index)}
+                else {clearConnectionTouch();suppressRemainingTouch=true;connectionDrain=true;cancelDetectors()}
+            }
+            MotionEvent.ACTION_UP,MotionEvent.ACTION_POINTER_UP -> {
+                if(e.getPointerId(e.actionIndex)!=connectionPointer) return true
+                position(e.actionIndex)
+                val from=connectionFrom;val target=connectionTarget
+                if((e.flags and 0x20)==0 && from!=null && target!=null) {
+                    endConnection(false) // Busy is released before opening a relation draft.
+                    onConnectionTarget(from,target)
+                } else {clearConnectionTouch();suppressRemainingTouch=true;connectionDrain=true;cancelDetectors()}
+            }
+            MotionEvent.ACTION_CANCEL -> {clearConnectionTouch();suppressRemainingTouch=true;connectionDrain=true;cancelDetectors()}
+        }
+        return true
+    }
     private fun cancelGesture() { cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
     private fun inkBody(n:MapNode,p:Pt):Boolean = n.kind==NodeKind.INK &&
         p.x in n.x+8..n.x+n.width-8 && p.y in n.y+8..n.y+n.height-(if(n.sources.isEmpty()) 8 else 28)
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if(e.actionMasked==MotionEvent.ACTION_DOWN) {pressedStream=true;connectionDrain=false}
+        return try {handleTouch(e)} finally {
+            if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL) pressedStream=false
+        }
+    }
+    private fun handleTouch(e:MotionEvent):Boolean {
         if(!isEnabled) return true
+        // Connection cancellation drains independently of ink's deliberate pen-over-palm priority.
+        if(connectionDrain) return true
         if(inkInput.active) {
             inkInput.handle(e,{x,y->point(x,y)},{false});invalidate();return true
         }
         if(e.actionMasked==MotionEvent.ACTION_DOWN) suppressRemainingTouch=false
+        if(connectionFrom!=null && handleConnection(e)) return true
         if(e.actionMasked in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_POINTER_DOWN)) {
             val i=e.actionIndex
             if(e.getToolType(i) in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER,MotionEvent.TOOL_TYPE_MOUSE)) {
@@ -261,8 +376,8 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     override fun onWindowFocusChanged(hasWindowFocus:Boolean) {
-        if(!hasWindowFocus) {inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
+        if(!hasWindowFocus) {cancelConnection();pressedStream=false;inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
         super.onWindowFocusChanged(hasWindowFocus)
     }
-    override fun onDetachedFromWindow() { inkInput.cancel(); cancelGesture(); super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { cancelConnection();pressedStream=false;inkInput.cancel(); cancelGesture(); super.onDetachedFromWindow() }
 }

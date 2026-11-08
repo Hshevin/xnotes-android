@@ -250,4 +250,169 @@ abstract class MapInputContract {
         assertEquals(90.0,v.ink.single().points.first().x,.001)
     }
 
+    private fun connectView(context:Context)=MindMapView(context).apply {
+        document=MindMapDocument(nodes=listOf(MapNode(id="source",parent=null,kind=NodeKind.INK),
+            MapNode(id="target",parent=null,free=true,kind=NodeKind.INK,x=500.0)))
+        layout(0,0,800,500);fit();selected="source"
+    }
+    private fun at(v:MindMapView,id:String)=v.screenPoint(v.document.node(id).bounds.center)
+    private fun touchNode(v:MindMapView,action:Int,id:String,type:Int=MotionEvent.TOOL_TYPE_STYLUS,flags:Int=0) {
+        val p=at(v,id);send(v,action,p.x.toFloat(),p.y.toFloat(),type,flags)
+    }
+    @Test fun explicitConnectionSelectsInkTargetsWithoutWritingDraggingOrEditingTheirBodies()=ui {context->
+        for(type in listOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_FINGER)) {
+            val v=connectView(context);val before=v.document;val camera=v.viewport();val requested=mutableListOf<Pair<String,String>>()
+            var edits=0;var commits=0
+            v.onConnectionTarget={from,to->requested.add(from to to)};v.onChange={commits++};v.onEdit={edits++}
+            assertTrue(v.beginConnection("source"));touchNode(v,MotionEvent.ACTION_DOWN,"source",type)
+            touchNode(v,MotionEvent.ACTION_MOVE,"target",type)
+            assertEquals("target",v.connectionTarget);assertNotNull(v.connectionPreview)
+            assertEquals(before,v.document);assertEquals(camera,v.viewport())
+            touchNode(v,MotionEvent.ACTION_UP,"target",type)
+            assertEquals(listOf("source" to "target"),requested);assertNull(v.connectionFrom)
+            assertEquals(before,v.document);assertEquals(0,commits);assertEquals(0,edits);assertFalse(v.inkInput.active)
+        }
+    }
+    @Test fun connectionCancelFlaggedUpSelfAndBlankDoNotProduceDraftsAndCanRetry()=ui {context->
+        val v=connectView(context);val before=v.document;var requests=0;v.onConnectionTarget={_,_->requests++}
+        assertTrue(v.beginConnection("source"))
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");send(v,MotionEvent.ACTION_CANCEL)
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target",flags=0x20)
+        touchNode(v,MotionEvent.ACTION_DOWN,"source");touchNode(v,MotionEvent.ACTION_UP,"source")
+        send(v,MotionEvent.ACTION_DOWN,1f,1f);send(v,MotionEvent.ACTION_UP,1f,1f)
+        assertEquals(0,requests);assertEquals("source",v.connectionFrom);assertNull(v.connectionPreview)
+        touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target")
+        assertEquals(1,requests);assertEquals(before,v.document)
+    }
+    @Test fun connectionCannotStartInsideAPressOrStrokeAndPenConnectionFreezesCameraAndKeys()=ui {context->
+        val v=connectView(context);val before=v.document
+        touchNode(v,MotionEvent.ACTION_DOWN,"source",MotionEvent.TOOL_TYPE_FINGER)
+        assertFalse(v.beginConnection("target"));touchNode(v,MotionEvent.ACTION_UP,"source",MotionEvent.TOOL_TYPE_FINGER)
+        touchNode(v,MotionEvent.ACTION_DOWN,"source");assertFalse(v.beginConnection("target"));send(v,MotionEvent.ACTION_CANCEL)
+        var busy=false;v.onInkContact={busy=it}
+        assertTrue(v.beginConnection("source"));touchNode(v,MotionEvent.ACTION_DOWN,"target");assertTrue(busy)
+        val camera=v.viewport();v.zoomBy(2f);v.fit();v.centerOn("target")
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_DPAD_DOWN,android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_DPAD_DOWN))
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER,android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_ENTER))
+        assertEquals(camera,v.viewport());assertEquals("source",v.connectionFrom)
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_ESCAPE,android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_ESCAPE))
+        assertNull(v.connectionFrom);assertFalse(busy);touchNode(v,MotionEvent.ACTION_UP,"target")
+        assertEquals(before,v.document)
+    }
+    @Test fun connectionLifecycleCancellationReleasesBusyAndSwallowsOldUp()=ui {context->
+        for(cancel in listOf<(MindMapView)->Unit>({it.cancelConnection()},{it.onWindowFocusChanged(false)},
+            {it.isEnabled=false},{it.layout(0,0,700,400)},{it.document=it.document.copy(id="another")},
+            {it.document=it.document.delete("target").update("source") {n->n.copy(id="other-source")}})) {
+            val v=connectView(context);var busy=false;var requests=0
+            v.onInkContact={busy=it};v.onConnectionTarget={_,_->requests++};v.onChange={fail("Old stream must not write")}
+            val target=at(v,"target")
+            assertTrue(v.beginConnection("source"));touchNode(v,MotionEvent.ACTION_DOWN,"target");assertTrue(busy)
+            cancel(v);assertFalse(busy);assertNull(v.connectionFrom)
+            v.isEnabled=true;send(v,MotionEvent.ACTION_UP,target.x.toFloat(),target.y.toFloat())
+            assertEquals(0,requests);assertFalse(v.inkInput.active)
+        }
+    }
+
+    private fun multi(v:MindMapView,action:Int,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>,oracle:android.view.ScaleGestureDetector?=null) {
+        val props=types.mapIndexed {i,type->MotionEvent.PointerProperties().apply {id=if(i==0) 2 else 7;toolType=type}}.toTypedArray()
+        val coords=points.map {p->MotionEvent.PointerCoords().apply {x=p.x.toFloat();y=p.y.toFloat();pressure=.7f}}.toTypedArray()
+        val e=MotionEvent.obtain(100,time++,action,props.size,props,coords,0,0,1f,1f,888,0,
+            if(types.any {it==MotionEvent.TOOL_TYPE_STYLUS}) InputDevice.SOURCE_STYLUS else InputDevice.SOURCE_TOUCHSCREEN,0)
+        try {oracle?.onTouchEvent(e);v.onTouchEvent(e)} finally {e.recycle()}
+    }
+    @Test fun connectionPenOwnsItsPointerBeforeAndAfterPalmAndOnlyFinishesWhenItLifts()=ui {context->
+        for(palmFirst in listOf(false,true)) {
+            val v=connectView(context);val before=v.document;val camera=v.viewport();var busy=false;var requests=0
+            val source=at(v,"source");val target=at(v,"target");val palm=com.xnotes.core.geometry.Pt(150.0,150.0)
+            v.onInkContact={busy=it};v.onConnectionTarget={from,to->assertFalse(busy);assertEquals("source",from);assertEquals("target",to);requests++}
+            assertTrue(v.beginConnection("source"))
+            if(palmFirst) multi(v,MotionEvent.ACTION_DOWN,listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(palm))
+            else touchNode(v,MotionEvent.ACTION_DOWN,"source")
+            val types=listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS)
+            multi(v,MotionEvent.ACTION_POINTER_DOWN or (if(palmFirst) 1 shl 8 else 0),types,listOf(palm,source))
+            assertTrue(busy)
+            multi(v,MotionEvent.ACTION_MOVE,types,listOf(palm,target));assertEquals("target",v.connectionTarget)
+            multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),types,listOf(palm,target))
+            multi(v,MotionEvent.ACTION_MOVE,listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(target))
+            multi(v,MotionEvent.ACTION_UP,listOf(MotionEvent.TOOL_TYPE_FINGER),listOf(target))
+            assertEquals(1,requests);assertFalse(busy);assertEquals(camera,v.viewport());assertEquals(before,v.document)
+        }
+    }
+    @Test fun connectionRetriesCannotQuickScaleAndSubsequentTruePinchKeepsItsRatioAndFocus()=ui {context->
+        val v=connectView(context);val before=v.document;val camera=v.viewport();var requests=0;var edits=0
+        v.onConnectionTarget={_,_->requests++};v.onEdit={edits++};assertTrue(v.beginConnection("source"))
+        // Respect Android's double-tap minimum delay; a stream of 1 ms taps would never test quick-scale.
+        repeat(2) {
+            send(v,MotionEvent.ACTION_DOWN,780f,480f,MotionEvent.TOOL_TYPE_FINGER);time+=40
+            send(v,MotionEvent.ACTION_UP,780f,480f,MotionEvent.TOOL_TYPE_FINGER);time+=80
+            send(v,MotionEvent.ACTION_DOWN,780f,480f,MotionEvent.TOOL_TYPE_FINGER);time+=50
+            send(v,MotionEvent.ACTION_MOVE,780f,380f,MotionEvent.TOOL_TYPE_FINGER);time+=50
+            send(v,MotionEvent.ACTION_MOVE,780f,280f,MotionEvent.TOOL_TYPE_FINGER)
+            send(v,MotionEvent.ACTION_UP,780f,280f,MotionEvent.TOOL_TYPE_FINGER);time+=400
+            touchNode(v,MotionEvent.ACTION_DOWN,"source",MotionEvent.TOOL_TYPE_FINGER)
+            touchNode(v,MotionEvent.ACTION_UP,"source",MotionEvent.TOOL_TYPE_FINGER);time+=80
+        }
+        assertEquals(camera,v.viewport());assertEquals(0,requests);assertEquals(0,edits)
+        val oldPoint=at(v,"source");val finger=MotionEvent.TOOL_TYPE_FINGER
+        var expected=1f
+        val oracle=android.view.ScaleGestureDetector(context,object:android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector:android.view.ScaleGestureDetector):Boolean {expected*=detector.scaleFactor;return true}
+        })
+        multi(v,MotionEvent.ACTION_DOWN,listOf(finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0)),oracle)
+        multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0),com.xnotes.core.geometry.Pt(700.0,250.0)),oracle)
+        assertNull(v.connectionFrom)
+        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(50.0,250.0),com.xnotes.core.geometry.Pt(750.0,250.0)),oracle)
+        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(-50.0,250.0),com.xnotes.core.geometry.Pt(850.0,250.0)),oracle)
+        val ratio=v.viewport().zoom/camera.zoom
+        assertTrue("A genuine pinch must still zoom",ratio>1.1f);assertEquals(expected,ratio,.001f)
+        val newPoint=at(v,"source")
+        assertEquals(400.0+(oldPoint.x-400.0)*ratio,newPoint.x,.1)
+        assertEquals(250.0+(oldPoint.y-250.0)*ratio,newPoint.y,.1)
+        multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(-50.0,250.0),com.xnotes.core.geometry.Pt(850.0,250.0)))
+        multi(v,MotionEvent.ACTION_UP,listOf(finger),listOf(com.xnotes.core.geometry.Pt(-50.0,250.0)))
+        assertEquals(before,v.document);assertEquals(0,requests)
+    }
+    @Test fun keyboardConnectionKeepsItsSourceAndDoesNotEnterBodyEditing()=ui {context->
+        val v=connectView(context);val before=v.document;var requested:Pair<String,String>?=null;var edits=0
+        assertTrue(v.isFocusableInTouchMode)
+        v.onConnectionTarget={from,to->requested=from to to};v.onEdit={edits++}
+        assertTrue(v.beginConnection("source"));v.selected="target"
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER,android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_ENTER))
+        v.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER,android.view.KeyEvent(100,200,android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_ENTER,1))
+        assertEquals("source" to "target",requested);assertEquals(0,edits);assertEquals(before,v.document)
+        v.onKeyUp(android.view.KeyEvent.KEYCODE_ENTER,android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,android.view.KeyEvent.KEYCODE_ENTER))
+    }
+    @Test fun connectionCancellationAndSuccessfulSelectionDrainNewPenPointersInTheRemainingStream()=ui {context->
+        for(success in listOf(false,true)) {
+            val v=connectView(context);val before=v.document;var requests=0;var commits=0
+            val finger=MotionEvent.TOOL_TYPE_FINGER;val pen=MotionEvent.TOOL_TYPE_STYLUS
+            val palm=com.xnotes.core.geometry.Pt(150.0,150.0);val target=at(v,"target")
+            v.onConnectionTarget={_,_->requests++};v.onChange={commits++;v.document=it}
+            assertTrue(v.beginConnection("source"))
+            multi(v,MotionEvent.ACTION_DOWN,listOf(finger),listOf(palm))
+            if(success) {
+                multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(finger,pen),listOf(palm,target))
+                multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(finger,pen),listOf(palm,target))
+            } else v.cancelConnection()
+            // A new pen pointer in the unended palm stream must not fall through to normal ink.
+            multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(finger,pen),listOf(palm,target))
+            multi(v,MotionEvent.ACTION_MOVE,listOf(finger,pen),listOf(palm,target+com.xnotes.core.geometry.Pt(15.0,15.0)))
+            multi(v,MotionEvent.ACTION_POINTER_UP or (1 shl 8),listOf(finger,pen),listOf(palm,target))
+            multi(v,MotionEvent.ACTION_UP,listOf(finger),listOf(palm))
+            assertEquals(if(success) 1 else 0,requests);assertEquals(0,commits);assertEquals(before,v.document)
+            // Fresh DOWN leaves the drain and restores ordinary direct handwriting.
+            touchNode(v,MotionEvent.ACTION_DOWN,"target");touchNode(v,MotionEvent.ACTION_UP,"target")
+            assertEquals(1,commits)
+        }
+    }
+    @Test fun collapsingTheArmedSourcesAncestorCancelsAndReleasesItsPenContact()=ui {context->
+        val v=connectView(context);val parent=MapNode(id="ancestor",parent=null)
+        v.document=v.document.copy(nodes=listOf(parent)+v.document.nodes.map {if(it.id=="source") it.copy(parent=parent.id) else it})
+        var busy=false;var requests=0;v.onInkContact={busy=it};v.onConnectionTarget={_,_->requests++}
+        assertTrue(v.beginConnection("source"));touchNode(v,MotionEvent.ACTION_DOWN,"target");assertTrue(busy)
+        v.document=v.document.update(parent.id) {it.copy(collapsed=true)}
+        assertFalse(busy);assertNull(v.connectionFrom)
+        touchNode(v,MotionEvent.ACTION_UP,"target");assertEquals(0,requests);assertTrue(v.document.node("target").ink.isEmpty())
+    }
+
 }
