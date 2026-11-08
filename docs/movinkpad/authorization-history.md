@@ -153,3 +153,5 @@
 ## 2026-11-08 Release 98 真机验收、画布闪烁修复合并与推送
 
 - 用户要求「合并至主分支并推送远端」：将 `worktree-device-acceptance-release98`（`476725f7` Release 98 真机验收记录、`b1991440` 画布闪烁调研、`1e7a8df7` 图层侧栏覆盖画布与图层增量更新）以 `--no-ff` 合入本地 `master` 并推送 `origin/master`，保留原分支。合并前远端新增 `60d477b3`（test4 打包记录，仅文档），已先合入该分支，无冲突。依据：编译与全量 2849 项 JVM 通过，仪器测试源码编译通过；模拟器、仪器测试与目标设备未运行，闪烁修复效果待真机验证。仅限本次合并与推送，不包含打包 APK、安装或 GitHub Release。
+
+- 用户再次要求拉取更新并打包独立测试 APK，不覆盖正式版，自动推送打包日志。本轮快进至 `fdc1f0fe`，交付 `com.xnotes.movinkpad.branchtest.master` / versionCode 5，沿用原签名；已有 test4 更新为 test5，正式版独立。仅本地交付 APK，推送本轮文档与日志，不上传 APK、不发布 GitHub Release、不安装用户设备。

@@ -8,7 +8,7 @@
 
 最新本地覆盖更新：[0.9.8 / Release 98 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release98-arm64.apk)，沿用正式包名与签名，包含 AI 模板文字 / 图像模型自选，以及无限画布退出分屏黑屏修复；三键、黑白界面、图层、分屏湿墨与黑屏、单份 PDF 重新关联已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。见 [打包与验证记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
 
-最新主线独立测试版：[master test4 ARM64 APK](build/branch-tests/master-test4/XNotes-master-711470e8-test4-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，数据独立。包含进入画布时等待首帧、纸面颜色覆盖等闪烁候选修复，目标设备效果待确认。见 [打包记录](docs/movinkpad/master-test4-2026-11-08.md)。
+最新主线独立测试版：[master test5 ARM64 APK](build/branch-tests/master-test5/XNotes-master-fdc1f0fe-test5-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，数据独立。包含图层侧栏覆盖画布及图层增量更新，新增调整的目标设备效果待确认。见 [打包记录](docs/movinkpad/master-test5-2026-11-08.md)。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 
