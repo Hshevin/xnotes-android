@@ -134,4 +134,28 @@ class DrawingLayersTest {
         assertFalse(layers.moveBefore(top.id, top.id))
         assertEquals(before, layers.entries)
     }
+
+    @Test fun stackedKeepsHiddenLayersInDrawingOrder() {
+        val page = Page(100.0, 100.0)
+        val bottom = item().also { page.items.add(it) }
+        val upper = page.layers.create("Upper")
+        val top = item().also { page.items.add(it) }
+        page.layers.select(DrawingLayers.DEFAULT)
+        val alsoBottom = item().also { page.items.add(it) }
+        page.layers.update(DrawingLayers.DEFAULT) { it.copy(visible = false) }
+
+        assertEquals(listOf(top), page.layers.ordered(page.items))
+        assertEquals(listOf(bottom, alsoBottom, top), page.layers.stacked(page.items))
+        assertEquals(setOf(DrawingLayers.DEFAULT), page.layers.hiddenIds)
+        page.layers.update(upper.id) { it.copy(visible = false) }
+        assertEquals(setOf(DrawingLayers.DEFAULT, upper.id), page.layers.hiddenIds)
+    }
+
+    @Test fun stackedOnOneHiddenLayerStillListsItsItems() {
+        val page = Page(100.0, 100.0)
+        val ink = item().also { page.items.add(it) }
+        page.layers.update(DrawingLayers.DEFAULT) { it.copy(visible = false) }
+        assertTrue(page.layers.ordered(page.items).isEmpty())
+        assertEquals(listOf(ink), page.layers.stacked(page.items))
+    }
 }

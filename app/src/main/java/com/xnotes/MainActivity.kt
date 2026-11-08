@@ -2005,37 +2005,48 @@ private fun EditorPane(
                 val canvas = editor.infinite
                 val bar: @Composable () -> Unit = { EditorToolbar(editor, app, actions) }
                 PaneToolbarAround(!closable, bar, onCover = canvas::setToolbarCover) { floatingBar ->
-                    Row(Modifier.fillMaxSize()) {
-                        if (canvas.layersSidebarVisible) {
-                            Box(Modifier.width(com.xnotes.ui.theme.LayerSidebarWidth).fillMaxHeight()) {
+                    // The layers sidebar lies over the canvas instead of narrowing it. Resizing the
+                    // canvas's two surfaces on every toggle is what flashed black: the window opens
+                    // the new area before the GL thread has a frame of the new size for it.
+                    val sidebarShown = canvas.layersSidebarVisible
+                    val sidebarPx = with(androidx.compose.ui.platform.LocalDensity.current) {
+                        com.xnotes.ui.theme.LayerSidebarWidth.toPx().toDouble()
+                    }
+                    SideEffect { canvas.setSidebarCover(if (sidebarShown) sidebarPx else 0.0) }
+                    Box(Modifier.fillMaxSize().clipToBounds()) {
+                        AndroidView(
+                            factory = {
+                                detached(canvas.surfaces)
+                                canvas.surfacesForAttach()
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            update = { canvas.view.publish() },
+                        )
+                        canvas.editingField?.let { field ->
+                            com.xnotes.ui.TextEditorOverlay(canvas, field)
+                        }
+                        if (sidebarShown) {
+                            // Taking every pointer keeps a touch on the panel's empty space
+                            // from reaching the canvas underneath.
+                            Box(Modifier.width(com.xnotes.ui.theme.LayerSidebarWidth).fillMaxHeight()
+                                .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
                                 com.xnotes.ui.LayersSidebar(canvas)
                             }
                         }
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                            AndroidView(
-                                factory = {
-                                    detached(canvas.surfaces)
-                                    canvas.surfacesForAttach()
-                                },
-                                modifier = Modifier.fillMaxSize(),
-                                update = { canvas.view.publish() },
-                            )
-                            canvas.editingField?.let { field ->
-                                com.xnotes.ui.TextEditorOverlay(canvas, field)
-                            }
+                        Box(Modifier.fillMaxSize().padding(start = if (sidebarShown) com.xnotes.ui.theme.LayerSidebarWidth else 0.dp)) {
                             floatingBar()
-                            com.xnotes.ui.SelectionMenu(
-                                canvas,
-                                onSaveAudio = { actions.onSaveAudio(editor, it) },
-                                onShareAudio = { actions.onShareAudio(editor, it) },
-                                onShareImage = actions.onShareImage,
-                            )
-                            com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
-                            com.xnotes.ui.CropOverlay(canvas)
-                            com.xnotes.ui.TextStyleBar(canvas)
-                            com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
-                            com.xnotes.ui.CanvasDebugOverlay(canvas)
                         }
+                        com.xnotes.ui.SelectionMenu(
+                            canvas,
+                            onSaveAudio = { actions.onSaveAudio(editor, it) },
+                            onShareAudio = { actions.onShareAudio(editor, it) },
+                            onShareImage = actions.onShareImage,
+                        )
+                        com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
+                        com.xnotes.ui.CropOverlay(canvas)
+                        com.xnotes.ui.TextStyleBar(canvas)
+                        com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
+                        com.xnotes.ui.CanvasDebugOverlay(canvas)
                     }
                 }
             } else {

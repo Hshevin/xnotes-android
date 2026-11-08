@@ -72,7 +72,7 @@
 
 - 仅黑白：纸面、面板、菜单为纯白 #FFFFFF / 纯黑 #000000，夜间反转，选中态完全反转。允许中性灰阶（R = G = B）表现层级（次要文字、分隔线、填充、背景）；不用彩色强调色、渐变或装饰阴影。笔迹颜色与 PDF 属于内容，不受主题约束。
 - 页面上的工具标记（选框、套索、手柄、光标、参考线、文本框边框）须与页面形成对比，而非跟随主题：读取 `CanvasState.palette` / `TextEditHost.overlayPalette`，夜间模式下在 PDF 或浅色页面上改用黑色。无限画布同一视图混有黑纸与白图片，因此 `OverlayTessellator` 在每个标记下垫 1 px 反色描边；其深色取 (1, 1, 1)，因为夜间笔迹会把精确的 (0, 0, 0) 重绘为白色。
-- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。全界面视觉与真机验收待执行。
+- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。Release 98 已在 MovinkPad Pro 14 / Android 15 通过日夜间真机视觉验收，见 `docs/movinkpad/device-acceptance-release98-2026-11-08.md`。
 - 用户可见文字放入字符串资源：英文在 `values/`，相同的简体中文在 `values-b+zh+Hans/` 与 `values-zh-rCN/`。AI 界面文字在 `ai.xml`；`ai/` 后端消息经 `AiText.t(AiMsg…)` 与 `ai_messages.xml`；`storage/` 消息经 `StorageText.t(StorageMsg…)` 与 `storage_messages.xml`。持久化键（AI 轮次状态、默认会话标题）与面向模型的提示词保持不变，仅在显示时翻译。
 - 功能名称统一为「AI」，截图入口、浮窗和设置不再使用「问 AI」。
 
@@ -90,8 +90,8 @@
 - 替换工作区前等待保存完成，避免异步关闭回调误关新文档；文档未打开成功时，不得因预检查失败丢弃当前工作区。
 - 分屏文档的关闭 / 返回先显示该窗格的文件选择首页，关闭首页才移除窗格。暂留文档由已有的保存 / 放弃保护处理替换与最终关闭；同文件共享视图关闭拥有者时，保留另一侧首页的物理位置。
 - 文件树只为已确认存在子文件夹的节点显示展开箭头。
-- 分页编辑器跨 AndroidView 宿主重挂时，必须通过 `Editor.surfacesForAttach()` 替换 GlWetPad / FrontInk：先归还暂存笔迹并断开旧回调，保留文档、普通画布、缓存及前缓冲开关。未经目标设备回归不要恢复复用旧湿墨 View。底层 RenderNode / crop 机制仍为推断，不把该修复扩大为全部场景或其他设备的验收。详见 `docs/movinkpad/split-wet-ink-2026-11-04.md`。
-- 无限画布的跨宿主重挂候选通过 `InfiniteEditor.surfacesForAttach()` 在旧 GL 线程完成 detach 后替换主绘制 View 与湿墨 View；保留同一 viewport、scene、文档与撤销，归还暂存及正在绘制的笔段，不复用旧 renderer 的帧回调。首次挂载不替换。画布不再分屏后，主菜单往返仍会卸载并重挂宿主；稳定工具栏布局只减少不必要拆挂，不能取代真实重挂时的替换保护，也不据此宣称黑区已解决。见 `docs/movinkpad/canvas-split-black-2026-11-07.md`、`docs/movinkpad/stable-pane-layout-backport-2026-11-07.md`。
+- 分页编辑器跨 AndroidView 宿主重挂时，必须通过 `Editor.surfacesForAttach()` 替换 GlWetPad / FrontInk：先归还暂存笔迹并断开旧回调，保留文档、普通画布、缓存及前缓冲开关。Release 98 已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 通过分屏湿墨真机验收；不要恢复复用旧湿墨 View。底层 RenderNode / crop 机制仍为推断，不把该结果扩大到其他设备。详见 `docs/movinkpad/split-wet-ink-2026-11-04.md`。
+- 无限画布的跨宿主重挂候选通过 `InfiniteEditor.surfacesForAttach()` 在旧 GL 线程完成 detach 后替换主绘制 View 与湿墨 View；保留同一 viewport、scene、文档与撤销，归还暂存及正在绘制的笔段，不复用旧 renderer 的帧回调。首次挂载不替换。画布不再分屏后，主菜单往返仍会卸载并重挂宿主；稳定工具栏布局只减少不必要拆挂，不能取代真实重挂时的替换保护。Release 98 已在目标真机确认画布退出分屏无黑区，根因仍为推断。见 `docs/movinkpad/canvas-split-black-2026-11-07.md`、`docs/movinkpad/stable-pane-layout-backport-2026-11-07.md`。
 
 ## 存储、PDF 与迁移
 
@@ -100,7 +100,7 @@
 - 导入与格式升级时保留旧笔迹及原 PDF 负载的原始字节；这不构成修改普通笔画简化的授权。迁移须先暂存并校验再发布，不得借模型重新编码来升级元数据或迁移笔迹。
 - 文档 UUID 与资源指纹分开。ID 缺失或重复时需显式恢复，不随意选择。登记表 / SAF 恢复及基于 ID 的分屏恢复已接入源码，设备验收待执行。
 - 单份 PDF：内部 `.xnote` 用身份元数据 v2 引用私有不可变 PDF 对象；分享 / 导出生成嵌入原 PDF 的便携包（身份 v1）。旧包在打开时按需迁移：先校验并持久保护原件，再逐条保留非 PDF 负载并安全发布。
-- 共享不可变 PDF 对象使用索引引用、活跃租约与延迟回收；不得被缩略图、合并或导出临时清理删除。内部笔记单独复制不构成备份，完整备份必须经应用导出。平台及目标设备验收待执行。详见 `docs/movinkpad/pdf-single-copy-2026-11-05.md`。
+- 共享不可变 PDF 对象使用索引引用、活跃租约与延迟回收；不得被缩略图、合并或导出临时清理删除。内部笔记单独复制不构成备份，完整备份必须经应用导出。单份 PDF 与原件缺失后重新关联已在 Release 98 目标真机通过。详见 `docs/movinkpad/pdf-single-copy-2026-11-05.md`。
 - 引用式笔记的私有原件缺失（其他安装身份迁移、重装、清除数据）时，恢复对话框提供重新关联（原 PDF 或仍内嵌原件的旧笔记 / 导出包，SHA-256 必须与记录一致，不得用不同 PDF 替换底稿），以及不写原文件的「仅笔迹」副本。受管原件只由引用与租约回收删除，任何临时文件清理（如 `adoptOpenPdf`）都必须跳过 `PdfResources.isOwned`。详见 `docs/movinkpad/pdf-relink-2026-11-05.md`、`docs/movinkpad/pdf-original-deletion-2026-11-06.md`。
 
 ## 图层
@@ -112,6 +112,8 @@
 - 缩略图与名称区域按下后移动即可排序（保留系统移动阈值防误触），不要求长按；点击选层、双击名称重命名。落下形成一次撤销，取消不改模型；选择当前层不占用内容撤销记录。面板跟随当前页面 / 文档与撤销更新。
 - 缩略图只显示单层自身内容，隐藏层仍有预览，不混入 PDF / 纸张背景。显示范围：分页笔记 / PDF 为不显示、已有笔记区域、整页；无限画布只有不显示和已有笔记区域。内容模式按单层内容边界裁切；不显示时不计算边界、不生成位图；显示设置不进入撤销栈。
 - 异步渲染只读几何快照；翻页、关闭或版本变化须取消旧任务。预览缓存不写入笔记格式。
+- 无限画布的图层显隐是绘制时过滤：隐藏层网格常驻场景，顺序用含隐藏层的 `DrawingLayers.stacked`。图层编辑、图层撤销重做与叠放调整经 `InfiniteEditor.syncScene` 按差异在一个批次内更新，不 `Reset` 场景；只有打开文档整体重建。`replaceAll` 的调用方不得改条目几何（改几何走 `onItemChanged`）。
+- 无限画布的图层侧栏盖在画布上，不改画布 / 湿墨 SurfaceView 的尺寸；侧栏宽度经 `setSidebarCover` 并入视口左内边距且不重新居中。见 `docs/movinkpad/canvas-flicker-fix-2026-11-08.md`。
 
 ## AI
 

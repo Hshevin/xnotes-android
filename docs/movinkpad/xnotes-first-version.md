@@ -53,3 +53,7 @@
 - 应用：XNotes Pen Preview；包名 `com.xnotes.movinkpad`；版本 `0.9.6-movinkpad-preview1`（67）。
 - SHA-256：`04d243d7d7a096e8681c9475d7fd797ed7e2afe148102d93e5a77d5ad7cf9f60`。
 - 最终包已用 `adb install -r` 安装成功（不需要 `-t`）；重新运行 Android 测试得到 `Tests: 6, failures: 0 / PASS`。
+
+## 真机验收（2026-11-08）
+
+Release 98 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上通过，见 [真机验收记录](device-acceptance-release98-2026-11-08.md)。
