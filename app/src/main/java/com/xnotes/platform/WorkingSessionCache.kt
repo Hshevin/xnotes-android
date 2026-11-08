@@ -57,7 +57,7 @@ internal class WorkingSessionCache(
 
     private data class Body(val name:String,val sha:String,val kind:Kind,val documentId:String,val version:Long,val metadata:String)
     private data class Head(val hash:String?,val body:Body?)
-    private data class Proof(val owner:Any,val headHash:String,val body:Body)
+    private data class Proof(val owner:Any,val headHash:String,val body:Body,val generation:Long)
     private class Coordinator {
         var generation=0L
         var latest:Request?=null
@@ -140,7 +140,7 @@ internal class WorkingSessionCache(
                     verifyHeadCandidate(headTemp,bytes)
                     Files.move(headTemp.toPath(),headFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
                     state.observedHeadHash=sha(bytes)
-                    state.committed=Proof(request.owner,state.observedHeadHash!!,next)
+                    state.committed=Proof(request.owner,state.observedHeadHash!!,next,request.generation)
                     true
                 }
             }
@@ -206,6 +206,21 @@ internal class WorkingSessionCache(
         verify(head.body,checkActive)
         read.checkIssuer(readIssuer)
         synchronized(state) {read.checkIssuer(readIssuer);if(checkedHead().hash!=read.headHash) throw Conflict()}
+    }
+    /** Runtime provenance only, not a way to claim a cold body's contentVersion for a new model. */
+    fun ownsPublished(read:Read,owner:Any,minimumGeneration:Long=0):Boolean {
+        read.checkIssuer(readIssuer)
+        return synchronized(state) {ownsHead(read.headHash,owner,minimumGeneration)}
+    }
+    fun ownsPrevious(previous:Previous,owner:Any)=synchronized(state) {ownsHead(previous.headHash,owner,0)}
+    private fun ownsHead(hash:String,owner:Any,minimumGeneration:Long)=state.committed?.let {
+        it.owner===owner && it.headHash==hash && it.generation>=minimumGeneration
+    }==true
+    /** Owner-thread boundary: pure memory, atomically invalidate only the exact preflight head. */
+    fun invalidateForRead(read:Read,owner:Any):Boolean=synchronized(state) {
+        read.checkIssuer(readIssuer)
+        if(state.observedHeadHash!=read.headHash || !ownsHead(read.headHash,owner,0)) false
+        else {nextGeneration();state.latest=null;true}
     }
     private fun previous(head:Head)=head.body?.let {Previous(it.kind,it.documentId,it.version,it.metadata,it.sha,requireNotNull(head.hash))}
 

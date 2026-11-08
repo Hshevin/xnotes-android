@@ -82,14 +82,16 @@ internal class PreparedNativeOpen private constructor(
         @Synchronized fun invalidate() {active=false}
         private fun authorize(epoch:Long,expected:NativeSourceVersion):Boolean=synchronized(this) {active && generation==epoch && base===expected}
         /** Read-only epoch, with no native body or publication capability. */
-        class Observation private constructor(private val source:EditSource,private val epoch:Long,val expected:NativeSourceVersion) {
+        class Observation private constructor(private val source:EditSource,private val epoch:Long,val expected:NativeSourceVersion,
+                                              internal val ownerToken:Any) {
             fun isCurrent()=source.authorize(epoch,expected)
+            internal fun matches(request:SaveRequest)=isCurrent() && request.expected===expected && request.issuedBy(source.issuer,epoch)
             companion object {
                 internal fun capture(source:EditSource,document:Document):Observation=synchronized(source) {
-                    Observation(source,source.generation,source.version(document))
+                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken)
                 }
                 internal fun capture(source:EditSource,document:InfiniteDocument):Observation=synchronized(source) {
-                    Observation(source,source.generation,source.version(document))
+                    Observation(source,source.generation,source.version(document),document.snapshotOwnerToken)
                 }
             }
         }
@@ -175,6 +177,20 @@ internal class PreparedNativeOpen private constructor(
                 val handoffId get()=stage.handoffId
                 val original get()=stage.original
                 val candidate get()=stage.candidate
+                internal val recordDigest get()=stage.recordDigest
+                internal val uri get()=request.uri
+                internal val ownerToken:Any get()=when(request) {is Note->request.snapshot.snapshotOwnerToken;is Canvas->request.snapshot.snapshotOwnerToken}
+                internal fun checkCurrent() {request.checkCurrent({});check(handoffId!=null)}
+                internal fun usesResources(resources:PdfResources)=request.resources===resources && storage.pdfResources===resources
+                internal fun checkCapture(proof:EditSource.Observation?,owner:Any) {
+                    checkCurrent()
+                    if(proof==null || !proof.matches(request) || proof.ownerToken!==ownerToken || owner!==ownerToken)
+                        throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                }
+                internal fun verifyWorkingBody(file:File,checkActive:()->Unit={}) {
+                    request.checkCurrent(checkActive)
+                    stage.verifyWorkingContract(BundleReferenceInfo.inspect(file,true) {request.checkCurrent(checkActive);false})
+                }
                 fun commit(checkActive:()->Unit={}):Receipt {
                     val check={request.checkCurrent(checkActive)}
                     check()

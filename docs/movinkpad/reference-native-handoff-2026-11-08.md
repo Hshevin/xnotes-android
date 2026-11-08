@@ -91,3 +91,17 @@ NotebookStorage.StagedSave已绑定实际storage issuer、canonical journal路�
 定向tmp/native-handoff-transition-first.log已成功，包含previous guard拒write/clear且零新bytes、guard内其它线程reserve不死锁、最后检查后失效write/clear、forceBody与Read issuer/open/head反例；Android源码编译成功。schema2 T/私有permit/root intent/ack/accepted ID/恢复claim内核仍继续，不能把基础接口当作完整交接。
 
 基础接口最终tmp/native-handoff-transition-full.log完整302套件3334项全过（0失败/错误/跳过），Android测试源码编译成功；5新增JVM场景，真实Android仪器未运行。已核Read最终短锁内再次确认open/issuer。该片未引入T/ack/source grant，后续内核继续实施。
+
+## 同head持久化结果（native4续写尚未开放）
+
+native metadata已写schema2/读1、2，T严格绑定sourceA与实际v4 record字节摘要；未知/未来/坏T不得降级。实际Receipt.Staged以原请求issuer/epoch/owner和原PDF/anchor合同核实capture，私有seal的一次性Main permit禁止旧Write重标。Root共享intent先原子失效旧reservation再注册，同owner后续capture继承T，未persist先强制新正文；其它owner/旧Write/clear拒绝。cold T可load data但所有普通写/清空和当前prepareRecovery都拒绝；B恢复/采用claim在下一半，不提前颁source grant。
+
+preflight明确要求已有普通bound working checkpoint且由这个runtime owner提交；empty/cleared不是owner证明，调用方须先persist当前普通C0，新增验证覆盖这一前置。IO preflight actual Read持到Main，invalidateForRead在cache同一短锁核issuer/open+exact observed/committed headHash与owner再失效，Root才注册。previous-head hook还核actual runtime owner及kind/docId/key/sourceA，避免预检后另owner提交D被覆盖。只允许注册后的更新同owner T提供更晚checkpoint。
+
+实际HandoffPublication只由当前durable C+T head签发，本次fresh ticket或更晚同owner runtime publication generation才可背书，不能拿上次旧T head确认本次未持久C2。Proof.generation为运行时值，不写格式，不从旧head.counter恢复或给冷模型复用。持有Read，close或head变后旧proof失效。原文件仍A，旧core/storage/native-only v4提交全部保持拒绝；本片不等于原文件保存成功。
+
+独立复核两项和自查一项均留先红后绿：tmp/native-handoff-persistence-review-red.log重现preflight→Main覆盖D与withContext返回派发取消泄漏Read；tmp/native-handoff-persistence-generation-red.log重现旧T为新失败尝试背书。修复使用actual Read原子注册、IO外AtomicReference+NonCancellable IO清理（交出ref前先清preflight并再check，finally无资源不再挂起），以及本attempt generation下限。D oracle保留实际新head/body与700坐标内容且可继续保存，不要求把释放预检lease后的旧不可达body作为资料保留。
+
+定向tmp/native-handoff-persistence-review-fixed.log与tmp/native-handoff-persistence-boundaries.log通过、Android测试源码编译成功，14新增JVM包括真实post-stage C+T、旧/重复/false permit、更晚成功、Root最后check后失效、跨owner/adapter、cold拒写、坏future T全字节保留、schema1、PDF变化无grant及派发取消GC。完整tmp/native-handoff-persistence-full.log：303套件3348项全过（0失败/错误/跳过），Android测试源码编译成功。native4 ack commit、accepted ID/completion、actualB恢复claim和生产稳定输入仍继续，不取消后续需求。
+
+持久化半段独立窄复核确认三个窗口已闭合。所有后续生产native保存必须统一经过协调协议，不能在未解决T期间混用native-only写入；格式相同SHA不能证明另一次普通保存未发生。当前Editor/旧session尚未迁移，不开启半套生产流程。下一半以私有HandoffPublication绑定确切Staged/canonical journal/record，才授native4写入；再实现accepted ID与actualB恢复认领。

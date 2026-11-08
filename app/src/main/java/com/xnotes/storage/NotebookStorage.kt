@@ -24,15 +24,22 @@ class NotebookStorage internal constructor(private val context:Context,
     internal class StagedSave private constructor(
         private val issuer:Any,internal val uri:String,internal val journalPath:String,internal val recordDigest:String,
         val original:NativeSourceVersion,val candidate:NativeSourceVersion,val handoffId:String?,
+        private val anchored:Boolean,private val originalPdfHash:String?,
     ) {
         private var consumed=false
         @Synchronized internal fun consume(owner:Any) {
             if(owner!==issuer || consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
             consumed=true
         }
+        internal fun verifyWorkingContract(info:com.xnotes.format.BundleReferenceInfo) {
+            if(info.format!=original.kind.extension || info.header.identity?.documentId!=original.documentId ||
+                (info.header.anchors!=null)!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+            if(info.originalPdfHash!=originalPdfHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
+        }
         companion object {
             internal fun issue(issuer:Any,uri:String,journalPath:String,recordDigest:String,original:NativeSourceVersion,
-                               candidate:NativeSourceVersion,handoffId:String?)=StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId)
+                               candidate:NativeSourceVersion,handoffId:String?,info:com.xnotes.format.BundleReferenceInfo)=
+                StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId,info.header.anchors!=null,info.originalPdfHash)
         }
     }
     /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
@@ -439,7 +446,7 @@ class NotebookStorage internal constructor(private val context:Context,
             val recordDigest=pending.stage(source.file,candidate,expected,expectedCandidateHash=next.version.sha256,
                 expectedOriginalHash=original.version.sha256,handoffId=handoffId,checkActive=checkActive)
             checkActive()
-            StagedSave.issue(saveIssuer,uri,pending.directoryPath,recordDigest,original.version,next.version,handoffId)
+            StagedSave.issue(saveIssuer,uri,pending.directoryPath,recordDigest,original.version,next.version,handoffId,original.info)
         }
     }
 

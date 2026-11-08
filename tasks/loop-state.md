@@ -51,4 +51,8 @@ R2轻量source observation/按需正文已实现/独立复核通过：tmp/native
 
 同head交接内核计划独立复核可实施，补Root注册/claim/完成先短cache锁invalidate旧reservation再发布intent，guard读同Root锁。基础API WorkingSessionCache previous-head锁外hook/forceBody/invalidate/actual Read issuer+head验证已实现并独立源码复核通过；tmp/native-handoff-transition-first.log定向+Android源码编译通过，完整tmp/native-handoff-transition-full.log 302套件3334项全过，Android源码编译成功。5新增JVM（含最后check后卡住的write/clear竞态），无native授权/schema2激活。继续T/permit/root/ack/B恢复claim实际内核；整体complete=false。
 
-交接previous-head/代次/forceBody/Read基础片完整验证与独立复核完成，阶段待提交；无运行作业。下一步在这些接口上实施schema2 T、一次性capture permit、共享root intent、私有真实head ack/v4 commit和actual B恢复claim，不能把基础片当作交接闭环。overall complete=false。
+交接previous-head/代次/forceBody/Read基础片完整验证与独立复核完成，已提交9d5bfd10；无运行作业。下一步在这些接口上实施schema2 T、一次性capture permit、共享root intent、私有真实head ack/v4 commit和actual B恢复claim，不能把基础片当作交接闭环。overall complete=false。
+
+同head持久化半段已实现并完成独立源码复核：metadata2/读1、2，真实Staged+单次Main seal→当前C+T持久→HandoffPublication私有actual head证明，原文件仍A/native4续写未开放。Root注册原子actual Read head/owner核对、previous hook owner/source复核；派发取消AtomicRefs清理；actual runtime generation>=本次fresh ticket防旧T背书。三个反例先红后绿；14新增JVM定向+Android源码编译通过，完整tmp/native-handoff-persistence-full.log 303套件3348项全过，Android源码编译成功。半段待本地提交；继续native4 typed ack→真实Receipt accepted ID→B恢复/claim，cold T现全部failclosed可读不可普通写。overall complete=false。
+
+同head持久化半段无运行作业、独立复核通过，native4仍默认拒写。下一半private Ack实际current head→同Staged/record/path核实→Native4 commit/实际Receipt T ID，再accepted sourceB completion与B恢复claim。不得混用native-only绕过未解决T，生产UI/稳定输入后续未激活。overall complete=false。

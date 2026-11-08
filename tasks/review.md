@@ -118,3 +118,7 @@ review_input_plan独立计划/源码复核通过：actual source/model observati
 ## 交接转移基础接口（2026-11-08）
 
 review_input_plan计划指出锁外check后的rename窗口，已加同cache短锁invalidateReservations及最后检查后双线程write/clear反例；Root未来注册/claim/完成先失效再发布intent，guard读同Root锁。源码复核确认锁外previous-head hook、失败零新bytes、重入reserve无锁反序、forceBody不伪造复用、Read issuer/open/head均闭合；旧held Read仍可读旧body。最终302套件3334项与Android源码编译全过，仪器/目标设备未运行。T/ack/native授权仍未实现，该片不改变生产。
+
+## 同head交接持久化半段（2026-11-08）
+
+review_input_plan独立源码审核发现preflight→Main另一owner新D被覆盖、返回派发取消Read泄漏；主代理自查旧T为新失败attempt背书。三个真反例先红后绿，分别以held Read exact head/owner原子注册+previous二次核、AtomicRefs/NonCancellable finally、runtime generation下限修复；独立窄复核全部确认。14新JVM场景含Root最后检查后失效、cold future全字节保留/schema1/PDF变化与更晚同owner成功等。最终303套件3348项与Android源码编译全过，仪器/目标设备未执行。native4续写未开放，actualB恢复/claim与生产仍后续。
