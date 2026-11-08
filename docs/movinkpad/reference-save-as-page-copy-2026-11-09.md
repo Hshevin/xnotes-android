@@ -8,7 +8,7 @@
 
 主界面首次保存／另存先结束文本／flow草稿并等当前笔输入、旧写入稳定，核原owner／模型／身份／路径后才固定最新revision的目标选择器请求，避免IME／onPause收尾立即使请求过期。不再先打开可截断的输出流。旧Editor.save(OutputStream)已移除。显式另存走saveAsToThen，即使provider返回原文件URI，也必须通过NativeCreation空目标核实；普通保存同目标仍走原来的受校验发布，不能据此宣称所有外部同UUID内容冲突已解决。
 
-主线程等旧native写入与已接受会话前缀，在输入稳定后准备PageReferenceCopy和固定正文。新目标以NativeCreation发布，成功后才核原owner、模型、路径、身份、scope、PDF文件指针与来源epoch，再采用复制scope及实际PDF元数据。副本的文档UUID／页UUID与原件独立；原文件及旧引用保持原处。Page对象、历史、笔迹和视口保留。晚到的正文修改在采用前按revision判断，继续保持dirty；末次awaitNoteCapture先结束阻断modal，不将预览或未完输入误作保存完成。
+主线程等旧native写入与已接受会话前缀，在输入稳定后准备PageReferenceCopy和固定正文。新目标以NativeCreation发布，成功后才核原owner、模型、路径、身份、scope、PDF文件指针与来源epoch，再采用复制scope及实际PDF元数据。副本的文档UUID独立，已启用引用时页UUID也独立；未启用的legacy不借另存分配页编号。原文件及旧引用保持原处。Page对象、历史、笔迹和视口保留。晚到的正文修改在采用前按revision判断，继续保持dirty；末次awaitNoteCapture先结束阻断modal，不将预览或未完输入误作保存完成。
 
 新PDF原件使用admitHeld覆盖编码及发布期间，发布成功才由新文档永久引用保护，不提前留下虚假的永久note owner。当前文档同时合入实际受管PDF文件和v2身份，不删除旧输入。写后登记失败保持原模型的路径／scope／内容，保留同一候选；可从「恢复资料→继续未完成的副本…」显式选该目标完成，之后手动打开；该独立完成不偷偷采用当前模型。
 
@@ -31,7 +31,7 @@ BundleAnchors.verifyActivation仅接受实际NeedsActivation原件：已有有�
 - `tmp/page-copy-pdf-reviewed-full.log`：PDF采用修复后331套3618项；随后补选择器启动前的输入稳定等待，`tmp/page-copy-pre-picker-input-focused.log`的SaveGate17／Editor6／Picker2共25项及Android编译通过，新增Main顺序独立复核通过。
 - `tmp/page-copy-ui-input-final-full.log`：最终331套3618项，0失败／错误／跳过，Android测试源码编译成功。JDK21、离线Gradle、独立构建与项目缓存。三语资源齐备，两份中文相同，git diff --check通过，独立窄复核通过。
 
-原字节证明已提交`1fe1286c`，选择器组件已提交`929ab4df`。
+原字节证明已提交`1fe1286c`，选择器组件已提交`929ab4df`，实际另存入口与测试已提交`47c4cc49`。
 
 SplitEditorTest中两条旧直接输出流调用已迁异步真实文件保存，保留共享文档／撤销重做／视口／关闭借用窗格及PDF原件断言；新异步夹具使用独立会话／登记／缓存目录并恢复存储单例；`tmp/page-copy-isolated-device-tests-compile.log`编译通过，本轮未执行仪器。系统DocumentsUI、真实SAF权限、PDFium／旋转、MovinkPad Android15 ProPen3、GPU及大文件性能未验收。新增PDF主机用例检验存储而不伪造渲染引擎结论。
 
