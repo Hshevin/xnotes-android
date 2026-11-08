@@ -36,3 +36,7 @@ JVM 新增覆盖：迁移／便携导出所有非身份负载一致、原 PDF �
 Android 仪器测试新增：真实 SQLite 两份笔记引用与导出租约保护；通过应用 DocumentsProvider 打开旧包、验证迁移幂等与 PDF 共享引用、便携导出负载一致。本轮仅编译，不执行设备测试或生成测试 APK。
 
 待设备验证：MovinkPad / Android 15 真机的旧笔记打开、书写保存、关闭重启、两笔记共用原件、合并与缩略图、分享并在独立安装中打开；真实 SAF 提供商的只读、空间不足、进程强杀、恢复入口及大扫描书耗时／峰值空间。不得用 JVM 结果代替这些验收。
+
+## 真机验收（2026-11-08）
+
+Release 98 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上通过，见 [真机验收记录](device-acceptance-release98-2026-11-08.md)。

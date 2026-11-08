@@ -50,3 +50,7 @@
 ## 构建提示
 
 工作区位于 iCloud 同步的 Documents 目录，`app/build` 中出现了 1500 多个 `… 2.*` 重复文件，会导致 dex 合并报 "defined multiple times"。删除这些重复文件（或 `project_dex_archive`）后重新构建即可恢复。
+
+## 真机验收（2026-11-08）
+
+Release 98 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上通过，见 [真机验收记录](device-acceptance-release98-2026-11-08.md)。

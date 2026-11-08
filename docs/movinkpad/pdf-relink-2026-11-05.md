@@ -24,3 +24,7 @@
 - 用户已没有原 PDF、且执行迁移的安装包也不在了时，仍无法恢复底稿；不提供用不同 PDF 强行替换的方式（页面与批注对位无法保证）。
 - 用户可见文件夹中的引用式笔记依赖应用私有存储，多个安装身份共用文件夹时会再次出现。是否对授权文件夹里的笔记保留内嵌 PDF，需要用户决定。
 - 待验证：新增 `missingPrivateOriginalOnlyRelinksIdenticalPdf` 仪器测试的设备运行；MovinkPad 真机上 SAF 选择器重新关联及重新打开。
+
+## 真机验收（2026-11-08）
+
+Release 98 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上通过，见 [真机验收记录](device-acceptance-release98-2026-11-08.md)。
