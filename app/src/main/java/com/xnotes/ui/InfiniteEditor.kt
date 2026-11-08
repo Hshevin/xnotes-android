@@ -309,6 +309,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             itemsRevision++
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
+            sceneLayers.remove(item)
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -333,7 +334,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
         override fun onReset() {
             itemsRevision++
-            rebuildScene()
+            // Only restacks and layer history replace the list wholesale, and neither changes an
+            // item's geometry; loading a document rebuilds explicitly.
+            syncScene()
             view.publish()
             AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -390,7 +393,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Tessellate [item] and hand the triangles to the renderer, or drop it if it draws nothing. */
     private fun pushItem(item: CanvasItem, vectorJobs: MutableList<VectorMeshRequest>? = null) {
-        if (!document.layers.visible(item)) { scene.remove(item); return }
+        // Hidden layers are meshed too: the scene leaves them out at draw time, so showing one
+        // again needs no tessellation.
+        sceneLayers[item] = item.layerId
         // Held back while the front buffer is still the only thing showing this stroke. The
         // document and the history already have it; only its triangles wait.
         for (h in heldItems) if (h === item) return
@@ -458,7 +463,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             // Claimed and filed on the main thread, so this cannot land after a removal that was
             // decided while it ran and put the item back on the canvas.
             mainHandler.post {
-                if (!vectorMeshGen.remove(item, token) || parts.isEmpty() || !document.layers.visible(item)) return@post
+                // Filed even on a hidden layer, which the scene skips at draw time, so showing the
+                // layer again does not leave the placeholder box behind.
+                if (!vectorMeshGen.remove(item, token) || parts.isEmpty()) return@post
                 scene.lastTessellateMs = ms
                 scene.upsert(item, parts, request.bounds)
                 view.publish()
@@ -485,7 +492,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private val vectorMeshGen = java.util.concurrent.ConcurrentHashMap<ImageItem, Long>()
     private val vectorMeshSeq = java.util.concurrent.atomic.AtomicLong()
 
-    /** Re-tessellate the whole document, after a load or a wholesale list replacement. */
+    /**
+     * The document's items as the scene last heard of them, with the layer each was filed under.
+     * Lets a structural change that keeps every item's geometry be applied as a difference.
+     */
+    private val sceneLayers = java.util.IdentityHashMap<CanvasItem, String?>()
+
+    /** Re-tessellate the whole document, after loading it. */
     private fun rebuildScene() {
         val vectorJobs = ArrayList<VectorMeshRequest>()
         scene.batch(afterCommit = {
@@ -493,17 +506,54 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             for (request in vectorJobs) startVectorMesh(request)
         }) {
             scene.reset(imageDecodeBinding)
+            sceneLayers.clear()
             for (item in document.items) pushItem(item, vectorJobs)
             publishLayerOrder()
         }
     }
 
+    /**
+     * Bring the scene in line with a change that kept every item's geometry: a layer edit, its undo
+     * or redo, or a restack. Only what changed is sent: removed items go, added ones are meshed,
+     * moved ones are refiled, and visibility and order are republished. Nothing already on the GPU
+     * is re-tessellated or re-uploaded, so the next frame is complete rather than rebuilt, and an
+     * SVG keeps its mesh instead of falling back to its placeholder box.
+     */
+    private fun syncScene() {
+        val current = document.items
+        val present = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<CanvasItem, Boolean>(current.size))
+        present.addAll(current)
+        val vectorJobs = ArrayList<VectorMeshRequest>()
+        scene.batch(afterCommit = { for (request in vectorJobs) startVectorMesh(request) }) {
+            for (item in sceneLayers.keys.filter { it !in present }) {
+                sceneLayers.remove(item)
+                if (item is ImageItem) vectorMeshGen.remove(item)
+                scene.remove(item)
+            }
+            val moved = ArrayList<CanvasItem>()
+            for (item in current) {
+                if (!sceneLayers.containsKey(item)) {
+                    pushItem(item, vectorJobs)
+                } else if (sceneLayers[item] != item.layerId) {
+                    sceneLayers[item] = item.layerId
+                    moved.add(item)
+                }
+            }
+            scene.relayer(moved)
+            publishLayerOrder()
+        }
+    }
+
+    /** Publish z order across every layer, and which layers are hidden, as one update. */
     private fun publishLayerOrder() {
-        val ordered = document.layers.ordered(document.items)
+        val ordered = document.layers.stacked(document.items)
         val active = document.layers.entries.indexOfFirst { it.id == document.layers.activeId }
         val belowOrActive = document.layers.entries.take(active + 1).map { it.id }.toSet()
         val end = ordered.indexOfLast { it.layerId in belowOrActive }
-        scene.setOrder(ordered, end.takeIf { document.layers.entries.size > 1 })
+        scene.batch {
+            scene.setHiddenLayers(document.layers.hiddenIds)
+            scene.setOrder(ordered, end.takeIf { document.layers.entries.size > 1 })
+        }
     }
 
     /** Repaint the canvas with whatever the model currently says. */
@@ -2546,13 +2596,30 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.publish()
     }
 
+    private var toolbarCoverLeft = 0.0
+    private var sidebarCover = 0.0
+
+    /**
+     * Px of the left edge the layers sidebar covers. The sidebar lies over the canvas rather than
+     * narrowing it: resizing the canvas's surfaces is what showed black, since the window opens the
+     * new area before a frame of the new size has arrived. Unlike the toolbar cover this does not
+     * recentre, so the ink stays where it was and the sidebar simply slides over it.
+     */
+    fun setSidebarCover(px: Double) {
+        if (sidebarCover == px) return
+        sidebarCover = px
+        viewport.insetLeft = toolbarCoverLeft + px
+    }
+
     /** What a floating toolbar covers of the canvas, in px per edge; centring and fitting keep clear of it. */
     fun setToolbarCover(left: Double, top: Double, right: Double, bottom: Double) {
         val v = viewport
-        if (v.insetLeft == left && v.insetTop == top && v.insetRight == right && v.insetBottom == bottom) return
+        toolbarCoverLeft = left
+        val insetLeft = left + sidebarCover
+        if (v.insetLeft == insetLeft && v.insetTop == top && v.insetRight == right && v.insetBottom == bottom) return
         // What sat in the middle of the clear area stays in the middle as the area changes.
         val center = v.centerContent
-        v.insetLeft = left
+        v.insetLeft = insetLeft
         v.insetTop = top
         v.insetRight = right
         v.insetBottom = bottom
@@ -2625,7 +2692,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (recordHistory) history.push(com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change))
         else change()
         interaction.clearSelection()
-        rebuildScene()
+        syncScene()
         markDirty()
         refresh()
         view.publish()
