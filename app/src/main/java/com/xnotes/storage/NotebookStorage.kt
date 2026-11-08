@@ -89,6 +89,10 @@ class NotebookStorage internal constructor(private val context:Context,
     private fun sourceSnapshot(backend:MigrationPublication.Target,checkActive:()->Unit={})=
         com.xnotes.format.BundleSnapshot.fromInput(backend.read(),context.cacheDir) {checkActive();false}
 
+    /** One explicit file observation; callers must share the result across that file's cards. */
+    internal fun referenceCatalog(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog =
+        openSource(uri,kind,checkActive).use {it.referenceCatalog()}
+
     /** IO-only, source bytes and their version are from the same owned container. */
     internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot = synchronized(lock) {
         purpose(kind.extension) // Reject unsupported document kinds before reading.
@@ -102,7 +106,7 @@ class NotebookStorage internal constructor(private val context:Context,
             // only its dependency hints first; they cannot register or authorize a source identity.
             val header=BundleHeader.readWithPdfProtection(snapshot.file,protect={ids->
                 check(lease==null) {"Source metadata protection was requested twice"}
-                lease=pdfResources.holdResolved(ids)
+                lease=pdfResources.holdResolved(ids,checkActive)
                 leasedIds=ids.toSet()
                 sourceValidationHook?.invoke()
             }) {checkActive();false}

@@ -6,12 +6,13 @@ import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipFile
 
 /** Caller owns an immutable file. Inspects references without decoding ink or PDF. */
-internal class BundleReferenceInfo private constructor(val header:BundleHeader,val pageIds:Set<String>,
+internal class BundleReferenceInfo private constructor(val header:BundleHeader,val orderedPageIds:List<String>,
                                                       val format:String?,val embeddedPdfHash:String?,val originalPdfHash:String?) {
+    val pageIds:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(orderedPageIds))
     companion object {
         fun legacy(header:BundleHeader):BundleReferenceInfo {
             require(header.anchors==null)
-            return BundleReferenceInfo(header,emptySet(),null,null,null)
+            return BundleReferenceInfo(header,emptyList(),null,null,null)
         }
         fun inspect(file:File,validatePayload:Boolean,cancelled:()->Boolean={false}):BundleReferenceInfo {
             val header=BundleHeader.read(file,cancelled)
@@ -19,10 +20,10 @@ internal class BundleReferenceInfo private constructor(val header:BundleHeader,v
             val payloads=BundleEntries.digests(file,cancelled,boundedManifest=header.anchors!=null)
             return ZipFile(file).use {zip->
                 val entry=requireNotNull(zip.getEntry("manifest.json")) {"Missing native manifest"}
-                val pages=if(header.anchors==null) emptySet() else {
+                val pages=if(header.anchors==null) emptyList() else {
                     val plan=AnchorManifest.inspect({zip.getInputStream(entry)},anchored=true,cancelled=cancelled)
                     require(plan.insertions.isEmpty()) {"Reference manifest needs explicit upgrade"}
-                    plan.identities
+                    plan.orderedPageIds
                 }
                 val metadata=zip.getInputStream(entry).use {input->
                     InputStreamReader(BundleEntries.cancellable(input,cancelled),Charsets.UTF_8.newDecoder()

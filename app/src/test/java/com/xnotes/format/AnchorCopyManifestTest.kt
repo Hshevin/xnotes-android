@@ -8,6 +8,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AnchorCopyManifestTest {
+    @Test fun copyPlanExposesTheActualNewPageOrderWithoutBorrowingTheOriginalIds() {
+        val first="00000000-0000-4000-8000-000000000099";val second="00000000-0000-4000-8000-000000000001"
+        val bytes="""{"format":"xnote","version":1,"pages":[{"reference_id":"$first","items":[]},{"reference_id":"$second","items":[]}]}""".toByteArray()
+        val original=AnchorManifest.inspect({bytes.inputStream()},true)
+        assertEquals(listOf(first,second),original.orderedPageIds)
+        val copy=AnchorManifest.inspectCopy({bytes.inputStream()})
+        val actual=AnchorManifest.inspect({write(bytes,copy).inputStream()},true)
+        assertEquals(copy.orderedPageIds,actual.orderedPageIds);assertEquals(copy.identities,copy.orderedPageIds.toSet())
+        assertTrue(copy.identities.intersect(original.identities).isEmpty())
+    }
     private val a="00000000-0000-0000-0000-000000000001"
     private val b="00000000-0000-0000-0000-000000000002"
     private fun escaped(id:String)=id.map {"\\u%04x".format(it.code)}.joinToString("")
@@ -70,7 +80,7 @@ class AnchorCopyManifestTest {
             override fun close() {inputClosed=true;super.close()}
         }
         val output=object:ByteArrayOutputStream() {override fun close() {outputClosed=true;super.close()}}
-        val plan=AnchorManifest.Plan("xnote",listOf(AnchorManifest.Insertion(0,"new",20000)),emptySet())
+        val plan=AnchorManifest.Plan("xnote",listOf(AnchorManifest.Insertion(0,"new",20000)),emptyList())
         assertThrows(IllegalStateException::class.java) {AnchorManifest.write({input},output,plan,cancelled={read>=8192})}
         assertTrue(read in 8192 until bytes.size)
         assertTrue(inputClosed);assertFalse(outputClosed)
@@ -80,7 +90,7 @@ class AnchorCopyManifestTest {
         for(edits in listOf(listOf(i,i.copy(position=3)),listOf(i.copy(skip=-1)),listOf(i.copy(skip=Long.MAX_VALUE)),listOf(i.copy(position=-1)))) {
             var opened=false;val out=ByteArrayOutputStream()
             assertThrows(IllegalArgumentException::class.java) {
-                AnchorManifest.write({opened=true;"original".byteInputStream()},out,AnchorManifest.Plan("xnote",edits,emptySet()))
+                AnchorManifest.write({opened=true;"original".byteInputStream()},out,AnchorManifest.Plan("xnote",edits,emptyList()))
             }
             assertFalse(opened);assertEquals(0,out.size())
         }

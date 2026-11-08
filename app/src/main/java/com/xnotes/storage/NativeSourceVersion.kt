@@ -65,6 +65,31 @@ internal class NativeSourceSnapshot private constructor(
     val file:File get()=synchronized(gate) {checkOpen();snapshot.file}
     private fun checkOpen() {check(!closed) {"Source snapshot is closed"}}
 
+    /** A frozen observation of this captured version, not a writable source/model capability. */
+    class ReferenceCatalog private constructor(val kind:DocumentKind,val documentId:String,val locationKey:String,val sha256:String,val pages:Pages) {
+        sealed interface Pages {
+            data object NotPaginated:Pages
+            data object NeedsActivation:Pages
+            class Available internal constructor(ordered:List<String>):Pages {
+                val orderedIds:List<String> = java.util.Collections.unmodifiableList(ArrayList(ordered))
+                val ids:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(orderedIds))
+            }
+        }
+        companion object {
+            internal fun capture(source:NativeSourceSnapshot):ReferenceCatalog=synchronized(source.gate) {
+                source.checkOpen();source.checkActive()
+                val version=source.inspected.version;val info=source.inspected.info
+                val pages=when(version.kind) {
+                    DocumentKind.CANVAS->Pages.NotPaginated
+                    DocumentKind.NOTE->if(info.header.anchors==null) Pages.NeedsActivation else Pages.Available(info.orderedPageIds)
+                    else->throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                }
+                ReferenceCatalog(version.kind,version.documentId,version.locationKey,version.sha256,pages)
+            }
+        }
+    }
+    fun referenceCatalog()=ReferenceCatalog.capture(this)
+
     /** Identity contract only, not a re-encoding or a bytewise comparison of model contents. */
     fun verify(document:Document) {
         synchronized(gate) {checkOpen()};checkActive()

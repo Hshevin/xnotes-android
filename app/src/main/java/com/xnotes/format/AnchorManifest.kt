@@ -19,7 +19,11 @@ internal object AnchorManifest {
     /** UTF-16 source offset and length, matching JsonPull.position. skip=0 is a plain insertion. */
     data class Insertion(val position:Long,val text:String,val skip:Long=0)
     /** identities always describes the output, including newly minted IDs in a copy plan. */
-    data class Plan(val format:String,val insertions:List<Insertion>,val identities:Set<String>)
+    class Plan(val format:String,val insertions:List<Insertion>,orderedPageIds:List<String>) {
+        val orderedPageIds:List<String> = java.util.Collections.unmodifiableList(ArrayList(orderedPageIds))
+        val identities:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(this.orderedPageIds))
+        init {require(this.orderedPageIds.size==identities.size) {"Duplicate page identity in plan"}}
+    }
     private enum class Place { ROOT,PAGE,OTHER }
 
     fun reader(input:InputStream,cancelled:()->Boolean={false}):InputStreamReader {
@@ -54,7 +58,7 @@ internal object AnchorManifest {
         }
         val insertions=ArrayList<Insertion>()
         val literals=ArrayList<Pair<Long,Long>>()
-        val ids=linkedSetOf<String>()
+        val ids=hashSetOf<String>();val orderedIds=ArrayList<String>()
         var existing=0;var missing=0;var targets=0
         var activeKeys=0;var activeKeyChars=0
         reader(input(),cancelled).use { r ->
@@ -87,7 +91,7 @@ internal object AnchorManifest {
                                     val id=p.nextString()
                                     val end=p.position
                                     require(UUID.fromString(id).toString()==id) {"Invalid anchor UUID"}
-                                    require(ids.add(id)) {"Duplicate anchor UUID"};existing++;hasId=true
+                                    require(ids.add(id)) {"Duplicate anchor UUID"};orderedIds.add(id);existing++;hasId=true
                                     if(rekey) literals+=start to (end-start)
                                 }
                                 else -> value(Place.OTHER)
@@ -97,6 +101,7 @@ internal object AnchorManifest {
                         if(place==Place.PAGE && !hasId) {
                             require(!anchored) {"Upgraded document lost an anchor identity"}
                             missing++;val id=UUID.randomUUID().toString();check(ids.add(id))
+                            orderedIds.add(id)
                             insertions+=Insertion(p.position,(if(names.isEmpty()) "" else ",")+"\"reference_id\":\"$id\"")
                         }
                         p.endObject()
@@ -113,18 +118,19 @@ internal object AnchorManifest {
         require(existing==0 || missing==0) {"Partially missing anchor identities require explicit recovery"}
         if(rekey) {
             // Generate only after validating every old ID, including pages later in the manifest.
-            val fresh=linkedSetOf<String>()
+            val fresh=ArrayList<String>();val issued=hashSetOf<String>()
             val edits=literals.map {(position,length)->
                 var id:String
                 do {
                     check(!cancelled()) {"Page identity copy cancelled"}
                     id=UUID.randomUUID().toString()
-                } while(id in ids || !fresh.add(id))
+                } while(id in ids || !issued.add(id))
+                fresh.add(id)
                 Insertion(position,"\"$id\"",length)
             }
-            return Plan(format,edits,fresh.toSet())
+            return Plan(format,edits,fresh)
         }
-        return Plan(format,insertions.toList(),ids.toSet())
+        return Plan(format,insertions.toList(),orderedIds)
     }
     /** One continuous encoder preserves surrogate pairs split by either read or insertion chunks. */
     fun write(input:()->InputStream,out:OutputStream,plan:Plan,cancelled:()->Boolean={false}) {

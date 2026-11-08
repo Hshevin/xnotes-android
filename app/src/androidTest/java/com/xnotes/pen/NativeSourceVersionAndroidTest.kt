@@ -13,6 +13,7 @@ import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.storage.ReferenceContractViolation
 import com.xnotes.storage.StorageMsg
+import com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
@@ -88,5 +89,34 @@ class NativeSourceVersionAndroidTest {
             zip.putNextEntry(ZipEntry("manifest.json"))
             zip.write("""{"format":"xnote","version":1,"has_pdf":${pdf!=null},"pages":[{"reference_id":"$page","items":[]}],"user_data":"$body"}""".toByteArray());zip.closeEntry()
         }
+    }
+    @Test fun providerCatalogPreservesObservedPageOrderAndNeverActivatesLegacyIdentity()=scenario {storage,current,_,uri->
+        val id=UUID.randomUUID().toString();val first="00000000-0000-4000-8000-000000000099";val second="00000000-0000-4000-8000-000000000003"
+        fun write(pages:List<String>,anchored:Boolean=true) {
+            ZipOutputStream(current.outputStream()).use {zip->
+                BundleIdentity(id).write(zip);if(anchored) AnchorMetadata(id).write(zip)
+                val entries=pages.joinToString(",") {"""{${if(anchored) "\"reference_id\":\"$it\"," else ""}"items":[]}"""}
+                zip.putNextEntry(ZipEntry("manifest.json"));zip.write("""{"format":"xnote","version":1,"pages":[$entries]}""".toByteArray());zip.closeEntry()
+            }
+        }
+        write(listOf(first,second));val bytes=current.readBytes();val original=storage.referenceCatalog(uri,DocumentKind.NOTE)
+        assertEquals(listOf(first,second),(original.pages as Pages.Available).orderedIds)
+        assertEquals(BundleMigration.hash(current),original.sha256);assertArrayEquals(bytes,current.readBytes())
+        write(listOf(second,first));val reordered=storage.referenceCatalog(uri,DocumentKind.NOTE)
+        assertEquals(listOf(second,first),(reordered.pages as Pages.Available).orderedIds)
+        assertNotEquals(original.sha256,reordered.sha256);assertEquals(listOf(first,second),(original.pages as Pages.Available).orderedIds)
+        write(listOf(first),anchored=false);val legacy=current.readBytes()
+        assertSame(Pages.NeedsActivation,storage.referenceCatalog(uri,DocumentKind.NOTE).pages)
+        assertArrayEquals(legacy,current.readBytes());assertTrue(storage.registry.locations(id).isEmpty())
+    }
+    @Test fun checkedPdfLeaseCanCancelDuringFirstHashWithoutKeepingAnActiveLease()=scenario {storage,_,_,_->
+        val resources=storage.pdfResources;val original=resources.admit(ByteArray(400000) {42}.inputStream(),"original")
+        val bytes=original.readBytes();var checks=0
+        assertThrows(java.util.concurrent.CancellationException::class.java) {
+            resources.holdResolved(setOf(original.nameWithoutExtension)) {if(++checks==4) throw java.util.concurrent.CancellationException()}.close()
+        }
+        val leases=storage.registry.readableDatabase.rawQuery("SELECT COUNT(*) FROM leases",null).use {it.moveToFirst();it.getInt(0)}
+        assertEquals(0,leases);assertArrayEquals(bytes,original.readBytes())
+        resources.holdResolved(setOf(original.nameWithoutExtension)) {}.close()
     }
 }
