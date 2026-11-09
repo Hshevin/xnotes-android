@@ -1,9 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。前goal turn为progress（核实70492真实红并派发修复），本轮为progress（修复、3726全量、本地提交）；用户问“完工了吗”不是暂停/缩小范围。
+目标：按原需求继续实现，active，overall complete=false。前goal turn为progress（当前页引用3726全量与4本地提交）；本轮为progress（Main图宿主/停车/运行时相机实现、3744全量、本地提交），未整体完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 最新已验证阶段：来源往返的Main可见宿主前置
+
+基线08fba33b clean。本片verified（源码／主机与Android源码编译），整体active/complete=false。本地提交85c4216d（native所有物理pane/actual owner停车观察+6测试）、7e6c25f3（MapWorkspace/VM owner/perview presentation+6workspace/4camera/4仪器actualgetter）、14052e12（实际Main接线、2raw Window测试、3Android场景、文档）；本恢复点后续docs-only检查点，不需重复已绿验证。
+
+最终28971终态0：347套3744项，失败/错误/跳过均0，Android测试源码编译绿，tmp/map-main-host-final-full.log及-summary.json；相关66529终态0：37套344项全绿与Androidcompile，tmp/map-main-host-native-map-related.log及-summary.json。生产/tests在full前全部冻结，之后仅docs/提交。无运行Gradle/exec作业。18新增：EditorHostParking6、MapWorkspaceHost6、MapPresentationState4、MainMapInputHost2；Android MapWorkspaceEditingHostTest2+实际MainMapWorkspaceRecreateHostTest1仅编译并已登记，4旧Map编辑仪器测试改actual documentSession，不能声称平台运行。
+
+实际交付：Main图入口复用MindMapScreen/MapDocuments同actor。native GlWetPad on-top不能Compose盖板，先等全部native owner/两physical输入/已接IO与session encoders/原文本提交，最终纯parking proof同Main无悬挂复核才不compose native Scaffold/SplitHost；保模型/历史/阅读相机，不强制源保存或cancel笔。返回native沿surfacesForAttach换湿墨/前缓冲View（设置保留），Map自己的View等待IME/尺寸两帧稳定后restore一次，不fit/arrange/undo/清redo/覆盖新selection。
+
+MapWorkspaceOwner由actual Main ViewModelProvider取得，跨config保同Entry/lease/Session/presentation，VM最终clear才dispose；composition仅按binding token取消自己旧等待/清旧parkingCheck，不强留oldEditor/Main。openMap/current/unbind/async onClosed两端核原token，旧宿主迟到不能关新host相同Entry。acceptedOpens全体join后清理，不只等最后work。URI/title仅processdeath currentnull冷恢复，非跨进程undo承诺。Map body隐藏仍常驻3picker壳/slots；PageToMapFlowHost只停显Added dialog不丢其controller/lease。native所有dialogs/AiChatHost仅停显不取消app jobs/AI，外部import保pending提示关闭图后继续/可取消，不在隐藏工作区起guard。Map前台keys/四指/native click latch隔离，触摸在原四指余流后直接super原事件，无Samsung改写。
+
+独审计划/代码/两Required及末次onClosed修复全部闭合，无剩余确定必修。真实行为红63530：Main raw2均失败（隐藏native click变hold、特殊流[0,211,213,212,1]变[0,3,0,2,1]），最小early-super修后344/3744均绿。73803缺API预期编译红；10375 Root局部activity命名冲突；14989无Recomposer未通知致Workspace5超时→加Snapshot通知7002五绿（非产品红）；59861中17/18绿，canonical读数竞争81468 actual stack确证MapStore.save冲突读，test loop不再快速advance虚拟350ms，原assert/timeout不改，临时diagnostic移除。详细docs/movinkpad/mind-map-main-host-2026-11-09.md，README/AGENTS/plan/todo同步。
+
+全员completed/frozen，Root统一Gradle/提交；source_loop_audit owns Editor/parking/tests，cancel_event_tests presentation/screen/actualgetters/Androidrecreate，review_input_plan independent review。completed需followup_task唤醒。不能把本片hide/show/runtime测试当来源Open闭环，原目标仍全保留。
 
 ## 最新已验证阶段：从当前页添加来源到图
 
@@ -21,15 +35,19 @@
 
 所有作者均completed/frozen，Root统一Gradle/提交。source_loop_audit源production/tests，cancel_event_tests目标production/tests，review_input_plan独审；completed需followup_task唤醒。不要重做已验证页/预览阶段，不把完整native4生产迁移当来源UI硬前置。
 
-## 下一条立即执行：来源定位／返回图
+## 下一条立即执行：严格来源打开／定位／返回图
 
-只读接口审计已完成，tmp/source-navigation-next-audit.txt；下一片实施方案尚待定稿/独审，不可把审计建议冒充已批准接口。首先检查实际Main宿主与Map入口，把单文档图→来源→返回接上，然后真Map双pane/反向引用/网络。现MainActivity是singleTask，直接从MapActivity start Main会清上层图，不能靠采用后UUID检查保护失败；在MapActivity另建Editor也会重复native owner。审计建议Main内复用MindMapScreen+MapDocuments lease呈现单文档graph host，旧native owner留存，成功定位后才收图、失败图保持；需先核输入路由/GL宿主拆挂/关闭保存与后续pane接法，再独审，不盲加Intent flags。
+宿主前置现已落地，不重做它。接着在具体来源列表加Open，复用MapSession现sourcePreview寿命票+graph epoch/node/source target，备注/排序/cache C1不废票，target变/删除undo/reload废票；保存原相机/选集/具体source ID，成功后才hide图，失败一直保图；返回同Entry/actor，原条目还有效才定位。
 
-来源按DocUUID先找已开actual owner/pane；活页按PageID查，不借磁盘复活live已删页；未开才registry.resolve+actual read-only catalog。旧预览SHA不要求等于当前内容，但实际UUID/页ID/类型必须在首读、晚重读、最终采用前证明。Editor.openNative已有严格prepare/settle/reread/adopt，但缺expected UUID/page约束和导航结果；不能goToTocEntry ordinal回退、不能ensure随机ID“修复”。新导航票绑定graph epoch/node+source寿命/target，不因备注/排序/check cache C1失效；保存原viewport/selection/具体来源条目。source未打开不提前隐藏图、替换工作区先保存，打开失败保当前图。
+已有精确只读审计（仍仅建议，下一片定稿独审后实施）：tmp/source-navigation-native-api.txt、source-navigation-map-api.txt、source-navigation-next-audit.txt。Native建议NativeReferenceTarget(UUID,pageId?)、Editor.locateOpenReference/openReference typed结果；Storage.prepareReferenceOpen同源openSource→核NOTE/UUID/PageID→PreparedNativeOpen.read，绝不能先registerForOpen/ensure为缺UUID文件迁移补ID。openNative已有prepare/settle/reread/adopt，但需要首read、晚重read、最终adopt三处目标约束；actual已有owner按永久PageID找，live删除页返回Deleted，不借disk旧页或goToTocEntry ordinal回退复活。PDF缺原件SHA恢复后也须回原expected票重新验证，不借relinkMissingPdf自动普通openAsync的true当定位成功。
 
-临时定位轮廓应是独立runtime overlay，读CanvasState.palette，按实际页变换定位，不改选择/批注/dirty/历史；旧model/Page/token退休timer。返回仍同MapSession，尺寸/IME稳定后还原viewport，不fit/arrange；target/条目仍同寿命才定位。真正Map双pane需要统一pane文档类型/ToolbarLayout分类/PaneChrome/保存关闭/Surface重挂，不能2Activity冒充分屏，原需求保留。目标textDraft期间引用不抢选择，编辑后定位追加节点待此片整合。
+重要模式边界：目前图在Main是全窗口单文档，旧native workspace只是停放，即使editor.inSplit仍true也不能把它当成“图正处于双窗格”并在来源跳转时自动显示旧split。下一片须按实际可见工作区模式设计：单图跳来源保持单文档、不自动恢复旧双窗格；真正图+来源双pane仍后续接统一Pane类型/ToolbarLayout/PaneChrome/保存关闭/Surface边界。可以复用已开来源actual owner，但安全收起/保存其他停放pane与避免第二owner需要保护采用接口定稿，不能简单Main.openInto+事后UUID检查。
 
-原范围仍保留：region/Canvas入口与范围调整、目录缩略/主画布primary大预览、权限/身份/文件移动与回收站恢复、独立副本/备份语义、反向引用、本地/筛选/全库网络、无中心关系画布/同级插入/边缘自动平移。网络strict区分真实内容引用/手工关联/可选同图出现，不从多来源概念自动推文件互相依赖。真实Android/DocsUI/SAF/PDFium成功渲染/MovinkPad Android15 ProPen3/掌触/GPU/大文档性能未运行；无APK/安装/推送/合并/发布。
+来源操作还须保持已有private actual baseline/strict保存保护：已开RAM与外部同UUID变化不能因引用操作洗白旧基线或让后续weak autosave覆盖外部版本。先核actual owner/Source UUID及当前页，再使用与PageReferenceSource相同的真实版本证明/保护，不伪造EditSource或写权；已经接受的旧IO语义和保已写B不回滚不变。这里是下一片验收点，尚未实现，不强开完整native4做硬前置。
+
+临时定位轮廓为独立runtime overlay，绑actual model/Page/navigation token，纸面对比palette+实际页变换；不改选区/批注/dirty/历史，退休旧timer。来源准备/保存失败/取消/C1/pane变/权限与身份冲突均保原workspace与图，Main现宿主token可复用。textDraft期间追加来源不抢选择，结束后新增节点定位仍待与此片整合。
+
+原范围仍保留：区域/Canvas入口与范围调整、主画布primary/目录缩略预览、权限/身份/文件移动与回收站恢复、独立副本/备份语义、反向引用、局部/筛选/全库网络、无中心关系画布/同级插入/边缘平移。网络strict区分真实内容引用/手工关联/可选同图出现，多来源概念不推导文件互相依赖。真实Android/DocsUI/SAF/PDFium成功绘制/MovinkPad Android15 ProPen3/掌触/Surface/GPU/大PDF性能未运行；无APK/安装/推送/合并/发布。
 
 ## 最新阶段：来源预览、保留最后图片与刷新
 
