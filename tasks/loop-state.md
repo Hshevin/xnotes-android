@@ -1,11 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-source-target/xnotes；分支 codex/mind-map-source-target。2026-11-10 按用户“在这个工作树基础上新建工作树继续”，从原工作树 mind-map-original-network 的实际 HEAD 8254f3b751db1a7e15f557c1dd3ea0115ae921ed 新建。28个未提交文件完整复制，逐文件SHA-256、模式和Git差异清单一致，原树保持原样；独立作者再次核对旧树28文件无变化。迁移记录 tmp/worktree-migration-source-target.json，既有失败和已通过证据一并复制。新阶段独立构建与项目缓存为 /private/tmp/xnotes-mind-map-source-target-build、/private/tmp/xnotes-mind-map-source-target-cache。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，整体仍 active。
+工作树：/Users/kita/.codex/worktrees/mind-map-map-navigation/xnotes；分支 codex/mind-map-map-navigation。2026-11-10 再按用户“在这个工作树基础上新建工作树继续”，从 mind-map-source-target 的实际 HEAD d0132a90eadb25ed77ba7f3f0f445691a880b13a 新建；34个未提交文件及验证资料完整复制，SHA-256／模式／状态一致，原树保持原样，独立复核通过。证据 tmp/worktree-migration-2026-11-10.json。构建及项目缓存独立为 /private/tmp/xnotes-mind-map-map-navigation-build、/private/tmp/xnotes-mind-map-map-navigation-cache。此前28文件迁移属于上一阶段，原历史保留。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：来源范围调整与更换（verified，已本地提交）
+## 当前阶段：Map整文件来源打开与返回（verified，已本地提交）
+
+d0132a90 clean 起步；本阶段在原 source-target 树实现，按用户新要求完整复制34文件到当前新树，原树未变。来源行与单来源双击→实际Map编辑／撤销／保存→全部Entry／actor退休后的真正冷开→逐跳返回已实现。A→B→C、self／cycle、既有dirty actor、canonical别名、容量16文件／64帧、逐跳camera、配置与旧host／晚IO、原生／独立原文子往返均有相关Host覆盖。Map→Map不额外保存停放Native；Map正常autosave／显式保存继续。
+
+复用MapDocuments唯一actor及原URI锁，最后raw UUID／SHA与registry结构epoch跨SQL提交核实，IO→同步Main采用无锁间隙；actor acquire在最终锁前避免死锁。Main子关闭先返回，根关闭按Entry／lease和实际saveAttempt，不修改共享Session.closing／interactionEpoch；他owner未确认输入及autosave不被取消。最后lease busy明确拒绝，可取消自己的草稿后重试；写失败保route，明确保留恢复只退出本route。Native纯停车不提交text／flow，Network-root关闭同样核实际lease／epoch／workspace代次。
+
+20426旧API真RED 1/1；32823生产enum编译错误，0测试执行，旧XML明确排除。37275新套51/14失败（37过），夹具逐项修正；27748完整相关30套240项／2旧用例失败，全部57新增已过，Android SOURCE实际编译通过。两旧method按当前生产语义／异步报告守卫修复，33832仅2项定向复验通过。新树90621独立构建新增真正冷开／Native／Original往返3项通过，1218输入前后SHA全同，Android源码任务FROM-CACHE。保持全部原始失败XML与日志，不冒充执行或改写失败。
+
+有效证据按case键合并：原240只替换2个失败method，再加3项＝31套243唯一case，0失败／错误／跳过。27748→33832仅2个测试文件改变；33832→90621仅新增leaf测试；production／Android／resources／build未变，1218最终输入集合与SHA逐项一致。tmp/map-source-verified-summary.json、tmp/map-source-final-inputs-verified.json及各prefix-results／inputs／log；资源4键三套一致，两中文逐值相同。独立实现审核Required已闭合，最后迁移／新增3项／原始XML及输入链独立复核通过，无剩余Required；实现与测试本地提交 b67ba73d／ab0d5ba5／3e3d7d10／48053e78／a100e494／c68668b1，文档提交随后见HEAD；无运行构建。
+
+正式记录 docs/movinkpad/map-source-navigation-2026-11-10.md；README／AGENTS已同步。下一步检查真正导图双窗格的宿主、焦点、租约与保存接口，写可验收的小阶段计划并独审后实施。完整14组保持active／overall complete=false，Canvas侧反向引用、精确权限／移动／回收站／重复身份恢复、完整引用备份、主要预览／页缩略、同级插入／边缘平移仍保留。真实Android／DocumentsUI／SAF／Activity重建杀进程／PDFium像素／MovinkPad Pro14 Android15 ProPen3／Surface／GPU／性能未运行；无APK／安装／推送／合并／发布。
+
+## 最近已验证阶段：来源范围调整与更换（verified，已本地提交）
 
 新树8254f3b7起步，按用户要求复制28个在途文件，迁移核对与计划提交6052ab36；原original-network树28文件／HEAD最终核对未变。普通概念来源行调整范围／明确换源已实现：实际保存内容可视只读、永久页／Canvas世界矩形／原PDF用户坐标选择，最终重读SHA与身份域→同sourceId最新节点合并→保存冷开→保旧PNG／显式Native刷新→Native或OriginalReader定位→同图返回。文件身份卡不借此换身份；Map来源目前仅可引用整文件，打开仍下一片。
 
