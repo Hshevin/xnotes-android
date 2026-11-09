@@ -833,6 +833,63 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(pageReferenceSaveGuards==0 && sessionOwner.isCurrent() && documentOwner===this && noteOpen && !canvasOpen &&
             state.document===doc && doc.dirty) scheduleAutosave()
     }
+    private data class BacklinkReading(val owner:Editor,val model:Document,val documentId:String,val path:String?,
+        val scope:com.xnotes.core.model.PageReferenceScope?,val page:Page?,val rawPageId:String?,val identity:BacklinkPageIdentity,
+        val open:Boolean,val ownerOpen:Boolean,val canvas:Boolean,val missing:MissingDocument?,val replacement:Long,val ownerReplacement:Long)
+    private class BacklinkDirectory(val model:Document,val revision:Long,val scope:com.xnotes.core.model.PageReferenceScope?,
+        val anchored:Boolean,val size:Int,val identity:BacklinkPageIdentity)
+    private var backlinkDirectory:BacklinkDirectory?=null
+    private var backlinkReading:BacklinkReading?=null
+    private var backlinkReadingVersion by mutableStateOf(0L)
+    /** Observable reading changes are independent of ordinary body edits. */
+    internal val backlinkContextVersion:Long get()=backlinkReadingVersion
+    private fun backlinkPageIdentity(doc:Document,force:Boolean,rememberDirectory:Boolean):BacklinkPageIdentity {
+        backlinkDirectory?.takeIf {!force && it.model===doc && it.revision==doc.bodyRevision && it.scope===doc.pageReferenceScope &&
+            it.anchored==doc.hasReferenceAnchors && it.size==doc.pages.size}?.let {return it.identity}
+        val identity=try {
+            if(!doc.hasReferenceAnchors) {
+                if(doc.pages.any {it.referenceIdentity.id!=null}) BacklinkPageIdentity.INVALID else BacklinkPageIdentity.NOT_ENABLED
+            } else {
+                com.xnotes.core.model.ReferenceAnchors.validateForWrite(doc)
+                BacklinkPageIdentity.AVAILABLE
+            }
+        } catch(_:RuntimeException) {BacklinkPageIdentity.INVALID}
+        if(rememberDirectory) backlinkDirectory=BacklinkDirectory(doc,doc.bodyRevision,doc.pageReferenceScope,doc.hasReferenceAnchors,doc.pages.size,identity)
+        return identity
+    }
+    private fun readBacklinkReading(force:Boolean=false,rememberDirectory:Boolean=false):BacklinkReading {
+        val owner=documentOwner;val doc=state.document
+        val page=doc.pages.getOrNull(state.currentPageIndex())
+        return BacklinkReading(owner,doc,doc.identity.documentId,doc.path,doc.pageReferenceScope,page,page?.referenceIdentity?.id,
+            backlinkPageIdentity(doc,force,rememberDirectory),noteOpen,owner.noteOpen,canvasOpen,missingDocument,replacementSequence,owner.replacementSequence)
+    }
+    private fun syncBacklinkReading(force:Boolean=false):BacklinkReading {
+        val next=readBacklinkReading(force,rememberDirectory=true)
+        if(next!=backlinkReading) {backlinkReading=next;backlinkReadingVersion=Math.incrementExact(backlinkReadingVersion)}
+        return next
+    }
+    /** Main-only: a reverse lookup never flushes, enables page IDs or rebinds a cached source. */
+    internal fun captureBacklinkContext():NativeBacklinkContext? {
+        val reading=syncBacklinkReading(force=true);val owner=reading.owner;val model=reading.model
+        if(!noteOpen || canvasOpen || missingDocument!=null || !owner.noteOpen || owner.canvasOpen || owner.documentOwner!==owner ||
+            owner.state.document!==model || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent()) return null
+        model.path?.let {owner.pageReferenceProtection=PageReferenceProtection(model,notebookStorage.registry.locationKey(it))}
+        val epoch=backlinkReadingVersion
+        val roots=buildList {
+            add(com.xnotes.platform.AppStorageDocumentsProvider.treeUri(appContext).toString())
+            browseRoot?.let {add(it)}
+            appContext.contentResolver.persistedUriPermissions.filter {it.isReadPermission && android.provider.DocumentsContract.isTreeUri(it.uri)}
+                .forEach {add(it.uri.toString())}
+        }.distinct()
+        return NativeBacklinkContext.observe(reading.documentId,
+            reading.rawPageId.takeIf {reading.identity==BacklinkPageIdentity.AVAILABLE},
+            reading.page?.let {model.pages.indexOfFirst {p->p===it}+1},reading.identity,roots) {
+            readBacklinkReading()==reading && backlinkReadingVersion==epoch && sessionOwner.isCurrent() && owner.sessionOwner.isCurrent() &&
+                noteOpen && !canvasOpen && missingDocument==null && owner.noteOpen && !owner.canvasOpen && owner.documentOwner===owner &&
+                documentOwner===owner && owner.state.document===model && state.document===model
+        }
+    }
+
     private val referenceIssuer=Any()
     private val referenceLocator by lazy {NativeReferenceLocator(state,view) {refreshView()}}
     private val pageReferenceIssuer=Any()
@@ -4027,6 +4084,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun refreshView() {
+        syncBacklinkReading()
         referenceLocator.applyIfReady()
         if (editingTable != null || tableMenu != null) tableChromeTick++
         followNotePeek()
