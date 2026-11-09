@@ -1,9 +1,27 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。D1当前文件局部网络源码／主机回归与独审已verified（3854全量）；真实平台／目标设备未运行，完整D及其他原需求仍未完成。
+目标：按原需求继续实现，active，overall complete=false。D2a局部网络来源集合／格式／目录筛选已verified（3879主机全量与Android源码编译）；真实平台／目标设备未运行，D2b/完整D及其他原需求仍未完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 当前恢复点：D2a 筛选 verified，下一 D2b 逐层展开／折叠
+
+本goal turn为progress：以d393eb08 clean为基线，完整实现当前局部网络的来源UUID集合／last-known原生格式／文件夹条件，已本地提交9cb7e4b0（pure model/selector/readonly facts/Registry DAO与15测试）、36bcc561（Controller/UI/picker/新消费者测试）。仅文档检查点在后续提交；不标整体complete。正式规格docs/movinkpad/file-network-filters-2026-11-09.md，精确API tmp/network-d2-filter-api.txt。
+
+最终10650终态0：368套3879项，fail/error/skip0；Android测试源码compile绿。tmp/network-d2-filters-final-full.log/-summary.json；1058 Kotlin/Java/XML冻结输入(-final-inputs.json)运行后逐项同SHA。新增25主机=Selector10/Reader5/Controller6/Picker3/Nav1。Android新增FileNetworkFilterEditingHostTest 1方法，原AndroidMainFileNetworkHostTest扩filter取消/采用/内部目录与具体T往返；均只compile未运行。全量后无app/src修改，仅docs/提交，当前无运行Gradle/exec。
+
+实际语义：只对同一个真实source求AND条件，concept ANY纳入后保整组全部sources/belongs；owner-only不匹配，确为source才可匹配。filter前catalog来自完整未筛投影，不由250 scene反推；null与empty分开，未知显式partial。格式是registry上次识别NOTE(含PDF)/CANVAS/MAP，无folder时可靠类型不依赖available位置；folder另核当前metadata/实际ancestor，缺失/权限/重复/超限unknown。零Source正文/复制/PDF decode/Native写权；不改SourceStatus/正文undo/原生工作区，不自动fit。
+
+Controller metadata跨IO仅immutable rows/facts，action+projection代次和actual live observation最终核；A→B→A永久退旧票，C1/cancel/close晚结果不覆盖；typed filter下own acquire产生LOADING仍保accepted请求。UI弹窗draft绑定原revision，独立picker runtime key/单槽retire防旧结果转绑；配置重建旧picker不领新callback，纯草稿有64Ki字符保存预算，过大未确认草稿重建关闭，已采用filter仍VM保留。owned目录UI纯URI构造，Reader直接recoveryRoot/File/canonical/listFiles，无mkdir/provider fallback；外部tree不persist新grant，metadata用appContext+真实CancellationSignal，迟到cursor关闭。Scope/error/match/context等为overlay，不resize原Canvas。读路径与位置/目录项/问题有界，DAO只SELECT。
+
+fresh独审review_d2_filters已独立核计划/代码/真实红与XML/全部SHA，无Required未闭合。计划Required（内部root picker/provider会mkdir、owner-only混淆、单source AND）已修；实现Required格式/位置混用和UI名称query不可取消已修。34897是缺接口预期compile红；91156相关31/0+Androidcompile历史绿；19321临时还原旧候选一条noneavailable条件，Reader+Controller两新增case2/2真红(-behavior-red.log/-summary.json)，恢复修复后full绿。未削弱断言。不同UUID同名目录/预览辨识可后续增强，当前绝不按名合并。
+
+所有作者正式生产/tests冻结，三位均completed。Root统一Gradle/提交；source_loop_audit Reader/DAO及5实际provider测试；cancel_event_tests UI/Picker/3 raw Registry与Android；review_d2_filters独审（新的fresh任务，不是旧review_network_plan）。未打包/安装/推送/合并/发布；真实Android/SAF/DocumentsUI/配置重建或杀进程/MovinkPad Pro14 Android15 ProPen3/掌触/Surface/GPU/性能未运行。无待用户回答/外部阻塞。
+
+下一条立即 D2b：源和UI只读审计仍在tmp/network-d2-data-audit.txt及network-d2-ui-audit.txt，先按当前新Controller/Filter接口定可验收API并独审，再tests-first实施真实“选可见文件→展开一层→共享路径/循环→折叠→原位再展→本层具体source→返回”。采用一次scan多个frontier/source+owner origin，旧D1单focus wrapper和S/T严格入口保持；不能拼多个D1 Controller或伪造S source。每层真实local anchor，owner-origin不能造fake来源；前序last-known路径只是解释，不额外acquire所有图。可达fixed-point保另一条路径支持的共享节点；SceneBuilder当前retainAll会丢隐藏positions，D2b须有界保隐藏位置/占槽，不自动fit。filter变更、expand/collapse、source ABA均退旧动作；scope/duplicate/alias/native停车/falseflush/input票不放宽。
+
+D2a只是当前局部条件，不是任意集合多中心/全库；后续D2c这些模式与显式用户关联、可选同图出现、失效检查、加入手工关系画布仍需实现。区域/Canvas来源入口/打开、真正Map双窗格、精确权限/身份/移动/回收站恢复、独立副本/完整备份、主要预览/目录缩略图、无中心/同级插入/边缘平移等全保留。保持goal active，不把代码/主机阶段当目标设备验收或整体完工。
 
 ## 当前阶段：D1 局部网络（verified：源码／主机与 Android 源码编译，整体未完成）
 

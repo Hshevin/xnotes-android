@@ -1,3 +1,11 @@
+## D2a 局部网络筛选（2026-11-09）
+
+fresh 独立代理review_d2_filters仅只读计划、源码、真实失败及终态证据，不构建/不派生。Required全部关闭：来源条件不由每组的owner MAP自动匹配；内部目录另有入口并避开会mkdir的provider；目录存在/预算/未知和单source AND；filter/draft单调版本；外部名称查询真实CancellationSignal；格式与位置分离，kind-only保上次类型且folder另核。身份冲突/重复/超限不被last kind洗白。
+
+最终10650：实际XML368套3879项，fail/error/skip0，与summary逐suite逐计数一致；Android源码编译成功，1058 Kotlin/Java/XML输入hash前后全同。19321旧候选位置条件2/2真红，恢复后全量覆盖Reader新增两形状/Controller第6/取消helper第3，91156首相关31绿仅作历史证据。真实Android/SAF/MovinkPad/ProPen/GPU未运行；不宣称实际系统picker或network重建通过。无剩余Required，可本地提交；同名不同UUID的可辨上下文可后续增强，不改变按UUID选择。
+
+本地9cb7e4b0（model/readonly facts）及36bcc561（controller/UI/消费者测试）；完整D2b/多中心/全库/用户关联等及原全产品目标仍active未完成，无APK/安装/推送/合并/发布。
+
 ## D1 局部网络产品接入（2026-11-09）
 
 独立代理review_network_plan从最小上下文只读复核实际Core/Coordinator/Nav/Screen/Main及Android场景，不改文件/不派生/不运行构建。所有确定Required已闭合：初始scope veto保实际actor/已接受IO；S/T原会员与final actual网络输入/native停车；关闭、替换、销毁退旧parking closure和ordinary backlink return链；所有动态提示overlay；busy视觉pin保护选择和相机，held前短路builder避免positions被空LOADING清；清选择不擅自fallback中心。纯查询和相机的VM不持旧原生宿主。
