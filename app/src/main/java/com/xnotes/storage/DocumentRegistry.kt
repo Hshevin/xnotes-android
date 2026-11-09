@@ -67,21 +67,30 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         register(db,id,kind,name,uri,pageReferences)
     }
     /** Existing native recovery cannot reassign a location changed during PDF protection/IO. */
-    internal fun registerObserved(header:com.xnotes.format.BundleHeader,kind:String,name:String,uri:String) = transaction {db->
+    internal fun registerObserved(header:com.xnotes.format.BundleHeader,kind:String,name:String,uri:String,uniqueSource:Boolean=false) = transaction {db->
         val id=header.identity?.documentId ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISSING)
         if(kind !in setOf("xnote","xcanvas")) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
         if(known!=null && known!=kind) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         ReferenceContract.verifyObserved(expectationAt(uri),expectationForId(id),header)
+        if(uniqueSource) verifyUniqueSource(db,id,uri)
         register(db,id,kind,name,uri,header.anchors!=null)
     }
     /** JSON map observations cannot reclassify a known native identity or erase its page contract. */
-    internal fun registerMapObserved(id:String,name:String,uri:String) = transaction {db->
+    internal fun registerMapObserved(id:String,name:String,uri:String,uniqueSource:Boolean=false) = transaction {db->
         val at=expectationAt(uri);val byId=expectationForId(id)
         val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
         if(at!=null && at.documentId!=id || at?.requiresPages==true || byId.requiresPages || known!=null && known!="xmap")
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        if(uniqueSource) verifyUniqueSource(db,id,uri)
         register(db,id,"xmap",name,uri,false)
+    }
+    /** Check and registration share one transaction; rejecting a copy must not leave a new row. */
+    private fun verifyUniqueSource(db:SQLiteDatabase,id:String,uri:String) {
+        val key=locationKey(uri)
+        db.rawQuery("SELECT location_key FROM locations WHERE document_id=? AND available=1",arrayOf(id)).use {cursor->
+            while(cursor.moveToNext()) require(cursor.getString(0)==key) {StorageText.t(StorageMsg.DUPLICATE_DOCUMENT_ID)}
+        }
     }
     /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
     fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(

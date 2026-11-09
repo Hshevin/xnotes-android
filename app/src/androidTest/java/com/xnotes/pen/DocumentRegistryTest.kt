@@ -2,6 +2,8 @@ package com.xnotes.pen
 
 import android.content.ContextWrapper
 import com.xnotes.storage.DocumentRegistry
+import com.xnotes.core.model.enableReferenceAnchors
+import com.xnotes.core.model.fixedWriteSnapshot
 import java.io.File
 import java.util.UUID
 import org.junit.Assert.*
@@ -51,6 +53,36 @@ class DocumentRegistryTest {
         DocumentRegistry(context).use {reopened->
             assertNull(reopened.expectationAt(uri));assertTrue(reopened.expectationForId(id).requiresPages)
         }
+    }
+    @Test fun uniqueNativeSourceRegistrationRejectsTheDuplicateAtomically() = database {db,root->
+        val document=com.xnotes.core.model.Document(mutableListOf(com.xnotes.core.model.Page(500.0,500.0))).apply {
+            enableReferenceAnchors()
+        }
+        val file=File(root,"source.xnote")
+        val codec=com.xnotes.format.DocumentCodec(com.xnotes.platform.AndroidImageCodec(),com.xnotes.platform.AndroidTextMeasurer())
+        file.outputStream().use {codec.write(document.fixedWriteSnapshot(),it)}
+        val header=com.xnotes.format.BundleHeader.read(file);val id=header.identity!!.documentId
+        val original="content://registry-unique/document/native-original";val duplicate="content://registry-unique/document/native-copy"
+        db.registerObserved(header,"xnote","original",original,uniqueSource=true)
+        val before=db.knownLocations().sorted();val bytes=file.readBytes()
+        assertThrows(IllegalArgumentException::class.java) {db.registerObserved(header,"xnote","copy",duplicate,uniqueSource=true)}
+        assertEquals(before,db.knownLocations().sorted());assertEquals(listOf(original),db.locations(id))
+        assertNull(db.idAt(duplicate));assertNull(db.expectationAt(duplicate));assertEquals("original",db.nameForId(id))
+        assertTrue(db.expectationForId(id).requiresPages);assertArrayEquals(bytes,file.readBytes())
+        db.registerObserved(header,"xnote","same source",original,uniqueSource=true)
+        assertEquals(listOf(original),db.locations(id))
+    }
+    @Test fun uniqueMapSourceRegistrationRejectsTheDuplicateWithoutChangingNativeContractsOrNames() = database {db,_->
+        val id=UUID.randomUUID().toString()
+        val original="content://registry-unique/document/map-original";val duplicate="content://registry-unique/document/map-copy"
+        db.registerMapObserved(id,"original map",original,uniqueSource=true)
+        val before=db.knownLocations().sorted()
+        assertThrows(IllegalArgumentException::class.java) {db.registerMapObserved(id,"duplicate map",duplicate,uniqueSource=true)}
+        assertEquals(before,db.knownLocations().sorted());assertEquals(listOf(original),db.locations(id))
+        assertNull(db.idAt(duplicate));assertNull(db.expectationAt(duplicate));assertEquals("original map",db.nameForId(id))
+        assertFalse(db.expectationForId(id).requiresPages)
+        db.registerMapObserved(id,"same map",original,uniqueSource=true)
+        assertEquals(listOf(original),db.locations(id))
     }
     private fun database(block: (DocumentRegistry,File)->Unit) {
         val base=PenTestRunner.instance.targetContext
