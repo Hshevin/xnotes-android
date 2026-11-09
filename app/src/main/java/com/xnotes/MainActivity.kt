@@ -2355,8 +2355,10 @@ private fun EditorPane(
                                 onSaveAudio = { actions.onSaveAudio(editor, it) },
                                 onShareAudio = { actions.onShareAudio(editor, it) },
                                 onShareImage = actions.onShareImage,
+                                onReferenceSelection = {canvas.sourceSelectionRegion()?.let(editor::requestCanvasRegionReference)==true},
                             )
-                            com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
+                            com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage,
+                                onReferenceRegion = {canvas.sourceCaptureRegion()?.let(editor::requestCanvasRegionReference)==true})
                             com.xnotes.ui.CropOverlay(canvas)
                             com.xnotes.ui.TextStyleBar(canvas)
                             com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })

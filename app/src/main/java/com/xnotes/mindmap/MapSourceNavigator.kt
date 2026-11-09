@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.xnotes.storage.NativeReferenceIssue
 import com.xnotes.storage.NativeReferenceTarget
+import com.xnotes.core.util.DocumentKind
 import com.xnotes.ui.Editor
 import com.xnotes.ui.NativeReferencePreparation
 import com.xnotes.ui.NativeReferenceRequest
@@ -59,7 +60,8 @@ internal class MapSourceNavigator(
             var committed=false
             try {
                 val target=ticket.target
-                when(val prepared=editor.prepareReference(NativeReferenceTarget(target.documentId,target.pageId),target.region)) {
+                when(val prepared=editor.prepareReference(NativeReferenceTarget(target.documentId,target.pageId,
+                    requiredKind=if(target.scope==SourceScope.CANVAS_REGION) DocumentKind.CANVAS else null),target.region)) {
                     is NativeReferencePreparation.Failed->if(current(entry,token)) failure=prepared.issue
                     is NativeReferencePreparation.Ready->{
                         val native=prepared.request;request=native

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="graph_reference_this_region">引用此区域</string>
+    <string name="graph_ref_save_in_place_notice">此画布有尚未保存的修改。点“保存”将写入原文件，然后继续创建引用。</string>
+    <string name="graph_region_save_copy_notice">保存独立画布副本并切换到它，继续创建此引用。原文件保留；之后需重新选择导图。</string>
+    <string name="graph_region_save_copy">保存副本并继续</string>
+    <string name="graph_region_copy_file_name">画布引用副本.xcanvas</string>
+    <string name="graph_region_copy_retained">副本尚未完整发布，恢复资料已保留。请继续同一副本，不要另建一份。</string>
+    <string name="graph_region_continue_copy">继续此副本</string>
+    <string name="graph_region_copy_written">副本已保存，但采用前当前画布已变化。已保存的副本保留；请重新打开它再创建引用。</string>
+</resources>

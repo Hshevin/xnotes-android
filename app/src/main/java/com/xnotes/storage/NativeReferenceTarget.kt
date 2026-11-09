@@ -6,9 +6,13 @@ import com.xnotes.core.model.ReferenceIdentity
 import com.xnotes.core.util.DocumentKind
 
 /** A permanent native document/page target, never an ordinal or authority to save or migrate. */
-internal data class NativeReferenceTarget(val documentId:String,val pageId:String?=null) {
-    init {ReferenceIdentity.requireUuid(documentId);pageId?.let(ReferenceIdentity::requireUuid)}
+internal data class NativeReferenceTarget(val documentId:String,val pageId:String?=null,val requiredKind:DocumentKind?=null) {
+    init {
+        ReferenceIdentity.requireUuid(documentId);pageId?.let(ReferenceIdentity::requireUuid)
+        require(requiredKind==null || requiredKind==DocumentKind.NOTE || requiredKind==DocumentKind.CANVAS)
+    }
     fun verify(catalog:NativeSourceSnapshot.ReferenceCatalog) {
+        if(requiredKind!=null && catalog.kind!=requiredKind) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(catalog.kind !in setOf(DocumentKind.NOTE,DocumentKind.CANVAS) ||
             catalog.kind==DocumentKind.CANVAS && pageId!=null) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(catalog.documentId!=documentId) throw NativeReferenceFailure(NativeReferenceIssue.CHANGED)
@@ -19,10 +23,12 @@ internal data class NativeReferenceTarget(val documentId:String,val pageId:Strin
         }
     }
     fun canvas(document:InfiniteDocument) {
+        if(requiredKind!=null && requiredKind!=DocumentKind.CANVAS) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(pageId!=null) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(document.identity.documentId!=documentId) throw NativeReferenceFailure(NativeReferenceIssue.CHANGED)
     }
     fun page(document:Document):com.xnotes.core.model.Page? {
+        if(requiredKind!=null && requiredKind!=DocumentKind.NOTE) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(document.identity.documentId!=documentId) throw NativeReferenceFailure(NativeReferenceIssue.CHANGED)
         try {
             if(!document.hasReferenceAnchors && document.pages.any {it.referenceIdentity.id!=null}) throw IllegalArgumentException()

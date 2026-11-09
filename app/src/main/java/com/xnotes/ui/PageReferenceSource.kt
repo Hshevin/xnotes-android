@@ -11,12 +11,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** A UI request for one actual page, never an ordinal or authority to publish a model. */
 internal class PageReferenceRequest private constructor(
-    private val issuer:Any,val pane:Editor,internal val owner:Editor,
+    private val issuer:Any,override val pane:Editor,internal val owner:Editor,
     internal val model:Document,internal val page:Page,internal val documentId:String,
     internal val path:String?,internal val scope:PageReferenceScope?,internal val initialPageId:String?,
     internal val paneSession:LegacySessionQueue.Owner,internal val ownerSession:LegacySessionQueue.Owner,
-) {
-    val id:String=UUID.randomUUID().toString()
+) : SourceCreationRequest {
+    override val id:String=UUID.randomUUID().toString()
+    override val hasSavedPath get()=model.path!=null
+    override val dirty get()=model.dirty
+    override val titleRes get()=com.xnotes.R.string.graph_reference_this_page
+    override fun current()=pane.pageReferenceCurrent(this)
+    override suspend fun prepare()=pane.preparePageReference(this)
+    override suspend fun enablePages(offer:MapSourceOffer)=pane.enablePageReference(this,offer)
+    override suspend fun continueEnablePages()=pane.continuePageReferenceEnable(this)
+    override suspend fun reopen()=pane.reopenPageReference(this)
+    override fun clear()=pane.clearPageReference(this)
     internal val sourceId:String=UUID.randomUUID().toString()
     private val retired=AtomicBoolean()
     internal fun issuedBy(owner:Any)=issuer===owner
