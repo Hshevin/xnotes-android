@@ -425,9 +425,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         val cards=linkedMapOf<String,MapNode>()
         for(node in doc.nodes) {
             checkActive()
-            val file=node.fileCardId ?: continue
-            if(node.kind==NodeKind.REFERENCE && node.sources.singleOrNull()?.let {
-                    it.documentId==file && it.scope==SourceScope.FILE}==true) cards[node.id]=node
+            if(node.canonicalFileCardSource()!=null) cards[node.id]=node
         }
         for(relation in doc.relations) {
             checkActive()

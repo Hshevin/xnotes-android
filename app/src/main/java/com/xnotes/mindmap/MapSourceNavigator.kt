@@ -11,6 +11,12 @@ import com.xnotes.ui.Editor
 import com.xnotes.ui.NativeReferencePreparation
 import com.xnotes.ui.NativeReferenceRequest
 import com.xnotes.ui.NativeReferenceResult
+import com.xnotes.storage.OriginalPdfAccess
+import com.xnotes.storage.OriginalPdfCatalog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -62,12 +68,24 @@ internal class MapSourceNavigator(
         val token=++generation
         entry.sourceReturn=null;nativeFailure=null;saveFailed=false;nativeReturning=false;nativeBusy=true
         pendingEntry=entry;pendingTicket=ticket
-        fun valid()=current(entry,token) && workspace.visible && workspace.canHide(entry) &&
+        val identityAccess=editor.originalPdfAccess ?: OriginalPdfAccess(editor.view.context.applicationContext)
+        var domains:OriginalPdfCatalog.IdentityDomainsBatch?=null
+        fun valid()=current(entry,token) && workspace.visible && workspace.canHide(entry) && domains?.current()!=false &&
             entry.session.currentSourceNavigation(ticket)!=null
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var committed=false
             try {
                 val target=ticket.target
+                val owner=currentCoroutineContext()[Job]!!
+                val observed=withContext(Dispatchers.IO) {
+                    identityAccess.identityDomains(setOf(target.documentId)) {owner.ensureActive()}
+                }
+                domains=observed
+                if(!valid()) {if(current(entry,token)) nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
+                if(!observed.supported || observed.unverifiable || target.documentId in observed.reservedOriginalIds) {
+                    if(current(entry,token)) nativeFailure=NativeReferenceIssue.UNSUPPORTED
+                    return@launch
+                }
                 when(val prepared=editor.prepareReference(NativeReferenceTarget(target.documentId,target.pageId,
                     requiredKind=if(target.scope==SourceScope.CANVAS_REGION) DocumentKind.CANVAS else null),target.region)) {
                     is NativeReferencePreparation.Failed->if(current(entry,token)) nativeFailure=prepared.issue

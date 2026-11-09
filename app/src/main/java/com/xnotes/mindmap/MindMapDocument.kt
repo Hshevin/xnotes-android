@@ -129,8 +129,8 @@ data class MindMapDocument(
             require(n.sources.size <= 128 && (n.primarySource == null || n.sources.any { it.id == n.primarySource }))
             n.sources.forEach { it.validate() }
             n.fileCardId?.let {file->
-                require(UUID.fromString(file).toString()==file && n.kind==NodeKind.REFERENCE && n.sources.size==1)
-                require(n.sources.single().let {it.documentId==file && it.scope==SourceScope.FILE})
+                require(UUID.fromString(file).toString()==file)
+                require(n.canonicalFileCardSource()!=null)
             }
             require(n.id.isNotBlank() && n.id.length <= 128 && n.text.length <= 20_000)
             require(n.width.isFinite() && n.width in 48.0..4096.0 && n.height.isFinite() && n.height in 48.0..4096.0)

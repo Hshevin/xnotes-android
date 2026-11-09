@@ -54,7 +54,7 @@ class MapSession() : ViewModel() {
     private data class SourceLife(val nodeId:String,val target:MapSourceTarget,val token:Any=Any())
     private val sourceLifetimes=mutableMapOf<String,SourceLife>()
     private val nodeLifetimes=mutableMapOf<String,Any>()
-    private data class FileCardLife(val fileId:String,val nodeLifetime:Any,val token:Any=Any())
+    private data class FileCardLife(val fileId:String,val sourceId:String,val target:MapSourceTarget,val nodeLifetime:Any,val token:Any=Any())
     private data class FileRelationLife(val relation:MapRelation,val fromLifetime:Any,val toLifetime:Any,val token:Any=Any())
     private val fileCardLifetimes=mutableMapOf<String,FileCardLife>()
     private val fileRelationLifetimes=mutableMapOf<String,FileRelationLife>()
@@ -66,13 +66,15 @@ class MapSession() : ViewModel() {
         val nodes=document?.nodes.orEmpty()
         nodeLifetimes.keys.retainAll(nodes.mapTo(hashSetOf()) {it.id})
         nodes.forEach {nodeLifetimes.getOrPut(it.id) {Any()}}
-        val cards=nodes.filter {it.fileCardId!=null}
+        val cards=nodes.filter {it.canonicalFileCardSource()!=null}
         fileCardLifetimes.keys.retainAll(cards.mapTo(hashSetOf()) {it.id})
         cards.forEach {node->
             val previous=fileCardLifetimes[node.id]
             val nodeLifetime=requireNotNull(nodeLifetimes[node.id])
-            if(previous==null || previous.fileId!=node.fileCardId || previous.nodeLifetime!==nodeLifetime)
-                fileCardLifetimes[node.id]=FileCardLife(requireNotNull(node.fileCardId),nodeLifetime)
+            val source=requireNotNull(node.canonicalFileCardSource())
+            if(previous==null || previous.fileId!=node.fileCardId || previous.sourceId!=source.id || previous.target!=source.target ||
+                previous.nodeLifetime!==nodeLifetime)
+                fileCardLifetimes[node.id]=FileCardLife(requireNotNull(node.fileCardId),source.id,source.target,nodeLifetime)
         }
         val relations=document?.relations.orEmpty().filter {it.from in fileCardLifetimes && it.to in fileCardLifetimes}
         fileRelationLifetimes.keys.retainAll(relations.mapTo(hashSetOf()) {it.id})
@@ -681,8 +683,9 @@ class MapSession() : ViewModel() {
     internal fun fileCardsCurrent(ticket:MapFileCardsTicket):Boolean {
         if(ticket.issuer!==this || ticket.epoch!=connectedEpoch || ticket.historyEpoch!=fileCardsHistoryEpoch ||
             ticket.documentId!=document?.id) return false
-        return ticket.appliedNodes?.all {(id,applied)->nodeLifetimes[id]===applied.lifetime &&
-            document?.nodes?.any {it.id==id && it.fileCardId==applied.documentId}==true}!=false
+        return ticket.appliedNodes?.all {(id,applied)->fileCardLifetimes[id]?.token===applied.lifetime &&
+            document?.nodes?.any {it.id==id && it.fileCardId==applied.documentId && it.canonicalFileCardSource()?.let {source->
+                source.id==applied.sourceId && source.target==applied.target}==true}==true}!=false
     }
     internal fun importFileCards(ticket:MapFileCardsTicket):MapFileCardsImportResult {
         if(!fileCardsCurrent(ticket)) return MapFileCardsImportResult.Changed
@@ -693,9 +696,11 @@ class MapSession() : ViewModel() {
             val result=doc.addFileCards(ticket.seeds)
             if(result.document!==doc && !commit(result.document)) return MapFileCardsImportResult.Invalid
             val cards=result.document.nodes.associateBy {it.id}
-            val lives=result.nodeIds.associateWith {id->MapFileCardAppliedNode(
-                nodeLifetimes[id] ?: return MapFileCardsImportResult.Changed,
-                cards[id]?.fileCardId ?: return MapFileCardsImportResult.Changed)}
+            val lives=result.nodeIds.associateWith {id->
+                val source=cards[id]?.canonicalFileCardSource() ?: return MapFileCardsImportResult.Changed
+                MapFileCardAppliedNode(fileCardLifetimes[id]?.token ?: return MapFileCardsImportResult.Changed,
+                    source.documentId,source.id,source.target)
+            }
             ticket.appliedNodes=java.util.Collections.unmodifiableMap(lives)
             if(result.nodeIds.size>1) nodeSelectionMode=true
             replaceNodeSelection(result.nodeIds);selectedRelation=null

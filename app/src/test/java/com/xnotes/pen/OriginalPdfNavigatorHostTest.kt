@@ -5,6 +5,8 @@ import android.graphics.Canvas
 import android.net.Uri
 import android.view.MotionEvent
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.model.enableReferenceAnchors
+import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.pdf.PdfPageGeometry
 import com.xnotes.mindmap.*
 import com.xnotes.platform.AndroidRasterSurface
@@ -248,4 +250,102 @@ class OriginalPdfNavigatorHostTest {
         }
         withTimeout(5000) {while(engine.closes.get()==0) delay(1)};assertEquals(1,engine.closes.get());assertEquals(0,f.native.writes.get())
     }
+    @Test fun aLegacyFileCardUsingAnOriginalUuidCannotAdoptARealNativeNoteWithThatSameUuid()=scenario {f->
+        val id=f.observation.record.id
+        val retryUri=android.provider.DocumentsContract.buildDocumentUri(f.native.authority,"retry").toString()
+        withContext(Dispatchers.IO) {
+            val note=com.xnotes.core.model.Document(mutableListOf(com.xnotes.core.model.Page(500.0,500.0))).apply {
+                identity=identity.copy(documentId=id);enableReferenceAnchors()
+            }
+            f.native.retry.outputStream().use {f.native.codec.write(note.fixedWriteSnapshot(),it)}
+            f.native.storage.registry.registerObserved(com.xnotes.format.BundleHeader.read(f.native.retry),"xnote","retry.xnote",retryUri)
+            f.native.storage.openSource(retryUri,com.xnotes.core.util.DocumentKind.NOTE).use {assertEquals(id,it.version.documentId)}
+        }
+        val models=f.native.editor.openPanes.map {it.state.document};val histories=f.native.editor.openPanes.map {it.history}
+        val before=f.native.retry.readBytes();var guarded=0;var adopted=0
+        withContext(Dispatchers.Main) {
+            f.sources.dispose()
+            f.sources=MapSourceNavigator(f.native.editor,f.maps,f.binding,f.scope,
+                guard={_,_->guarded++;MapSourceGuardResult.Ready(emptySet())},originalNavigator=f.navigator,onOpened={_,_->adopted++})
+            assertTrue(f.entry.session.operate {doc->doc.update("n") {node->node.copy(kind=NodeKind.REFERENCE,fileCardId=id,
+                sources=node.sources.map {it.copy(scope=SourceScope.FILE,pageId=null,originalPdf=null)})}})
+            f.entry.session.cancelPendingAutosave();assertTrue(f.open())
+        }
+        f.await {!f.sources.busy}
+        withContext(Dispatchers.Main) {
+            assertTrue(f.maps.visible);assertNull(f.originals.current);assertNull(f.entry.sourceReturn)
+            assertEquals(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED,f.sources.failure)
+            assertEquals(0,guarded);assertEquals(0,adopted)
+            f.native.editor.openPanes.forEachIndexed {i,pane->assertSame(models[i],pane.state.document);assertSame(histories[i],pane.history)}
+        }
+        assertArrayEquals(before,f.native.retry.readBytes());assertEquals(0,f.native.writes.get())
+    }
+    @Test fun missingOrUnsupportedOriginalCatalogNeverFallsBackToTheNativeReferenceBranch()=scenario {f->
+        var guarded=0;var adopted=0
+        withContext(Dispatchers.Main) {
+            f.sources.dispose();f.sources=MapSourceNavigator(f.native.editor,f.maps,f.binding,f.scope,
+                guard={_,_->guarded++;MapSourceGuardResult.Ready(emptySet())},originalNavigator=f.navigator,onOpened={_,_->adopted++})
+        }
+        val saved=f.entry.session.document!!.node("n").sources.single()
+        for(unsupported in listOf(false,true)) {
+            if(unsupported) withContext(Dispatchers.IO) {
+                f.native.storage.registry.writableDatabase.execSQL("UPDATE original_pdf_documents SET row_schema=99 WHERE id=?",arrayOf(f.observation.record.id))
+            }
+            withContext(Dispatchers.Main) {
+                assertTrue(f.entry.session.operate {doc->doc.update("n") {it.copy(sources=listOf(if(unsupported) saved else saved.copy(documentId=java.util.UUID.randomUUID().toString())))}})
+                f.entry.session.cancelPendingAutosave();assertTrue(f.open())
+            }
+            f.await {!f.sources.busy}
+            withContext(Dispatchers.Main) {assertTrue(f.maps.visible);assertNull(f.originals.current);assertNotNull(f.sources.failure);assertEquals(0,guarded);assertEquals(0,adopted)}
+        }
+        assertEquals(0,f.native.writes.get())
+    }
+    @Test fun aNativeSourceStillOpensThroughTheActualNavigatorWhenItsIdentityDomainIsUnambiguous()=scenario {f->
+        val model=f.native.editor.state.document;val history=f.native.editor.history
+        val keptBytes=f.native.source.readBytes();val outgoingBefore=f.native.target.readBytes()
+        // Ordinary native navigation keeps its existing save-before-detach policy for the other
+        // pane. Establish that actual saved outgoing baseline; originals have separate zero-write tests.
+        withContext(Dispatchers.Main) {assertTrue(f.native.editor.secondary!!.flushSplitDocument())}
+        val savedOutgoing=f.native.target.readBytes();val acceptedWrites=f.native.writes.get()
+        assertEquals(1,acceptedWrites);assertFalse(outgoingBefore.contentEquals(savedOutgoing))
+        var guarded=0;var adopted=0
+        withContext(Dispatchers.Main) {
+            f.sources.dispose();f.sources=MapSourceNavigator(f.native.editor,f.maps,f.binding,f.scope,
+                guard={_,_->guarded++;MapSourceGuardResult.Ready(emptySet())},originalNavigator=f.navigator,onOpened={_,_->adopted++})
+            assertTrue(f.entry.session.operate {doc->doc.update("n") {node->node.copy(sources=node.sources.map {
+                it.copy(documentId=model.identity.documentId,scope=SourceScope.FILE,pageId=null,originalPdf=null)
+            })}})
+            f.entry.session.cancelPendingAutosave();assertTrue(f.open())
+        }
+        f.await {!f.sources.busy}
+        withContext(Dispatchers.Main) {
+            assertFalse(f.maps.visible);assertNull(f.originals.current);assertEquals(1,guarded);assertEquals(1,adopted)
+            assertSame(model,f.native.editor.state.document);assertSame(history,f.native.editor.history)
+            assertTrue(model.dirty);assertTrue(history.canUndo);assertTrue(f.sources.returnToMap())
+        }
+        f.await {f.maps.visible && !f.sources.busy}
+        assertEquals(acceptedWrites,f.native.writes.get())
+        assertArrayEquals(keptBytes,f.native.source.readBytes());assertArrayEquals(savedOutgoing,f.native.target.readBytes())
+    }
+    @Test fun aDomainEpochChangeWhileTheNativeGuardWaitsRejectsItsFinalAdoption()=scenario {f->
+        val model=f.native.editor.state.document;val entered=CompletableDeferred<Unit>();val release=CompletableDeferred<Unit>()
+        var adopted=0
+        withContext(Dispatchers.Main) {
+            f.sources.dispose();f.sources=MapSourceNavigator(f.native.editor,f.maps,f.binding,f.scope,
+                guard={_,_->entered.complete(Unit);release.await();MapSourceGuardResult.Ready(emptySet())},
+                originalNavigator=f.navigator,onOpened={_,_->adopted++})
+            assertTrue(f.entry.session.operate {doc->doc.update("n") {node->node.copy(sources=node.sources.map {
+                it.copy(documentId=model.identity.documentId,scope=SourceScope.FILE,pageId=null,originalPdf=null)
+            })}})
+            f.entry.session.cancelPendingAutosave();assertTrue(f.open())
+        }
+        entered.await();withContext(Dispatchers.IO) {f.catalog.delete(f.observation)};release.complete(Unit)
+        f.await {!f.sources.busy}
+        withContext(Dispatchers.Main) {
+            assertEquals(0,adopted);assertTrue(f.maps.visible);assertNull(f.originals.current)
+            assertSame(model,f.native.editor.state.document);assertEquals(com.xnotes.storage.NativeReferenceIssue.CHANGED,f.sources.failure)
+        }
+        assertEquals(0,f.native.writes.get())
+    }
+
 }
