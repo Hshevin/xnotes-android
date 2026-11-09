@@ -6,7 +6,7 @@
 
 ## 工作位置
 
-当前树 `/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes`，分支 `codex/mind-map-region-continue`，按用户于 2026-11-10 的明确要求从上一续作树 HEAD `4f413d16dfec5aef207da75b922be9e6ab74aed4` 创建，45 个本阶段未提交文件逐一 SHA-256 校验后复制，原树原样保留。迁移清单见忽略的 `tmp/worktree-transfer-2026-11-10.json`，当前作业见 `tmp/mind-map-region-runtime.json`。接手须核 Git，不 reset 来凑一致。两个旧树只读保留，勿默默在默认目录写代码。
+当前树 `/Users/kita/.codex/worktrees/mind-map-original-pdf/xnotes`，分支 `codex/mind-map-original-pdf`，按用户于 2026-11-10 的明确要求从 `/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes` 实际 HEAD `579e5f54a25579ca8dfb5465f8a80e1a24c52272` 创建。原树未提交的 `tasks/loop-state.md` 与 `docs/movinkpad/original-pdf-sources-2026-11-10.md` 已逐字节核对复制，原树原样保留。迁移清单 `tmp/original-pdf-worktree-copy.json`；新阶段专用 `tmp/build-mind-map-original-pdf.gradle`、独立构建目录 `/private/tmp/xnotes-mind-map-original-pdf-build` 及 Gradle 项目缓存 `/private/tmp/xnotes-mind-map-original-pdf-cache`。旧阶段有效证据仍在原树的忽略目录，不冒充新阶段验证。所有后续作者和构建须明确使用新树绝对路径。
 
 先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
 

@@ -1,11 +1,15 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；当前分页区域来源 verified，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes；分支 codex/mind-map-region-continue；2026-11-10 用户再次明确要求从上一续作树 HEAD 4f413d16 新建，45 个当前未提交文件逐一 SHA 校验复制，原树原样保留；起点 63371f5d13ca4d7457249d468c315db59cc69b5c，创建时原树clean；本聊天未写原树。提交后只读观察原树已由其他任务推进至f8cd9b2f且有未提交修改，保留、不合并。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；当前原PDF独立原文 in_progress，整体仍 active。
+工作树：/Users/kita/.codex/worktrees/mind-map-original-pdf/xnotes；分支 codex/mind-map-original-pdf；2026-11-10 用户明确要求在当前工作树基础上新建并继续，以 mind-map-region-continue 的实际 HEAD 579e5f54a25579ca8dfb5465f8a80e1a24c52272 创建。原树两份未提交的原PDF阶段计划逐字节校验后复制，原树保持原样。新树迁移清单 tmp/original-pdf-worktree-copy.json；新阶段构建与项目缓存分别独立为 /private/tmp/xnotes-mind-map-original-pdf-build、/private/tmp/xnotes-mind-map-original-pdf-cache。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：分页固定区域来源（verified）
+## 当前阶段：原PDF独立原文（in_progress）
+
+上一goal turn为progress，分页区域已本地提交579e5f54／281有效测试。当前HEAD579e5f54 clean起步，原完整14组不缩减。独立身份关键决策已审：新catalog随机doc/pageUUID，SHA仅资源指纹；与resource pin同SQLite事务，tombstone／显式恢复／mutation-start epoch防ABA。完整规格docs/movinkpad/original-pdf-sources-2026-11-10.md已独审，两项Required已补（实际pageInfo/整页同模式选择），开始实施真实模式选择／保留／加图／预览／独立reader／返回及原件库管理。旧已知构建终态，无重启。
+
+## 既有阶段：分页固定区域来源（verified）
 
 分页本地提交：`69ccde43`（完整读取／固定预览）、`d5c8fcc2`（实际入口／请求／定位）、`40ce03b5`（主机与Android菜单测试源码）。
 
