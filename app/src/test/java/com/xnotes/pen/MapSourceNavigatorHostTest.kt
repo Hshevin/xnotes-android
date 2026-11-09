@@ -23,7 +23,7 @@ class MapSourceNavigatorHostTest {
         val binding=Any()
         lateinit var entry:MapWorkspace.Entry
         lateinit var navigator:MapSourceNavigator
-        val file=File(native.root,"navigation.xmap")
+        val file=File(com.xnotes.platform.AppStorageDocumentsProvider.rootDir(native.context),"navigation.xmap")
         var opened=0
         var guard:suspend ()->MapSourceGuardResult={MapSourceGuardResult.Ready(emptySet())}
         suspend fun start() {
@@ -158,7 +158,7 @@ class MapSourceNavigatorHostTest {
         withContext(Dispatchers.Main) {assertEquals(1,pane.state.document.pages.first().items.size)}
     }
 
-    @Test fun unsupportedMapSourcesKeepTheCurrentGraphAndTheExistingSourceEntry()=scenario {f->
+    @Test fun aVerifiedSelfMapSourceKeepsTheCurrentActorWithoutAFrameOrNativeReplacement()=scenario {f->
         val documentId=f.entry.session.document!!.id
         withContext(Dispatchers.IO) {f.native.storage.registry.registerMapObserved(documentId,"navigation.xmap",Uri.fromFile(f.file).toString())}
         withContext(Dispatchers.Main) {
@@ -167,7 +167,8 @@ class MapSourceNavigatorHostTest {
         }
         f.await {!f.navigator.busy}
         withContext(Dispatchers.Main) {
-            assertEquals(NativeReferenceIssue.UNSUPPORTED,f.navigator.failure);assertTrue(f.workspace.visible)
+            assertNull(f.navigator.failure);assertTrue(f.workspace.visible)
+            assertSame(f.entry,f.workspace.current);assertFalse(f.workspace.canReturnSource)
             assertEquals(3,f.entry.session.document!!.node("n").sources.size);assertEquals("Body remains",f.entry.session.document!!.node("n").text)
             assertTrue(f.native.editor.noteOpen);assertTrue(f.native.editor.secondary!!.noteOpen);assertEquals(0,f.opened)
         }
