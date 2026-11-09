@@ -76,7 +76,8 @@
     <string name="graph_sources_changed">Sources changed, or the document limit was reached. Review the list and retry.</string>
     <string name="graph_source_choose">Choose reference</string>
     <string name="graph_source_whole_file">Whole file</string>
-    <string name="graph_source_page_identity">Page reference · %1$s</string>
+    <string name="graph_source_page_last_known">Last checked: page %1$d</string>
+    <string name="graph_source_page_unknown">Page reference (location needs refresh)</string>
     <string name="graph_source_page_number">Page %1$d</string>
     <string name="graph_source_page_directory">Choose a page from the current file. Thumbnails are not available yet.</string>
     <string name="graph_source_enable_pages">Enable page references</string>

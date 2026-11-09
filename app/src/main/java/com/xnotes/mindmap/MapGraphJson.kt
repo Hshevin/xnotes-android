@@ -10,7 +10,8 @@ internal object MapGraphJson {
             .put("scope",s.scope.name).put("pageId",s.pageId ?: JSONObject.NULL)
             .put("note",s.note).put("status",s.status.name)
             .put("previewKey",s.previewKey ?: JSONObject.NULL).put("sourceVersion",s.sourceVersion ?: JSONObject.NULL)
-            .put("region",s.region?.let { JSONArray(listOf(it.x,it.y,it.w,it.h)) } ?: JSONObject.NULL))
+            .put("region",s.region?.let { JSONArray(listOf(it.x,it.y,it.w,it.h)) } ?: JSONObject.NULL)
+            .also {json->s.lastKnownPage?.let {json.put("lastKnownPage",it)}})
     } }
     fun readSources(n: JSONObject): List<MapSource> {
         val a=n.getJSONArray("sources"); require(a.length()<=128)
@@ -23,7 +24,7 @@ internal object MapGraphJson {
             MapSource(id=str(s,"id"),documentId=str(s,"documentId"),fileName=str(s,"fileName"),scope=SourceScope.valueOf(str(s,"scope")),
                 pageId=nullable(s,"pageId"),region=r,
                 note=str(s,"note"),status=SourceStatus.valueOf(str(s,"status")),previewKey=nullable(s,"previewKey"),
-                sourceVersion=nullable(s,"sourceVersion"))
+                sourceVersion=nullable(s,"sourceVersion"),lastKnownPage=lastKnownPage(s))
         }
     }
     fun relations(doc: MindMapDocument) = JSONArray().also { a -> doc.relations.forEach { r ->
@@ -35,7 +36,17 @@ internal object MapGraphJson {
     }
     fun str(j:JSONObject,key:String) = strValue(j.get(key))
     private fun strValue(v:Any):String {require(v is String);return v}
-    fun nullable(j:JSONObject,key:String):String? = if(j.get(key) === JSONObject.NULL) null else str(j,key)
+    fun nullable(j:JSONObject,key:String):String? = nullable(j,key,false,::strValue)
+    private fun <T> nullable(j:JSONObject,key:String,optional:Boolean,read:(Any)->T):T? {
+        if(optional && !j.has(key)) return null
+        return j.get(key).let {if(it===JSONObject.NULL) null else read(it)}
+    }
     fun bool(j:JSONObject,key:String):Boolean = j.get(key).let {require(it is Boolean);it}
+    private fun lastKnownPage(j:JSONObject):Int? = nullable(j,"lastKnownPage",true) {value->
+        require(value is Int || value is Long)
+        val number=(value as Number).toLong()
+        require(number in 1L..com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS.toLong())
+        number.toInt()
+    }
     private fun num(v:Any):Double {require(v is Number);return v.toDouble().also {require(it.isFinite())}}
 }

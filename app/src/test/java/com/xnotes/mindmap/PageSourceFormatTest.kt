@@ -69,4 +69,39 @@ class PageSourceFormatTest {
         assertEquals(b.id,moved.root.primarySource);assertEquals("Concept",moved.root.text)
         assertEquals(listOf(b.id,a.id),moved.root.sources.map {it.id})
     }
+    @Test fun optionalLastKnownPageHintsRoundTripInVersionTwoWithoutChangingReferenceIdentity() {
+        for(hint in listOf(null,1,2,com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS)) {
+            val s=MapSource(documentId=owner,scope=SourceScope.PAGE,pageId=page,lastKnownPage=hint,note="User note",sourceVersion="actual SHA")
+            val doc=document(s);val j=JSONObject(String(MapCodec.encode(doc)));val encoded=source(j)
+            assertEquals(2,j.getInt("version"));assertEquals(hint!=null,encoded.has("lastKnownPage"))
+            assertEquals(doc,MapCodec.decode(j.toString().toByteArray()))
+            // Earlier v2 readers ignore this optional display field; removing it preserves the target.
+            encoded.remove("lastKnownPage")
+            val legacy=MapCodec.decode(j.toString().toByteArray());val old=legacy.root.sources.single()
+            assertEquals(s.copy(lastKnownPage=null),old);assertEquals(s.id,old.id);assertEquals(page,old.pageId)
+            assertEquals(s.note,old.note);assertEquals(s.sourceVersion,old.sourceVersion)
+            assertEquals(legacy,MapCodec.decode(MapCodec.encode(legacy)))
+            encoded.put("lastKnownPage",JSONObject.NULL)
+            assertEquals(legacy,MapCodec.decode(j.toString().toByteArray()))
+        }
+    }
+    @Test fun displayPageHintsRejectInvalidNumbersTypesAndWholeFileLocations() {
+        val max=com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS
+        for(hint in listOf(0,-1,max+1,Int.MAX_VALUE)) {
+            assertThrows(IllegalArgumentException::class.java) {document(MapSource(documentId=owner,scope=SourceScope.PAGE,pageId=page,lastKnownPage=hint)).validate()}
+        }
+        assertThrows(IllegalArgumentException::class.java) {document(MapSource(documentId=owner,lastKnownPage=1)).validate()}
+        for(value in listOf<Any>("2",true,2.5,0,-1,max+1,Long.MAX_VALUE)) {
+            val s=MapSource(documentId=owner,scope=SourceScope.PAGE,pageId=page)
+            val j=JSONObject(String(MapCodec.encode(document(s))));source(j).put("lastKnownPage",value)
+            assertThrows(IllegalArgumentException::class.java) {MapCodec.decode(j.toString().toByteArray())}
+        }
+        for(literal in listOf("2.0","2e0")) {
+            val s=MapSource(documentId=owner,scope=SourceScope.PAGE,pageId=page,lastKnownPage=2)
+            val raw=String(MapCodec.encode(document(s))).replace("\"lastKnownPage\":2","\"lastKnownPage\":$literal")
+            assertThrows(IllegalArgumentException::class.java) {MapCodec.decode(raw.toByteArray())}
+        }
+        val file=json();source(file).put("lastKnownPage",1)
+        assertThrows(IllegalArgumentException::class.java) {MapCodec.decode(file.toString().toByteArray())}
+    }
 }

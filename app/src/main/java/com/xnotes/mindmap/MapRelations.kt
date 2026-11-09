@@ -18,6 +18,8 @@ data class MapSource(
     val status: SourceStatus = SourceStatus.UNVERIFIED,
     val previewKey: String? = null,
     val sourceVersion: String? = null,
+    /** Display hint from the last actual catalog check. Never used to identify or locate the page. */
+    val lastKnownPage: Int? = null,
 ) {
     fun validate() {
         require(id.isNotBlank() && id.length <= 128)
@@ -26,9 +28,10 @@ data class MapSource(
         require(pageId == null || UUID.fromString(pageId).toString() == pageId)
         require(previewKey == null || previewKey.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(sourceVersion == null || sourceVersion.length <= 512)
+        require(lastKnownPage == null || lastKnownPage in 1..com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS)
         region?.let { r -> require(listOf(r.x,r.y,r.w,r.h).all { it.isFinite() && kotlin.math.abs(it) <= MindMapDocument.MAX_COORD } && r.w > 0 && r.h > 0) }
         when(scope) {
-            SourceScope.FILE -> require(pageId == null && region == null)
+            SourceScope.FILE -> require(pageId == null && region == null && lastKnownPage == null)
             SourceScope.PAGE -> require(pageId != null)
         }
     }

@@ -156,6 +156,7 @@ class MapPageSourceConsumerTest {
         assertEquals("latest independent title",changed.root.text);assertEquals(listOf(ink),changed.root.ink)
         assertEquals(oldSource.copy(note="latest note"),changed.root.sources.first());assertEquals(oldSource.id,changed.root.primarySource)
         assertEquals(SourceScope.PAGE,added.scope);assertEquals(sourceId,added.documentId);assertEquals(page,added.pageId)
+        assertEquals(2,added.lastKnownPage)
         assertEquals(activated.offer!!.catalog!!.sha256,added.sourceVersion);assertNull(added.region)
         f.session.undo();assertEquals(beforeAppend,f.session.document);f.session.redo();assertEquals(changed,f.session.document)
         f.session.save();await {!f.session.saving};assertEquals(changed,MapCodec.decode(f.provider.file(f.map).readBytes()))
@@ -181,6 +182,7 @@ class MapPageSourceConsumerTest {
         val changed=f.session.document!!;val added=changed.node(draft.nodeId)
         assertEquals("Confirmed title",added.text);assertEquals(second,added.sources.single().pageId)
         assertEquals(SourceScope.PAGE,added.sources.single().scope);assertEquals(draft.center,added.bounds.center)
+        assertEquals(2,added.sources.single().lastKnownPage)
         assertTrue(changed.relations.any {it.from==draft.from && it.to==draft.nodeId})
         f.session.undo();assertEquals(original,f.session.document);f.session.redo();assertEquals(changed,f.session.document)
         assertEquals(0,f.provider.writes(f.native))
@@ -231,6 +233,7 @@ class MapPageSourceConsumerTest {
             assertFalse(f.session.sourcePicker.activatePages(file));assertFalse(f.session.sourcePicker.choosePage(file,second))
             assertTrue(f.session.sourcePicker.chooseFile(file));await {f.session.sourcePicker.state==null}
             val source=f.session.document!!.root.sources.last();assertEquals(SourceScope.FILE,source.scope);assertNull(source.pageId)
+            assertNull(source.lastKnownPage)
             assertEquals(0,f.provider.writes(uri))
         }
     }

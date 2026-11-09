@@ -82,8 +82,12 @@ internal object MapSourceAccess {
     fun select(context:Context,expected:MapSourceOffer,pageId:String?,checkActive:()->Unit={}):MapSource {
         if(pageId!=null) require((expected.catalog?.pages as? NativeSourceSnapshot.ReferenceCatalog.Pages.Available)?.ids?.contains(pageId)==true)
         val actual=offer(context,expected.uri,checkActive);same(expected,actual)
-        if(pageId!=null) require((actual.catalog?.pages as? NativeSourceSnapshot.ReferenceCatalog.Pages.Available)?.ids?.contains(pageId)==true)
-        return actual.fileSource.copy(id=expected.fileSource.id,scope=if(pageId==null) SourceScope.FILE else SourceScope.PAGE,pageId=pageId).also {it.validate();checkActive()}
+        val lastKnown=pageId?.let {id->
+            val pages=requireNotNull(actual.catalog?.pages as? NativeSourceSnapshot.ReferenceCatalog.Pages.Available)
+            val index=pages.orderedIds.indexOf(id);require(index>=0);index+1
+        }
+        return actual.fileSource.copy(id=expected.fileSource.id,scope=if(pageId==null) SourceScope.FILE else SourceScope.PAGE,
+            pageId=pageId,lastKnownPage=lastKnown).also {it.validate();checkActive()}
     }
     fun inspect(context: Context, uri: Uri,checkActive:()->Unit={}): MapSource {
         return offer(context,uri,checkActive).fileSource

@@ -76,7 +76,8 @@
     <string name="graph_sources_changed">来源已变化或已达到文档限制，请检查列表后重试。</string>
     <string name="graph_source_choose">选择引用范围</string>
     <string name="graph_source_whole_file">整份文件</string>
-    <string name="graph_source_page_identity">页面引用 · %1$s</string>
+    <string name="graph_source_page_last_known">上次核对：第 %1$d 页</string>
+    <string name="graph_source_page_unknown">页面引用（位置待刷新）</string>
     <string name="graph_source_page_number">第 %1$d 页</string>
     <string name="graph_source_page_directory">从当前文件选择页面，缩略图尚未接入。</string>
     <string name="graph_source_enable_pages">启用页面引用</string>

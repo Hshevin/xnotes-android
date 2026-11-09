@@ -172,7 +172,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
 
 @Composable
 internal fun sourceScopeLabel(source:MapSource)=if(source.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-    else stringResource(R.string.graph_source_page_identity,source.pageId.orEmpty().take(8))
+    else source.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
 
 /** A text-only actual page directory; rows never decode or read their source independently. */
 @Composable

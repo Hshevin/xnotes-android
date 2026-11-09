@@ -144,6 +144,9 @@ class MapPageSourceEditingHostTest {
         click(second);waitUntil {f.host.onMain {f.session.document!!.root.sources.isNotEmpty()}}
         val changed=f.host.onMain {f.session.document!!};val attached=changed.root.sources.single()
         assertEquals(SourceScope.PAGE,attached.scope);assertEquals(ids[1],attached.pageId);assertEquals(f.sourceId,attached.documentId)
+        assertEquals(2,attached.lastKnownPage)
+        waitUntil {visible(f.context.getString(R.string.graph_source_page_last_known,2))}
+        assertFalse(visible(requireNotNull(attached.pageId).take(8)))
         assertEquals("Keep title",changed.root.text);f.host.onMain {f.session.undo()};assertEquals(original,f.host.onMain {f.session.document})
         f.host.onMain {f.session.redo();f.session.save()};waitUntil {f.host.onMain {!f.session.saving}}
         assertEquals(changed,MapCodec.decode(f.map.readBytes()));assertEquals(1,f.sourceWrites.get())
@@ -183,5 +186,22 @@ class MapPageSourceEditingHostTest {
         val attached=f.host.onMain {f.session.document!!.root.sources.single()}
         assertEquals(SourceScope.FILE,attached.scope);assertNull(attached.pageId)
         assertArrayEquals(before,f.source.readBytes());assertEquals(0,f.sourceWrites.get())
+    }
+    @Test fun pageDisplayHintUsesAndroidNullAndStrictIntegerRulesWithoutChangingThePageTarget() {
+        val source=MapSource(documentId=UUID.randomUUID().toString(),scope=SourceScope.PAGE,pageId=UUID.randomUUID().toString(),lastKnownPage=2)
+        val doc=MindMapDocument(nodes=listOf(MapNode(parent=null,sources=listOf(source))))
+        fun sourceJson(j:org.json.JSONObject)=j.getJSONArray("nodes").getJSONObject(0).getJSONArray("sources").getJSONObject(0)
+        val raw=String(MapCodec.encode(doc));assertEquals(doc,MapCodec.decode(raw.toByteArray()))
+        val j=org.json.JSONObject(raw);sourceJson(j).remove("lastKnownPage")
+        val legacy=doc.copy(nodes=doc.nodes.map {it.copy(sources=listOf(source.copy(lastKnownPage=null)))})
+        assertEquals(legacy,MapCodec.decode(j.toString().toByteArray()))
+        sourceJson(j).put("lastKnownPage",org.json.JSONObject.NULL)
+        assertEquals(legacy,MapCodec.decode(j.toString().toByteArray()))
+        for(literal in listOf("\"2\"","2.5","2.0","2e0","0","200001","true")) {
+            val invalid=raw.replace("\"lastKnownPage\":2","\"lastKnownPage\":$literal")
+            assertThrows(IllegalArgumentException::class.java) {MapCodec.decode(invalid.toByteArray())}
+        }
+        val file=org.json.JSONObject(raw);sourceJson(file).put("scope","FILE").put("pageId",org.json.JSONObject.NULL)
+        assertThrows(IllegalArgumentException::class.java) {MapCodec.decode(file.toString().toByteArray())}
     }
 }
