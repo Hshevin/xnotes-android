@@ -1031,6 +1031,122 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } finally {owner.endPageReferenceSave(request.model)}
     }
 
+    private var hostTouching=false
+    private var hostInputRevision=0L
+    private fun observeHostInput(event:android.view.MotionEvent) {
+        when(event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_POINTER_DOWN -> {hostTouching=true;hostInputRevision++}
+            android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL -> {hostTouching=false;hostInputRevision++}
+            android.view.MotionEvent.ACTION_MOVE,android.view.MotionEvent.ACTION_POINTER_UP,android.view.MotionEvent.ACTION_SCROLL -> hostInputRevision++
+            else -> return
+        }
+        contentTransactionChanged()
+    }
+    private fun hostInputLost() {
+        hostTouching=false;hostInputRevision++;contentTransactionChanged()
+    }
+    private fun hostParkingPanes():List<Editor> = listOfNotNull(this,secondary)
+    private fun hostParkingSlots()=hostParkingPanes().map {ed->val owner=ed.documentOwner
+        OpenSlot(ed,owner,if(owner.canvasOpen) requireNotNull(owner.infiniteOrNull).document else owner.state.document,ed.canvasOpen,ed.noteOpen)}
+    private fun sameHostParkingSlots(slots:List<OpenSlot>):Boolean {
+        val current=hostParkingSlots()
+        return slots.size==current.size && slots.zip(current).all {(a,b)->
+            a.pane===b.pane && a.owner===b.owner && a.model===b.model && a.canvas==b.canvas && a.open==b.open &&
+                a.pane.sessionOwner.isCurrent() && a.owner.sessionOwner.isCurrent()}
+    }
+    private fun hostParkingInputBusy(slot:OpenSlot):Boolean {
+        val ed=slot.pane
+        if(ed.hostTouching || ed.stylusInContact) return true
+        return if(slot.canvas) ed.infiniteOrNull?.hasPendingContentTransaction==true
+            else ed.controller.hasPendingContentTransaction ||
+                ed.tablePreviews.values.any {ed.currentTablePreview(it) && it.table.snapshot()!=it.before}
+    }
+    private fun hostParkingWriterBusy(slot:OpenSlot)=listOf(slot.pane,slot.owner).any {
+        it.noteWriteJob?.isActive==true || it.canvasWriteJob?.isActive==true || it.sessionWriteJob?.isActive==true}
+
+    private class HostParkingStamp(private val slot:OpenSlot) {
+        private val ed=slot.pane
+        private val input=ed.hostInputRevision
+        private val replacement=ed.replacementSequence
+        private val noteWrite=ed.noteWriteJob
+        private val canvasWrite=ed.canvasWriteJob
+        private val sessionWrite=ed.sessionWriteJob
+        private val revision=revision()
+        private val path=path()
+        private val identity=identity()
+        private val pageRects=ed.state.pageRects
+        private val nativeView=if(slot.canvas) ed.infiniteOrNull?.view else ed.view
+        private val wetPad=if(slot.canvas) ed.infiniteOrNull?.pad else ed.pad
+        private val layout=layout()
+        private fun revision()=when(val model=slot.model) {
+            is Document->model.bodyRevision
+            is com.xnotes.core.infinite.InfiniteDocument->model.bodyRevision
+            else->error("Unknown native model")
+        }
+        private fun path()=when(val model=slot.model) {
+            is Document->model.path
+            is com.xnotes.core.infinite.InfiniteDocument->model.path
+            else->error("Unknown native model")
+        }
+        private fun identity()=when(val model=slot.model) {
+            is Document->model.identity
+            is com.xnotes.core.infinite.InfiniteDocument->model.identity
+            else->error("Unknown native model")
+        }
+        private fun layout():List<Any?> = if(slot.canvas) ed.infiniteOrNull?.let {canvas->
+            val v=canvas.viewport
+            listOf(canvas.view.width,canvas.view.height,v.widthPx,v.heightPx,v.zoom,v.scrollX,v.scrollY,
+                v.insetLeft,v.insetTop,v.insetRight,v.insetBottom)
+        } ?: emptyList() else with(ed.state) {
+            listOf(ed.view.width,ed.view.height,viewportW,viewportH,zoom,scrollX,scrollY,rotationDeg,verticalScroll,
+                insetLeft,insetTop,insetRight,insetBottom,didInitialFit,pendingInitialView,
+                ed.splitSideBySide,ed.splitReversed,ed.focusedPane)
+        }
+        fun current()=input==ed.hostInputRevision && replacement==ed.replacementSequence &&
+            noteWrite===ed.noteWriteJob && canvasWrite===ed.canvasWriteJob && sessionWrite===ed.sessionWriteJob &&
+            !ed.opening && ed.nativeOpenRequest==null && revision==revision() && path==path() && identity==identity() &&
+            pageRects===ed.state.pageRects && nativeView===(if(slot.canvas) ed.infiniteOrNull?.view else ed.view) &&
+            wetPad===(if(slot.canvas) ed.infiniteOrNull?.pad else ed.pad) && layout==layout()
+    }
+
+    /** Park the existing workspace intact; dirty is allowed and no native write is requested here. */
+    internal suspend fun awaitHostParking():NativeHostParking? {
+        val workspace=sibling?.takeIf {it.secondary===this} ?: this
+        if(workspace!==this) return workspace.awaitHostParking()
+        val slots=hostParkingSlots()
+        val replacements=slots.map {it.pane.replacementSequence}
+        fun current()=sameHostParkingSlots(slots) && slots.zip(replacements).all {(slot,sequence)->
+            slot.pane.replacementSequence==sequence && !slot.pane.opening && slot.pane.nativeOpenRequest==null}
+        while(current()) {
+            for(ed in slots.map {it.pane}.distinct()) {
+                ed.noteWriteJob?.join();ed.canvasWriteJob?.join();ed.awaitSessionEncoders()
+                if(!current()) return null
+            }
+            for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
+                if(slot.canvas) slot.owner.infiniteOrNull?.commitText()
+                else {slot.owner.commitNoteTextForSave();slot.owner.flowText.endSession()}
+            }
+            afterInputDispatch()
+            for(ed in slots.map {it.pane}.distinct()) ed.awaitSessionEncoders()
+            if(!current()) return null
+            val wakes=slots.map {it.pane.captureBoundary}
+            if(slots.any(::hostParkingWriterBusy)) continue
+            if(slots.none(::hostParkingInputBusy)) {
+                val stamps=slots.map(::HostParkingStamp)
+                return NativeHostParking.observe {
+                    current() && slots.none(::hostParkingInputBusy) && slots.none(::hostParkingWriterBusy) && stamps.all {it.current()}
+                }
+            }
+            // A closed physical surface cannot ask the user to finish an invisible transaction.
+            if(slots.any {!it.open && hostParkingInputBusy(it)}) return null
+            kotlinx.coroutines.selects.select<Unit> {
+                for(wake in wakes) wake.onAwait { }
+                for(slot in slots) slot.pane.sessionOwner.onRetired { }
+            }
+        }
+        return null
+    }
+
     /** Created only by an explicit Discard click's guard; expires when that exact body changes. */
     class OpenDiscard internal constructor(internal val owner:Editor,private val model:Document,private val revision:Long) {
         private val path=model.path?.let(owner::documentKey)
@@ -1172,6 +1288,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             it.penDoublePressMs = { preferences.penDoublePressMs.toLong() }
             it.otherPenInContact = { sibling?.stylusInContact == true }
             it.beforePenInput = ::focusForPenInput
+            val lost=it.view.onInputLost
+            it.view.onInputLost={hostInputLost();lost?.invoke()}
             it.applyPalette(palette)
             // Both editors write inserted images into the same purged-on-launch temp dir.
             it.imageDir = imageDir
@@ -2296,7 +2414,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         view.crossPaneTouchGate.shouldBlock = { sibling?.stylusInContact == true }
         view.onTwoFingerTap = { dispatchTapGesture(preferences.twoFingerTap) }
         view.onThreeFingerTap = { dispatchTapGesture(preferences.threeFingerTap) }
-        view.onInputLost = { proPenInput.surfaceDetached() }
+        view.onInputLost = { hostInputLost();proPenInput.surfaceDetached() }
         view.hover = { focusForPenInput(it); proPenInput.motion(it); controller.onHover(it) }
         view.genericMotion = { focusForPenInput(it); proPenInput.motion(it); controller.onGenericMotion(it) }
         view.drawOverlay = { renderer, _ -> controller.drawOverlay(renderer) }
@@ -11106,6 +11224,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** All incoming pen routes take focus before the sample reaches the target state machine. */
     private fun focusForPenInput(event: android.view.MotionEvent) {
+        observeHostInput(event)
         if (!noteOpen || event.actionMasked !in listOf(android.view.MotionEvent.ACTION_DOWN,
                 android.view.MotionEvent.ACTION_POINTER_DOWN, android.view.MotionEvent.ACTION_HOVER_ENTER,
                 android.view.MotionEvent.ACTION_HOVER_MOVE, android.view.MotionEvent.ACTION_BUTTON_PRESS,
