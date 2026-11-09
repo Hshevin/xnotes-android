@@ -6,7 +6,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
-import androidx.lifecycle.ViewModelProvider
 import com.xnotes.R
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
@@ -41,7 +40,7 @@ class MapRelationEditingHostTest {
         val file=File.createTempFile("relation-host-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(MapLayout.arrange(document)))}
         val activity=runner.startActivitySync(MindMapActivity.intent(context,Uri.fromFile(file).toString(),"Relationship host").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MindMapActivity
         try {
-            val session=main {ViewModelProvider(activity)[MapSession::class.java]}
+            val session=main {activity.documentSession}
             waitUntil {main {!session.loading && session.document!=null}}
             block(activity,session)
         } finally {main {activity.finish()}}
@@ -118,7 +117,7 @@ class MapRelationEditingHostTest {
             main {activity.recreate()}
             val recreated=runner.waitForMonitorWithTimeout(monitor,5000) as? MindMapActivity;runner.removeMonitor(monitor)
             assertNotNull(recreated);activity=recreated!!
-            assertSame(s,main {ViewModelProvider(activity)[MapSession::class.java]})
+            assertSame(s,main {activity.documentSession})
             waitUntil {visible("Draft survives recreation")}
             assertEquals(token,main {s.connectedDraft!!.token});assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
             click(activity.getString(R.string.cancel));waitUntil {main {s.connectedDraft==null}}

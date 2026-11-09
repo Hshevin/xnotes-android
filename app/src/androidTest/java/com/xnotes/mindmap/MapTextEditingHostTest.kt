@@ -9,7 +9,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.text.TextRange
-import androidx.lifecycle.ViewModelProvider
 import com.xnotes.R
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
@@ -37,7 +36,7 @@ class MapTextEditingHostTest {
             MapNode(id="far",parent=null,free=true,text="Far away",x=100000.0)))
         val file=File.createTempFile("text-host-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(doc))}
         val activity=runner.startActivitySync(MindMapActivity.intent(context,Uri.fromFile(file).toString(),"Text host").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MindMapActivity
-        val session=main {ViewModelProvider(activity)[MapSession::class.java]}
+        val session=main {activity.documentSession}
         waitUntil {main {!session.loading && views(activity.window.decorView).any {it is MindMapView && it.height>0}}}
         return activity
     }
@@ -65,7 +64,7 @@ class MapTextEditingHostTest {
     @Test fun realComposingFieldKeepsDraftAcrossResizeThenDoneIsOneUndoAndBackCancels() {
         val activity=open()
         try {
-            val session=main {ViewModelProvider(activity)[MapSession::class.java]};val g=main {graph(activity)}
+            val session=main {activity.documentSession};val g=main {graph(activity)}
             main {g.onEdit("root")}
             val imm=activity.getSystemService(InputMethodManager::class.java)
             waitUntil {main {session.textDraft!=null && imm.isAcceptingText && activity.currentFocus!=null}}
@@ -106,7 +105,7 @@ class MapTextEditingHostTest {
     @Test fun recreatedGraphKeepsImeCompositionAndReadableScaleWithoutReplacingTransaction() {
         var activity=open()
         try {
-            val session=main {ViewModelProvider(activity)[MapSession::class.java]};val original=main {session.document}
+            val session=main {activity.documentSession};val original=main {session.document}
             main {graph(activity).onEdit("root")}
             waitUntil {main {session.textDraft!=null && graph(activity).viewport().zoom>=1f}}
             val draft=main {session.textDraft!!}
@@ -118,7 +117,7 @@ class MapTextEditingHostTest {
             runner.removeMonitor(monitor)
             assertNotNull(recreated);activity=recreated!!
             waitUntil {main {views(activity.window.decorView).any {it is MindMapView && it.height>0} && graph(activity).viewport().zoom>=1f}}
-            assertSame(session,main {ViewModelProvider(activity)[MapSession::class.java]})
+            assertSame(session,main {activity.documentSession})
             assertEquals(draft.token,main {session.textDraft!!.token});assertEquals(value,main {session.textDraft!!.value})
             assertEquals(draft.viewport,main {session.textDraft!!.viewport})
             main {activity.onBackPressedDispatcher.onBackPressed()}

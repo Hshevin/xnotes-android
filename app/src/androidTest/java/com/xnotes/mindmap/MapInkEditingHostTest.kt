@@ -6,7 +6,6 @@ import android.view.MotionEvent
 import android.view.InputDevice
 import android.view.View
 import android.view.ViewGroup
-import androidx.lifecycle.ViewModelProvider
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
 import org.junit.Test
@@ -38,7 +37,7 @@ class MapInkEditingHostTest {
         val file=File.createTempFile("ink-host-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(doc))}
         val activity=runner.startActivitySync(MindMapActivity.intent(context,Uri.fromFile(file).toString(),"Ink host").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MindMapActivity
         try {
-            val session=main {ViewModelProvider(activity)[MapSession::class.java]}
+            val session=main {activity.documentSession}
             waitUntil {main {!session.loading && views(activity.window.decorView).any {it is MindMapView && it.height>0}}}
             val graph=main {views(activity.window.decorView).filterIsInstance<MindMapView>().single()}
             main {graph.centerOn("ink")}

@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -29,13 +30,14 @@ import com.xnotes.ui.theme.*
 internal val LocalInkBusy=staticCompositionLocalOf {false}
 
 @Composable
-fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
+fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:MapPresentationState?=null) {
+    val presentationState=presentation ?: remember(session) {MapPresentationState()}
+    presentationState.synchronize(session)
     val context = LocalContext.current
     val appearance = remember { LiveSettings.get(SettingsRepository(context)).prefs.uiAppearance }
     val dark = when (appearance) { "light" -> false; "dark", "oled" -> true; else -> isSystemInDarkTheme() }
     XnotesTheme(monochromePalette(dark)) {
-      CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
-        var sourcesFor by remember { mutableStateOf<String?>(null) }
+      CompositionLocalProvider(LocalInkBusy provides session.inkContact) screen@{
         var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         var activeExistingSource by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         val sourceController=session.sourcePicker
@@ -71,6 +73,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         val saveCopy = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
             if (uri != null) session.saveCopy(uri) {}
         }
+        // The host parks only the visible editor. OS picker slots above retain their original owner.
+        if(!presentationState.visible) return@screen
         val close = { if (session.document == null) onClose() else session.save(onClose) }
         val focus = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
@@ -99,6 +103,32 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         }
         // Exiting has one path, including configuration recreation with an outstanding restore.
         val geometry=remember(viewRevision,view) {Pair(view?.width ?: 0,view?.height ?: 0)}
+        var cameraReady by remember(view) {mutableStateOf(false)}
+        var textOwnedCamera by remember(view) {mutableStateOf(false)}
+        val latestIme by rememberUpdatedState(imeBottom)
+        val latestCameraReady by rememberUpdatedState(cameraReady)
+        DisposableEffect(view,presentationState,session) {
+            val owned=view
+            onDispose {
+                if(owned!=null && latestCameraReady) presentationState.capture(session,owned,latestIme)
+                if(view===owned) view=null
+            }
+        }
+        LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token) {
+            val graph=view ?: return@LaunchedEffect
+            if(textDraft!=null || textRestore!=null) {
+                // Text transactions own their pre-edit camera and their existing restoration path.
+                textOwnedCamera=true;cameraReady=true;return@LaunchedEffect
+            }
+            if(imeBottom!=0 || graph.width<=0 || graph.height<=0) return@LaunchedEffect
+            val size=Pair(graph.width,graph.height);val densityAtLayout=graph.resources.displayMetrics.density
+            repeat(2) {withFrameNanos {}}
+            if(size!=Pair(graph.width,graph.height) || densityAtLayout!=graph.resources.displayMetrics.density ||
+                session.interactionEpoch!=graphEpoch || graph.document.id!=session.document?.id) return@LaunchedEffect
+            if(!textOwnedCamera) presentationState.restore(session,graph)
+            cameraReady=true
+            presentationState.capture(session,graph)
+        }
         var preparedText by remember(view,textDraft?.token) {mutableStateOf(false)}
         LaunchedEffect(view,textDraft?.token,geometry) {
             val draft=textDraft ?: return@LaunchedEffect
@@ -218,7 +248,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                         MapButton(R.string.graph_connect_canvas,enabled=!nodeMode && node!=null,selected=connectingFrom!=null) {
                             if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
                         }
-                        MapButton(R.string.graph_sources,enabled=!nodeMode && node!=null) { sourcesFor=node?.id }
+                        MapButton(R.string.graph_sources,enabled=!nodeMode && node!=null) { presentationState.sourcesFor=node?.id }
                         MapButton(R.string.map_nodes,enabled=!nodeMode) { choosing = true; reparenting = false }
                         MapButton(R.string.map_change_parent, enabled = !nodeMode && node?.parent != null && !session.closing) { choosing = true; reparenting = true }
                         MapButton(R.string.map_layout, enabled = !nodeMode && !session.closing) { layoutMenu=true }
@@ -233,9 +263,12 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 HorizontalDivider()
                 Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     when {
-                        doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize(), update = { v ->
-                            v.isEnabled=!enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
-                            v.onViewportChanged={viewRevision++}
+                        doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize().alpha(if(cameraReady) 1f else 0f), update = { v ->
+                            v.isEnabled=cameraReady && !enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
+                            v.onViewportChanged={
+                                viewRevision++
+                                if(cameraReady) presentationState.capture(session,v,imeBottom)
+                            }
                             v.onConnectionModeChanged={connectingFrom=it}
                             v.onConnectionTarget={from,to->relationToEdit=null;pendingRelation=MapRelation(from=from,to=to);graphTools=true}
                             v.onConnectionBlank={from,point->session.beginConnectedNode(from,point)}
@@ -250,7 +283,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                             if(session.selectedRelation!=null) v.selectedRelation=session.selectedRelation else v.setSelectedNodes(session.selectedNodes)
                             v.onCaptureNodes=session::captureNodes;v.onMoveNodes=session::moveNodes;v.onSelectNodes={capture,ids->session.selectNodes(capture,ids)}
                             v.contentDescription = context.getString(R.string.map_canvas_description)
-                            v.onSelect = { session.selected = it }; v.onSources={sourcesFor=it}; v.onEdit = { if (!session.closing) { if(doc.node(it).kind==NodeKind.REFERENCE) sourcesFor=it else editing = it } }; v.onChange = { session.commit(it) }
+                            v.onSelect = { session.selected = it }; v.onSources={presentationState.sourcesFor=it}; v.onEdit = { if (!session.closing) { if(doc.node(it).kind==NodeKind.REFERENCE) presentationState.sourcesFor=it else editing = it } }; v.onChange = { session.commit(it) }
                             v.onSelectRelation={session.selectRelation(it)};v.onEditRelation=::editExistingRelation
                         })
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
@@ -294,7 +327,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             for(k in NodeKind.entries) MapButton(when(k){NodeKind.TEXT->R.string.map_text_node;NodeKind.INK->R.string.map_ink_node;NodeKind.REFERENCE->R.string.graph_reference}) {
                 var added: String?=null
                 val accepted=session.operate { d -> val n=d.addFree(k,if(k==NodeKind.REFERENCE) "" else context.getString(R.string.map_topic),d.root.x+d.root.width+100,d.root.y+300+d.nodes.count { it.free }*100);added=n.second;n.first }
-                if(accepted) { session.selected=added;addFree=false;if(k==NodeKind.REFERENCE) sourcesFor=added else editing=added }
+                if(accepted) { session.selected=added;addFree=false;if(k==NodeKind.REFERENCE) presentationState.sourcesFor=added else editing=added }
             }
         }},confirmButton={MapButton(R.string.cancel){addFree=false}})
         if(layoutMenu) AlertDialog(onDismissRequest={layoutMenu=false},title={Text(stringResource(R.string.map_layout),fontSize=TextSize.heading)},text={Column {
@@ -316,7 +349,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                 }){graphTools=false;pendingRelation=null;relationToEdit=null}
             }
         }
-        sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
+        presentationState.sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
             val editor=remember(session,id,sourceEdit.epoch,sourceEdit.documentId) {SourceListEditor(session,sourceEdit)}
             GraphSourcesDialog(sourceEdit,editor, {
                 if(pendingSourceRequest==null) session.beginExistingSource(id)?.let {request->
@@ -327,7 +360,7 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             },addEnabled=pendingSourceRequest==null && sourceController.state==null) {
                 listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
                 // Keep the system launch occupied until ITS result consumes the old ticket.
-                activeExistingSource=null;sourcesFor=null
+                activeExistingSource=null;presentationState.sourcesFor=null
             }
         } }
         sourceController.state?.let {GraphSourceChoiceDialog(it,sourceController)}

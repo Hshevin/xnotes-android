@@ -13,7 +13,6 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsOwner
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.lifecycle.ViewModelProvider
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
 import com.xnotes.pen.PenTestRunner
@@ -68,7 +67,7 @@ class MapNodeSelectionEditingHostTest {
         val file=File.createTempFile("selection-host-",".xmap",context.cacheDir).apply {writeBytes(MapCodec.encode(document))}
         val activity=runner.startActivitySync(MindMapActivity.intent(context,Uri.fromFile(file).toString(),"Node selection host")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MindMapActivity
-        val session=main {ViewModelProvider(activity)[MapSession::class.java]}
+        val session=main {activity.documentSession}
         try {
             waitUntil {main {!session.loading && session.document!=null && graph(activity).width>0 && graph(activity).height>0}}
             block(activity,session,sourceFile,sourceBytes)
