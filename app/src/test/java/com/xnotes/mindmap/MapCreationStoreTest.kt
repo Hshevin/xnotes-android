@@ -72,10 +72,13 @@ class MapCreationStoreTest {
         assertEquals(already,reopened.document);assertFalse(reopened.recovered);assertFalse(reopened.conflict)
         assertEquals(1,written.writes);assertArrayEquals(bytes,written.bytes)
     }
-    @Test fun orphanStagingIsRetainedAndCancellationAfterTheDurableJournalResumesTheSameCandidate() {
+    @Test fun completeOrphanStagingIsRetainedAndCancellationAfterTheDurableJournalResumesTheSameCandidate() {
         val dir=tmp.newFolder();val key="orphan"
         val name=MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") {"%02x".format(it)}+".json.pending"
-        val orphan=File(dir,name).apply {writeText("fsynced old checkpoint")};val original=orphan.readBytes()
+        val base=MessageDigest.getInstance("SHA-256").digest(byteArrayOf()).joinToString("") {"%02x".format(it)}
+        val checkpoint=JSONObject().put("baseHash",base).put("pending",true)
+            .put("document",MapCodec.toJson(doc("fsynced old checkpoint")))
+        val orphan=File(dir,name).apply {writeText(checkpoint.toString())};val original=orphan.readBytes()
         val empty=Target()
         assertThrows(IOException::class.java) {MapStore(dir,key,empty).create(doc())}
         assertEquals(0,empty.writes);assertArrayEquals(original,orphan.readBytes())

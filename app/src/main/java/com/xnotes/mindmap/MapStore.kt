@@ -31,6 +31,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
 
     fun open(): Opened {
         val read=inspect({})
+        reconcileStaging()
         journal=read.chosen;expectedHash=read.expected
         if(read.ready) journalReady=true
         if(read.checkpoint) checkpoint(read.opened.document,pending=false)
@@ -47,29 +48,24 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     }
     private fun inspect(checkActive:()->Unit,readJournalBytes:(Int)->Unit={}):Inspection {
         checkActive()
-        if(journals.any {staging(it).exists()}) throw MapRecoveryObservationException("Unfinished recovery checkpoint")
-        val existing=journals.filter {it.exists()}
+        var journalBytes=0L
+        val savedByFile=journals.associateWith {file->
+            val staged=staging(file).takeIf {it.exists()}?.let {
+                readCheckpoint(it,checkActive) {count->journalBytes+=count;readJournalBytes(count)}
+            }
+            // A complete staging file is the next checkpoint for this same serialized writer.
+            // An incomplete one cannot supersede the last published recovery journal.
+            staged ?: if(file.exists()) readCheckpoint(file,checkActive) {count->journalBytes+=count;readJournalBytes(count)}
+                ?: throw MapRecoveryObservationException("Invalid recovery journal") else null
+        }
+        val existing=journals.filter {savedByFile[it]!=null}
         if(existing.size>1) throw MapRecoveryObservationException("Conflicting recovery journals")
         val chosen=existing.singleOrNull() ?: journals.first()
         val remote=try {target.read()} catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {checkActive();null}
         checkActive()
         val remoteHash = remote?.let(::hash)
-        var journalBytes=0L
-        // A corrupt journal is retained; do not mask an otherwise readable original or overwrite it.
-        val saved = if (chosen.exists()) runCatching {
-            val bytes=chosen.inputStream().use {input->MapCodec.readBytes(object:FilterInputStream(input) {
-                override fun read():Int {checkActive();return super.read().also {if(it>=0) readJournalBytes(1)}}
-                override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length).also {if(it>0) readJournalBytes(it)}}
-            })};journalBytes=bytes.size.toLong();checkActive()
-            val j = JSONObject(String(bytes, Charsets.UTF_8))
-            val doc = MapCodec.fromJson(j.getJSONObject("document"))
-            checkActive()
-            Triple(doc, j.getString("baseHash"), j.getBoolean("pending"))
-        }.getOrElse {
-            if(it is java.util.concurrent.CancellationException) throw it
-            checkActive();throw MapRecoveryObservationException("Invalid recovery journal",it)
-        } else null
+        val saved=savedByFile[chosen]
         fun result(opened:Opened,expected:String?,ready:Boolean,checkpoint:Boolean=false)=Inspection(opened,chosen,expected,ready,
             checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes)
         if (saved != null && saved.third) {
@@ -94,6 +90,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         checkActive()
         val bytes=MapCodec.encode(doc)
         checkActive()
+        reconcileStaging(checkActive,promote=false)
         if(journals.any {it.exists() || staging(it).exists()}) throw IOException("Destination has recovery work")
         val before=target.read()
         checkActive()
@@ -150,7 +147,10 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     fun discardRecovery(): Opened {
         val remote = target.read()
         val doc = MapCodec.decode(remote)
-        check(!journal.exists() || journal.delete()) { "Cannot remove the recovery journal" }
+        for(file in journals.flatMap {listOf(it,staging(it))}) {
+            check(!file.exists() || file.delete()) { "Cannot remove the recovery journal" }
+        }
+        journal=journals.first()
         expectedHash = hash(remote)
         journalReady = false
         return Opened(doc)
@@ -158,6 +158,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
 
     private fun checkpoint(doc: MindMapDocument, pending: Boolean,checkActive:()->Unit={}) {
         checkActive()
+        reconcileStaging(checkActive)
         val data = JSONObject().put("baseHash", requireNotNull(expectedHash))
             .put("pending", pending).put("document", MapCodec.toJson(doc)).toString().toByteArray(Charsets.UTF_8)
         // Envelope adds a small fixed overhead to the document's size.
@@ -180,6 +181,35 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
             // recovery material if its atomic move fails; earlier staging files are never ours.
             if(!synced) staging.delete()
         }
+    }
+    /** Only the serialized editing owner cleans/promotes checkpoints; indexing stays read-only. */
+    private fun reconcileStaging(checkActive:()->Unit={},promote:Boolean=true) {
+        for(file in journals) {
+            val pending=staging(file)
+            if(!pending.exists()) continue
+            val valid=readCheckpoint(pending,checkActive)
+            checkActive()
+            if(valid!=null) {
+                if(promote) Files.move(pending.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+            }
+            else check(pending.delete() || !pending.exists()) {"Cannot remove an incomplete recovery checkpoint"}
+        }
+    }
+    /** I/O, cancellation and read-budget failures propagate; only invalid bytes are discardable. */
+    private fun readCheckpoint(file:File,checkActive:()->Unit,readBytes:(Int)->Unit={}):Triple<MindMapDocument,String,Boolean>? {
+        checkActive()
+        if(file.length()>MapCodec.MAX_BYTES) return null
+        val bytes=file.inputStream().use {input->MapCodec.readBytes(object:FilterInputStream(input) {
+            override fun read():Int {checkActive();return super.read().also {if(it>=0) readBytes(1)}}
+            override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length).also {if(it>0) readBytes(it)}}
+        })}
+        checkActive()
+        return try {
+            val j=JSONObject(String(bytes,Charsets.UTF_8))
+            val base=j.get("baseHash").also {require(it is String && (it==ABSENT || it.matches(Regex("[0-9a-f]{64}"))))} as String
+            val pending=j.get("pending").also {require(it is Boolean)} as Boolean
+            Triple(MapCodec.fromJson(j.getJSONObject("document")),base,pending)
+        } catch(_:org.json.JSONException) {null} catch(_:IllegalArgumentException) {null}
     }
     private fun staging(file:File)=File(file.parentFile,file.name+".pending")
     companion object {
