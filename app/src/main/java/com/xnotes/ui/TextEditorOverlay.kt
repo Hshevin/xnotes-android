@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.heightIn
@@ -29,6 +30,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.relocation.BringIntoViewModifierNode
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -83,9 +85,18 @@ private class NoBringIntoViewNode : Modifier.Node(), BringIntoViewModifierNode {
 interface TextEditHost {
     /** Colours for chrome drawn on the page itself (contrasting with the page in view), or null for the theme's. */
     val overlayPalette: com.xnotes.ui.theme.Palette? get() = null
+    /** Opaque editing paper only when the host needs it; notebook/PDF overlays remain transparent. */
+    val editingBackground: androidx.compose.ui.graphics.Color? get() = null
 
     /** Where the style bar sits and what it shows, or null to hide it. */
     val textBar: com.xnotes.canvas.TextBar?
+
+    /** Optional controlled IME state. Null keeps the existing note/canvas local state behavior. */
+    val editingValue:TextFieldValue? get()=null
+    fun acceptsEditingText(text:String):Boolean=true
+    fun updateEditingValue(value:TextFieldValue) {updateEditingText(value.text)}
+    /** Host-local viewport px; default hosts intentionally do not auto-pan. */
+    fun editingCaretChanged(bounds:com.xnotes.core.geometry.Rect) {}
 
     /** Mirror the field's text back to the model. */
     fun updateEditingText(text: String)
@@ -116,15 +127,23 @@ interface TextEditHost {
  * (tap to commit, drag to scroll).
  */
 @Composable
-fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
+fun TextEditorOverlay(editor: TextEditHost, field: EditingField, caretGeometryRevision:Int=0) {
     val density = LocalDensity.current
     // The box border and caret sit on the page, so they take the page-aware overlay colours.
     val palette = editor.overlayPalette ?: LocalPalette.current
-    var value by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
+    var localValue by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
+    val value=editor.editingValue ?: localValue
+    var textLayout by remember {mutableStateOf<TextLayoutResult?>(null)}
     var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(value.selection,textLayout,field.x,field.y,field.zoom,field.rotation,caretGeometryRevision) {
+        textLayout?.takeIf {it.layoutInput.text.text==value.text}?.let { layout ->
+            val r=layout.getCursorRect(value.selection.end.coerceIn(0,layout.layoutInput.text.length))
+            editor.editingCaretChanged(field.screenBounds(com.xnotes.core.geometry.Rect(r.left.toDouble(),r.top.toDouble(),r.width.toDouble(),r.height.toDouble())))
+        }
+    }
 
     // Content-space geometry: the field lays its text out on the box's own pixel grid (the
     // baked painter wraps a StaticLayout at floor(width) px with a content-size font, then
@@ -148,8 +167,10 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
         BasicTextField(
             value = value,
             onValueChange = {
-                value = it
-                editor.updateEditingText(it.text)
+                if(editor.acceptsEditingText(it.text)) {
+                    localValue=it
+                    editor.updateEditingValue(it)
+                }
             },
             modifier = Modifier
                 .then(NoBringIntoViewElement)
@@ -163,6 +184,7 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
                 )
                 .widthIn(min = widthDp, max = widthDp)
                 .heightIn(min = heightDp)
+                .then(editor.editingBackground?.let { Modifier.background(it) } ?: Modifier)
                 // No fill: the edited box is lifted out of the ink cache, so a transparent field lets the
                 // page/PDF underneath show through while typing (true WYSIWYG). The border marks the
                 // bounds; its width is pre-divided so it stays 1dp after the layer scale.
@@ -212,6 +234,7 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
                 fontSize = fontSp,
                 textAlign = if (field.centred) TextAlign.Center else TextAlign.Start,
             ),
+            onTextLayout={textLayout=it},
             cursorBrush = SolidColor(palette.accent.toComposeColor()),
         )
     }) { measurables, constraints ->

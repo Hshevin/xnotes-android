@@ -52,6 +52,7 @@ class Stroke(
     val smoothScale: Double = 1.0,
 ) : CanvasItem {
 
+
     override val kind = KIND
     override val resizable = false
     override var layerId: String? = null
@@ -108,6 +109,11 @@ class Stroke(
     constructor(src: Stroke) : this(src.tool, src.config, emptyList(), src.speedScale, src.straight, src.smoothScale) {
         pts = src.pts.detached()
         cuts = src.cuts
+    }
+    /** Pin the published prefix without allocating a second note's worth of sample arrays.
+     * Appending fills only beyond its count; every edit to the prefix publishes a new tuple. */
+    internal fun copyForWrite():Stroke=Stroke(tool,config,emptyList(),speedScale,straight,smoothScale).also {
+        it.pts=pts;it.cuts=cuts.toList()
     }
 
     // --- sample access ---

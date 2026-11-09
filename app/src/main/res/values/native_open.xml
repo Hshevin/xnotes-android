@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_open_changed">The document changed while opening. Your current workspace was kept. Please try again.</string>
+    <string name="native_save_picker_busy">Finish or cancel the current save destination selection first.</string>
+</resources>

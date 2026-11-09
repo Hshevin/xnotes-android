@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Storage messages; names mirror com.xnotes.storage.StorageMsg. -->
 <resources>
+    <string name="storage_msg_migration_recovery_pending">Finish the previous recovery before saving again.</string>
+    <string name="storage_msg_migration_recovery_invalid">Recovery files are missing, damaged or unsupported. Existing recovery data was kept; check the current file before choosing how to recover.</string>
+    <string name="storage_msg_migration_index_incomplete">Document registration is incomplete. The current file and recovery backups were kept. Retry to finish registration.</string>
+
+    <string name="storage_msg_reference_identity_mismatch">The document identity no longer matches. Saving was blocked. Locate the original or explicitly open this file as a different document.</string>
+    <string name="storage_msg_reference_identity_missing">The existing file has no document identity. Restore its identity or explicitly upgrade it before saving.</string>
+    <string name="storage_msg_reference_page_metadata_missing">Page reference metadata is missing. Restore the original reference metadata before saving.</string>
+
     <string name="storage_msg_duplicate_document_id">Several files share this document ID. Choose the original or give the copy a new identity first</string>
     <string name="storage_msg_pdf_resource_unregistered">PDF resource is not registered</string>
     <string name="storage_msg_pdf_resource_missing">PDF resource does not exist</string>
@@ -21,4 +29,8 @@
     <string name="storage_msg_pdf_resource_verify_failed">PDF resource verification failed</string>
     <string name="storage_msg_pdf_resource_corrupt">The original PDF this note refers to is not stored in this app. Another installed version may have upgraded the note, or the app was reinstalled or its data cleared. Your ink and annotations are intact: choose the same original PDF, or an older note file or exported package that still embeds it, to re-link</string>
     <string name="storage_msg_pdf_resource_mismatch">The selected file does not match this note\'s original PDF. Nothing was changed; choose the same PDF you first imported, or an older note file that contains it</string>
+    <string name="storage_msg_reference_metadata_invalid">Unable to verify the document identity or page references. The source file was not changed. Check the original file or use recovery data.</string>
+    <string name="storage_msg_reference_write_context_invalid">This save does not match the original document type, page reference state, or original PDF. The file was not overwritten. Use the corresponding copy, recovery, or upgrade operation.</string>
+    <string name="storage_msg_reference_source_changed">The source file content has changed. Saving was blocked and your edits are retained. Check the source or save a separate copy.</string>
+    <string name="storage_msg_native_creation_target_invalid">The target is not a verified new empty file and was not overwritten. Please choose a new file.</string>
 </resources>

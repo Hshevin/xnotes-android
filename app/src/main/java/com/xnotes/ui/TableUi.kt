@@ -89,7 +89,9 @@ fun TableChrome(editor: Editor) {
 fun TableDialog(editor: Editor, table: FlowTable?, onDismiss: () -> Unit) {
     val palette = LocalPalette.current
     val saved = editor.newTableDefaults
-    val before = remember(table) { table?.snapshot() }
+    val document = remember(editor, table) { editor.state.document }
+    val preview = remember(editor, table) { table?.let(editor::beginTablePreview) }
+    DisposableEffect(preview) { onDispose { preview?.let { editor.finishTablePreview(it, commit = true) } } }
     var rows by remember { mutableStateOf(saved.rows) }
     var cols by remember { mutableStateOf(saved.cols) }
     var style by remember { mutableStateOf(table?.style ?: saved.style) }
@@ -101,12 +103,13 @@ fun TableDialog(editor: Editor, table: FlowTable?, onDismiss: () -> Unit) {
         rows = r.coerceIn(1, TableDefaults.MAX_ROWS)
         cols = c.coerceIn(1, TableDefaults.MAX_COLS)
         style = s.clamped()
-        if (table != null) editor.tablePreview(table, table.snapshot().copy(style = style))
+        if (table != null && preview != null) editor.tablePreview(preview, table.snapshot().copy(style = style))
         if (current() != saved) showDefaultRow = true
     }
 
     fun finish(insert: Boolean) {
-        if (table != null && before != null) editor.tableCommitPreview(table, before)
+        if (editor.state.document !== document) { onDismiss(); return }
+        if (preview != null) editor.finishTablePreview(preview, commit = true)
         if (insert) editor.flowInsertTable(rows, cols, style) else if (table == null) editor.flowReshowIme()
         onDismiss()
     }
@@ -422,12 +425,13 @@ private fun TableEditOverlay(editor: Editor, table: FlowTable) {
             for (c in 1 until cols) {
                 key("cw", fi, c) {
                     val tableW by rememberUpdatedState(p.vp.w.toFloat())
-                    DragHandle(p.x(f.colXs[c]), widthY, vertical = true, table, 0.0) { start, _, dx, _, done ->
+                    DragHandle(p.x(f.colXs[c]), widthY, vertical = true, editor, table, 0.0) { preview, _, dx, _, done ->
+                        val start = preview.before
                         val w = start.widths.toMutableList()
                         val d = (dx / tableW).toDouble().coerceIn(MIN_COL - w[c - 1], w[c] - MIN_COL)
                         w[c - 1] += d
                         w[c] -= d
-                        finishDrag(editor, table, start, start.copy(widths = w), done)
+                        finishDrag(editor, preview, start.copy(widths = w), done)
                     }
                 }
             }
@@ -437,9 +441,10 @@ private fun TableEditOverlay(editor: Editor, table: FlowTable) {
             // the boundaries above it this drag moves the table's own width, so it measures
             // against the width at the grab, not the one it is busy changing.
             key("tw", fi) {
-                DragHandle(p.x(f.colXs[cols]), widthY, vertical = true, table, p.vp.w) { start, grabbed, dx, _, done ->
+                DragHandle(p.x(f.colXs[cols]), widthY, vertical = true, editor, table, p.vp.w) { preview, grabbed, dx, _, done ->
+                    val start = preview.before
                     val next = FlowTable.widthAfterDrag(start.width, grabbed, dx.toDouble())
-                    finishDrag(editor, table, start, start.copy(width = next), done)
+                    finishDrag(editor, preview, start.copy(width = next), done)
                 }
             }
 
@@ -449,10 +454,11 @@ private fun TableEditOverlay(editor: Editor, table: FlowTable) {
                 if (k == f.rows.lastIndex && continuesOnNextPage(placed, fi)) continue
                 key("rh", fi, row.row) {
                     val scaleY by rememberUpdatedState(p.scaleY)
-                    DragHandle(heightX, p.y(row.bottom), vertical = false, table, row.bottom - row.top) { start, rowH, _, dy, done ->
+                    DragHandle(heightX, p.y(row.bottom), vertical = false, editor, table, row.bottom - row.top) { preview, rowH, _, dy, done ->
+                        val start = preview.before
                         val h = List(maxOf(start.minHeights.size, row.row + 1)) { start.minHeights.getOrElse(it) { 0.0 } }.toMutableList()
                         h[row.row] = ((rowH + dy / scaleY) / TableStyle.PX_PER_PT).coerceAtLeast(0.0)
-                        finishDrag(editor, table, start, start.copy(minHeights = h), done)
+                        finishDrag(editor, preview, start.copy(minHeights = h), done)
                     }
                 }
             }
@@ -469,11 +475,11 @@ private fun TableEditOverlay(editor: Editor, table: FlowTable) {
 }
 
 /** Preview [next] while a drag runs; [done] lands it as one undo step (or reverts a cancel). */
-private fun finishDrag(editor: Editor, table: FlowTable, start: TableSnapshot, next: TableSnapshot, done: Boolean?) {
+private fun finishDrag(editor: Editor, preview: Editor.TablePreview, next: TableSnapshot, done: Boolean?) {
     when (done) {
-        null -> editor.tablePreview(table, next)
-        true -> editor.tableCommitPreview(table, start)
-        false -> editor.tablePreview(table, start)
+        null -> editor.tablePreview(preview, next)
+        true -> editor.finishTablePreview(preview, commit = true)
+        false -> editor.finishTablePreview(preview, commit = false)
     }
 }
 
@@ -590,7 +596,7 @@ private fun Grip(
 
 /** One resize drag in flight: the table and the handle's [measure] as it began, and the travel. */
 private class HandleDrag {
-    var start: TableSnapshot? = null
+    var start: Editor.TablePreview? = null
     var measure = 0.0
     var dx = 0f
     var dy = 0f
@@ -609,9 +615,10 @@ private fun DragHandle(
     x: Float,
     y: Float,
     vertical: Boolean,
+    editor: Editor,
     table: FlowTable,
     measure: Double,
-    onChange: (start: TableSnapshot, measure: Double, dx: Float, dy: Float, done: Boolean?) -> Unit,
+    onChange: (start: Editor.TablePreview, measure: Double, dx: Float, dy: Float, done: Boolean?) -> Unit,
 ) {
     val palette = LocalPalette.current
     val change by rememberUpdatedState(onChange)
@@ -628,7 +635,7 @@ private fun DragHandle(
         Modifier.pointerInput(table) {
             detectDragGestures(
                 onDragStart = {
-                    drag.start = table.snapshot()
+                    drag.start = editor.beginTablePreview(table)
                     drag.measure = current
                     drag.dx = 0f
                     drag.dy = 0f

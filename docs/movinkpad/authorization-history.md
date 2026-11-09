@@ -68,6 +68,16 @@
 - 用户要求「打包主线最新提交」。本次拉取并合入远端 `ae3e54b7`，本地交付 0.9.8 / Release 95，沿用正式包名和原签名、递增 versionCode；不推送、不安装用户设备、不发布 GitHub Release，保留已有本地修改。
 
 - 用户随后于 2026-11-06 提供本机构建的 Release 95 APK 并要求发布：补提交 versionCode 95，推送 `master` 与标签 `v0.9.8-movinkpad.95`，发布 GitHub Release（附 APK 与 SHA256SUMS.txt）。仅限本次，不包含设备安装。
+
+## 2026-11-06 原生思维导图第一版
+
+用户要求「新建工作树，先做出第一版」，明确使用原生 Kotlin、独立文件格式，功能参考 XMind，但不需要 XMind 格式兼容。建立独立工作树 `mind-map/xnotes` 与本地分支 `codex/mind-map`，基于 `47256b5a`；相关验证通过后依长期规则自动本地提交。本轮没有打包 APK、安装、推送、合并或发布授权。
+
+
+## 2026-11-06 思维导图与文件关系网络扩展
+
+用户授权在当前工作树检查、规格化并持续实现上述功能、运行验证、更新文档及本地提交；明确不授权 APK 打包、设备安装、推送、合并其他功能分支或 Release。当前分支 codex/mind-map，原有改动检查为空。本轮落地多来源／普通关系与自由节点的增量，完整阶段及未完成项保存在 graph-network-2026-11-06.md；不宣称整体完成。
+
 - 用户于 2026-11-06 要求合并到主分支：将 `worktree-ai-markdown-latex`（`e49b612e`，AI 回答 LaTeX 公式排版）与 `worktree-ai-pdf-native-tools`（`d716ef7e`，AI 读取 PDF 改为原生工具调用）以 `--no-ff` 合入本地 `master`，保留两条原分支。合并后全部 JVM 单元测试（2720 项）通过、仪器测试可编译。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release。
 - 用户于 2026-11-07 要求合并到主分支：将 `worktree-ai-openai-400`（`48c7729c`，OpenAI 官方接口改发 `max_completion_tokens`、失败提示附供应商原因）以 `--no-ff` 合入本地 `master`，保留原分支。该分支基于合并前的 `master`，合并结果与已通过全部 JVM 单元测试（2724 项）的分支代码一致。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release；真实 OpenAI 密钥复测待用户执行。
 - 用户随后于 2026-11-07 要求推送远端：将本地 `master` 推送到 `origin/master`（`Hshevin/xnotes-android`），包含 AI 回答 LaTeX 公式、PDF 原生工具读取、OpenAI HTTP 400 修复及此前未推送的无限画布分屏诊断记录 `47256b5a`。仅限本次推送，不包含打包 APK、安装或 GitHub Release。
@@ -153,3 +163,14 @@
 ## 2026-11-08 Release 98 真机验收、画布闪烁修复合并与推送
 
 - 用户要求「合并至主分支并推送远端」：将 `worktree-device-acceptance-release98`（`476725f7` Release 98 真机验收记录、`b1991440` 画布闪烁调研、`1e7a8df7` 图层侧栏覆盖画布与图层增量更新）以 `--no-ff` 合入本地 `master` 并推送 `origin/master`，保留原分支。合并前远端新增 `60d477b3`（test4 打包记录，仅文档），已先合入该分支，无冲突。依据：编译与全量 2849 项 JVM 通过，仪器测试源码编译通过；模拟器、仪器测试与目标设备未运行，闪烁修复效果待真机验证。仅限本次合并与推送，不包含打包 APK、安装或 GitHub Release。
+
+## 2026-11-08 导图分支同步新渲染基线
+
+- 用户恢复导图与文件关系网络开发，并明确选择「授权同步该 master 基线」：只将 master54f05b0f 同步至 codex/mind-map，含主线已有 AI/画布更新；保留原分支，不向主线合并。四处冲突保留两侧功能，独立复核与源码编译/2964项JVM通过。Android仪器及真机未运行。
+- 此授权不包含打包、安装、推送或发布；不顺延为合并其他功能分支的授权。实际接口和验证见 mind-map-rendering-resume-2026-11-08.md。
+
+## 2026-11-10 导图两轮审核修复与本地合并
+
+- 用户通过本轮任务明确授权：先在 `codex/mind-map` 引入 `27f5a8e8`、`2f51718f` 的审核记录，逐项修复 A1–A10、B1–B6，运行测试并本地提交；再把本地 `master` 同步到导图分支，保留主线画布修复，验证后用 `--no-ff` 合并到本地 `master`。
+- 保留 `codex/mind-map` 与 `worktree-mind-map-review`，保留已有修改。不授权推送、新建远端分支、修改 Git 配置、打包 APK、安装设备或发布 Release；其他历史授权不顺延。
+- 实际修复、性能数据、合并与平台验收边界见 [逐项修复记录](mind-map-merge-fixes-2026-11-10.md)。

@@ -21,6 +21,8 @@ class Page(
     /** The room Insert space opened on it, sorted (see [Rooms]). Replaced whole, never mutated, so any thread can read it. */
     @Volatile var rooms: List<Room> = emptyList(),
 ) {
+    @Volatile internal var referenceBinding=PageReferenceBinding(ReferenceIdentity(),null)
+    val referenceIdentity:ReferenceIdentity get()=referenceBinding.identity
     /** Membership frozen with an autosave snapshot; live edits cannot retarget its objects. */
     var savedLayerIds: Map<CanvasItem, String?>? = null
         internal set

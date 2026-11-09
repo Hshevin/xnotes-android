@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -93,7 +94,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** The side panel's tabs. */
-enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS }
+enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS, REFERENCES }
 
 /**
  * The side panel. The Pages tab shows page thumbnails with a per-page three-dot menu (add / copy /
@@ -110,6 +111,7 @@ fun SidePanel(
     onInsertPdf: (after: Int) -> Unit = {},
     onImportTemplate: () -> Unit = {},
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
+    references: com.xnotes.mindmap.BacklinkHostHooks? = null,
 ) {
     val palette = LocalPalette.current
     val tab = editor.sidePanelTab
@@ -142,6 +144,7 @@ fun SidePanel(
             SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == SidePanelTab.CONTENTS) { editor.sidePanelTab = SidePanelTab.CONTENTS }
             SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == SidePanelTab.BOOKMARKS) { editor.sidePanelTab = SidePanelTab.BOOKMARKS }
             SegIcon(XnotesIcons.layers, stringResource(R.string.layers_title), tab == SidePanelTab.LAYERS) { editor.sidePanelTab = SidePanelTab.LAYERS }
+            SegIcon(XnotesIcons.link, stringResource(R.string.graph_backlinks_title), tab == SidePanelTab.REFERENCES) { editor.sidePanelTab = SidePanelTab.REFERENCES }
             SegIcon(XnotesIcons.search, stringResource(R.string.search), tab == SidePanelTab.SEARCH, shortcut = Keys.SEARCH) { editor.sidePanelTab = SidePanelTab.SEARCH }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -151,6 +154,7 @@ fun SidePanel(
                 SidePanelTab.BOOKMARKS -> BookmarksTab(editor)
                 SidePanelTab.SEARCH -> SearchTab(editor)
                 SidePanelTab.LAYERS -> LayersSidebar(editor)
+                SidePanelTab.REFERENCES -> ReferencesTab(editor,references)
             }
         }
         if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {
@@ -517,6 +521,7 @@ private fun PageThumb(
                     PageContextMenu(
                         editor, index, page.cover, page.pdfPage != null, menuOpen, { menuOpen = false }, { sizing = true }, { extracting = it },
                         onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover,
+                        {editor.requestPageReference(page)},
                     )
                 }
             }
@@ -561,6 +566,7 @@ private fun PageContextMenu(
     onSavePagesAsImages: (List<Int>) -> Unit,
     onInsertPdf: (Int) -> Unit,
     onPickCover: () -> Unit,
+    onReferencePage: () -> Unit,
 ) {
     val palette = LocalPalette.current
     var sub by remember { mutableStateOf(MENU_MAIN) }
@@ -593,6 +599,9 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.insert_pdf)) }, leadingIcon = menuIcon(XnotesIcons.importDoc), onClick = { onInsertPdf(index); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { onDismiss(); editor.duplicatePages(one) })
                 DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.graph_reference_this_page),fontSize=TextSize.body) },
+                    modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget),
+                    leadingIcon=menuIcon(XnotesIcons.link),onClick={onDismiss();onReferencePage()})
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })

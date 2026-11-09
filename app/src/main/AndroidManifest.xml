@@ -75,6 +75,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".mindmap.MindMapActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".platform.RecordingService"
             android:exported="false"

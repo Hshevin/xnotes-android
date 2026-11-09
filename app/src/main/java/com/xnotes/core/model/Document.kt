@@ -23,7 +23,7 @@ class Document(
     var path: String? = null,
     /** Real file name from the storage provider, when known (overrides [path]-derived title). */
     var displayName: String? = null,
-    var dirty: Boolean = false,
+    dirty: Boolean = false,
     /**
      * Embedded source PDF (for PDF-imported notes), so the note stays self-contained. Held as a
      * **file** on disk, not bytes in RAM: the file is memory-mapped by the renderer and streamed
@@ -53,14 +53,38 @@ class Document(
     /** The size of each page added from now on, or null to give it the size of the page before it. */
     var newPageSize: PageSizeChoice? = null,
 ) {
+    /** Owner-side body changes, separate from render versions and saved/unsaved presentation. */
+    internal var bodyRevision:Long=0L
+    var dirty:Boolean=dirty
+        set(value) {
+            if(value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
+    /** True only for a new model explicitly enabled, or a complete validated anchor bundle. */
+    var hasReferenceAnchors:Boolean=false
+        internal set(value) {
+            if(field!=value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
+    /** Runtime-only provenance; session persistence must bind it to its own frozen body. */
+    internal var pageReferenceScope:PageReferenceScope?=null
+    internal var snapshotOwnerToken:Any=Any()
+    internal var isWriteSnapshot:Boolean=false
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
+        set(value) {
+            if(field!=value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
 
     /** Null uses PDF labels or the first page; otherwise a zero-based body start. */
     var bodyStartPage: Int? = null
 
     /** Transient: set by the codec when legacy ink was compacted at load (debug overlay readout). */
     var compactedOnLoad = false
+
+    /** Transient: source objects an ink-only recovery copy could not read and left out. */
+    var omittedOnCopy = 0
 
     /** Derived: the storage display name (or path) base name without extension, or "Untitled". */
     val title: String

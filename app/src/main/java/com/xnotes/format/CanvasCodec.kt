@@ -500,85 +500,95 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
      * dir skips them, which is what a validation-only read wants.
      */
     fun read(input: InputStream, imageDir: File? = null): InfiniteDocument {
-        var manifest: ParsedManifest? = null
-        var identity: BundleIdentity? = null
-        val imageFiles = HashMap<String, File>()
-        val audioFiles = HashMap<String, File>()
-        ZipInputStream(input).use { zis ->
-            var entry: ZipEntry? = zis.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    val name = entry.name
-                    if (name == BundleIdentity.ENTRY) {
-                        require(identity == null) { "Duplicate document identity" }
-                        identity = BundleIdentity.read(zis)
-                    } else if (name == "manifest.json") {
-                        // Parsed straight off the zip stream, so a dense canvas's manifest is never
-                        // materialized as bytes, a String, or a DOM.
-                        if (manifest == null) {
-                            manifest = try {
-                                parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)))
-                            } catch (_: JsonPullException) {
-                                throw XCanvasFormatException(NOT_XCANVAS)
+        val created=ArrayList<File>()
+        try {
+            var manifest: ParsedManifest? = null
+            var identity: BundleIdentity? = null
+            val imageFiles = HashMap<String, File>()
+            val audioFiles = HashMap<String, File>()
+            ZipInputStream(input).use { zis ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val name = entry.name
+                        if(name==AnchorMetadata.ENTRY) {
+                            throw IllegalArgumentException("Page anchor metadata does not belong to a canvas")
+                        } else if (name == BundleIdentity.ENTRY) {
+                            require(identity == null) { "Duplicate document identity" }
+                            identity = BundleIdentity.read(zis)
+                        } else if (name == "manifest.json") {
+                            // Parsed straight off the zip stream, so a dense canvas's manifest is never
+                            // materialized as bytes, a String, or a DOM.
+                            if (manifest == null) {
+                                manifest = try {
+                                    parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)))
+                                } catch (_: JsonPullException) {
+                                    throw XCanvasFormatException(NOT_XCANVAS)
+                                }
+                            }
+                        } else if (name.startsWith("assets/image-")) {
+                            if (imageDir != null) {
+                                val f = File.createTempFile("img", null, imageDir).also {created+=it}
+                                FileOutputStream(f).use { zis.copyTo(it) }
+                                imageFiles[name] = f
+                            }
+                        } else if (name.startsWith(AUDIO_ASSET)) {
+                            // A recording streams to disk beside the images; it is played from the file.
+                            if (imageDir != null) {
+                                val f = File.createTempFile("aud", null, imageDir).also {created+=it}
+                                FileOutputStream(f).use { zis.copyTo(it) }
+                                audioFiles[name] = f
                             }
                         }
-                    } else if (name.startsWith("assets/image-")) {
-                        if (imageDir != null) {
-                            val f = File.createTempFile("img", null, imageDir)
-                            FileOutputStream(f).use { zis.copyTo(it) }
-                            imageFiles[name] = f
-                        }
-                    } else if (name.startsWith(AUDIO_ASSET)) {
-                        // A recording streams to disk beside the images; it is played from the file.
-                        if (imageDir != null) {
-                            val f = File.createTempFile("aud", null, imageDir)
-                            FileOutputStream(f).use { zis.copyTo(it) }
-                            audioFiles[name] = f
-                        }
+                        // Anything else is an asset from a newer version: skipped, never buffered.
                     }
-                    // Anything else is an asset from a newer version: skipped, never buffered.
+                    zis.closeEntry()
+                    entry = zis.nextEntry
                 }
-                zis.closeEntry()
-                entry = zis.nextEntry
             }
+
+            val m = manifest ?: throw XCanvasFormatException(NOT_XCANVAS)
+            if (!m.formatOk) throw XCanvasFormatException(NOT_XCANVAS)
+
+            val doc = InfiniteDocument(dpi = m.dpi)
+            identity?.let { doc.identity = it }
+            doc.created = m.created
+            doc.background = m.background
+            doc.lastView = m.view
+            doc.waypoints.addAll(m.waypoints)
+
+            // Image entries stream out of the zip after the manifest, so image items materialize only
+            // now that their files exist; the recorded slot restores each one's z-order position.
+            val items = ArrayList<CanvasItem>(m.items.size + m.images.size)
+            items.addAll(m.items)
+            var dropped = 0
+            for (spec in m.images) {
+                val item = when (spec) {
+                    is PendingImage -> materializeImage(spec, imageFiles)
+                    is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
+                }
+                if (item == null) {
+                    dropped++
+                } else {
+                    items.add(spec.index - dropped, item)
+                    if (spec is PendingImage) m.glue.named(item, spec.id)
+                }
+            }
+            // A recording whose item did not survive leaves its file behind; nothing else will delete it.
+            val used = m.images.filterIsInstance<PendingAudio>().map { it.asset }.toSet()
+            for ((name, f) in audioFiles) if (name !in used) f.delete()
+            // Every item is in, so connectors can glue to whatever their ends name.
+            m.glue.resolve()
+            doc.layers.restore(m.layers.entries, m.layers.activeId)
+            require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
+            doc.addAll(items)
+            return doc
+        } catch(error:Throwable) {
+            // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
+            created.forEach {runCatching {it.delete()}}
+            throw error
         }
 
-        val m = manifest ?: throw XCanvasFormatException(NOT_XCANVAS)
-        if (!m.formatOk) throw XCanvasFormatException(NOT_XCANVAS)
-
-        val doc = InfiniteDocument(dpi = m.dpi)
-        identity?.let { doc.identity = it }
-        doc.created = m.created
-        doc.background = m.background
-        doc.lastView = m.view
-        doc.waypoints.addAll(m.waypoints)
-
-        // Image entries stream out of the zip after the manifest, so image items materialize only
-        // now that their files exist; the recorded slot restores each one's z-order position.
-        val items = ArrayList<CanvasItem>(m.items.size + m.images.size)
-        items.addAll(m.items)
-        var dropped = 0
-        for (spec in m.images) {
-            val item = when (spec) {
-                is PendingImage -> materializeImage(spec, imageFiles)
-                is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
-            }
-            if (item == null) {
-                dropped++
-            } else {
-                items.add(spec.index - dropped, item)
-                if (spec is PendingImage) m.glue.named(item, spec.id)
-            }
-        }
-        // A recording whose item did not survive leaves its file behind; nothing else will delete it.
-        val used = m.images.filterIsInstance<PendingAudio>().map { it.asset }.toSet()
-        for ((name, f) in audioFiles) if (name !in used) f.delete()
-        // Every item is in, so connectors can glue to whatever their ends name.
-        m.glue.resolve()
-        doc.layers.restore(m.layers.entries, m.layers.activeId)
-        require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
-        doc.addAll(items)
-        return doc
     }
 
     /**
@@ -670,7 +680,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val m = ParsedManifest()
         p.beginObject()
         while (p.hasNext()) {
-            when (p.nextName()) {
+            val key=p.nextName()
+            when (key) {
                 "format" -> {
                     if (stringOr(p, "") != FORMAT) throw XCanvasFormatException(NOT_XCANVAS)
                     m.formatOk = true

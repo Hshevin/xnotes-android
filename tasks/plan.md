@@ -1,4 +1,26 @@
+2026-11-10 D2d1 已接完整网络→关系画布→手工线/撤销重做→保存关闭重开→原网络，406相关验证及Android源码编译通过，真实平台未运行。下一D2d2将显式卡片关联接自动网络及来源侧手工组；先按用户要求在本阶段提交后换全新6.1sol/ultra对话复用同树，完整范围不缩减。见docs/movinkpad/network-to-relation-canvas-2026-11-10.md。
+
+2026-11-09 D2c：无文档首页→全库→指定多文件中心→筛选／具体来源打开→同网络返回已实现，89相关用例及Android测试源码编译通过，真实平台未运行。继续显式用户关联和将文件加入可保存关系画布；其他原需求保留。见docs/movinkpad/file-network-overview-2026-11-09.md。
+
+2026-11-09 按用户纠偏完成D2b可操作流程：选文件→下一层→共享折叠/原位再展→具体条目打开及原网络返回，bc26a9db已保存；本阶段80相关用例全部通过、Android源码编译通过，未重跑未变全仓证据，平台未运行。接着集合多中心／全库、显式关联／加入关系画布等真实操作；原完整范围保留。见docs/movinkpad/file-network-expansion-2026-11-09.md。
+
+2026-11-09 D2a局部网络来源集合／格式／目录筛选已实现并独审：368套3879项主机与Android测试源码编译绿；真实平台未运行。保整概念和未知事实，异步/草稿ABA/取消隔离。9cb7e4b0／36bcc561已本地提交。下一D2b逐层展开／折叠，集合多中心／全库与其余原需求保留；详见docs/movinkpad/file-network-filters-2026-11-09.md。
+
 # 大型 PDF 独立标注与工具光标计划
+
+2026-11-09 D1局部网络源码已接真实Sidebar入口／双成员跳图／Main纯停车／返回网络：364套3854项主机通过，Android测试源码编译通过，平台与目标设备未运行。完整D筛选／全库／展开／显式手工关联／加入关系画布等保留，整体未完成。规格与证据见`docs/movinkpad/file-local-network-2026-11-09.md`。
+
+2026-11-09 来源侧反向引用阶段已完成：真实笔记／PDF SidePanel、只读有界库发现、live覆盖、精确打开与临时展开、单条移除／重试及位置拒写保护；357套3812项全量主机、Android源码编译及独审通过，平台未运行。见`docs/movinkpad/mind-map-backlinks-2026-11-09.md`。接着当前文件局部关系网络，再过滤／全库／逐层展开及加入手工关系画布；Canvas、真正双窗格、精确恢复与原剩余交互不取消。
+
+2026-11-09 R3实际PAGE消费者与出口保护已完成：导图内整文件/文字页目录、明确启用/续写、原票与最终源校验；typed新建/分叉/提取/合并及C1/撤销/取消保护。337套3664主机+Android源码编译通过，见`docs/movinkpad/mind-map-page-source-flow-2026-11-09.md`。下步来源预览/状态刷新/当前页入口与跳转返回，随后反向引用和文件网络；完整原需求及设备边界保留。
+
+2026-11-09 R3第二片已完成：实际存盘文件副本、导图空目标创建及原字节页启用Storage/显式恢复；334套3640项主机和Android测试源码编译通过，见`docs/movinkpad/reference-stored-copy-and-page-activation-2026-11-09.md`。页来源界面/引用闭环仍未完成；下一步保护createNoteFile与分叉/合并，再接实际页面来源选择。
+
+2026-11-09 R3有限出口第一片已完成：实际分页另存与原字节启用验证器，331套3618项主机及Android测试源码编译通过；见`docs/movinkpad/reference-save-as-page-copy-2026-11-09.md`。页面Storage启用／PAGE界面尚未接通；继续剩余复制／新建／分叉出口后实接，不重复全native4前置。
+
+2026-11-09 R2恢复预览消费者已接通真实Backstage窗格入口、历史预览、独立副本、typed继续与重启显式重选目标；完整328套3599项主机及Android测试源码编译通过，实际仪器/SAF/目标设备未运行。下一产品路径改按现有NativeSaveContract与单调登记先补直接输出/副本/新建/分叉保护，再接原字节页启用与真实PAGE来源，不以全量native4未使用API作为硬前置；详见 `docs/movinkpad/reference-page-ui-first-2026-11-09.md`。保存恢复安全、来源往返/反向引用/网络及剩余交互继续保留。
+
+2026-11-09 导图A2续作：节点选择/框选、子树并集移动、批量删除与自由主题对齐已实现，2b0d1fdc/5cd2552e已本地提交，318套件3552项主机及Android测试源码编译通过，规格与独立审核要求见 `docs/movinkpad/mind-map-node-selection-2026-11-09.md`。来源生产保存交接、页面来源和往返、反向引用与文件网络仍按既有依赖继续，未因交互切片取消。当前只编译/测试/本地提交，不打包或安装。
 
 
 > 2026-10-30 实施更新：用户要求改为基于 XNotes，原型位于本仓库根目录，不再新建 `notes/` 模块。第一版先实现 T16 所涉三键自定义映射和黑白调色板；软件自动化验证与真机验收分开记录，见 `docs/movinkpad/xnotes-first-version.md`。其余大型 PDF、完整工具光标及性能任务继续保留，尚未验收。
@@ -304,3 +326,206 @@ PDF 笔记、普通笔记、无限画布可混合并排；同一 PDF／分页笔
 4. PDF、AI、草稿引用：持久资源与显示缓存分开，旧聊天仍可访问旧资源版本，删除/撤销/在途操作受保护。
 5. 分屏/最近/来源跳转：ID 优先、路径兼容，独立窗格阅读位置，失联占位及重新定位。
 6. 阶段测试、文档与真机验收清单。旧格式导入/升级的数据保真不扩展为调整日常笔画简化算法。
+
+## 2026-11-06 原生思维导图第一版
+
+用户要求新工作树、原生 Kotlin、文本／手绘节点、独立文件格式，不要求 XMind 格式兼容。工作树 `mind-map/xnotes`，本地分支 `codex/mind-map`，基于 `47256b5a`；不影响主工作树，不打包／安装／推送／合并。
+
+先完成不可变树模型、可撤销操作与变尺寸布局，再实现 `.xmap` 严格编解码及原子恢复日志，随后接原生画布／手绘节点编辑和文件浏览器入口。共享 Android 事件契约在 Robolectric 上执行并编译到仪器测试；原生图形渲染测试检查黑白画布、缩略图和 PDF。详细规格、验收证据和剩余边界见 `docs/movinkpad/mind-map-2026-11-06.md`。
+
+## 思维导图与文件关系网络扩展（2026-11-06）
+
+完整落地规格与 A1/A2 → B1/B2 → C1/C2 → D 依赖顺序见 `docs/movinkpad/graph-network-2026-11-06.md`。优先原生复用，先森林／多来源／普通线的兼容模型和操作闭环，再持久页／对象身份、引用创建、导航／反向引用和文件网络；后续阶段持续保留，不按本轮容量裁掉需求。
+
+### B1b 原位文本源码阶段：复用现有文本覆盖层
+
+已实施，独立审核发现的入口、尺寸刷新与重建比例问题已修复；最终独立复核已完成，未发现仍需先处理的确定性代码错误。2770 项主机测试通过、Android 仪器源码编译通过，真实 IME／宿主／设备验收未运行。复用 ui/TextEditorOverlay.kt 的 TextEditHost 和 canvas/EditingField；通过默认 no-op 的光标几何回报和默认不限制的文本接受策略适配导图，旧笔记／画布默认行为不变。Graph 适配器只编辑事务草稿，屏蔽底图文字与输入；完成时校验初始文本，按当前宽度测高，合并保留来源等字段，整次更新／分支布局一步撤销。无改动不重排；取消不改模型。编辑事务 key 不随相机/IME/来源更新重建。
+
+EditingField.x/y 是宿主 viewport 物理 px，width/height/fontPx 是内容 px，zoom 为图实际比例；直接沿用既有 Density 与 graphicsLayer。内容原点和度量须来自 MapPainter（16px 内距、width-32、18px 字体），不把整个节点当文字框。光标回报映射 rotation 的四角；仅图相机响应遮挡，防止系统窗口额外平移和反馈抖动。图工具栏编辑时压缩以给 IME 留出可编辑区域。进入前释放图手势；结束统一拒绝迟到回调，待 IME/尺寸稳定后恢复原相机和选择。验收与风险见 tasks/review.md。
+
+### B2 分拆及 B2a 已实施计划：原始 manifest 字节保真锚点升级
+
+B1b 本地提交 c5d0d4ac。B2 不以进程 Page.uid 或 GlueIds 的位置序号冒充稳定身份，分为三步：B2a 升级基础，B2b 模型／编解码／快照／复制与显式存储接入，B2c 碎片等确定后继和删除／移动／撤销语义。C1 对象引用必须等依赖完成，不能提前按位置匹配。
+
+B2a 输入是已具有 BundleIdentity 的原生 .xnote/.xcanvas；输出为独立暂存并校验的候选文件。本步不自动接到打开／保存／注册路径，不重编码任何模型或采样。计划在 manifest 的每个直接 page 对象与其直接 item 对象、canvas 根 items 的直接对象中追加独立 UUID `reference_id`。已有 ID 原样保留且严格验证、不随位置重建；同文档内重复 UUID、非字符串／无效 UUID 或部分对象缺 ID 均拒绝，以后由显式修复处理。仅完整旧格式（所有可锚定对象都缺 ID）允许首次生成；未知 item 也取得 ID，未知嵌套 extensions 中同名 pages/items 不误处理。
+
+复用 JsonPull 识别精确结构，不经 JSON DOM／模型重新输出。给该内部 parser 增加消费字符位置（UTF-16 code units）与严格末尾检查，不改变现有默认读写行为。第一次只读取并记录新增字段的插入位置／UUID；第二次严格 UTF-8 解码、原字符片段流式复制和插入，再 UTF-8 编码。合法 UTF-8 原字节往返不变，数字字面量、空格、未知字段、笔压／时间字符串和原 PDF 不重新序列化。需核实 JsonPull 跳过值的严格性，对此升级路径增加必要的词法／深度／容量校验，拒绝尾随垃圾／畸形输入／取消。原 JSON 大内容不整份驻留内存；只保留对象ID和插入点。
+
+ZIP 在新候选文件中复制全部原条目，manifest 以插入结果替换；可优先复用 ZipTail 追加并替换中心目录记录，否则流式重封装且逐条 SHA-256 保留所有非 manifest 原始解压负载，包括 PDF、音频和未知扩展。拒绝重复 ZIP 名称。候选 fsync、再读校验 ID 与生成 manifest 的摘要；所有非 manifest 摘要须相同；来源摘要未变化才允许原子本地发布。SAF 仍用既有 MigrationPublication 的恢复发布而非直接覆盖，留到 B2b 显式接入。本步骤本身不开放 SAF 写入。
+
+验收：独立 JSON 解析验证只新增预期路径字段；移除本次插入字段后与原 manifest 字节完全一致；UTF-8 中文／emoji／转义、非标准数字拼写保真、16KiB 缓冲边界、大样本流、未知嵌套、空页、幂等、合法原ID／重复／缺失／损坏／截断／尾随垃圾、取消、ZIP未知／PDF载荷、发布前来源修改、失败保留原件。主机与 Android org.json 平台差异分开；该基础优先纯 JVM，后续存储行为保留仪器测试。
+
+下一步 B2b 在 Page 和各 CanvasItem 增加持久 ID，正常新增／深拷贝取得新 ID，autosave snapshot 保持原 ID 并冻结归属；编解码不按加载成功后的列表索引配对，直接读取对象字段。先确保已有 BundleIdentity 的源升级候选被安全持久化，再允许创建外部引用。身份丢失不能把新生成的 ID 当成旧来源恢复，已知升级状态／引用失效由登记与 C2 显式修复路径处理。B2c 再保存确切后继图，不按几何相似度猜测；这两步需各自独立计划审核。
+
+B2a 计划审核修订（已接受）：候选同时带独立 `xnotes-anchors.json` 版本标记（format=xnotes-object-anchors，version=1，documentId须与BundleIdentity一致），不靠“全缺ID”推断升级状态。准备API额外接收可信 expectedAnchored 状态，登记层已知升级过但标记／全部ID被剥离时拒绝重建；源内标记存在时任何应有ID缺失都拒绝。首次合法空画布仍写标记，重开零对象有效，之后出现无ID对象属于损坏而非再次旧格式升级。标记与字段同时被外部旧写入器移除、且无可信登记记录时无法离线推断旧身份，此边界不能冒充已恢复旧引用。新增测试覆盖标记+全缺、expectedAnchored+标记也缺、空画布幂等与新增缺ID。候选同时验证版本标记，非manifest载荷比较仅排除本次新增 anchors 条目；已有标记不重写。
+
+JsonPull 现有 skipValue 容忍部分数字与未转义控制符，根结束也不会检查尾随内容。实现须使用显式strict模式（默认false保持原笔记读取兼容），strict模式校验JSON数字词法、字符串控制符、深度与末尾；迁移始终开启。字符消费位置独立于Reader预读位置，覆盖buffer refill和EOF。格式字段可能晚于pages/items：先短扫描确认format，再完整严格结构扫描，最后按字符位流式插入；所有扫描均只读且带取消，输入使用严格UTF-8解码，最终候选在新文件中完整校验。
+
+B2a 容器审核修订（已接受）：本步骤**不使用在中心目录前追加替代 manifest 的 ZipTail 手法**；旧 local manifest 即使从中心目录过滤，ZipInputStream 仍先读到旧条目。统一流式重封装候选的所有条目，非manifest解压载荷逐字保留。源和候选分别校验 ZipFile 中心目录与 ZipInputStream 顺序枚举的名称、唯一性和负载摘要一致；拒绝原容器中两种读取方式不一致的孤立／重复local记录。候选只能有一份实际local manifest，并保留manifest后面的未知条目／identity／PDF。新增非尾manifest、尾随扩展、孤立旧local manifest回归；不以ZipFile单独验证替代应用实际顺序读取验证。
+
+B2a 严格性／资源审核修订（已接受）：完整主扫描拒绝所有对象的重复键（按JSON反转义后的键名），包括format/version/pages/items/reference_id，短扫描得到的format须与完整扫描一致。只升级当前已支持的manifest版本；要求对应pages/items容器与直接元素类型正确，不把未来版本或损坏容器当旧格式。未知item kind及其所有字段保留，不对不认识的kind作模型解释。数字保真指合法JSON但未规范化的字面量（如-0、1.2500e+02），不接受非法JSON数字。
+
+strict读取路径明确限制单token最多1,048,576个字符、JSON嵌套256层、manifest最多512MiB、锚点对象及插入点最多200,000个；拒绝超限保留原件，不静默截断。JsonPull严格模式在token分段累积时检查容量，读取缓冲／结构扫描／复制循环均检查取消；旧默认解析不加此限制。此容量边界不是支持任意大旧笔记的承诺；B2a暂不自动接入口，后续接入须有清楚的失败提示与只读恢复。无需为了跳过未知值而整份构建DOM。
+
+B2a 最终计划审核已完成，全部建议接受。补充同一快照约束：先复制原件到独立暂存文件并核对快照 SHA-256 与预先取得的来源摘要相同，所有格式短扫、结构扫描、字符复制及 ZIP 校验只打开这份快照，防止跨遍 A→B→A 对应错位。最终发布仍核对原件摘要。UTF-8 decoder 与 encoder 均使用 REPORT，持续一个 Reader/Writer 跨所有字符块，禁止每块单独编码；计数使用 Long 且只计已消费 UTF-16 单元。新增 1 字符短读与代理对跨缓冲测试。
+
+B2a 实现复核修订：前置ZIP摘要即按名称限流，manifest 512MiB、anchors和BundleIdentity条目各4096字节，同时检查声明／实际解压字节；不能先完整摘要再限流。重复键去重另外限制单键1024字符、活动递归链8192键／262144字符，单对象仍最多4096键，退出兄弟对象释放预算。均有主机回归。实现与测试细节见 docs/movinkpad/reference-anchors-2026-11-07.md；本阶段仍不接文档打开／SAF。
+
+### B2b1 已实施：持久身份的模型／编解码／快照契约（2026-11-07）
+
+B2a 已提交 c93f8129。先分出可独立验证的 B2b1，不立刻改打开／SAF／登记。B2b2 才启用实际用户文件升级和新文档创建路径；B2c 确定后继仍另审。
+
+计划增加原生模型 `ReferenceIdentity`：公开只读 nullable ID，内部一次性 assign/restore（恢复已有值时只允许相同值），不暴露随意替换ID的setter。Page 和每个具体 CanvasItem 持有一个独立容器；CanvasItem 接口要求明确实现，不给未知类型伪造兜底。新对象暂未赋ID，实际持久化／引用准备才分配UUID，避免每次临时渲染或笔输入构造随机数。旧Page.uid和GlueIds保持原用途，不替代稳定引用身份。
+
+Document/InfiniteDocument 新增已验证锚点状态，默认false保留旧序列化字节；只有明确的新文档启用或已验证marker读取才设为true。已启用文档在主线程捕获snapshot前分配尚无ID的新成员并校验全局唯一；所有ID一经赋值不变。snapshot复制页面ID／模式，冻结对象ID映射，与已冻结layer成员关系相同，后台writer只读快照；不能以`map[id] ?: liveId`回退导致原null值被后来赋值污染。正常移动／图层／跨页转移／撤销持有原对象，身份保持。Page.deepCopy/items.deepCopy创建新容器不继承身份，后续赋新ID；Document.deepCopy继续用于独立可编辑副本，snapshot才保留身份。当前Clone里的Stroke复制不能隐式复制新身份容器。
+
+编解码显式传递每个页面／对象的可选reference_id，不通过解析后的列表位置配对；图像／音频pending DTO携带ID并在物化时恢复。读取跟踪全部原始page/item（含未知kind与缺资源pending）的ID，校验类型／UUID、重复字段／重复ID；marker存在时任何原始目标缺ID都拒绝，不因模型跳过未知对象而略过身份损坏。marker的format/version/documentId解析提取为复用的有界组件，文档身份缺失或错配拒绝，ZIP重复marker／identity／manifest拒绝。普通旧格式无marker仍沿用原读取兼容，不伪称已有持久引用能力。
+
+写入前若已启用则验证实际序列化成员全部有ID、唯一，并写marker；ID作为可选字段追加，各writer函数显式参数，不用共享codec可变“当前模式”，避免并发导出／保存串扰。marker在manifest之前，保留manifest最后的尾部约定。legacy模式不加字段／marker，维持现有字节与条目顺序测试。正常编辑保存可走既有样本写入规则；首次元数据升级只能用B2a原字节候选，禁止用这些模型writer升级旧文件。
+
+验收：新模型启用后note/canvas roundtrip所有七种对象（含延迟图片／音频）；页面重排、对象移动／跨页／图层与撤销保持ID；复制页面／对象新ID；snapshot与深拷贝身份语义分开、后台保存不读后来成员／身份；legacy输出与旧样本字节测试保持；marker前/后、身份缺失／错配／重复／部分缺ID与未知kind拒绝；普通笔迹／PDF已有测试。Android平台差异仍保留仪器编译／验收边界。B2b2的新建、可信expectedAnchored登记与恢复发布另立规格，不在本阶段悄悄启用。
+
+B2b1 审核中语义修订（已接受）：已锚定的模型读取采用完整性拒绝策略，不返回丢了未知／缺资源对象的“可写完整文档”。原始目标ID与实际物化对象全量对账，unknown kind、无效Tape、缺／解码失败图片音频、零页后默认补白页均不得静默通过；marker在manifest之后也追认。刻意read(imageDir=null)不能返回部分anchored可写模型，调用方应改用peek／raw校验API。失败只清理本次read创建的临时图片、音频、模板和自行抽取的PDF文件；pdfStore／resolvePdf返回的受管／借入PDF不属于codec清理对象，禁止删除。普通legacy读取兼容不扩大拒绝范围。
+
+B2b1 接口审核修订（已接受）：assign/restore 使用同步一次性更新与可见读值；不假设“公开只读”自动带来线程安全。prepare按照实际序列化出现次数校验，拒绝同一Page/同一item被重复列出，不能先用IdentityHashMap去重。独立deepCopy遇未支持CanvasItem类型拒绝，不能沿用Clone.kt的else->this承诺新身份却共享原对象。无marker但发现任意reference_id时，模型read拒绝并要求先用B2a原字节补marker，不返回会在legacy写出时剥离ID的可写模型；完全无ID旧包保持兼容。
+
+note支持七类对象，canvas现有格式不支持独立TextItem（文本在ShapeLabel）；对应验收为note七类／canvas六类。已启用writer遇不支持序列化的模型成员必须拒绝，不能静默丢掉其ID或内容，legacy模式维持旧路径。
+
+B2b1源码与主机验收完成，独立复核必修均已处理，最终2808项通过／仪器源码编译成功。PDF/版本与显式独立恢复修订的最终实现与证据见docs/movinkpad/reference-identity-model-2026-11-07.md。接下来制定并审核B2b2普通打开／可信登记／SAF激活和复制包身份一致性计划。
+
+### B2b2a 待审核：锚点契约登记与整包复制一致性（2026-11-07）
+
+B2b1已提交0f0a8d91。先完成可独立验收的存储防退化与整包复制；B2b2b再接新建／普通保存激活及旧编辑器模型的精确身份绑定，不在本步对正在打开的legacy模型猜测补ID。
+
+1. 增加有界BundleHeader读取：同一容器取得BundleIdentity和可选AnchorMetadata，拒绝重复元数据条目、错误版本／类型／UUID绑定。普通seekable URI可用中央目录，但必须正确限制STORED条目读取边界，不能读入下一ZIP条目；不支持的comment/Zip64/不可seek描述符退到私有临时快照，失败只清本次临时文件。不把metadata检查宣称为完整模型校验，实际打开继续由B2b1完整性对账。
+2. DocumentRegistry升级到schema2，新增按document UUID记录“曾声明锚点契约”的单调状态。移动／URI别名／回收站不清除，不依赖文件名或路径；无FK级联以免普通位置／文档登记清理误删恢复证据。表只代表契约被观察，不冒充内容版本／完整模型可读性。schema1→2保留原文档、位置、资源、租约和引用；未知未来版本拒绝。
+3. NotebookStorage.ensure在任何身份生成或PDF迁移之前检查契约：标记与文档UUID绑定错误拒绝；已知锚定UUID缺标记，或已知位置的身份也缺失，显式报恢复错误，不自动生成新页／对象ID。完全legacy继续现有打开路径，不强制为普通阅读升级，也不新增写权限要求。成功观察有效绑定标记就保存expected状态；普通原ID改名／移动保持。新增storage消息经StorageText/StorageMsg与三套资源／穷尽映射，不把新英文格式异常直接给用户。
+4. 整包文件复制只分配新的document UUID，并同步重绑定marker；page/item ID仍按新document UUID作用域独立，manifest、全部旧笔迹／PDF／其他未知负载字节不变，不加入旧文档引用。这个整文件复制不同于同文档内对象／页面deepCopy（后者生成新成员ID）。源marker必须有效且绑定其现有UUID；无身份却带marker或绑定矛盾不静默猜修复。明确的新副本可为完全legacy生成新文档UUID。复制候选保留原件、失败清副本，原件SHA不变。
+5. BundleMigration所有扫描都改为同一份预先hash校验的不可变源快照，避免identity取A而payload取B。已有marker的复制先校验两种ZIP读取视图一致与资源上限，更新identity/marker必须重封装，不留下旧local元数据。manifest和其他原负载逐条摘要不变。legacy的大二进制PDF不加新解压总量限制；只对锚定manifest应用既有512MiB边界，元数据始终4096字节。取消／来源改动／发布冲突保留原件，原有身份迁移幂等测试保留。
+6. 保存增加模式／身份防退化：普通publishNote和Editor公共保存分支（包括绕过publishNote的in-place路径）检查候选模式不能剥离已知锚点、源UUID/marker不能被未知替换。已被外部改变的原件仍走现有分叉保护；新创建空目标允许首次写入。成功持久写出后才记录expected，DB失败不假装完整保存成功。SAF仍用已有MigrationPublication先留原件／候选并读回校验，不能裸覆盖；pending恢复保留该契约。此检查只防身份／模式退化，不把它当作来源内容全摘要冲突保护。
+
+验收：文件与URI Header的DEFLATED/STORED、后随大条目、comment/Zip64或pipe回退、重复／损坏元数据；schema1升级保留数据与expected跨move/重启；完全legacy打开不升级，expected缺失不改文件，marker绑定错误拒绝；锚定note/canvas文件复制新doc UUID+marker匹配、manifest及非元数据原字节不变、原引用resolve仍到原件；普通保存和in-place不能剥离契约、首次空目标允许；SAF部分写入／中断／取消／来源变化／恢复与候选清理。主机Robolectric + Android共享契约源码编译，真实SAF／设备验收单列。B2b2b活模型绑定／历史／会话与C1创建引用仍另审、未完成，不用本步API悄悄发布旧模型里的随机身份。
+
+B2b2a 审核修订（全部接受，2026-11-07）：
+
+- 已登记位置A且expected(A)时，当前Header UUID变为B不能静默重登记；保留A证据，进入独立的“接受当前位置为另一文档”流程（保留B身份，不用“作为副本”伪代替）。需要再次验证当前UUID，别名按规范location_key处理。新复制／明确新建目标另走独立语义；异常空文件不是新建证据。
+- 所有整包改UUID入口统一，包括BundleMigration、BundlePdf.write/prepare、Editor.copyFileTo(newIdentity=true)、provider复制和fallback复制。同UUID便携PDF导出保留marker原字节；新UUID副本同步重绑。PDF包装也必须从同一已校验快照取header/PDF/payload；不能只修普通identity复制。
+- pending的publish/restore/keepCurrent清日志前，先校验original/candidate/current与registry的UUID/契约；旧候选剥marker不得自动发布，keepCurrent不能只ZIP摘要就删唯一完好备份。成功文件发布→DB登记→清pending，DB失败保留恢复证据供重试；原先MigrationPublication清理时序需扩展callback或等价状态。
+- 所有实际写入前检查，特别in-place。契约拒绝是明确错误，不能被getOrDefault(false)吞成“不支持拼接”再全量覆盖。OutputStream已被外层截断后再检查来不及：初次保存／导出入口必须在openOutputStream前校验上下文；新空目标例外需明确创建语义且无登记或pending。
+- Header快速路径严格区分absent与unsupported/error。压缩切片限制、实际尺寸和CRC验证，元数据最大解压4096字节（压缩读取也需合理上限）；STORED不能读到相邻条目。fallback从原件起点取快照，不在解析失败后伪装“缺身份”生成UUID。
+
+为控制每次可验证改动，实施分为B2b2a1与B2b2a2：a1先实现有界Header和所有原始整包writer的不可变快照／marker重绑，纯格式层可独立验收，不启用新用户文件。a2再实现schema2单调登记、显式位置替换、保存／pending／恢复防退化和新目标预检查，所有上述安全要求保留。B2b2b再处理活模型原始来源证据、撤销／会话以及真正引用激活。此分拆不取消任何需求。
+
+B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64KiB压缩元数据预算，核对实际长度与CRC；Channel不改变／关闭调用方描述符，unsupported返回单独结果，错误不当absence。Header保留原marker字节供同UUID导出；绑定变化才生成新marker。引入内部拥有的BundleSnapshot：File输入先摘要→拷贝fsync→核对摘要，之后只从同一snapshot取header和全部负载；InputStream导出直接生成一次私有快照，避免Editor已有临时包再复制大型PDF。public File包装入口自行take snapshot，内部重用证明型snapshot入口。
+
+原始writer重用同一metadata重绑组件，BundleMigration和BundlePdf候选/导出均覆盖；已锚定输入先校验双ZIP视图，legacy同样拒绝孤立/重复local语义但不套用锚点manifest大小上限。PDF参数仍必须是受管不可变资源（生产调用沿用resolve+hold），不为了导出又复制一遍共享PDF。compactPdf后续a2调用也需先从snapshot核对与预读identity一致，从这份snapshot提取/登记PDF并构建候选，再比对原URI摘要发布；这一调用链不在a1单独宣称已接入。
+
+### 用户暂停（2026-11-07）
+
+用户准备重构渲染架构，本目标已暂停，不自动继续实施。已保存B2b2a1的Header/Snapshot局部源码与12项定向验证，writer接入未开始，最新helper未全量验证。恢复时先根据新的渲染／模型／输入／宿主接口重新检查既有B1及后续计划，不直接沿用旧渲染接法。完整交接见docs/movinkpad/mind-map-rendering-handoff-2026-11-07.md；所有未完成需求保留。
+
+### 2026-11-08 按新渲染基线恢复
+
+用户已恢复并授权同步 master54f05b0f。采用主线已回迁的快照、完整场景批次、解码来源身份和 View/湿墨层替换接口，不移入原重构分支完整Session体系。导图继续原生Canvas/共享笔迹几何/TextEditHost。实施顺序 R0～R5、接口边界与验收见 docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。
+页面级决定覆盖原B2b1对象身份和B2b2a1“整包副本保留成员ID”的计划；另存/导出副本应生成新页面UUID。B2c取消，其余功能和安全要求保留。
+
+R1a模型/codec/原字节升级已通过2971项主机与Android源码编译。抢救计数与页面身份独立；坏层对象过滤发生于pending全数插入之后，Glue限定最终成员。R1c先收紧.xmap范围避免保留对象级产品接口；R1b整包副本新页面UUID、R2安全激活仍未完成，完整来源闭环继续。
+
+R1c已提交55d64a4e，R1b0原字节page UUID替换工具已提交9d3547f2，全量2984项/Android源码编译通过。R1b1整包writer计划已独立审核（sameUUID也完整验证页契约，PDF prepare核对snapshot原身份；完整前置/验收见page-reference-implementation-2026-11-08.md末节），尚未实施。R2～R5/A2均保留，overall complete=false。
+
+### 2026-11-08 持续推进：R1b1完成
+
+原始整包writer已接Snapshot/Header/新页面UUID/marker，保持源指纹和共享PDF约束。Header回退限流/歧义PDF/legacy取消经红灯修正，最后2999项全量及Android源码编译、独立复核通过。详细证据reference-bundle-copy-2026-11-08.md。接续R2a登记页契约；活模型另存/分叉/合并需另审会话和历史身份，不能修改已建立页面身份后又由旧快照写回。
+
+### R2a登记契约组件已实现
+
+schema2新增按UUID单调页契约表，两种查询覆盖位置和外移UUID证据；typed header预检先验current再验candidate，无隐式新建/修复。独立计划/代码复核完成，3011项JVM与Android源码编译通过。生产正契约登记/保存接线仍待R2b，不能据此启用页面来源。详细reference-contract-registry-2026-11-08.md。
+
+### R2b0 已完成：恢复事务
+
+发布/恢复/保留当前均支持校验与DB回调，pending v2保存摘要，失败保留并可不重复写重试，受管恢复固定根路径且严格区分缺失与不可读。3034项JVM与Android源码编译通过、独立复核完成；详见reference-recovery-publication-2026-11-08.md。下一步R2b1生产存储校验和接线，不能把默认空回调当作已完成页契约保护。
+
+### R2b1a：原生来源只读身份检查
+
+真实入口NotebookStorage.identity先用BundleHeader读取，明确unsupported→从URI起点取得一个私有快照；读取/解析错误不当无身份。anchored输入必须在同一快照核验双ZIP和页面UUID，Header/页面集合来自该快照；快读与快照身份或marker有无不一致拒绝。返回前检查位置及UUID两种契约。legacy只读metadata、不主动升级或正登记页契约。ensure有pending时先报恢复待处理，不空hooks自动发布/清除。此片仅NOTE/CANVAS，不声称.xmap分支已有等价来源登记保护。
+验收：快读/unsupported/非seek回退，comment ZIP，marker绑定/页面UUID/重复条目，快读后身份改变或降级，位置/UUID契约失败不写不重登记，失败清私有快照。仪器源码补真实文件和pipe来源读取；实际Android仍未运行。R2b1b保存/恢复的完整guard、正登记、PDF持久保护和.xmap位置替换保护继续保留。
+
+### R2b1b 计划待审核：普通原生保存进入验证发布事务
+
+先覆盖现有文件的普通保存（.xnote/.xcanvas），不混入新文件、另存、复制或首次页编号激活。`publishNote` 从目标取不可变原件快照，源/候选完整ZIP及页面契约验证，禁止改变UUID、剥离/隐式新增页标记，原共享PDF身份保持。发布前依位置+UUID检查current；重试current已经等于candidate仍重新验证。所有目标（包括受管目录）走durable journal，受管文件写入使用同目录暂存/校验后原子替换。写后回读→PDF note pin及登记→清日志，登记失败保留原/候选可重试，不重复写。
+
+pending v3增加类型化操作目的（本片仅EXISTING_SAVE），SHA与目的由同一record解析、绑定并传入validation，旧1/2无目的不自动发布，明确恢复仍保留。ensure仅自动继续已验证EXISTING_SAVE，其他pending继续提示恢复。共享PDF先在固定migration owner下持久保护原/候选引用的并集，成功note pin+登记及清pending后解除；不按“无pending”单独清理owner。崩溃遗留pin保守保留，只有锁内无活动操作、当前文件完整验证且note pin已经覆盖当前依赖后才考虑解除；清理失败仅保留pin，不把已提交保存报成失败。日志按规范location_key定位并兼容旧URI日志；冲突记录拒绝，不选任意一份。
+
+本片删除实际目标的无before-image in-place调用，统一先构建完整私有候选再走事务；后续优化只能在私有候选拼接或先保护完整原件，不恢复写坏目标后靠fallback补救。typed拒绝不能吞成另一种写入fallback。画布也改用publishNote，不直接wt复制。保存顶层保留typed失败原因和dirty，不让异步异常误报成功。成功保存已验证anchored包必须登记pageReferences=true；这不构成legacy首次激活。页来源界面尚不开放；完整元数据迁移/SaveAs截断前保护及模型UUID切换仍需接续处理。
+
+验收：普通保存/保存重试、A→B/剥marker/隐式增加marker/损坏页ID拒绝且零写，当前已经降级不能借candidate修复；DB失败原候选pending/PDF pin保留；current==candidate重试零写；受管原子失败保留旧文件，SAF部分写入保留journal；取消/typed错误无full fallback；canvas真实入口；URI别名与冲突journal；共享PDF在待恢复/GC期间不丢失。JVM/Robolectric和Android仪器源码，实际SAF与目标设备仍单独验收。
+
+R2b1a实施/独立复核通过：284套件3051项及Android源码编译成功，reference-source-read-2026-11-08.md记录生产接线与取消边界。R2b1b审核必须修订：禁止真实目标无before-image的in-place后再靠full fallback修复；先选私有候选拼接或本片停用目标in-place，注入部分写入失败覆盖恢复证据。
+
+R2b1b计划补充（接受审核）：普通保存持久目的区分SAVE_NOTE/SAVE_CANVAS；严格读manifest format/version并与original/candidate及本次保存类型一致，禁止同UUID跨格式覆盖。legacy的Header/ZIP检查不能冒充格式验证。旧URI journal兼容至少覆盖当前URI及registry保存的规范位置别名；无法绑定的旧pending不能猜测关联、不能自动发布。
+
+R2b1b计划进一步修订（接受审核）：受管Target.write接收已观察的expected current SHA（显式缺失为null），同目录暂存fsync/校验完成后在move前再次核对，外部A→B不覆盖B并留journal。新v3不能被原空hook restore/keepCurrent消费；本片一并接原件/当前文件完整身份+页契约/类型校验、PDF note pin和登记，keepCurrent重复校验捕获当前摘要。恢复旧原件若违反已知页契约应拒绝，不借恢复剥离页编号。新/旧记录不够证明自动发布意图时保留手动恢复。
+
+### R2b1b 已实现与主机验证
+
+普通现有note/canvas save及restore/keep验证、v3用途+摘要、DB/pin时序、canonical/已知别名日志、单一PDF资源所有权和受管原子替换已接通。Editor失败/取消finally及canvas在途保存关窗等待已修，3086项JVM/Android源码编译/独立复核通过；平台未运行。详见reference-native-save-2026-11-08.md。
+
+下一阶段R2b2：另存输出打开前显式目标证明、save/fork/merge的文档scope与新页面ID、会话/撤销对账。已有pending的Save按钮重试需先证明新快照与暂存候选的关系（不能无条件resume别的模型后覆盖）；恢复UI要保留当前未保存模型。保存部分成功后“放弃修改”语义已向用户异步询问，等待期间不实现依赖该决定的清理/回退。legacy v1/坏记录的native keep-current目前保留证据，独立副本/身份修复界面继续补齐。之后才正接页锚点激活与C1/C2/D，A2未取消。
+
+### R2b2a 计划待审：活模型页复制上下文
+
+已检查ReferenceIdentity/Page/Clone/ForkLedger/Editor所有UUID变更以及SessionStore。先做显式scope API和确定性新页身份/冻结投影/成功后采用，保留原Page对象、历史、PDF指纹；生产Save-As/fork/merge不半接。规格reference-copy-scope-2026-11-08.md；接着补会话配对/代次，再接创建上下文与原生入口，最后激活页引用。复制旧快照不能每次铸造不同页UUID，writer不得补ID。
+
+R2b2a计划审核已通过。显式API/volatile页binding/严格owner与父scope/延迟undo重基已实现；18新增回归，全量3104项与Android源码编译通过；代码复核中。scope的runtime信息不冒充持久会话来源证据，生产另存接线仍待R2b2b/c。
+
+R2b2a源码独立复核通过，修复空容器共享导致部分采用，新增20项，最后289套件3106项/Android源码编译成功，待本地提交后继续R2b2b。
+
+### R2b2b0 已实现：会话事务组件
+
+reference-session-cache-2026-11-08.md独立计划/代码复核完成，immutable body+atomic head、已观察摘要CAS、reserve/clear代次、lease/GC均有反例。290套件3133项全通过/Android源码编译成功，未运行实际平台。接着b1接SessionStore/CanvasSessionStore/Editor和旧缓存，b2接native来源摘要/恢复决策，再R2b2c另存/fork/merge，其他来源闭环与网络需求保留。
+
+R2b2b1a正文版本/画布owner快照已实现，3142项全量及独立复核通过。接线前还需同源native打开/保存凭据，内部配对不能授权外部同UUID覆盖；安全来源证明与实际会话入口一并审。
+
+### R2b2b2a 来源版本 API 已验证
+
+同源SourceSnapshot/私有版本签发、严格publishExpected/staged receipt、PDF早期Header保护与codec entry边界均已完成；21新回归，全量3163项/Android源码编译/独立复核通过。接续实际SourceBinding、会话捕获与成功receipt时序、旧cache保留及来源冲突，另存切换旧cache不得写回原件。新建/另存/fork/merge、页面引用激活、Source UI/反向索引/网络和A2均保留。
+
+
+### R2b2c0 与 R2b2b2b 已实现（2026-11-08）
+
+reference-native-creation-2026-11-08.md 的新建上下文/CREATE发布/explicit完成已提交d272728a，3191项主机测试/Android源码编译/独立复核通过。reference-verified-open-2026-11-08.md 已接真实Editor/首页打开：完整准备后settle并同步检查旧工作区，同源actualModel绑定、PDF handoff、取消/迟到回调、模型绑定Discard、picker占用；3200项主机测试全通过/Android源码编译成功/独立复核通过，平台未运行。接续生产native保存receipt与会话原子配对/旧cache保留/同源SHA恢复、Save-As持久切换与copyScope；不是页面来源/反向引用/网络已完成。
+
+
+### R2b2b3a 活模型来源与请求配对回执（2026-11-08）
+
+reference-edit-source-2026-11-08.md已实现/独立复核通过，16新JVM反例、总3216项/Android源码编译通过，平台未运行。Editor真实打开持唯一context；主线程source+snapshot请求、真实publish后私有receipt、no-op代次/retire/原PDF核验均具备。生产writer/会话尚未迁移，后续b3b/c2必须统一成功receipt时序、旧cache恢复、所有替换调用保存等待、copy持久切换。背景PDF显式变更不能借普通save放松原件保护。
+
+### 实际 owner 稳定保存已验证（2026-11-09）
+
+输入事务、固定writer、旧native3和旧会话捕获/恢复/关闭已实际接通：等待输入结束不取消笔或预览，Main完整dispatch之后再捕获；按目录FIFO处理已接受写入/清理/新实例恢复，失败不建立正文复用证明。表格事务绑定实际模型，历史前收尾；共享全部关闭、明确放弃新建、单笔记恢复可见、共享PDF编码寿命和退休等待均已验证。当前代码19574fe1，完整313套件3483项主机通过、Android源码编译及双独立复核完成，真实平台未运行。详情reference-owner-capture-2026-11-09.md。
+
+后续保留顺序：统一native4实际producer/成功回执与同head会话持久交接、恢复权限和new/copy切换（含已开始native IO跨Activity采用）；再启用原字节页面身份并接页面/区域来源、多来源预览状态、来源往返/反向引用和文件网络。旧会话两文件崩溃原子性及无目标canvas的明确保存/放弃交互尚待完成。A2多选、无中心画布和线命中等交互不取消；整体未完工，不打包APK。
+
+### 来源重开与普通线画布选择已验证（2026-11-09）
+
+d7610f5b 在收尾保存后重新核实际来源，改变时真正解码B，再核所有owner revision/路径/jobs/runtime采用；4个基线内容回退反例先红、8真实主机场景绿。5c43056b 接共享关系几何、宽命中、运行时线选择和现有线编辑／列表；笔掌与跨会话旧定时／拖动覆盖均有反例，正常双击保留。最终315套件3520项全过、Android源码编译及独立复核完成，实际Compose／SAF／目标设备未运行。记录reference-open-after-save-2026-11-09.md及mind-map-relation-hit-2026-11-09.md；普通线命中从剩余清单移入完成，整体范围不变。
+
+native4生产统一仍待整片迁移，精确接口和未具备的恢复／active Root／新建复制前提见reference-native-handoff-2026-11-08.md末节；不以新普通保存API半接旧cache。页面来源、预览、往返／反向引用、网络，以及A2其它交互继续按原目标执行。
+
+### 当前页添加来源已验证（2026-11-09）
+
+实际 PDF／分页笔记页菜单支持添加到已有或新建导图、已有概念或新分支／自由引用节点，节点与来源一次撤销，保留原阅读位置。源端以真实读取／成功发布的版本保护保存，外部同身份变化与未知基线拒写；旧页编号启用后必须实际重开，不按页序号补活模型。取消请求后已接受的 B 继续完成，后续 C1 恢复原自动保存并按 B 核对原件。目标通过唯一 MapSession 租约合并当前编辑，原选择票不能跨重载复活，保存失败只重试、不重复追加。
+
+最终343套件3726项主机全绿、Android测试源码编译及独立复核通过，详见mind-map-current-page-reference-2026-11-09.md；真实仪器／SAF／MovinkPad未执行，无APK。下片接来源定位／轮廓／返回及视口选择，然后双窗格、反向引用和文件网络。区域/画布入口、范围调整、失效恢复、主画布与目录缩略预览、文本编辑后追加节点定位、A2无中心／同级插入／边缘自动平移等仍保留；整体未完成。
+
+### 来源往返的Main宿主前置已验证（2026-11-09）
+
+Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Surface也不能以Compose盖板遮住；因此主图入口改为同Main宿主复用现Screen/MapDocuments，停放全部native owner/物理输入后只卸View、不替换原模型。VM保同Entry/lease/presentation跨配置，宿主token隔离旧打开/关闭回调；图raw触摸不触native latch/兼容改写，系统picker常驻，native浮层仅停显。347套3744项全量、Android源码编译及独立复核通过，无APK；实际平台/Surface/GPU/目标设备未运行，见mind-map-main-host-2026-11-09.md。
+
+下一片仍是具体来源Open→严格UUID/永久PageID保护采用→定位轮廓→返回原图和具体来源条目；本片hide/show消费者只证明宿主基础，不能冒充该用户闭环。真正Map双窗格、反向引用与网络等原范围均保留。
+
+### 来源打开、定位和返回已验证（2026-11-09）
+
+本阶段接具体来源入口、严格NOTE/PDF FILE/PAGE打开、actual owner原槽保留与其余文档原保存保护、真实attach/稳定preDraw定位、fresh DOWN取消pending跳转、同Entry相机/选集/来源条返回。范围变化/删除undo/重载旧票不复活，来源备注IME和失效成员收尾不污染相机；embedded PDF v1保包装/原字节、secondary单文档恢复无phantom primary。351套3771项全量与Android测试源码编译、独立复核通过；无APK，实际平台与目标设备未运行。详见 `docs/movinkpad/mind-map-source-navigation-2026-11-09.md`。
+
+下一阶段优先从现有文件/页面查看真实反向引用并定位图中具体来源条目，复用MapDocuments唯一actor及现有窗口/保存保护；不手工维护双向关系。随后局部及筛选/全库文件网络，严格区分内容引用、用户关联、可选同图出现，不因概念多来源推导文件彼此依赖。真正图双窗格、Canvas/xmap来源打开、区域/画布创建入口及范围调整、精确失效与权限/身份恢复、复制/完整备份、无中心/同级插入/边缘平移与真机验收仍保留；整体未完成。

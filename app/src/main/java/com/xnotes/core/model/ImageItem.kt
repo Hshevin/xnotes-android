@@ -32,6 +32,7 @@ class ImageItem(
     var part: Rect? = null,
 ) : CanvasItem, Resizable {
 
+
     override val kind = KIND
     override val resizable = true
     override var layerId: String? = null

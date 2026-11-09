@@ -84,6 +84,7 @@ class ConnectorItem(
     var neonStrength: Double = 0.6,
 ) : CanvasItem, Labelled {
 
+
     override val kind = KIND
     override val resizable = true
     override var layerId: String? = null

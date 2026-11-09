@@ -7,6 +7,12 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.FilterOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
+
+enum class LegacySessionWrite { SAVED,NEEDS_BODY,FAILED }
 
 /**
  * Persists the working session — the open document (including unsaved edits) plus
@@ -16,13 +22,28 @@ import java.io.FileOutputStream
  * The document is written in the normal `.xnote` format via [DocumentCodec]; the
  * file's identity ([Document.path]/[Document.displayName]/[Document.dirty], which
  * the codec doesn't carry) and the view state go in a small sidecar JSON.
- * Best-effort: failures are swallowed, and a missing or corrupt session restores
- * nothing.
+ * Legacy callers remain best-effort; checked writes report failures. The body and sidecar are
+ * individually replaced, not one crash-atomic publication. Missing or corrupt sessions restore nothing.
  */
 class SessionStore(private val dir: File, private val codec: DocumentCodec, private val pdfDir: File, private val imageDir: File) {
 
     private val docFile = File(dir, "document.xnote")
-    private val meta = JsonStore(File(dir, "session.json"))
+    private val metaFile = File(dir, "session.json")
+    private val meta = JsonStore(metaFile)
+
+    init {runCatching {LegacySessionBodyCandidates.cleanup(dir)}}
+
+    /** Captured separately from the body, so a view-only refresh never needs a live model. */
+    data class Metadata(
+        val path:String?,
+        val displayName:String?,
+        val dirty:Boolean,
+        val zoom:Double,
+        val scrollX:Double,
+        val scrollY:Double,
+        val zoomLocked:Boolean,
+        val viewOverrides:ViewOverrides,
+    )
 
     /** A restored session: the document plus the view state to reapply. */
     class Snapshot(
@@ -48,36 +69,56 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
         viewOverrides: ViewOverrides,
         writeDocument: Boolean,
     ) {
-        runCatching {
-            dir.mkdirs()
-            if (writeDocument || !docFile.exists()) {
-                val tmp = File(dir, "document.xnote.tmp")
-                FileOutputStream(tmp).use { codec.write(document, it) }
-                if (!tmp.renameTo(docFile)) {
-                    docFile.delete()
-                    tmp.renameTo(docFile)
+        saveChecked(if(writeDocument || !docFile.exists()) document else null,
+            Metadata(document.path,document.displayName,document.dirty,zoom,scrollX,scrollY,zoomLocked,viewOverrides))
+    }
+
+    /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
+    fun saveChecked(document:Document?,metadata:Metadata):LegacySessionWrite=runCatching {
+        LegacySessionBodyCandidates.cleanup(dir)
+        if(document==null) {
+            if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
+            if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
+        } else {
+            check(dir.isDirectory || dir.mkdirs())
+            val candidate=LegacySessionBodyCandidates.create(dir,"document-",".xnote.tmp")
+            try {
+                FileOutputStream(candidate.file).use {output->
+                    codec.write(document,object:FilterOutputStream(output) {
+                        override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
+                        override fun close() {flush()}
+                    })
+                    output.fd.sync()
                 }
-            }
+                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
+            } finally {candidate.close()}
+        }
+        val m=with(metadata) {
             val m = JSONObject()
-                .put("dirty", document.dirty)
+                .put("dirty", dirty)
                 .put("zoom", zoom)
                 .put("scrollX", scrollX)
                 .put("scrollY", scrollY)
                 .put("zoomLocked", zoomLocked)
-            document.path?.let { m.put("path", it) }
-            document.displayName?.let { m.put("displayName", it) }
-            meta.write(ViewOverridesJson.write(m, viewOverrides))
+            path?.let {m.put("path",it)}
+            displayName?.let {m.put("displayName",it)}
+            ViewOverridesJson.write(m,viewOverrides)
         }
-    }
+        if(meta.writeChecked(m)) LegacySessionWrite.SAVED else LegacySessionWrite.FAILED
+    }.getOrDefault(LegacySessionWrite.FAILED)
 
     /** Discard any saved session (document + sidecar), so the next launch restores nothing.
      *  Used when the app is left with no note open, so a closed note isn't kept on disk. */
     fun clear() {
-        runCatching {
-            docFile.delete()
-            File(dir, "session.json").delete()
-        }
+        clearChecked()
     }
+
+    /** Keep the sidecar when the body cannot be removed, so a failed clear does not detach it. */
+    fun clearChecked():Boolean=runCatching {
+        Files.deleteIfExists(docFile.toPath())
+        Files.deleteIfExists(metaFile.toPath())
+        true
+    }.getOrDefault(false)
 
     /** Load the saved session, or null when there is none or it can't be read. */
     fun load(): Snapshot? {
@@ -95,5 +136,37 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
             m.optBoolean("zoomLocked", false),
             ViewOverridesJson.read(m),
         )
+    }
+}
+
+/** Shared by every legacy store instance, including aliases of the same private directory. */
+internal object LegacySessionBodyCandidates {
+    private val gate=Any()
+    private val active=hashSetOf<String>()
+
+    fun cleanup(directory:File)=synchronized(gate) {
+        for(file in directory.listFiles().orEmpty()) {
+            val candidate=file.name.startsWith("document-") && file.name.endsWith(".xnote.tmp") ||
+                file.name.startsWith("canvas-") && file.name.endsWith(".xcanvas.tmp")
+            if(candidate && file.isFile && file.canonicalPath !in active) file.delete()
+        }
+    }
+
+    // Register before cleanup can observe the new file; encoding itself never holds this gate.
+    fun create(directory:File,prefix:String,suffix:String):Candidate=synchronized(gate) {
+        val file=File.createTempFile(prefix,suffix,directory)
+        val key=file.canonicalPath
+        active.add(key)
+        Candidate(file,key)
+    }
+
+    class Candidate internal constructor(val file:File,private val key:String):AutoCloseable {
+        private var closed=false
+        override fun close()=synchronized(gate) {
+            if(!closed) {
+                closed=true
+                try {file.delete()} finally {active.remove(key)}
+            }
+        }
     }
 }

@@ -1,11 +1,13 @@
 package com.xnotes.core.infinite
 
+
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.fixedWriteCopies
 import com.xnotes.core.util.Paths
 import java.util.IdentityHashMap
 
@@ -48,7 +50,7 @@ class InfiniteDocument(
     var path: String? = null,
     /** Real file name from the storage provider, when known (overrides [path]-derived title). */
     var displayName: String? = null,
-    var dirty: Boolean = false,
+    dirty: Boolean = false,
     var background: CanvasBackground = CanvasBackground(),
     val waypoints: MutableList<Waypoint> = mutableListOf(),
     /** The view the canvas was last left at, restored on open. */
@@ -56,8 +58,21 @@ class InfiniteDocument(
     /** When the canvas was created (epoch ms), or null for files written before this was recorded. */
     var created: Long? = null,
 ) {
+    /** Owner-side body changes, separate from render versions and saved/unsaved presentation. */
+    internal var bodyRevision:Long=0L
+    var dirty:Boolean=dirty
+        set(value) {
+            if(value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
+    /** A writer snapshot keeps this token; a separate live model never inherits it implicitly. */
+    internal var snapshotOwnerToken:Any=Any()
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
     var identity: com.xnotes.format.BundleIdentity = com.xnotes.format.BundleIdentity()
+        set(value) {
+            if(field!=value) bodyRevision=Math.incrementExact(bodyRevision)
+            field=value
+        }
 
 
     /** Something that must be patched when the item list changes: the GL geometry store. */
@@ -123,12 +138,16 @@ class InfiniteDocument(
      * It carries no spatial index and no listener. It exists to be serialized and dropped, never
      * drawn or edited.
      */
-    fun snapshotForWrite(): InfiniteDocument {
+    fun snapshotForWrite(fixedItems:Boolean=false): InfiniteDocument {
         val copy = InfiniteDocument(dpi, path, displayName, dirty, background, waypoints.toMutableList(), lastView, created)
         copy.identity = identity
         copy.layers.restore(layers.entries, layers.activeId)
-        copy.savedLayerIds = items.associateWith { it.layerId }
-        copy.backing.addAll(backing)
+        val members=if(fixedItems) backing.fixedWriteCopies(allowText=false) else backing
+        copy.savedLayerIds = members.indices.associateBy({index->members[index]},{index->layerIdForWrite(backing[index])})
+        copy.backing.addAll(members)
+        // Copy last: construction/identity setters are not edits of this frozen body.
+        copy.bodyRevision=bodyRevision
+        copy.snapshotOwnerToken=snapshotOwnerToken
         return copy
     }
 

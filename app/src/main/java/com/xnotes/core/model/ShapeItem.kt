@@ -71,6 +71,7 @@ class ShapeItem(
     var headEnd: Head = shape.defaultHeadEnd,
 ) : CanvasItem, Resizable, Labelled {
 
+
     override val kind = KIND
     override val resizable = true
     override var layerId: String? = null

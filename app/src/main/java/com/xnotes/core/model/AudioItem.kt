@@ -23,6 +23,7 @@ class AudioItem(
     val measurer: TextMeasurer,
 ) : CanvasItem {
 
+
     override val kind = KIND
     override val resizable = true
     override val mirrorable = false

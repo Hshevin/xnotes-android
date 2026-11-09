@@ -52,8 +52,13 @@ internal class GlueRead {
     }
 
     /** Glue every waiting end to the item it names; an end naming nothing it can glue to stays loose. */
-    fun resolve() {
+    fun resolve(members:Collection<CanvasItem>?=null) {
+        val present=members?.let {list ->
+            Collections.newSetFromMap(IdentityHashMap<CanvasItem,Boolean>()).apply {addAll(list)}
+        }
+        if(present!=null) byId.entries.removeAll {it.value !in present}
         for ((c, from, to) in pending) {
+            if(present!=null && c !in present) continue
             c.start = glued(c, c.start, from)
             c.end = glued(c, c.end, to)
         }

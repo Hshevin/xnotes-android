@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_save_recovery_session">无法更新恢复会话。</string>
+</resources>

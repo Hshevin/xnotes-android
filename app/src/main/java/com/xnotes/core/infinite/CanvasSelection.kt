@@ -301,6 +301,20 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         startBox?.let { box = it }
     }
 
+    /** Cancel a live transform exactly, including members baked during a renderer-driven drag. */
+    fun cancelTransform() {
+        if (startSnapshots.isEmpty()) return
+        for (i in items.indices) items[i].restoreGeometry(startSnapshots[i])
+        follow.restore()
+        box = startBox
+        doc.itemsChanged(items)
+        doc.itemsChanged(follow.items)
+        follow = GlueFollow.NONE
+        startSnapshots = emptyList()
+        startBox = null
+        startGrabAngle = null
+    }
+
     /** The point a transform turns and scales about: the box as it was when the gesture began. */
     val transformPivot: Pt? get() = startBox?.center
 
@@ -318,7 +332,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * after geometry snapshots, because a rotation can change a shape's very kind.
      */
     fun buildCommand(movedOnly: Boolean, dx: Double = 0.0, dy: Double = 0.0): Command? {
-        if (items.isEmpty()) return null
+        if (items.isEmpty() || startSnapshots.isEmpty()) return null
         follow.settle()
         // Connectors are recorded whole, glue and all; a plain move of anything else stays a move.
         val moved = ArrayList<CanvasItem>()

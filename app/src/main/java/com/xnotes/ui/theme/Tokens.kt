@@ -53,3 +53,24 @@ val MinTouchTarget = 48.dp
 /** Docked sidebar with a content preview and 48 dp layer controls. */
 val LayerSidebarWidth = 320.dp
 val LayerThumbnailSize = 48.dp
+
+/** Scrollable outline and parent chooser in the independent mind map editor. */
+val MindMapNodeListHeight = 400.dp
+
+val MindMapPenSliderWidth = 160.dp
+
+/** Last source image shown within the graph's existing scrollable source dialog. */
+val MindMapSourcePreviewHeight = 144.dp
+
+/** World units in the native graph surface equal dp at its normal viewing scale. */
+val FileNetworkCardWidth = 240.dp
+val FileNetworkCardHeight = 96.dp
+val FileNetworkColumnStep = 360.dp
+val FileNetworkRowStep = 144.dp
+
+/** Temporary, paper-contrast navigation outline; it never becomes document content. */
+object ReferenceLocatorStyle {
+    const val DurationMillis = 1800L
+    val StrokeWidth = 2.dp
+    val Inset = Space.s4
+}

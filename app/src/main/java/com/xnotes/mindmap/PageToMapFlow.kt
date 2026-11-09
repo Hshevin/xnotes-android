@@ -1,0 +1,177 @@
+package com.xnotes.mindmap
+
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.xnotes.R
+import com.xnotes.ui.Editor
+import com.xnotes.ui.theme.*
+
+/** Pickers belong to the reading host, so a retired page cannot clear/rebind an old system result. */
+@Composable
+internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri)->Unit,visible:Boolean=true) {
+    val context=LocalContext.current
+    val scope=rememberCoroutineScope()
+    val request=editor.openPanes.firstNotNullOfOrNull {it.pageReferenceRequest}
+    val controller=remember(request?.id) {request?.let {PageToMapController(context,it,scope)}}
+    val latest by rememberUpdatedState(controller)
+    var pickerRequest by rememberSaveable {mutableStateOf<String?>(null)}
+    var pickerKind by rememberSaveable {mutableStateOf<String?>(null)}
+    fun receive(uri:Uri?,kind:String) {
+        val owner=pickerRequest;val expected=pickerKind
+        pickerRequest=null;pickerKind=null
+        val current=latest
+        if(uri==null || expected!=kind || owner==null || current?.request?.id!=owner || !current.request.pane.pageReferenceCurrent(current.request)) return
+        val resolver=context.contentResolver
+        runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}
+            .onFailure {runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}}
+        if(kind=="OPEN") current.selectMap(uri) else current.createMap(uri)
+    }
+    val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {receive(it,"OPEN")}
+    val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {receive(it,"NEW")}
+    DisposableEffect(controller) {onDispose {controller?.close()}}
+    LaunchedEffect(controller) {controller?.start()}
+    SideEffect {
+        controller?.takeIf {!it.request.pane.pageReferenceCurrent(it.request)}?.close()
+    }
+    controller?.takeIf {visible}?.let {flow->
+        val openUri=flow.targetUri;val openContext=flow.targetContext
+        PageToMapDialog(flow,pickerRequest!=null,
+            choose={if(pickerRequest==null && flow.request.pane.pageReferenceCurrent(flow.request)) {
+                pickerRequest=flow.request.id;pickerKind="OPEN"
+                try {choose.launch(arrayOf("application/json","application/octet-stream","*/*"))}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+            }},
+            create={if(pickerRequest==null && flow.request.pane.pageReferenceCurrent(flow.request)) {
+                pickerRequest=flow.request.id;pickerKind="NEW"
+                try {create.launch(context.getString(R.string.map_title)+".xmap")}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+            }},
+            save={flow.saveSource {pane->pane.message=context.getString(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry);onSave(pane)}},
+            reopen={flow.reopen {flow.request.pane.message=context.getString(R.string.graph_ref_reopened_retry)}},
+            open={flow.openMap(openUri,openContext,onOpenMap)},close={flow.close()})
+    }
+}
+
+@Composable
+private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:()->Unit,create:()->Unit,
+                            save:()->Unit,reopen:()->Unit,open:()->Unit,close:()->Unit) {
+    val session=flow.targetSession
+    val doc=session?.document
+    val step=flow.step
+    if(step==PageToMapStep.CLOSED) return
+    val hasImport=flow.hasImportedReference
+    val palette=LocalPalette.current
+    val targetContext=flow.targetContext
+    val confirmation=flow.confirmationToken
+    val newBranch=(flow.destination as? MapReferenceDestination.New)?.node?.parent
+    val branchEditing=newBranch!=null && (session?.textDraft!=null || session?.textRestore!=null)
+    CompositionLocalProvider(LocalInkBusy provides false) {
+        AlertDialog(onDismissRequest=close,title={Text(stringResource(R.string.graph_reference_this_page),fontSize=TextSize.heading)},text={
+            LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                flow.source?.let {source->item {
+                    Text(source.fileName,fontSize=TextSize.title)
+                    Text(sourceScopeLabel(source),fontSize=TextSize.caption)
+                }}
+                when(step) {
+                    PageToMapStep.PREPARING,PageToMapStep.TARGET_LOADING,PageToMapStep.CONFIRMING,PageToMapStep.SAVING->item {
+                        Text(stringResource(if(step==PageToMapStep.SAVING) R.string.map_saving else R.string.graph_ref_preparing),fontSize=TextSize.body)
+                    }
+                    PageToMapStep.SAVE_REQUIRED->item {
+                        Text(stringResource(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry),fontSize=TextSize.body)
+                        MapButton(R.string.save_as_ellipsis,onClick=save)
+                    }
+                    PageToMapStep.ENABLE_REQUIRED->item {
+                        Text(stringResource(R.string.graph_ref_enable_notice),fontSize=TextSize.body)
+                        MapButton(R.string.graph_source_enable_confirm) {flow.enablePages()}
+                    }
+                    PageToMapStep.ENABLE_RETAINED->item {
+                        Text(stringResource(R.string.graph_source_activation_failed),fontSize=TextSize.body)
+                        MapButton(R.string.graph_source_complete_activation) {flow.continueEnable()}
+                    }
+                    PageToMapStep.REOPEN_REQUIRED->item {
+                        Text(stringResource(R.string.graph_ref_reopen_notice),fontSize=TextSize.body)
+                        MapButton(R.string.graph_ref_reopen,onClick=reopen)
+                    }
+                    PageToMapStep.DESTINATION->item {
+                        Text(stringResource(R.string.graph_ref_destination_notice),fontSize=TextSize.body)
+                        if(pickerBusy) Text(stringResource(R.string.native_save_picker_busy),fontSize=TextSize.caption)
+                        MapButton(R.string.graph_ref_choose_map,enabled=!pickerBusy,onClick=choose)
+                        MapButton(R.string.map_new,enabled=!pickerBusy,onClick=create)
+                    }
+                    PageToMapStep.TARGET->{
+                        item {
+                            Text(stringResource(R.string.graph_ref_choose_node),fontSize=TextSize.body)
+                            if(session?.conflict==true || session?.recovered==true)
+                                Text(stringResource(R.string.graph_ref_target_recovery),fontSize=TextSize.caption)
+                            if(session?.conflict==true || session?.recovered==true) MapButton(R.string.graph_ref_view_map,onClick=open)
+                            if(session?.inkContact==true) Text(stringResource(R.string.graph_ref_wait_pen),fontSize=TextSize.caption)
+                            if(branchEditing) {
+                                Text(stringResource(R.string.graph_ref_finish_edit),fontSize=TextSize.caption)
+                                MapButton(R.string.graph_ref_view_map,onClick=open)
+                            }
+                            MapButton(R.string.graph_ref_new_branch,selected=(flow.destination as? MapReferenceDestination.New)?.node?.parent!=null) {flow.chooseNewReference(true,expectedContext=targetContext)}
+                            MapButton(R.string.graph_ref_new_free,selected=(flow.destination as? MapReferenceDestination.New)?.node?.free==true) {flow.chooseNewReference(false,expectedContext=targetContext)}
+                            val draft=flow.destination as? MapReferenceDestination.New
+                            if(newBranch!=null && doc!=null) Text(stringResource(R.string.graph_ref_branch_parent,relationNodeTitle(doc,newBranch)),fontSize=TextSize.caption)
+                            if(draft!=null) OutlinedTextField(flow.newNodeTitle,{flow.renameNewReference(it,draft.node.id,targetContext)},
+                                label={Text(stringResource(R.string.graph_display_title),fontSize=TextSize.body)},
+                                textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.body))
+                        }
+                        items(doc?.nodes?.size ?: 0,key={doc!!.nodes[it].id}) {index->
+                            val node=doc!!.nodes[index]
+                            val selected=(flow.destination as? MapReferenceDestination.Existing)?.nodeId==node.id
+                            TextButton(onClick={flow.chooseExistingNode(node.id,targetContext)},modifier=Modifier.fillMaxWidth().heightIn(min=MinTouchTarget)
+                                .then(if(selected) Modifier.background(palette.text.toComposeColor()) else Modifier),
+                                colors=ButtonDefaults.textButtonColors(contentColor=if(selected) palette.panel.toComposeColor() else palette.text.toComposeColor())) {
+                                Text(relationNodeTitle(doc,node.id),fontSize=TextSize.body)
+                            }
+                        }
+                        item {MapButton(R.string.graph_ref_change_map) {flow.changeMap()}}
+                    }
+                    PageToMapStep.ADDED->item {
+                        Text(stringResource(R.string.graph_ref_added),fontSize=TextSize.body)
+                        if(session?.dirty==true) Text(stringResource(R.string.graph_ref_newer_changes),fontSize=TextSize.caption)
+                        MapButton(R.string.graph_ref_view_map,onClick=open)
+                    }
+                    PageToMapStep.SAVE_FAILED->item {
+                        Text(stringResource(R.string.graph_ref_save_failed),fontSize=TextSize.body)
+                        MapButton(R.string.graph_ref_retry_save) {flow.retrySave()}
+                        MapButton(R.string.graph_ref_view_map,onClick=open)
+                    }
+                    PageToMapStep.CREATE_RETAINED->item {
+                        Text(stringResource(R.string.graph_ref_create_retained),fontSize=TextSize.body)
+                        MapButton(R.string.graph_ref_open_retained) {flow.openRetained()}
+                        MapButton(R.string.graph_ref_view_map,onClick=open)
+                    }
+                    PageToMapStep.SOURCE_ERROR->item {
+                        Text(stringResource(R.string.graph_ref_source_changed),fontSize=TextSize.body)
+                        MapButton(R.string.graph_ref_retry_source) {flow.start()}
+                    }
+                    PageToMapStep.TARGET_ERROR->item {
+                        Text(stringResource(R.string.graph_ref_target_changed),fontSize=TextSize.body)
+                        if(!hasImport) {
+                            MapButton(R.string.graph_ref_choose_map,enabled=!pickerBusy,onClick=choose)
+                            MapButton(R.string.map_new,enabled=!pickerBusy,onClick=create)
+                        }
+                        if(flow.targetUri!=null) MapButton(R.string.graph_ref_view_map,onClick=open)
+                    }
+                    PageToMapStep.CLOSED->Unit
+                }
+            }
+        },confirmButton={
+            if(step==PageToMapStep.TARGET) MapButton(R.string.graph_ref_add,enabled=flow.destination!=null && !branchEditing && session?.inkContact!=true && session?.closing!=true && session?.replacingDocument!=true) {flow.confirm(confirmation)}
+            else if(step==PageToMapStep.ADDED) MapButton(R.string.map_done,onClick=close)
+        },dismissButton={MapButton(if(hasImport) R.string.map_close else R.string.cancel,onClick=close)})
+    }
+}

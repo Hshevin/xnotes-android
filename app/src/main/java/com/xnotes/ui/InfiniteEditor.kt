@@ -163,7 +163,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         detectShapes = { detectShapes },
         selection = { selection },
         itemsIn = { rect -> document.itemsIn(rect).filter(document.layers::editable) },
-        onSelectionChanged = { publishOverlay() },
+        onSelectionChanged = { settleRetiredSelectionPreviews(); publishOverlay() },
         onCommitSelection = { commitSelection(it) },
         onLiftSelection = { items, at -> scene.setLift(items, at) },
         devicePxPerDp = { devicePxPerDp },
@@ -180,7 +180,24 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onUserMovedView = { AudioPlayback.userMoved(this) },
         onTextBox = { insertTextBox(it) },
         onScreenshot = { screenshotMenu = it },
-    )
+    ).apply {
+        onContentTransactionChanged = { this@InfiniteEditor.onContentTransactionChanged?.invoke() }
+        onSelectionWillChange = { finishSelectionPreviews() }
+    }
+
+    /** Main-thread wake-up only; the owning document controller posts any subsequent capture. */
+    var onContentTransactionChanged: (() -> Unit)? = null
+
+    val hasPendingContentTransaction: Boolean
+        get() = interaction.hasPendingContentTransaction || labelContentChanged() ||
+            !restyleBaseline.isNullOrEmpty() || !refillBaseline.isNullOrEmpty()
+
+    private fun labelContentChanged(): Boolean {
+        val shape = editingLabel ?: return false
+        val after = shape.label?.takeIf { it.text.isNotBlank() }
+        val before = labelBefore?.takeIf { it.text.isNotBlank() }
+        return if (after == null) before != null else !after.sameAs(before)
+    }
 
     private val devicePxPerDp = appContext.resources.displayMetrics.density.toDouble()
     private val imageCodec = com.xnotes.platform.AndroidImageCodec()
@@ -685,6 +702,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun deleteSelection() {
         val items = selection.items
         if (items.isEmpty()) return
+        finishSelectionPreviews()
         val command = EraseCanvasItems.capture(document, items)
         document.removeAll(items)
         history.push(command)
@@ -713,6 +731,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Clone the selection a nudge down and right, and leave the copies selected. */
     override fun duplicateSelection() {
+        finishSelectionPreviews()
         if (selection.isEmpty) return
         val clones = selection.items.deepCopyAll(textMeasurer)
         com.xnotes.core.model.Groups.refresh(clones, document.items)
@@ -757,6 +776,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      * copied on this canvas, or centred in the view when it came from elsewhere.
      */
     fun pasteClipboard(atContent: Pt? = null) {
+        finishSelectionPreviews()
         if (!document.layers.writable) { onMessage?.invoke(appContext.getString(R.string.layers_not_writable), null); return }
         val clip = ItemClipboard.clip ?: return
         val home = clip.isFrom(document)
@@ -1008,7 +1028,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override fun refillSelection(color: Rgba?, preview: Boolean) {
         val shapes = selection.items.mapNotNull { (it as? ShapeItem)?.takeIf { s -> s.fillRgba != null } }
-        if (shapes.isEmpty()) return
+        if (shapes.isEmpty()) {
+            if (!preview) finishSelectionPreviews()
+            return
+        }
         val baseline = refillBaseline ?: shapes.associateWith { it.fillRgba }
         refillBaseline = if (preview) baseline else null
         com.xnotes.core.history.RefillShapes(com.xnotes.core.history.RefillShapes.of(shapes, color)).redo()
@@ -1023,6 +1046,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         markDirty()
         refresh()
         publishOverlay()
+        onContentTransactionChanged?.invoke()
     }
 
     /** The fills as a refill preview found them, so its settling call records them as one step. */
@@ -1128,6 +1152,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         shape.label = shape.label?.withText(text)
         document.itemChanged(shape)
         refreshField()
+        onContentTransactionChanged?.invoke()
     }
 
     override fun panWhileEditing(dxFinger: Float, dyFinger: Float) {
@@ -1155,10 +1180,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         shape.label = l.withStyle(change(l.style))
         document.itemChanged(shape)
         refreshField()
+        onContentTransactionChanged?.invoke()
     }
 
     /** End the label edit with its current (or [text]) words: blank clears the label; any change is one undo step. */
-    override fun commitText(text: String?) {
+    override fun commitText(text: String?) =
+        try { finishLabelEdit(text) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun finishLabelEdit(text: String?) {
         val shape = editingLabel ?: return
         text?.let { t -> shape.label = shape.label?.withText(t) }
         val before = labelBefore
@@ -1234,13 +1263,47 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Styles held from the first restyle preview, so a slider drag undoes in one step. */
     private var restyleBaseline: MutableMap<CanvasItem, DrawStyle>? = null
 
+    /** Keep the preview as shown and record it once; never apply an outline-matching fill. */
+    fun finishSelectionPreviews() {
+        val fill = refillBaseline
+        val styles = restyleBaseline
+        refillBaseline = null
+        restyleBaseline = null
+        val fillEntries = fill.orEmpty().mapNotNull { (shape, before) ->
+            shape.fillRgba.takeIf { it != before }?.let { com.xnotes.core.history.RefillShapes.Entry(shape, before, it) }
+        }
+        val styleEntries = styles.orEmpty().mapNotNull { (item, before) ->
+            DrawStyle.of(item)?.takeIf { it != before }?.let { RestyleItems.Entry(item, before, it) }
+        }
+        if (fillEntries.isNotEmpty()) history.push(OnCanvas(document,
+            com.xnotes.core.history.RefillShapes(fillEntries), fillEntries.map { it.shape }))
+        if (styleEntries.isNotEmpty()) history.push(OnCanvas(document,
+            RestyleItems(styleEntries), styleEntries.map { it.item }))
+        if (fillEntries.isNotEmpty() || styleEntries.isNotEmpty()) {
+            markDirty()
+            refresh()
+        }
+        if (fill != null || styles != null) onContentTransactionChanged?.invoke()
+    }
+
+    private fun settleRetiredSelectionPreviews() {
+        if (restyleBaseline == null && refillBaseline == null) return
+        val current = selection.items.toHashSet()
+        if (restyleBaseline?.keys?.any { it !in current } == true || refillBaseline?.keys?.any { it !in current } == true) {
+            finishSelectionPreviews()
+        }
+    }
+
     /**
      * Recolour and/or re-thicken the selected strokes and shapes, with the same preview/commit
      * contract the paged editor uses. The command is wrapped in [OnCanvas] so undo and redo re-file
      * the index and re-mesh through exactly the path the edit did.
      */
     override fun restyleSelection(color: Rgba?, width: Double?, preview: Boolean) {
-        if (selection.isEmpty) return
+        if (selection.isEmpty) {
+            if (!preview) finishSelectionPreviews()
+            return
+        }
         val baseline = restyleBaseline ?: HashMap<CanvasItem, DrawStyle>().also { map ->
             for (item in selection.items) DrawStyle.of(item)?.let { map[item] = it }
         }
@@ -1264,6 +1327,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         markDirty()
         refresh()
         publishOverlay()
+        onContentTransactionChanged?.invoke()
     }
 
     /** Focus transfer updates drawing defaults without restyling an existing selected label. */
@@ -2427,7 +2491,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     /** Keyboard shortcuts. Only the ones that mean something without pages. */
-    fun handleKeyDown(e: android.view.KeyEvent): Boolean {
+    fun handleKeyDown(e: android.view.KeyEvent): Boolean =
+        try { dispatchKeyDown(e) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun dispatchKeyDown(e: android.view.KeyEvent): Boolean {
         // An open label's field takes the keys; only Escape ends it.
         if (editingLabel != null) {
             if (e.keyCode != android.view.KeyEvent.KEYCODE_ESCAPE) return false
@@ -2474,6 +2541,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Select everything unlocked on the canvas, which on an unbounded one means most of it. */
     fun selectAll() {
         if (document.isEmpty) return
+        finishSelectionPreviews()
         selection.select(document.editableItems)
         armTool(Tool.SELECT)
         publishOverlay()
@@ -2535,6 +2603,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     fun replaceDocument(next: InfiniteDocument) {
         AudioRecording.stopFor(this) // closing the canvas places its recording
         AudioPlayback.closeFor(this)
+        // A completed drag can still have a worker result queued. Always retire its generation.
+        colorDropper.cancel()
+        dropWindow = null
+        dropItems = emptyList()
+        restyleBaseline = null
+        refillBaseline = null
         clearFading() // whatever was melting belongs to the outgoing canvas
         // An open label belongs to the outgoing canvas too; its history goes with it.
         editingLabel?.labelHidden = false
@@ -2711,6 +2785,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     // reason, so both surfaces behave alike.
     fun undo() {
         commitText() // a label being typed is the first thing undo takes back
+        finishSelectionPreviews()
         history.undo()
         interaction.clearSelection()
         markDirty()
@@ -2720,6 +2795,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     fun redo() {
         commitText()
+        finishSelectionPreviews()
         history.redo()
         interaction.clearSelection()
         markDirty()

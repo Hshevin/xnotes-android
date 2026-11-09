@@ -71,11 +71,22 @@ object FontCatalog {
     private var customDir: File? = null
     private val custom = ConcurrentHashMap<String, CustomFont>()
     private val cache = ConcurrentHashMap<String, Resolved>()
+    private val initializationLock=Any()
 
-    fun init(context: Context) {
-        assets = context.applicationContext.assets
-        customDir = File(context.applicationContext.filesDir, "fonts")
+    fun init(context: Context) = synchronized(initializationLock) {initialize(context.applicationContext)}
+
+    /** A source preview can be the process's first renderer, without opening MainActivity. */
+    fun ensureInitialized(context:Context) = synchronized(initializationLock) {
+        if(assets==null) initialize(context.applicationContext)
+    }
+
+    private fun initialize(app:Context) {
+        assets = app.assets
+        customDir = File(app.filesDir, "fonts")
         reloadCustom()
+        // Resolving a bundled face before init cached Sans. That fallback is not valid once the
+        // actual assets/custom directory are available. ensureInitialized never clears a warm cache.
+        cache.clear()
     }
 
     /** The pickable fonts, generic tokens first, then bundled, then imported. */
@@ -104,7 +115,7 @@ object FontCatalog {
 
     fun resolve(face: FontFace, bold: Boolean, italic: Boolean): Resolved {
         generic(face)?.let { return Resolved(Typeface.create(it, style(bold, italic)), false, false) }
-        return cache.getOrPut("${face.id}/$bold/$italic") {
+        return synchronized(initializationLock) {cache.getOrPut("${face.id}/$bold/$italic") {
             val am = assets
             val family = byId[face.id]
             val fallback = { Resolved(Typeface.create(Typeface.SANS_SERIF, style(bold, italic)), false, false) }
@@ -118,7 +129,7 @@ object FontCatalog {
                     }.getOrElse { fallback() }
                 } ?: fallback()
             }
-        }
+        }}
     }
 
     // --- user-imported fonts (filesDir/fonts; the file name carries family + mono) ---

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_save_recovery_session">Could not update the recovery session.</string>
+</resources>

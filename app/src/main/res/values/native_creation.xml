@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="extract_copy_kept_source_changed">The copy was saved. The source changed, so its pages were kept.</string>
+</resources>

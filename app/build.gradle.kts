@@ -114,6 +114,11 @@ android {
         compose = true
     }
 
+    // Actual Editor host tests read the same Android strings and themes as device tests.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     // Lists every values-* translation in the manifest so Android 13+ offers a per-app language.
     androidResources {
         generateLocaleConfig = true

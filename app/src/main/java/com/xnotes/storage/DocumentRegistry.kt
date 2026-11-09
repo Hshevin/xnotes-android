@@ -7,10 +7,11 @@ import java.io.File
 import java.util.UUID
 
 /** Private index only. Documents and immutable resources remain independently recoverable files. IO callers only. */
-class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 1) {
+class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 2) {
     private val liveLeases = java.util.concurrent.ConcurrentHashMap<String,String>()
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
+        createPageContracts(db)
         db.execSQL("CREATE TABLE documents(id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL)")
         db.execSQL("CREATE TABLE locations(uri TEXT PRIMARY KEY, location_key TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL REFERENCES documents(id), available INTEGER NOT NULL DEFAULT 1)")
         db.execSQL("CREATE INDEX locations_document ON locations(document_id,available)")
@@ -21,21 +22,129 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("CREATE INDEX leases_resource ON leases(resource_id,expires)")
         db.execSQL("CREATE TABLE migrations(uri TEXT PRIMARY KEY, original TEXT NOT NULL, candidate TEXT NOT NULL, source_hash TEXT NOT NULL, document_id TEXT NOT NULL)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { error("Unsupported registry upgrade") }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        check(oldVersion==1 && newVersion==2) {"Unsupported registry upgrade"}
+        createPageContracts(db)
+    }
+    /** No location/document FK: losing a location or removing an index row must not erase evidence. */
+    private fun createPageContracts(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
+    }
     private fun <T> transaction(block: (SQLiteDatabase) -> T): T {
         val db = writableDatabase
         db.beginTransaction()
         try { val result = block(db); db.setTransactionSuccessful(); return result } finally { db.endTransaction() }
     }
-    fun register(id: String, kind: String, name: String, uri: String) = transaction { db ->
+    fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
+        register(db,id,kind,name,uri,pageReferences)
+    }
+    private fun register(db:SQLiteDatabase,id:String,kind:String,name:String,uri:String,pageReferences:Boolean) {
         require(UUID.fromString(id).toString() == id)
         db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
-        db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE uri=?", arrayOf(id,uri))
+        db.execSQL("UPDATE locations SET document_id=?,available=1 WHERE location_key=?", arrayOf(id,locationKey(uri)))
+        if(pageReferences) db.execSQL("INSERT OR IGNORE INTO page_reference_contracts(document_id) VALUES(?)",arrayOf(id))
     }
-    private fun locationKey(uri: String): String = runCatching { val parsed=android.net.Uri.parse(uri); "${parsed.authority}|${android.provider.DocumentsContract.getDocumentId(parsed)}" }.getOrDefault(uri)
+    /** Includes unavailable locations and orphaned monotonic contracts; an empty file is not identity proof. */
+    internal fun verifyCreation(id:String,kind:String,uri:String,allowRegisteredHere:Boolean=false,pageReferences:Boolean=false) {
+        verifyCreation(readableDatabase,id,kind,uri,allowRegisteredHere,pageReferences)
+    }
+    private fun verifyCreation(db:SQLiteDatabase,id:String,kind:String,uri:String,allowRegisteredHere:Boolean,pageReferences:Boolean) {
+        val key=locationKey(uri)
+        val here=db.rawQuery("SELECT document_id FROM locations WHERE location_key=?",arrayOf(key)).use {if(it.moveToFirst()) it.getString(0) else null}
+        val locations=db.rawQuery("SELECT location_key FROM locations WHERE document_id=?",arrayOf(id)).use {c->buildList {while(c.moveToNext()) add(c.getString(0))}}
+        val knownKind=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        val anchored=db.rawQuery("SELECT 1 FROM page_reference_contracts WHERE document_id=?",arrayOf(id)).use {it.moveToFirst()}
+        val fresh=here==null && locations.isEmpty() && knownKind==null && !anchored
+        val same=allowRegisteredHere && here==id && locations.isNotEmpty() && locations.all {it==key} && knownKind==kind && (!anchored || pageReferences)
+        if(!fresh && !same) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+    }
+    /** The final recheck and registration are indivisible even if another caller updated the index during IO. */
+    internal fun registerCreated(id:String,kind:String,name:String,uri:String,pageReferences:Boolean) = transaction {db->
+        verifyCreation(db,id,kind,uri,true,pageReferences)
+        register(db,id,kind,name,uri,pageReferences)
+    }
+    /** Existing native recovery cannot reassign a location changed during PDF protection/IO. */
+    internal fun registerObserved(header:com.xnotes.format.BundleHeader,kind:String,name:String,uri:String,uniqueSource:Boolean=false) = transaction {db->
+        val id=header.identity?.documentId ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISSING)
+        if(kind !in setOf("xnote","xcanvas")) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        if(known!=null && known!=kind) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        ReferenceContract.verifyObserved(expectationAt(uri),expectationForId(id),header)
+        if(uniqueSource) verifyUniqueSource(db,id,uri)
+        register(db,id,kind,name,uri,header.anchors!=null)
+    }
+    /** JSON map observations cannot reclassify a known native identity or erase its page contract. */
+    internal fun registerMapObserved(id:String,name:String,uri:String,uniqueSource:Boolean=false) = transaction {db->
+        val at=expectationAt(uri);val byId=expectationForId(id)
+        val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        if(at!=null && at.documentId!=id || at?.requiresPages==true || byId.requiresPages || known!=null && known!="xmap")
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        if(uniqueSource) verifyUniqueSource(db,id,uri)
+        register(db,id,"xmap",name,uri,false)
+    }
+    /** Check and registration share one transaction; rejecting a copy must not leave a new row. */
+    private fun verifyUniqueSource(db:SQLiteDatabase,id:String,uri:String) {
+        val key=locationKey(uri)
+        db.rawQuery("SELECT location_key FROM locations WHERE document_id=? AND available=1",arrayOf(id)).use {cursor->
+            while(cursor.moveToNext()) require(cursor.getString(0)==key) {StorageText.t(StorageMsg.DUPLICATE_DOCUMENT_ID)}
+        }
+    }
+    /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
+    fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(
+        "SELECT l.document_id,p.document_id IS NOT NULL FROM locations l LEFT JOIN page_reference_contracts p ON p.document_id=l.document_id WHERE l.location_key=?",
+        arrayOf(locationKey(uri)),
+    ).use {c->if(c.moveToFirst()) ReferenceExpectation(c.getString(0),c.getInt(1)!=0) else null}
+    /** Also works after every old location/document row was removed or the file moved externally. */
+    fun expectationForId(id:String):ReferenceExpectation = readableDatabase.rawQuery(
+        "SELECT EXISTS(SELECT 1 FROM page_reference_contracts WHERE document_id=?)",arrayOf(id),
+    ).use {c->check(c.moveToFirst());ReferenceExpectation(id,c.getInt(0)!=0)}
+    internal fun locationKey(uri: String): String = runCatching { val parsed=android.net.Uri.parse(uri); "${parsed.authority}|${android.provider.DocumentsContract.getDocumentId(parsed)}" }.getOrDefault(uri)
+    internal fun uriAtLocation(uri:String):String? = readableDatabase.rawQuery("SELECT uri FROM locations WHERE location_key=?",arrayOf(locationKey(uri))).use {if(it.moveToFirst()) it.getString(0) else null}
+    internal fun nameForId(id:String):String? = readableDatabase.rawQuery("SELECT name FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+    internal fun kindForId(id:String):String? = readableDatabase.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+    internal data class ObservedLocation(val uri:String,val key:String,val available:Boolean)
+    internal data class ObservedFile(val kind:String?,val name:String?,val locations:List<ObservedLocation>)
+    internal data class FileObservations(val files:Map<String,ObservedFile>,val limited:Boolean)
+    /** Last-registered metadata only. A limit never turns a truncated set into one chosen location. */
+    internal fun fileObservations(ids:Set<String>,checkActive:()->Unit={}):FileObservations {
+        require(ids.size<=10000)
+        data class Read(val kind:String?,val name:String?,val locations:MutableList<ObservedLocation> = mutableListOf())
+        val found=linkedMapOf<String,Read>();var positions=0;var limited=false
+        loop@for(chunk in ids.toList().chunked(200)) {
+            checkActive()
+            val placeholders=chunk.joinToString(",") {"?"}
+            val args=(chunk+((10000-positions)+chunk.size+1).toString()).toTypedArray()
+            readableDatabase.rawQuery("SELECT d.id,d.kind,d.name,l.uri,l.location_key,l.available FROM documents d LEFT JOIN locations l ON l.document_id=d.id "+
+                "WHERE d.id IN ($placeholders) ORDER BY d.id,l.location_key LIMIT ?",args).use {cursor->
+                while(cursor.moveToNext()) {
+                    checkActive()
+                    val id=cursor.getString(0)
+                    val file=found.getOrPut(id) {Read(cursor.getString(1),cursor.getString(2))}
+                    if(!cursor.isNull(3)) {
+                        if(++positions>10000) {limited=true;break}
+                        file.locations+=ObservedLocation(cursor.getString(3),cursor.getString(4),cursor.getInt(5)!=0)
+                    }
+                }
+            }
+            if(limited) break@loop
+        }
+        checkActive()
+        return FileObservations(found.mapValues {(_,file)->ObservedFile(file.kind,file.name,file.locations.toList())},limited)
+    }
+    /** Bounded last-registered inventory only; no file is opened or granted a new identity. */
+    internal fun knownAvailableFiles(limit:Int=10001,checkActive:()->Unit={}):FileObservations {
+        require(limit in 1..10001)
+        val ids=linkedSetOf<String>()
+        readableDatabase.rawQuery("SELECT d.id FROM documents d WHERE d.kind IN ('xnote','xcanvas','xmap') "+
+            "AND EXISTS(SELECT 1 FROM locations l WHERE l.document_id=d.id AND l.available=1) ORDER BY d.id LIMIT ?",
+            arrayOf(limit.toString())).use {cursor->while(cursor.moveToNext()) {checkActive();ids+=cursor.getString(0)}}
+        val overflow=ids.size>10000
+        val observed=fileObservations(ids.take(10000).toSet(),checkActive)
+        return FileObservations(observed.files,observed.limited || overflow)
+    }
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
     fun locations(id: String): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations WHERE document_id=? AND available=1 ORDER BY uri", arrayOf(id)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
@@ -57,6 +166,16 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     fun referenceIds(owner: String): Set<String> = readableDatabase.rawQuery("SELECT resource_id FROM resource_refs WHERE owner=?",arrayOf(owner)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun owners(prefix: String): Set<String> = readableDatabase.rawQuery("SELECT DISTINCT owner FROM resource_refs WHERE owner LIKE ?",arrayOf("$prefix%" )).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun knownLocations(): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations",null).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
+    internal data class MapLocation(val id:String,val name:String,val uri:String,val available:Boolean)
+    /** Discovery hints only; callers still read the actual graph and classify its library location. */
+    internal fun knownMapLocations(limit:Int=4097,documentId:String?=null):List<MapLocation> {
+        require(limit in 1..4097)
+        val where=if(documentId==null) "" else " AND d.id=?"
+        val args=if(documentId==null) arrayOf(limit.toString()) else arrayOf(documentId,limit.toString())
+        return readableDatabase.rawQuery(
+            "SELECT d.id,d.name,l.uri,l.available FROM documents d JOIN locations l ON l.document_id=d.id WHERE d.kind='xmap'"+where+" ORDER BY l.available DESC,l.uri LIMIT ?",args,
+        ).use {c->buildList {while(c.moveToNext()) add(MapLocation(c.getString(0),c.getString(1),c.getString(2),c.getInt(3)!=0))}}
+    }
     fun resource(id: String): Resource? = readableDatabase.rawQuery("SELECT id,name,path,size,digest,version,owned FROM resources WHERE id=?", arrayOf(id)).use { c ->
         if (!c.moveToFirst()) null else Resource(c.getString(0), c.getString(1), c.getString(2), c.getLong(3), c.getString(4), c.getInt(5), c.getInt(6) == 1)
     }

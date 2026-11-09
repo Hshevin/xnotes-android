@@ -1,0 +1,50 @@
+{
+  "name": "branch-after",
+  "commit": "3877c4bb180828d74ea935a2fb1079d075ebd84b",
+  "worktree_overlay": [
+    "app/src/main/java/com/xnotes/mindmap/GraphDialogs.kt",
+    "app/src/main/java/com/xnotes/mindmap/SourceListEditor.kt",
+    "app/src/main/java/com/xnotes/storage/MigrationPublication.kt",
+    "app/src/main/java/com/xnotes/storage/NotebookStorage.kt",
+    "app/src/main/java/com/xnotes/ui/DestinationPickerState.kt",
+    "app/src/main/java/com/xnotes/ui/NativeDestinationPicker.kt",
+    "app/src/main/res/values-b+zh+Hans/destination_picker.xml",
+    "app/src/main/res/values-zh-rCN/destination_picker.xml",
+    "app/src/main/res/values/destination_picker.xml"
+  ],
+  "production_sha256_before_hooks": {
+    "app/src/main/java/com/xnotes/storage/NotebookStorage.kt": "fa364b25832e67e060cf471de5aeb95c4039f2d34f67e69c49342579cf78e773",
+    "app/src/main/java/com/xnotes/ui/Editor.kt": "33e28a20177951aa72e4c9feadba3fadb2847c291add37538b9a18cee87cac81",
+    "app/src/main/java/com/xnotes/storage/MigrationPublication.kt": "b662bd52153cedb2d3b75590ecfbe8c3cab91bcd4487e8159b907ee852d082f9",
+    "app/src/main/java/com/xnotes/storage/OwnedRecoveryTarget.kt": "1d144a38ccf81b0fc25e759621661555429da816915def5b0e116fe753e8a4e6",
+    "app/src/main/java/com/xnotes/storage/NativeSourceVersion.kt": "3a5b30dc744fdb654e822e033b622e5aaf9fd05e3ca6e9ea895f2d983aa303e9",
+    "app/src/main/java/com/xnotes/format/BundleSnapshot.kt": "8e184bb078e4fa0c2f82442b33a66fa1084ffb0e0858f08229da4b18fa2c835e"
+  },
+  "production_sha256_after_hooks": {
+    "app/src/main/java/com/xnotes/storage/NotebookStorage.kt": "9b63c1ee7b0317037f16757af77344b66bc693a17c2539ddfe012ba4fb36eaec",
+    "app/src/main/java/com/xnotes/ui/Editor.kt": "1f8391e19ab3f7f9e3fda035d1133583fdba12a6e0110bfc08bd3612352c1007",
+    "app/src/main/java/com/xnotes/storage/MigrationPublication.kt": "b662bd52153cedb2d3b75590ecfbe8c3cab91bcd4487e8159b907ee852d082f9",
+    "app/src/main/java/com/xnotes/storage/OwnedRecoveryTarget.kt": "1d144a38ccf81b0fc25e759621661555429da816915def5b0e116fe753e8a4e6",
+    "app/src/main/java/com/xnotes/storage/NativeSourceVersion.kt": "3a5b30dc744fdb654e822e033b622e5aaf9fd05e3ca6e9ea895f2d983aa303e9",
+    "app/src/main/java/com/xnotes/format/BundleSnapshot.kt": "8e184bb078e4fa0c2f82442b33a66fa1084ffb0e0858f08229da4b18fa2c835e"
+  },
+  "harness_sha256": {
+    "fixture.kt": "2b631d3d569d640e2ed2836331555fa3c16f9fc65c0a4c68314c0103469caf74",
+    "helper.kt": "faa4039d27f93dc2b963d9ed23cb583f8955e05646e8dd275ea78c83c72820a3",
+    "init.gradle": "0b6055d692764746e115ba3e97ebc722eef7bc0bab8259798fe8dd166e85f17e"
+  },
+  "storage_lock_wrappers": 25,
+  "editor_lock_wrappers": 1,
+  "measured_editor_save_entrypoint_sha256": "18968c3dc413dd4e913a1270130b15966f904d38337241a6fd13762c66467e4b",
+  "measured_editor_save_entrypoint_unchanged_from_before": true,
+  "pre_hook_pipeline_matches_frozen_worktree": true,
+  "validated_against_final_b1_commit": "f87b4338b384792d270a1c402df2d0288b0a4b3b",
+  "pre_hook_pipeline_matches_final_b1_commit": {
+    "app/src/main/java/com/xnotes/storage/NotebookStorage.kt": true,
+    "app/src/main/java/com/xnotes/ui/Editor.kt": true,
+    "app/src/main/java/com/xnotes/storage/MigrationPublication.kt": true,
+    "app/src/main/java/com/xnotes/storage/OwnedRecoveryTarget.kt": true,
+    "app/src/main/java/com/xnotes/storage/NativeSourceVersion.kt": true,
+    "app/src/main/java/com/xnotes/format/BundleSnapshot.kt": true
+  }
+}

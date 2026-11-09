@@ -7,6 +7,18 @@ import com.xnotes.storage.StorageText
 
 /** Exhaustive so every message keeps a resource under R8 shrinking and new entries fail to compile. */
 internal fun StorageMsg.resId(): Int = when (this) {
+    StorageMsg.MIGRATION_RECOVERY_PENDING -> R.string.storage_msg_migration_recovery_pending
+    StorageMsg.MIGRATION_RECOVERY_INVALID -> R.string.storage_msg_migration_recovery_invalid
+    StorageMsg.MIGRATION_INDEX_INCOMPLETE -> R.string.storage_msg_migration_index_incomplete
+
+    StorageMsg.NATIVE_CREATION_TARGET_INVALID -> R.string.storage_msg_native_creation_target_invalid
+    StorageMsg.REFERENCE_SOURCE_CHANGED -> R.string.storage_msg_reference_source_changed
+    StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID -> R.string.storage_msg_reference_write_context_invalid
+    StorageMsg.REFERENCE_METADATA_INVALID -> R.string.storage_msg_reference_metadata_invalid
+    StorageMsg.REFERENCE_IDENTITY_MISMATCH -> R.string.storage_msg_reference_identity_mismatch
+    StorageMsg.REFERENCE_IDENTITY_MISSING -> R.string.storage_msg_reference_identity_missing
+    StorageMsg.REFERENCE_PAGE_METADATA_MISSING -> R.string.storage_msg_reference_page_metadata_missing
+
     StorageMsg.DUPLICATE_DOCUMENT_ID -> R.string.storage_msg_duplicate_document_id
     StorageMsg.PDF_RESOURCE_UNREGISTERED -> R.string.storage_msg_pdf_resource_unregistered
     StorageMsg.PDF_RESOURCE_MISSING -> R.string.storage_msg_pdf_resource_missing

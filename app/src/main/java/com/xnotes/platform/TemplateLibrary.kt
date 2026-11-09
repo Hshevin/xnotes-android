@@ -99,8 +99,14 @@ object TemplateLibrary {
     private val eval = TemplateEval(AndroidGlyphOutliner())
     val layouts = TemplateLayoutCache(eval)
 
-    fun init(context: Context) {
-        val app = context.applicationContext
+    fun init(context: Context) = synchronized(lock) {initialize(context.applicationContext)}
+
+    /** Do not reload imports or replace an active Store when a second renderer appears. */
+    fun ensureInitialized(context:Context) = synchronized(lock) {
+        if(assets==null) initialize(context.applicationContext)
+    }
+
+    private fun initialize(app:Context) {
         legacyDir = File(app.filesDir, "templates")
         cacheDir = File(app.cacheDir, "template-library").apply { mkdirs() }
         assets = app.assets

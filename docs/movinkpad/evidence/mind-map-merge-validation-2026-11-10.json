@@ -1,0 +1,30 @@
+{
+  "branch_before_master_sync": {
+    "tests": 3984,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": 394
+  },
+  "after_master_sync": {
+    "tests": 3990,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": 395
+  },
+  "master_baseline": "fdc1f0fe17415788cecfe63b08945f50031d325f",
+  "jdk": 21,
+  "gradle_tasks": [
+    ":app:testDebugUnitTest",
+    ":app:compileDebugAndroidTestKotlin"
+  ],
+  "android_test_sources_compiled": true,
+  "android_instrumentation_executed": false,
+  "instrumentation_limit": "Medium_Phone AVD configured; no running adb device. This task forbids APK packaging and installation required for instrumentation execution.",
+  "movinkpad_android15_propen3_executed": false,
+  "apk_packaged": false,
+  "installed": false,
+  "pushed": false,
+  "release_published": false
+}

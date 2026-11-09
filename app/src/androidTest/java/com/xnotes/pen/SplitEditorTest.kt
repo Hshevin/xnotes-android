@@ -6,8 +6,8 @@ import com.xnotes.ui.Editor
 import com.xnotes.ui.Pane
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.ByteArrayOutputStream
 import com.xnotes.format.DocumentCodec
+import kotlinx.coroutines.CompletableDeferred
 
 /** Real editor models/controllers and codec, on Android's UI thread. No production data is used. */
 class SplitEditorTest {
@@ -93,6 +93,54 @@ class SplitEditorTest {
         error?.let { throw it }
     }
 
+    private fun onMainAsync(test:suspend (Editor)->Unit)=kotlinx.coroutines.runBlocking {
+        val base=PenTestRunner.instance.targetContext
+        val root=java.io.File(base.cacheDir,"split-async-${java.util.UUID.randomUUID()}").apply {check(mkdirs())}
+        val context=object:ContextThemeWrapper(base,R.style.Theme_Xnotes) {
+            override fun getApplicationContext():android.content.Context=this
+            override fun getFilesDir()=java.io.File(root,"files").apply {mkdirs()}
+            override fun getCacheDir()=java.io.File(root,"cache").apply {mkdirs()}
+            override fun getNoBackupFilesDir()=java.io.File(root,"private").apply {mkdirs()}
+        }
+        val storage=com.xnotes.storage.NotebookStorage(context)
+        val singleton=com.xnotes.storage.NotebookStorage::class.java.getDeclaredField("instance").apply {isAccessible=true}
+        val previous=singleton.get(null)
+        try {
+            kotlinx.coroutines.withTimeout(30000L) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    singleton.set(null,storage)
+                    val editor=Editor(context)
+                    editor.newNote()
+                    try {test(editor)} finally {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            kotlinx.coroutines.withTimeout(15000L) {
+                                val panes=listOfNotNull(editor,editor.secondary)
+                                val owners=panes.map {it.documentOwner}.distinct()
+                                val discarded=owners.filter {it.noteOpen}.map {it.discardForOpen()}.toSet()
+                                editor.goHomeAll(discarded)
+                                while(panes.any {it.noteOpen}) kotlinx.coroutines.delay(1)
+                                for(pane in (panes+owners).distinct()) {
+                                    for(field in listOf("noteWriteJob","canvasWriteJob"))
+                                        (Editor::class.java.getDeclaredField(field).apply {isAccessible=true}.get(pane) as? kotlinx.coroutines.Job)?.join()
+                                    (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(pane) as com.xnotes.platform.LegacySessionQueue.Owner).awaitAccepted()
+                                    (Editor::class.java.getDeclaredField("sessionWriteJob").apply {isAccessible=true}.get(pane) as? kotlinx.coroutines.Job)?.join()
+                                    val scope=Editor::class.java.getDeclaredField("autosaveScope").apply {isAccessible=true}.get(pane) as kotlinx.coroutines.CoroutineScope
+                                    scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+                                    scope.coroutineContext[kotlinx.coroutines.Job]?.join()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {singleton.set(null,previous)}
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {try {storage.registry.close()} finally {root.deleteRecursively()}}
+            }
+        }
+    }
+
     @Test fun freshSplitPositionIgnoresPreviousOrderForEitherSurvivingPane() = onMain { a ->
         val original = a.preferences
         try {
@@ -152,7 +200,10 @@ class SplitEditorTest {
         assertEquals(a.state.pageRects.first().h, b.state.pageRects.first().h, 0.001)
     }
 
-    @Test fun sharedViewsEditUndoSaveAndDetachWithoutLosingHistory() = onMain { a ->
+    @Test fun sharedViewsEditUndoSaveAndDetachWithoutLosingHistory() {
+        val context=PenTestRunner.instance.targetContext
+        val file=java.io.File.createTempFile("split-shared-",".xnote",context.cacheDir)
+        try {onMainAsync { a ->
         val original = a.pageCount
         val b = a.secondaryPane()
         b.openSharedView(a)
@@ -171,11 +222,17 @@ class SplitEditorTest {
         assertEquals(original, a.pageCount)
         b.redo()
         assertEquals(original + 1, a.pageCount)
-        val out = ByteArrayOutputStream()
-        b.save(out, "content://test/shared", "shared.xnote")
-        assertEquals("content://test/shared", a.currentUri)
-        assertEquals(original + 1, DocumentCodec(com.xnotes.platform.AndroidImageCodec(), com.xnotes.platform.AndroidTextMeasurer()).read(out.toByteArray().inputStream()).pages.size)
+        val uri=android.net.Uri.fromFile(file).toString()
+        val saved=CompletableDeferred<Boolean>()
+        b.saveAsToThen(uri,"shared.xnote") {saved.complete(it)}
+        assertTrue(saved.await())
+        assertEquals(uri,a.currentUri)
+        val codec=DocumentCodec(com.xnotes.platform.AndroidImageCodec(),com.xnotes.platform.AndroidTextMeasurer())
+        assertEquals(original+1,file.inputStream().use {codec.read(it)}.pages.size)
+        assertEquals(1.25,a.state.zoom,0.001)
+        assertEquals(2.5,b.state.zoom,0.001)
         b.goHome()
+        while(b.noteOpen) kotlinx.coroutines.delay(1)
         assertTrue(a.noteOpen)
         assertFalse(b.noteOpen)
         a.undo()
@@ -184,6 +241,7 @@ class SplitEditorTest {
         b.addPageAtEnd()
         assertEquals(original, a.pageCount)
         assertNotSame(a.state.document, b.state.document)
+        }} finally {file.delete()}
     }
 
     @Test fun closingOwnerRetainsOtherViewportAndSharedEdits() = onMain { a ->
@@ -284,9 +342,11 @@ class SplitEditorTest {
         error?.let { throw it }
     }
 
-    @Test fun pdfSharedViewKeepsSourceAndSurvivesClosingBorrower() = onMain { a ->
+    @Test fun pdfSharedViewKeepsSourceAndSurvivesClosingBorrower() {
         val context = PenTestRunner.instance.targetContext
-        val pdfFile = java.io.File(context.cacheDir, "split-source.pdf")
+        val pdfFile = java.io.File.createTempFile("split-source-",".pdf",context.cacheDir)
+        val note = java.io.File.createTempFile("split-note-",".xnote",context.cacheDir)
+        try {onMainAsync { a ->
         val pdf = android.graphics.pdf.PdfDocument()
         try {
             repeat(2) { index ->
@@ -301,9 +361,9 @@ class SplitEditorTest {
         val doc = com.xnotes.core.model.Document()
         doc.pdfFile = pdfFile
         repeat(2) { doc.pages.add(com.xnotes.core.model.Page(800.0, 1200.0, pdfPage = it)) }
-        val note = java.io.File(context.cacheDir, "split-source.xnote")
         note.outputStream().use { codec.write(doc, it) }
-        kotlinx.coroutines.runBlocking { a.openAsync(android.net.Uri.fromFile(note).toString(), "source.xnote") }
+        val noteUri=android.net.Uri.fromFile(note).toString()
+        a.openAsync(noteUri,"source.xnote")
         assertTrue(a.hasPdf)
         val b = a.secondaryPane()
         b.openSharedView(a)
@@ -327,13 +387,20 @@ class SplitEditorTest {
         a.undo()
         b.addPageAtEnd()
         b.goHome()
+        while(b.noteOpen) kotlinx.coroutines.delay(1)
         a.releaseClosedSecondary()
         assertNull(a.secondary)
         assertTrue(a.state.document.pdfFile!!.exists())
-        val out = ByteArrayOutputStream()
-        a.save(out, android.net.Uri.fromFile(note).toString(), "source.xnote")
-        assertEquals(3, codec.read(out.toByteArray().inputStream(), context.cacheDir).pages.size)
+        val saved=CompletableDeferred<Boolean>()
+        a.saveToThen(noteUri) {saved.complete(it)}
+        assertTrue(saved.await())
+        val isolated=a.view.context
+        codec.resolvePdf={com.xnotes.storage.PdfResources.get(isolated).resolve(it)}
+        val read=note.inputStream().use {codec.read(it,isolated.cacheDir)}
+        assertEquals(3,read.pages.size)
+        assertArrayEquals(original,requireNotNull(read.pdfFile).readBytes())
         assertArrayEquals(original, pdfFile.readBytes())
+        }} finally {note.delete();pdfFile.delete()}
     }
 
     @Test fun canvasWorkspaceUsesVisibleIdentityInsteadOfUnderlyingPdf() = onMain { a ->
@@ -706,9 +773,9 @@ class SplitEditorTest {
                 restored.newNote(); restored.addPageAtEnd()
                 val unsaved = restored.state.document
                 assertFalse("default must protect an unsaved note", restored.openSplitFile(splitUri))
-                assertFalse("discarding another editor is not authorization", restored.openSplitFile(splitUri, setOf(a)))
+                assertFalse("discarding another editor is not authorization", restored.openSplitFile(splitUri, setOf(a.discardForOpen())))
                 assertSame(unsaved, restored.state.document)
-                assertTrue(restored.openSplitFile(splitUri, setOf(restored)))
+                assertTrue(restored.openSplitFile(splitUri, setOf(restored.discardForOpen())))
                 assertTrue(restored.inSplit)
                 assertEquals(files[0].toString(), restored.currentUri)
                 assertEquals(files[1].toString(), restored.secondary!!.visibleDocumentUri)
@@ -729,7 +796,7 @@ class SplitEditorTest {
                     assertNull(outside.autosaveUri)
                     outside.addPageAtEnd()
                     assertTrue(outside.dirty)
-                    assertTrue(outside.openSplitFile(splitUri, setOf(outside)))
+                    assertTrue(outside.openSplitFile(splitUri, setOf(outside.discardForOpen())))
                     assertTrue("explicit Discard must not write existing files", originalBytes.contentEquals(externalNote.readBytes()))
                 } finally { outside.goHomeAll(); externalNote.delete() }
 

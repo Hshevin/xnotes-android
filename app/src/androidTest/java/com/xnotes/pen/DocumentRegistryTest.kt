@@ -2,12 +2,88 @@ package com.xnotes.pen
 
 import android.content.ContextWrapper
 import com.xnotes.storage.DocumentRegistry
+import com.xnotes.core.model.enableReferenceAnchors
+import com.xnotes.core.model.fixedWriteSnapshot
 import java.io.File
 import java.util.UUID
 import org.junit.Assert.*
 import org.junit.Test
 
 class DocumentRegistryTest {
+    @Test fun platformPublicationRetainsRecoveryUntilRegistrationCompletesAndRetriesWithoutRewriting() = database {db,root->
+        val id=UUID.randomUUID().toString();val uri="content://example/document/published"
+        val current=File(root,"current.bin").apply {writeText("original")}
+        val next=File(root,"candidate.bin").apply {writeText("candidate")}
+        val journal=com.xnotes.storage.MigrationPublication(File(root,"pending-publication"))
+        journal.stage(current,next)
+        var writes=0
+        val target=object:com.xnotes.storage.MigrationPublication.Target {
+            override fun read()=current.inputStream()
+            override fun write(source:File) {
+                writes++
+                java.io.FileOutputStream(current).use {out->source.inputStream().use {it.copyTo(out)};out.fd.sync()}
+            }
+        }
+        try {
+            journal.publish(target,afterVerified={
+                db.register(id,"xnote","published",uri,pageReferences=true)
+                throw java.io.IOException("registration acknowledgement failed")
+            })
+            fail("must retain recovery after incomplete registration")
+        } catch(_:com.xnotes.storage.MigrationPublication.RecoveryRequired) {}
+        assertTrue(journal.pending);assertEquals("candidate",current.readText());assertEquals(1,writes)
+        journal.publish(target,afterVerified={db.register(id,"xnote","published",uri,pageReferences=true)})
+        assertFalse(journal.pending);assertEquals(1,writes);assertTrue(db.expectationForId(id).requiresPages)
+    }
+    @Test fun platformSchemaUpgradeKeepsLocationsAndPersistsMonotonicPageContracts() = database {db,root->
+        val id=UUID.randomUUID().toString();val uri="content://example/document/page-ref"
+        db.register(id,"xnote","original",uri)
+        // All pre-existing table definitions are unchanged from v1; remove only the new table.
+        db.writableDatabase.execSQL("DROP TABLE page_reference_contracts")
+        db.writableDatabase.version=1
+        db.close()
+        val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
+        DocumentRegistry(context).use {upgraded->
+            assertEquals(2,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            upgraded.register(id,"xnote","with references",uri,pageReferences=true)
+            upgraded.register(id,"xnote","ordinary save",uri)
+            assertTrue(upgraded.expectationForId(id).requiresPages)
+            upgraded.writableDatabase.execSQL("DELETE FROM locations")
+        }
+        DocumentRegistry(context).use {reopened->
+            assertNull(reopened.expectationAt(uri));assertTrue(reopened.expectationForId(id).requiresPages)
+        }
+    }
+    @Test fun uniqueNativeSourceRegistrationRejectsTheDuplicateAtomically() = database {db,root->
+        val document=com.xnotes.core.model.Document(mutableListOf(com.xnotes.core.model.Page(500.0,500.0))).apply {
+            enableReferenceAnchors()
+        }
+        val file=File(root,"source.xnote")
+        val codec=com.xnotes.format.DocumentCodec(com.xnotes.platform.AndroidImageCodec(),com.xnotes.platform.AndroidTextMeasurer())
+        file.outputStream().use {codec.write(document.fixedWriteSnapshot(),it)}
+        val header=com.xnotes.format.BundleHeader.read(file);val id=header.identity!!.documentId
+        val original="content://registry-unique/document/native-original";val duplicate="content://registry-unique/document/native-copy"
+        db.registerObserved(header,"xnote","original",original,uniqueSource=true)
+        val before=db.knownLocations().sorted();val bytes=file.readBytes()
+        assertThrows(IllegalArgumentException::class.java) {db.registerObserved(header,"xnote","copy",duplicate,uniqueSource=true)}
+        assertEquals(before,db.knownLocations().sorted());assertEquals(listOf(original),db.locations(id))
+        assertNull(db.idAt(duplicate));assertNull(db.expectationAt(duplicate));assertEquals("original",db.nameForId(id))
+        assertTrue(db.expectationForId(id).requiresPages);assertArrayEquals(bytes,file.readBytes())
+        db.registerObserved(header,"xnote","same source",original,uniqueSource=true)
+        assertEquals(listOf(original),db.locations(id))
+    }
+    @Test fun uniqueMapSourceRegistrationRejectsTheDuplicateWithoutChangingNativeContractsOrNames() = database {db,_->
+        val id=UUID.randomUUID().toString()
+        val original="content://registry-unique/document/map-original";val duplicate="content://registry-unique/document/map-copy"
+        db.registerMapObserved(id,"original map",original,uniqueSource=true)
+        val before=db.knownLocations().sorted()
+        assertThrows(IllegalArgumentException::class.java) {db.registerMapObserved(id,"duplicate map",duplicate,uniqueSource=true)}
+        assertEquals(before,db.knownLocations().sorted());assertEquals(listOf(original),db.locations(id))
+        assertNull(db.idAt(duplicate));assertNull(db.expectationAt(duplicate));assertEquals("original map",db.nameForId(id))
+        assertFalse(db.expectationForId(id).requiresPages)
+        db.registerMapObserved(id,"same map",original,uniqueSource=true)
+        assertEquals(listOf(original),db.locations(id))
+    }
     private fun database(block: (DocumentRegistry,File)->Unit) {
         val base=PenTestRunner.instance.targetContext
         val root=File(base.cacheDir,"registry-test-${UUID.randomUUID()}").apply { mkdirs() }

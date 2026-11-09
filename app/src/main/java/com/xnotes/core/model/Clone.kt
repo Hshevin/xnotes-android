@@ -31,7 +31,7 @@ fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
             it.label = label
             it.labelAt = labelAt
         }
-    else -> this
+    else -> throw IllegalArgumentException("Unsupported independent object copy")
     // Carried, not reset: autosave snapshots the document through this, so dropping the lock here
     // would quietly unlock everything on the next save.
 }.also {
@@ -63,10 +63,8 @@ fun Page.deepCopy(measurer: TextMeasurer): Page =
     Page(width, height, items.deepCopyAll(measurer).toMutableList(), pdfPage, style, margins, markups, pdfTurn, rooms).also { it.layers.restore(layers.entries, layers.activeId) }
 
 /**
- * A deep copy of a document: pages cloned, bookmarks copied, the source PDF file and styles shared
- * (immutable for the copy's lifetime). Cheap now that image bytes are shared, so it can snapshot the
- * live document on the main thread before an off-thread save, keeping the writer off the mutating
- * model (no [ConcurrentModificationException]).
+ * An independent editable document: geometry and mutable flow are copied, immutable assets shared.
+ * Member reference identities are fresh. Use [snapshot] to preserve persisted identity during saves.
  */
 fun Document.deepCopy(measurer: TextMeasurer): Document = Document(
     pages = pages.mapTo(mutableListOf()) { p -> p.deepCopy(measurer).also { it.cover = p.cover } },
@@ -84,7 +82,7 @@ fun Document.deepCopy(measurer: TextMeasurer): Document = Document(
     templates = templates,
     templatePackages = templatePackages,
     newPageSize = newPageSize,
-).also { it.bodyStartPage = bodyStartPage; it.identity = identity }
+).also { it.bodyStartPage = bodyStartPage; it.identity = identity; if(hasReferenceAnchors) it.enableReferenceAnchors() }
 
 /**
  * The document as the writer should see it: fresh [Page] objects over fresh item *lists*, sharing
@@ -100,12 +98,29 @@ fun Document.deepCopy(measurer: TextMeasurer): Document = Document(
  * The flow is the exception: it is a tree of mutable lists with no such discipline, so it is still
  * deep-copied. It is small. Use [deepCopy] wherever the copy has to be independently editable.
  */
-fun Document.snapshot(): Document = Document(
+fun Document.snapshot(): Document {
+    prepareReferenceAnchors()
+    return copyWriteSnapshot()
+}
+
+/** Fixed item state for a versioned native request; subsequent live edits cannot alter this body. */
+internal fun Document.fixedWriteSnapshot():Document {
+    prepareReferenceAnchors()
+    return copyWriteSnapshot(fixedItems=true)
+}
+
+/** Copy a frozen writer view without assigning IDs or consulting its original owner. */
+internal fun Document.copyWriteSnapshot(fixedItems:Boolean=false):Document = Document(
     pages = pages.mapTo(mutableListOf()) { p ->
-        Page(p.width, p.height, ArrayList(p.items), p.pdfPage, p.style, p.margins, p.markups, p.pdfTurn, p.rooms).also {
+        val members=if(fixedItems) p.items.fixedWriteCopies(allowText=true) else ArrayList(p.items)
+        Page(p.width, p.height, members, p.pdfPage, if(fixedItems) p.style.fixedWriteCopy() else p.style,
+            p.margins, if(fixedItems) p.markups.map {it.fixedWriteCopy()} else p.markups,
+            p.pdfTurn, if(fixedItems) p.rooms.toList() else p.rooms).also {
             it.cover = p.cover
+            p.referenceIdentity.id?.let {id->it.referenceIdentity.restore(id)}
+            it.referenceBinding=PageReferenceBinding(it.referenceIdentity,p.referenceBinding.scope)
             it.layers.restore(p.layers.entries, p.layers.activeId)
-            it.savedLayerIds = p.items.associateWith { item -> item.layerId }
+            it.savedLayerIds = members.indices.associateBy({index->members[index]},{index->p.layerIdForWrite(p.items[index])})
         }
     },
     dpi = dpi,
@@ -114,11 +129,16 @@ fun Document.snapshot(): Document = Document(
     dirty = dirty,
     pdfFile = pdfFile,
     bookmarks = bookmarks.mapTo(mutableListOf()) { Bookmark(it.page, it.label) },
-    style = style,
+    style = if(fixedItems) style.fixedWriteCopy() else style,
     margins = margins,
-    flow = flow.deepCopy(),
+    flow = if(fixedItems) flow.fixedWriteCopy() else flow.deepCopy(),
     created = created,
-    templates = templates,
-    templatePackages = templatePackages,
+    templates = if(fixedItems) templates.toMap() else templates,
+    templatePackages = if(fixedItems) templatePackages.toMap() else templatePackages,
     newPageSize = newPageSize,
-).also { it.bodyStartPage = bodyStartPage; it.identity = identity }
+).also {
+    it.bodyStartPage=bodyStartPage;it.identity=identity;it.hasReferenceAnchors=hasReferenceAnchors
+    it.pageReferenceScope=pageReferenceScope;it.snapshotOwnerToken=snapshotOwnerToken;it.isWriteSnapshot=true
+    // Copy last: construction/identity/marker setters must not advance the captured revision.
+    it.bodyRevision=bodyRevision
+}

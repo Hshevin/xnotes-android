@@ -100,6 +100,7 @@ class TapeItem(
     pattern: TapePattern = TapePattern.SOLID,
 ) : CanvasItem, Resizable {
 
+
     override val kind = KIND
     override val resizable = true
     override var layerId: String? = null

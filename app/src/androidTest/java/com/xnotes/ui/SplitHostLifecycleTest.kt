@@ -459,7 +459,6 @@ class SplitHostLifecycleTest {
         private val globals = listOf(
             com.xnotes.settings.LiveSettings::class.java.getDeclaredField("value"),
             com.xnotes.storage.NotebookStorage::class.java.getDeclaredField("instance"),
-            com.xnotes.storage.PdfResources::class.java.getDeclaredField("instance"),
         ).map { field -> field.isAccessible = true; field to field.get(null) }
         private val editors = mutableListOf<Editor>()
         init { globals.forEach { (field, _) -> field.set(null, null) } }

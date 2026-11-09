@@ -6,6 +6,10 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.FilterOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
 /**
  * The working session for an infinite canvas: the open document, including edits never written to
@@ -16,35 +20,51 @@ import java.io.FileOutputStream
  * to hand its result to. The view is not stored here at all, because a canvas carries its own last
  * view inside the document.
  *
- * Best effort throughout: a missing or corrupt session restores nothing rather than failing to
- * start.
+ * Legacy callers remain best-effort; checked writes report failures. The body and sidecar are
+ * individually replaced, not one crash-atomic publication. Missing or corrupt sessions restore nothing.
  */
 class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, private val imageDir: File) {
 
     private val docFile = File(dir, "canvas.xcanvas")
     private val meta = JsonStore(File(dir, "canvas-session.json"))
 
+    init {runCatching {LegacySessionBodyCandidates.cleanup(dir)}}
+
+    data class Metadata(val path:String?,val displayName:String?,val dirty:Boolean)
+
     /** Whether a canvas session exists, so the host knows which editor to restore into. */
     fun exists(): Boolean = docFile.exists()
 
     fun save(document: InfiniteDocument, writeDocument: Boolean) {
-        runCatching {
-            dir.mkdirs()
-            if (writeDocument || !docFile.exists()) {
-                val tmp = File(dir, "canvas.xcanvas.tmp")
-                FileOutputStream(tmp).use { codec.write(document, it) }
-                if (!tmp.renameTo(docFile)) {
-                    docFile.delete()
-                    tmp.renameTo(docFile)
-                }
-            }
-            val json = JSONObject()
-            document.path?.let { json.put("path", it) }
-            document.displayName?.let { json.put("display_name", it) }
-            json.put("dirty", document.dirty)
-            meta.write(json)
-        }
+        saveChecked(if(writeDocument || !docFile.exists()) document else null,
+            Metadata(document.path,document.displayName,document.dirty))
     }
+
+    /** A null body only refreshes metadata; canvas view changes still require a new body. */
+    fun saveChecked(document:InfiniteDocument?,metadata:Metadata):LegacySessionWrite=runCatching {
+        LegacySessionBodyCandidates.cleanup(dir)
+        if(document==null) {
+            if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
+            if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
+        } else {
+            check(dir.isDirectory || dir.mkdirs())
+            val candidate=LegacySessionBodyCandidates.create(dir,"canvas-",".xcanvas.tmp")
+            try {
+                FileOutputStream(candidate.file).use {output->
+                    codec.write(document,object:FilterOutputStream(output) {
+                        override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
+                        override fun close() {flush()}
+                    })
+                    output.fd.sync()
+                }
+                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
+            } finally {candidate.close()}
+        }
+        val json=JSONObject().put("dirty",metadata.dirty)
+        metadata.path?.let {json.put("path",it)}
+        metadata.displayName?.let {json.put("display_name",it)}
+        if(meta.writeChecked(json)) LegacySessionWrite.SAVED else LegacySessionWrite.FAILED
+    }.getOrDefault(LegacySessionWrite.FAILED)
 
     /** The stored canvas, or null when there is none or it will not read. */
     fun load(): InfiniteDocument? = runCatching {
@@ -58,9 +78,12 @@ class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, 
     }.getOrNull()
 
     fun clear() {
-        runCatching {
-            docFile.delete()
-            meta.write(JSONObject())
-        }
+        clearChecked()
     }
+
+    /** Preserve the legacy empty sidecar, but never detach it from a body that failed to clear. */
+    fun clearChecked():Boolean=runCatching {
+        Files.deleteIfExists(docFile.toPath())
+        meta.writeChecked(JSONObject())
+    }.getOrDefault(false)
 }

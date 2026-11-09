@@ -226,6 +226,7 @@ internal class ResourceWords(private val res: Resources) : ExplorerWords {
             EntryKind.NOTE -> R.string.kind_notes
             EntryKind.PDF -> R.string.kind_pdf_notes
             EntryKind.CANVAS -> R.string.kind_canvases
+            EntryKind.MIND_MAP -> R.string.map_title
             EntryKind.SPLIT -> R.string.split_workspace
         },
     )

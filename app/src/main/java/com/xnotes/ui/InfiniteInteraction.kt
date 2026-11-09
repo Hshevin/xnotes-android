@@ -131,6 +131,21 @@ class InfiniteInteraction(
     private val onScreenshot: (Rect?) -> Unit = {},
 ) {
 
+    /** Main-thread wake-up only. Hosts must post any writer capture after event dispatch. */
+    var onContentTransactionChanged: (() -> Unit)? = null
+
+    /** The host settles selection-style previews while the old selection is still available. */
+    var onSelectionWillChange: (() -> Unit)? = null
+
+    val hasPendingContentTransaction: Boolean
+        get() = when (mode) {
+            CanvasPointerMode.DRAW, CanvasPointerMode.ERASE, CanvasPointerMode.MOVE,
+            CanvasPointerMode.RESIZE, CanvasPointerMode.ROTATE, CanvasPointerMode.VERTEX,
+            CanvasPointerMode.JOINT, CanvasPointerMode.SLIDE, CanvasPointerMode.SHAPE,
+            CanvasPointerMode.TAPE, CanvasPointerMode.CONNECT, CanvasPointerMode.TEXT_BOX -> true
+            else -> false
+        }
+
     private val choreographer = Choreographer.getInstance()
 
     companion object {
@@ -180,6 +195,7 @@ class InfiniteInteraction(
             if (value != field && value != Tool.SHAPE) finishPolygonDraft()
             if (value != field) clearCapture()
             field = value
+            onContentTransactionChanged?.invoke()
         }
 
     /** Whether a finger draws, or pans instead. Mirrors the paged canvas's preference. */
@@ -346,7 +362,10 @@ class InfiniteInteraction(
     // Android took back a finger of this touch, so the rest of it is ignored.
     private var touchTakenBack = false
 
-    fun onTouch(e: MotionEvent): Boolean {
+    fun onTouch(e: MotionEvent): Boolean =
+        try { dispatchTouch(e) } finally { onContentTransactionChanged?.invoke() }
+
+    private fun dispatchTouch(e: MotionEvent): Boolean {
         if (rulerController.touch(e, viewport.widthPx, viewport.heightPx, devicePxPerDp())) {
             stopFling(); cancelLongPress(); requestRender(); return true
         }
@@ -387,6 +406,18 @@ class InfiniteInteraction(
     }
 
     private fun movingView(): Boolean = mode == CanvasPointerMode.PAN || mode == CanvasPointerMode.PINCH
+
+    private fun selectionGestureActive(): Boolean = when (mode) {
+        CanvasPointerMode.MOVE, CanvasPointerMode.RESIZE, CanvasPointerMode.ROTATE,
+        CanvasPointerMode.VERTEX, CanvasPointerMode.JOINT, CanvasPointerMode.SLIDE -> true
+        else -> false
+    }
+
+    /** The host may switch tools and clear the selection as soon as this command is recorded. */
+    private fun publishSelectionCommit(command: com.xnotes.core.history.Command?) {
+        mode = CanvasPointerMode.IDLE
+        onCommitSelection(command)
+    }
 
     /** Android took this touch back, as its palm rejection does with a resting hand: drop the
      *  gesture, and put back a view it scrolled or zoomed, as the paged canvas does. */
@@ -465,26 +496,69 @@ class InfiniteInteraction(
      */
     fun onGenericMotion(e: MotionEvent) {
         stylusButtons.onGenericMotion(e)
+        onContentTransactionChanged?.invoke()
     }
 
     /** Latch a side button delivered as a key event, which is all Bluetooth and USI pens send. */
-    fun onStylusButtonKey(keyCode: Int, down: Boolean): Boolean = stylusButtons.onKey(keyCode, down)
+    fun onStylusButtonKey(keyCode: Int, down: Boolean): Boolean =
+        try { stylusButtons.onKey(keyCode, down) } finally { onContentTransactionChanged?.invoke() }
 
     /** Drop any in-flight gesture and stop a glide, so a document swap cannot bleed into the next. */
     fun resetGestureState() {
+        // Selection may already refer to the next model. Discard controller-owned state only;
+        // abort/end would instead restore or commit it through that new owner.
+        mode = CanvasPointerMode.IDLE
+        touchTakenBack = true
         rulerController.reset()
         clearCapture()
         stopFling()
         cancelLongPress()
+        cancelDwell()
+        dwellEligible = false
         longPressPrevTool = null
-        mode = CanvasPointerMode.IDLE
+        polygonDraft = null
+        pendingShape = null
+        pendingTape = null
+        tapeStart = null
+        tapePath.clear()
+        connectorDraft = null
+        eraseSession = null
+        jointEdit = null
+        jointFollow = GlueFollow.NONE
+        slideItem = null
+        slideBefore = null
+        clearVertex()
+        lastVertexTap = null
+        lastVertexTapAt = 0L
+        lastWaypointTap = -1
+        lastWaypointTapAt = 0L
+        tapCandidate = false
+        tapDownSelected = emptySet()
+        lastTapSelected = emptySet()
+        lastTapAt = null
+        lastTapTime = 0L
+        bandRect = null
+        lassoPoints.clear()
+        grabHandle = null
+        movedBy = Pt.ZERO
+        transformPointer = Pt.ZERO
+        transformMargin = 0.0
+        connectHot = emptyList()
+        strokeDismissedSelection = false
         dismissPressAt = null
+        panMayCommit = false
+        panMayDismiss = false
         panVel = Pt.ZERO
         liveStroke = null
+        drawingPointerId = -1
         endLift()
         onWetStroke(null)
+        onPendingShape(null)
+        onEraserCursor(null, 0.0)
         onLiftSelection(emptyList(), LiftTransform.NONE)
+        setInteractive(false, true)
         stylusButtons.reset()
+        onContentTransactionChanged?.invoke()
     }
 
     // --- pointer handling ---
@@ -680,6 +754,7 @@ class InfiniteInteraction(
             if (mode == CanvasPointerMode.TAPE) abandonTape()
             // A finger erase yields to a pinch: commit what it already removed rather than lose it.
             if (mode == CanvasPointerMode.ERASE) endErase()
+            if (selectionGestureActive()) abortGesture()
             beginPinch(e)
         }
     }
@@ -781,6 +856,9 @@ class InfiniteInteraction(
     }
 
     private fun abortGesture() {
+        val selectionGesture = selectionGestureActive()
+        tapCandidate = false
+        dismissPressAt = null
         cancelLongPress()
         if (mode == CanvasPointerMode.TEXT_BOX || mode == CanvasPointerMode.SCREENSHOT) clearCapture()
         if (mode == CanvasPointerMode.DRAW) abandonStroke()
@@ -800,15 +878,16 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.JOINT) abandonJoint()
         if (mode == CanvasPointerMode.SLIDE) abandonSlide()
         if (mode == CanvasPointerMode.POLYGON) showPolygonDraft(null)
-        if ((mode == CanvasPointerMode.ROTATE || mode == CanvasPointerMode.RESIZE) && liftedTransform) {
-            selection()?.previewBack()
-            if (bakedInLift.isNotEmpty()) selection()?.applyLiveTo(bakedInLift, Affine.IDENTITY)
-            selection()?.unfollow()
+        if (mode == CanvasPointerMode.ROTATE || mode == CanvasPointerMode.RESIZE) {
+            selection()?.cancelTransform()
             onLiftSelection(emptyList(), LiftTransform.NONE)
             endLift()
-            onSelectionChanged()
+            grabHandle = null
+            transformPointer = Pt.ZERO
+            transformMargin = 0.0
         }
         mode = CanvasPointerMode.IDLE
+        if (selectionGesture) onSelectionChanged()
         setInteractive(false, true)
         stopFling()
         requestRender()
@@ -1004,7 +1083,11 @@ class InfiniteInteraction(
     private fun frameMargin(): Double = OverlayTessellator.FRAME_MARGIN_PX / viewport.zoom
 
     /** Clear the selection and its chrome, for a tool change or a document swap. */
-    fun clearSelection() {
+    fun clearSelection() = try { clearSelectedContent() } finally { onContentTransactionChanged?.invoke() }
+
+    private fun clearSelectedContent() {
+        if (selectionGestureActive()) abortGesture()
+        onSelectionWillChange?.invoke()
         // A long-press grab only borrowed the selection tool; putting the selection away returns it.
         longPressPrevTool?.let {
             longPressPrevTool = null
@@ -1092,7 +1175,7 @@ class InfiniteInteraction(
         val before = slideBefore
         slideItem = null
         slideBefore = null
-        if (before != null && item.snapshotGeometry() != before) onCommitSelection(selection()?.commandFor(listOf(item), listOf(before)))
+        if (before != null && item.snapshotGeometry() != before) publishSelectionCommit(selection()?.commandFor(listOf(item), listOf(before)))
         selection()?.itemChanged(item)
     }
 
@@ -1230,7 +1313,7 @@ class InfiniteInteraction(
         sel.moveLive(movedBy.x, movedBy.y)
         if (movedBy != Pt.ZERO) sel.loneConnector?.letGo()
         onLiftSelection(emptyList(), LiftTransform.NONE)
-        onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
+        publishSelectionCommit(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()
     }
@@ -1311,7 +1394,7 @@ class InfiniteInteraction(
             onLiftSelection(emptyList(), LiftTransform.NONE)
             endLift()
         }
-        onCommitSelection(sel.buildCommand(movedOnly = false))
+        val command = sel.buildCommand(movedOnly = false)
         // A resize of an upright box snaps onto the real bounds, which is what keeps the chrome
         // honest around a text box that refused to shrink past its own text. A turned box cannot be
         // re-derived at all: item bounds are axis aligned, so measuring one and then tilting the
@@ -1319,6 +1402,7 @@ class InfiniteInteraction(
         // exception, since it carries its own frame.
         val upright = sel.box?.let { kotlin.math.abs(it.angle) < 1e-9 } == true
         if ((wasResize && upright) || sel.isFramedShape) sel.refreshBox()
+        publishSelectionCommit(command)
         onSelectionChanged()
         requestRender()
     }
@@ -1392,7 +1476,7 @@ class InfiniteInteraction(
         val sel = selection()
         val spot = vertexSpot
         if (vertexMoved) {
-            onCommitSelection(sel?.buildCommand(movedOnly = false))
+            publishSelectionCommit(sel?.buildCommand(movedOnly = false))
             lastVertexTap = null
         } else {
             vertexBefore?.let { shape.restoreGeometry(it) }
@@ -1403,7 +1487,7 @@ class InfiniteInteraction(
                 shape.toFree()
                 if (shape.deleteVertex(spot)) {
                     sel?.followEdit()
-                    onCommitSelection(sel?.buildCommand(movedOnly = false))
+                    publishSelectionCommit(sel?.buildCommand(movedOnly = false))
                 } else {
                     vertexBefore?.let { shape.restoreGeometry(it) }
                 }
@@ -1487,7 +1571,7 @@ class InfiniteInteraction(
         if (jointMoved || removing) {
             val items = listOf<CanvasItem>(c) + jointFollow.items
             val before = listOf(edit.before) + jointFollow.startSnapshots
-            onCommitSelection(selection()?.commandFor(items, before))
+            publishSelectionCommit(selection()?.commandFor(items, before))
         }
         selection()?.itemChanged(c)
         jointFollow.items.forEach { selection()?.itemChanged(it) }
