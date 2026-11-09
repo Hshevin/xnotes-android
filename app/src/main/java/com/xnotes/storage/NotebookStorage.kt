@@ -226,6 +226,10 @@ class NotebookStorage internal constructor(private val context:Context,
     internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot =
         observedSource(uri,kind,checkActive)
 
+    /** Read the actual native manifest kind; never use a display suffix as type evidence. */
+    internal fun openSourceActual(uri:String,checkActive:()->Unit={}):NativeSourceSnapshot =
+        observedSource(uri,null,checkActive)
+
     private fun observedSource(uri:String,kind:com.xnotes.core.util.DocumentKind?,checkActive:()->Unit):NativeSourceSnapshot = synchronized(lock) {
         kind?.let {purpose(it.extension)} // Reject unsupported expected kinds before reading.
         if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)

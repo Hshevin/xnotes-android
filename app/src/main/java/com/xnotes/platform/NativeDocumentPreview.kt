@@ -26,6 +26,7 @@ internal class NativeDocumentPreview(
     }
     private var closed=false
     private var pdf:PdfSource?=null
+    private var closingPdf:PdfSource?=null
     private var flowDocument:Document?=null
     private var flowThrough=-1
     private var flowFrame:FlowFrame?=null
@@ -146,7 +147,9 @@ internal class NativeDocumentPreview(
             checkActive();transferred=true;return surface.bitmap
         } finally {if(!transferred) surface.recycle()}
     }
-    override fun close() {if(closed) return;closed=true;pdf?.close();pdf=null;flowFrame=null;flowDocument=null}
+    override fun close() {if(closed) return;closed=true;closingPdf=pdf;pdf?.close();pdf=null;flowFrame=null;flowDocument=null}
+    /** Range hosts drain their accepted paint work first, then wait before releasing source assets. */
+    fun closeAndAwait() {close();closingPdf?.closeAndAwait();closingPdf=null}
     companion object {
         fun footprint(doc:Document,page:Page):Rect=page.insets(doc).let {Rect(-it.left,-it.top,it.left+page.width+it.right,it.top+page.height+it.bottom)}
         fun intersect(a:Rect,b:Rect):Rect? {
