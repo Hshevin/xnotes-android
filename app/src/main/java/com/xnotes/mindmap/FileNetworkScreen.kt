@@ -32,12 +32,13 @@ private data class NetworkOpeningVisual(val report:LocalFileNetworkReport,val sc
 @Composable
 internal fun FileNetworkWorkspaceHost(workspace:FileNetworkWorkspace,actions:FileNetworkHostActions,
     nativeContent:@Composable ()->Unit) {
+    val picker=rememberNetworkCanvasPicker()
     if(!workspace.visible) nativeContent()
-    workspace.current?.takeIf {workspace.visible}?.let {entry->key(entry) {FileNetworkScreen(entry,actions)}}
+    workspace.current?.takeIf {workspace.visible}?.let {entry->key(entry) {FileNetworkScreen(entry,actions,picker)}}
 }
 
 @Composable
-private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetworkHostActions) {
+private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetworkHostActions,picker:NetworkCanvasPicker) {
     val controller=entry.controller;val currentReport=controller.report;val presentation=entry.presentation
     val controls=controller.filterRevision
     val observedControls=remember(entry) {longArrayOf(controls)}
@@ -65,7 +66,7 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                     Text(stringResource(if(controller.browseMode==NetworkBrowseMode.LOCAL) R.string.network_title else R.string.network_library_title),
                         fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
                     NetworkScopeControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
-                    NetworkToCanvasFlow(entry,scene,enabled=!busy && !controller.loading && !controller.filtering,
+                    NetworkToCanvasFlow(entry,scene,enabled=!busy && !controller.loading && !controller.filtering,picker=picker,
                         openCanvas=actions.openCanvas)
                     NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
                     if(controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {

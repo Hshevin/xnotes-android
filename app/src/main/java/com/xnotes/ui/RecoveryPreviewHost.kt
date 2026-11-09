@@ -197,6 +197,10 @@ internal class RecoveryPreviewController(context:Context) {
         val r=current ?: return
         if(state?.busy!=true && r.pending==null && picker==null && launcher!=null) launch(Payload.Resume(r),RecoveryPickerKind.RESUME)
     }
+    fun ownsPickerResult(id:Long,kind:RecoveryPickerKind):Boolean {
+        val payload=picker?.takeIf {it.launch.id==id && it.launch.kind==kind}?.payload ?: return false
+        return stillCurrent(payload.request)
+    }
     /** Only the original outstanding request can consume a raw registry result. */
     fun receivePickerResult(id:Long,kind:RecoveryPickerKind,uri:Uri?) {
         val cell=picker?.takeIf {it.launch.id==id && it.launch.kind==kind} ?: return
@@ -257,33 +261,59 @@ internal class RecoveryPreviewController(context:Context) {
     }
 }
 
-/** Root registration manager survives dialog changes. Every launch uses a non-saveable unique key. */
+/** Pending registration is saved independently of the preview's non-restorable publication owner. */
 @Composable
 internal fun RecoveryPreviewHost(controller:RecoveryPreviewController) {
     val registry=requireNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
-    DisposableEffect(registry,controller) {
-        val registrations=mutableMapOf<Long,ActivityResultLauncher<*>>()
-        controller.attachPicker {request->
-            val key="recovery-${controller.pickerNamespace}-${request.kind}-${request.id}"
+    val saved=rememberDestinationPickerState()
+    DisposableEffect(registry,controller,saved) {
+        var registration:ActivityResultLauncher<*>?=null
+        fun register(request:DestinationPickerRequest,launch:Boolean) {
+            val id=request.owner.substringAfterLast(':').toLongOrNull()
+            val kind=if(request.kind=="CREATE") RecoveryPickerKind.CREATE else RecoveryPickerKind.RESUME
+            fun receive(uri:Uri?) {
+                if(saved.pending!=request) return
+                val belongs=id!=null && request.owner=="${controller.pickerNamespace}:$id"
+                val accepted=belongs && controller.ownsPickerResult(requireNotNull(id),kind)
+                saved.pending=null
+                registration?.unregister();registration=null
+                if(belongs) controller.receivePickerResult(requireNotNull(id),kind,if(accepted) uri else null)
+                if(!accepted) saved.retain(request,uri)
+            }
             try {
-                when(request.kind) {
+                when(kind) {
                     RecoveryPickerKind.CREATE->{
-                        val launcher=registry.register(key,ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
-                            registrations.remove(request.id)?.unregister();controller.receivePickerResult(request.id,request.kind,uri)
+                        val launcher=registry.register(request.key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
+                        if(saved.pending!=request) launcher.unregister() else {
+                            registration=launcher
+                            if(launch) launcher.launch(request.name)
                         }
-                        registrations[request.id]=launcher;launcher.launch(requireNotNull(request.filename))
                     }
                     RecoveryPickerKind.RESUME->{
-                        val launcher=registry.register(key,ActivityResultContracts.OpenDocument()) {uri->
-                            registrations.remove(request.id)?.unregister();controller.receivePickerResult(request.id,request.kind,uri)
+                        val launcher=registry.register(request.key,ActivityResultContracts.OpenDocument(),::receive)
+                        if(saved.pending!=request) launcher.unregister() else {
+                            registration=launcher
+                            if(launch) launcher.launch(arrayOf("*/*"))
                         }
-                        registrations[request.id]=launcher;launcher.launch(arrayOf("*/*"))
                     }
                 }
-            } catch(error:Throwable) {registrations.remove(request.id)?.unregister();throw error}
+            } catch(error:Throwable) {
+                registration?.unregister();registration=null
+                if(saved.pending==request) saved.pending=null
+                throw error
+            }
         }
-        onDispose {controller.detachPicker();registrations.values.toList().forEach {it.unregister()};registrations.clear();controller.dispose()}
+        saved.pending?.let {register(it,launch=false)}
+        controller.attachPicker {request->
+            check(saved.pending==null && saved.interrupted==null) {"A destination is still outstanding"}
+            val pending=DestinationPickerRequest("recovery-${controller.pickerNamespace}-${request.kind}-${request.id}",
+                if(request.kind==RecoveryPickerKind.CREATE) "CREATE" else "OPEN",request.filename.orEmpty(),
+                "${controller.pickerNamespace}:${request.id}")
+            saved.pending=pending;register(pending,launch=true)
+        }
+        onDispose {controller.detachPicker();registration?.unregister();registration=null;controller.dispose()}
     }
+    InterruptedDestinationNotice(saved)
     val state=controller.state ?: return
     val actions=controller.actions() ?: return
     val context=LocalContext.current
@@ -316,16 +346,16 @@ internal fun RecoveryPreviewHost(controller:RecoveryPreviewController) {
                         Text(stringResource(R.string.recovery_preview_page,state.page+1,state.pageCount),fontSize=TextSize.body)
                         RecoveryButton(R.string.recovery_preview_next,state.page+1<state.pageCount && !state.busy) {actions.page(state.page+1)}
                     }
-                    RecoveryButton(R.string.recovery_preview_save_copy,!state.busy && !state.hasPending && !controller.pickerPending && controller.pickerAvailable) {actions.requestCopy()}
+                    RecoveryButton(R.string.recovery_preview_save_copy,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestCopy()}
                 }
             }
             if(state.busy) Text(stringResource(R.string.recovery_copy_working),fontSize=TextSize.body)
-            if(controller.pickerPending) Text(stringResource(R.string.recovery_picker_waiting),fontSize=TextSize.caption)
+            if(controller.pickerPending || saved.pending!=null) Text(stringResource(R.string.recovery_picker_waiting),fontSize=TextSize.caption)
             if(state.retryFailed) Text(stringResource(R.string.recovery_copy_retry_failed),fontSize=TextSize.body)
             state.error?.let {Text(it,fontSize=TextSize.body)}
             if(state.hasPending) RecoveryButton(R.string.recovery_copy_continue,!state.busy) {actions.completePending()}
             state.saved?.let {Text(stringResource(R.string.recovery_copy_saved),fontSize=TextSize.title);Text(it.name,fontSize=TextSize.body);Text(it.uri,fontSize=TextSize.caption)}
-            RecoveryButton(R.string.recovery_copy_resume_pick,!state.busy && !state.hasPending && !controller.pickerPending && controller.pickerAvailable) {actions.requestResumePicker()}
+            RecoveryButton(R.string.recovery_copy_resume_pick,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestResumePicker()}
         }
     },confirmButton={RecoveryButton(R.string.close_preview){actions.closePreview()}})
 }

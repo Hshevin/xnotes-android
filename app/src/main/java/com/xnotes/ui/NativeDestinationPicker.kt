@@ -14,49 +14,52 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import java.util.UUID
 
-/** A destination result belongs to the launch that created it, including across UI changes. */
-internal class NativeDestinationPicker(private val registry:ActivityResultRegistry) {
-    private class Cell(var callback:((Uri?)->Unit)?) {
+/** Saved registry identity survives recreation; runtime callbacks never acquire replacement owners. */
+internal class NativeDestinationPicker(private val registry:ActivityResultRegistry,
+    internal val saved:DestinationPickerState=DestinationPickerState()) {
+    private class Cell(val request:DestinationPickerRequest,var callback:((Uri?)->Unit)?,val current:()->Boolean) {
         var launcher:ActivityResultLauncher<String>?=null
     }
     private var current:Cell?=null
     private var disposed=false
     var busy by mutableStateOf(false);private set
 
+    init {saved.pending?.let {register(Cell(it,null,{false}))}}
+
     @MainThread
-    fun launch(name:String,onResult:(Uri?)->Unit):Boolean {
-        if(disposed || current!=null) return false
-        val cell=Cell(onResult)
-        current=cell;busy=true
+    fun launch(name:String,isCurrent:()->Boolean={true},onResult:(Uri?)->Unit):Boolean {
+        if(disposed || current!=null || saved.interrupted!=null) return false
+        val request=DestinationPickerRequest("native-destination-${UUID.randomUUID()}","CREATE",name)
+        val cell=Cell(request,onResult,isCurrent)
+        saved.pending=request
         return try {
-            // Never restore or reuse a key: an old ActivityResultRegistry mapping must not
-            // acquire a callback from a newer request or a reconstructed UI host.
-            val key="native-destination-${UUID.randomUUID()}"
-            val launcher=registry.register(key,ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
-                if(!disposed && current===cell) {
-                    val callback=cell.callback
-                    release(cell)
-                    callback?.invoke(uri)
-                }
-            }
-            cell.launcher=launcher
-            if(disposed || current!==cell) {
-                release(cell)
-                false
-            } else {
-                launcher.launch(name)
-                true
-            }
+            register(cell)
+            if(disposed || current!==cell) false else {requireNotNull(cell.launcher).launch(name);true}
         } catch(_:Exception) {
             // A synchronous result callback may already have launched another request.
             // Failure of this launch can release only its original cell.
-            release(cell)
+            release(cell,consume=true)
             false
         }
     }
 
-    private fun release(cell:Cell) {
+    private fun register(cell:Cell) {
+        current=cell;busy=true
+        val launcher=registry.register(cell.request.key,ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
+            if(!disposed && current===cell) {
+                val callback=cell.callback
+                val accepted=callback!=null && runCatching(cell.current).getOrDefault(false)
+                release(cell,consume=true)
+                if(accepted) callback?.invoke(uri) else saved.retain(cell.request,uri)
+            }
+        }
+        // Registration can deliver a pending raw result synchronously.
+        if(disposed || current!==cell) launcher.unregister() else cell.launcher=launcher
+    }
+
+    private fun release(cell:Cell,consume:Boolean) {
         if(current===cell) {current=null;busy=false}
+        if(consume && saved.pending==cell.request) saved.pending=null
         cell.callback=null
         val launcher=cell.launcher;cell.launcher=null
         launcher?.unregister()
@@ -65,14 +68,16 @@ internal class NativeDestinationPicker(private val registry:ActivityResultRegist
     @MainThread
     fun dispose() {
         disposed=true
-        current?.let(::release)
+        current?.let {release(it,consume=false)}
     }
 }
 
 @Composable
 internal fun rememberNativeDestinationPicker():NativeDestinationPicker {
     val registry=requireNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
-    val picker=remember(registry) {NativeDestinationPicker(registry)}
+    val saved=rememberDestinationPickerState()
+    val picker=remember(registry,saved) {NativeDestinationPicker(registry,saved)}
     DisposableEffect(picker) {onDispose {picker.dispose()}}
+    InterruptedDestinationNotice(saved)
     return picker
 }

@@ -1,0 +1,5 @@
+<resources>
+    <string name="destination_interrupted_title">Destination kept</string>
+    <string name="destination_interrupted_notice">The operation was interrupted. The chosen destination has been kept. Start the original action again and choose this location. You can remove an unused empty file in your file manager.</string>
+    <string name="destination_copy_location">Copy location</string>
+</resources>

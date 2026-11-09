@@ -16,6 +16,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.xnotes.R
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.ui.AlertDialog
+import com.xnotes.ui.DestinationPickerRequest
+import com.xnotes.ui.DestinationPickerState
+import com.xnotes.ui.InterruptedDestinationNotice
+import com.xnotes.ui.rememberDestinationPickerState
 import com.xnotes.ui.theme.*
 import java.util.UUID
 import com.xnotes.storage.NotebookStorage
@@ -25,45 +29,71 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 
 /** Two target contracts share one original slot; retired payloads never move to a later flow. */
-internal class NetworkCanvasPicker(private val registry:ActivityResultRegistry) {
-    private class Cell(var callback:((Uri?)->Unit)?) {var unregister:(()->Unit)?=null}
+internal class NetworkCanvasPicker(private val registry:ActivityResultRegistry,
+    internal val saved:DestinationPickerState=DestinationPickerState()) {
+    private class Cell(val request:DestinationPickerRequest,var callback:((Uri?)->Unit)?,val current:()->Boolean) {var unregister:(()->Unit)?=null}
     private var cell:Cell?=null
     private var disposed=false
+    private var launchCurrent:(()->Unit)?=null
     var busy by mutableStateOf(false);private set
-    fun launch(create:Boolean,name:String,onResult:(Uri?)->Unit):Boolean {
-        if(disposed || cell!=null) return false
-        val request=Cell(onResult);cell=request;busy=true
-        fun receive(uri:Uri?) {if(!disposed && cell===request) {val callback=request.callback;release(request);callback?.invoke(uri)}}
+    init {saved.pending?.let {register(Cell(it,null,{false}))}}
+    fun launch(create:Boolean,name:String,isCurrent:()->Boolean={true},onResult:(Uri?)->Unit):Boolean {
+        if(disposed || cell!=null || saved.interrupted!=null) return false
+        val savedRequest=DestinationPickerRequest("network-canvas-${UUID.randomUUID()}",if(create) "CREATE" else "OPEN",name)
+        val request=Cell(savedRequest,onResult,isCurrent);saved.pending=savedRequest
         return try {
-            val key="network-canvas-${UUID.randomUUID()}"
-            if(create) {
-                val launcher=registry.register(key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
-                request.unregister=launcher::unregister
-                if(disposed || cell!==request) {release(request);false} else {launcher.launch(name);true}
-            } else {
-                val launcher=registry.register(key,ActivityResultContracts.OpenDocument(),::receive)
-                request.unregister=launcher::unregister
-                if(disposed || cell!==request) {release(request);false} else {launcher.launch(arrayOf("application/json","application/octet-stream","*/*"));true}
+            register(request)
+            if(disposed || cell!==request) false else {
+                requireNotNull(launchCurrent).invoke();true
             }
-        } catch(_:Exception) {release(request);false}
+        } catch(_:Exception) {release(request,consume=true);false}
+    }
+    private fun register(request:Cell) {
+        cell=request;busy=true
+        fun receive(uri:Uri?) {if(!disposed && cell===request) {
+            val callback=request.callback;val accepted=callback!=null && runCatching(request.current).getOrDefault(false)
+            release(request,consume=true)
+            if(accepted) callback?.invoke(uri) else saved.retain(request.request,uri)
+        }}
+        if(request.request.kind=="CREATE") {
+            val launcher=registry.register(request.request.key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
+            if(disposed || cell!==request) launcher.unregister() else {
+                request.unregister=launcher::unregister;launchCurrent={launcher.launch(request.request.name)}
+            }
+        } else {
+            val launcher=registry.register(request.request.key,ActivityResultContracts.OpenDocument(),::receive)
+            if(disposed || cell!==request) launcher.unregister() else {
+                request.unregister=launcher::unregister;launchCurrent={launcher.launch(arrayOf("application/json","application/octet-stream","*/*"))}
+            }
+        }
     }
     fun retire() {cell?.callback=null}
-    fun dispose() {disposed=true;cell?.let(::release)}
-    private fun release(request:Cell) {
-        if(cell===request) {cell=null;busy=false}
+    fun dispose() {disposed=true;cell?.let {release(it,consume=false)}}
+    private fun release(request:Cell,consume:Boolean) {
+        if(cell===request) {cell=null;busy=false;launchCurrent=null}
+        if(consume && saved.pending==request.request) saved.pending=null
         request.callback=null;val unregister=request.unregister;request.unregister=null;unregister?.invoke()
     }
+}
+
+/** Registered at the root network host, including when its runtime network owner was not restored. */
+@Composable
+internal fun rememberNetworkCanvasPicker():NetworkCanvasPicker {
+    val registry=requireNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
+    val saved=rememberDestinationPickerState()
+    val picker=remember(registry,saved) {NetworkCanvasPicker(registry,saved)}
+    DisposableEffect(picker) {onDispose {picker.dispose()}}
+    InterruptedDestinationNotice(saved)
+    return picker
 }
 
 private data class NetworkCanvasTarget(val uri:Uri,val title:String,val key:String=MapSaves.key(uri))
 
 @Composable
-internal fun NetworkToCanvasFlow(entry:FileNetworkWorkspace.Entry,scene:LocalNetworkScene?,enabled:Boolean,
+internal fun NetworkToCanvasFlow(entry:FileNetworkWorkspace.Entry,scene:LocalNetworkScene?,enabled:Boolean,picker:NetworkCanvasPicker,
     openCanvas:(FileNetworkWorkspace.Entry,NetworkCanvasOpenRequest)->Boolean) {
     val context=LocalContext.current;val app=context.applicationContext
     val scope=rememberCoroutineScope()
-    val registry=requireNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
-    val picker=remember(entry,registry) {NetworkCanvasPicker(registry)}
     var flow by remember(entry) {mutableStateOf<NetworkToCanvasController?>(null)}
     var unavailable by remember(entry) {mutableStateOf(false)}
     var pickerProblem by remember(entry) {mutableStateOf(false)}
@@ -71,7 +101,7 @@ internal fun NetworkToCanvasFlow(entry:FileNetworkWorkspace.Entry,scene:LocalNet
     val frameFiles=entry.controller.centreFiles.toSet()
     val selected=entry.controller.browseMode==NetworkBrowseMode.FILES && entry.controller.centreFiles.isNotEmpty()
     val latestEnabled by rememberUpdatedState(enabled)
-    DisposableEffect(entry,picker) {onDispose {picker.dispose();flow?.close()}}
+    DisposableEffect(entry,picker) {onDispose {picker.retire();flow?.close()}}
     MapButton(if(selected) R.string.network_canvas_add else R.string.network_canvas_select_first,enabled=enabled && selected) {
         if(latestEnabled && flow==null && entry.alive && entry.controller.filterRevision==frameRevision &&
             entry.controller.centreFiles==frameFiles) {
@@ -107,7 +137,7 @@ internal fun NetworkToCanvasFlow(entry:FileNetworkWorkspace.Entry,scene:LocalNet
         pickerProblem=false
         val creation=if(create) shown.prepareNew() ?: return else null
         val name=DocumentKind.withSuffix(context.getString(R.string.network_canvas_new_title),DocumentKind.MIND_MAP)
-        if(!picker.launch(create,name) {uri->
+        if(!picker.launch(create,name,isCurrent={flow===shown && shown.current() && (creation==null || shown.creationCurrent(creation))}) {uri->
             if(uri==null && creation!=null) shown.cancelNew(creation)
             if(uri!=null && flow===shown && shown.current() && (creation==null || shown.creationCurrent(creation))) {
                 val read=Intent.FLAG_GRANT_READ_URI_PERMISSION

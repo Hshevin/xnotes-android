@@ -756,7 +756,9 @@ private fun EditorScreen(
             }
             if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);onStopped(NativeActionStop.FAILED);return@launch}
             val request=SavePickerRequest(owner.discardForOpen(),afterSave,onStopped,stillCurrent)
-            if(!createPicker.launch("${owner.title}.xnote") {uri->acceptSaveDestination(request,uri)}) {
+            if(!createPicker.launch("${owner.title}.xnote",isCurrent={
+                    (request.current() && request.proof.applies()).also {if(!it) request.stop(NativeActionStop.CHANGED)}
+                }) {uri->acceptSaveDestination(request,uri)}) {
                 editor.message=context.getString(R.string.err_save_note);request.stop(NativeActionStop.FAILED)
             }
         }

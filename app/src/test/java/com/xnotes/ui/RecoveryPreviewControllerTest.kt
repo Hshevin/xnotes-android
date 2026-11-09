@@ -14,6 +14,16 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.compose.runtime.AbstractApplier
+import androidx.compose.runtime.Composition
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Recomposer
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
+import androidx.compose.ui.platform.LocalContext
+import android.os.Bundle
 import androidx.core.app.ActivityOptionsCompat
 import com.xnotes.R
 import com.xnotes.core.model.Document
@@ -65,6 +75,32 @@ import org.robolectric.util.ReflectionHelpers
 @Config(sdk=[35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class RecoveryPreviewControllerTest {
+    private class NoViews:AbstractApplier<Unit>(Unit) {
+        override fun insertTopDown(index:Int,instance:Unit)=Unit
+        override fun insertBottomUp(index:Int,instance:Unit)=Unit
+        override fun remove(index:Int,count:Int)=Unit
+        override fun move(from:Int,to:Int,count:Int)=Unit
+        override fun onClear()=Unit
+    }
+    private class RawRegistry:ActivityResultRegistry() {
+        val codes=mutableListOf<Int>()
+        override fun <I,O> onLaunch(requestCode:Int,contract:ActivityResultContract<I,O>,input:I,options:ActivityOptionsCompat?) {codes+=requestCode}
+    }
+    private class SavedHost(context:Context,val controller:RecoveryPreviewController,val registry:RawRegistry,
+        restored:Map<String,List<Any?>>?=null) {
+        val saved=SaveableStateRegistry(restored) {true}
+        private val recomposer=Recomposer(Dispatchers.Main.immediate)
+        private val composition=Composition(NoViews(),recomposer)
+        init {
+            val owner=object:ActivityResultRegistryOwner {override val activityResultRegistry=registry}
+            composition.setContent {
+                CompositionLocalProvider(LocalContext provides context,LocalActivityResultRegistryOwner provides owner,LocalSaveableStateRegistry provides saved) {
+                    RecoveryPreviewHost(controller)
+                }
+            }
+        }
+        fun close() {composition.dispose();recomposer.cancel()}
+    }
     @Before fun noEglSentinels() {
         fun <T> value(type:Class<T>):T=ReflectionHelpers.callConstructor(type,ReflectionHelpers.ClassParameter.from(java.lang.Long.TYPE,0L))
         if(EGL14.EGL_NO_DISPLAY==null) EGL14.EGL_NO_DISPLAY=value(EGLDisplay::class.java)
@@ -202,6 +238,37 @@ class RecoveryPreviewControllerTest {
             }
             if(job.isCompleted) root.deleteRecursively()
         }
+    }
+    @Test fun recoveryPickerReregistersTheSavedRequestAndPreservesAnOrphanResultForExplicitRetry()=scenario {f->
+        f.seed(f.primary,11.0)
+        val first=withContext(Dispatchers.Main) {
+            val controller=RecoveryPreviewController(f.context).also {f.controllers+=it}
+            SavedHost(f.context,controller,RawRegistry())
+        }
+        f.ready(first.controller,f.primary)
+        val registryState=Bundle()
+        val composeState=withContext(Dispatchers.Main) {
+            first.controller.requestCopy()
+            assertTrue(first.controller.pickerPending);assertEquals(1,first.registry.codes.size)
+            first.registry.onSaveInstanceState(registryState)
+            first.saved.performSave().also {first.close()}
+        }
+        val target=File(f.root,"interrupted-copy.xnote").apply {writeBytes(byteArrayOf())}
+        val restored=withContext(Dispatchers.Main) {
+            val controller=RecoveryPreviewController(f.context).also {f.controllers+=it}
+            val registry=RawRegistry().also {it.onRestoreInstanceState(registryState)}
+            SavedHost(f.context,controller,registry,composeState)
+        }
+        try {
+            withContext(Dispatchers.Main) {
+                assertTrue(restored.registry.codes.isEmpty())
+                assertTrue(restored.registry.dispatchResult(first.registry.codes.single(),Activity.RESULT_OK,Intent().setData(Uri.fromFile(target))))
+                assertTrue("The original destination remains available after losing its publication owner",
+                    restored.saved.performSave().toString().contains(Uri.fromFile(target).toString()))
+                assertNull(restored.controller.state)
+            }
+            assertTrue(target.exists());assertEquals(0L,target.length());assertEquals(0,f.writes.get())
+        } finally {withContext(Dispatchers.Main) {restored.close()}}
     }
 
     @Test fun lateCreateResultConsumesOnlyItsOldCellBeforeANewPreviewCanActuallyPublish()=scenario {f->

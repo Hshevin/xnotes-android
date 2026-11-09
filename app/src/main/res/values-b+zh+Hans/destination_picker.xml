@@ -1,0 +1,5 @@
+<resources>
+    <string name="destination_interrupted_title">目标位置已保留</string>
+    <string name="destination_interrupted_notice">操作已中断，所选目标位置已保留。请重新发起原操作并选择此位置。不需要的空文件可在文件管理器中删除。</string>
+    <string name="destination_copy_location">复制位置</string>
+</resources>
