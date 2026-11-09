@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.DashPathEffect
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.xnotes.core.geometry.Rect
@@ -21,8 +22,21 @@ import com.xnotes.ui.theme.TextSize
 class MapPainter {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 18f }
+    private val textMetrics=Paint.FontMetrics().also {text.getFontMetrics(it)}
     private val strokes = IdentityHashMap<MapInk, Stroke>()
-    private val layouts = hashMapOf<Pair<String, Int>, StaticLayout>()
+    private val layouts = LinkedHashMap<Pair<String, Int>, StaticLayout>(16,.75f,true)
+    private val hierarchyPath=Path()
+    private val relationDash=DashPathEffect(floatArrayOf(8f,6f),0f)
+    private val stableInk=IdentityHashMap<MapInk,Boolean>()
+    private val temporaryInk=IdentityHashMap<MapInk,Boolean>()
+    private var stableDocument:MindMapDocument?=null
+    private var inkColor=Color.BLACK
+    private var inkRgba=Rgba(0,0,0,255)
+    private data class HierarchyLine(val x1:Double,val y1:Double,val x2:Double,val y2:Double,val bounds:Rect)
+    private data class RelationLine(val edge:MapRelation,val geometry:MapRelationGeometry.Line,val bounds:Rect)
+    private class Frame(val document:MindMapDocument,val expanded:Set<String>,val nodes:List<MapNode>,val byId:Map<String,MapNode>,
+        val counts:Map<String,Int>,val hierarchy:List<HierarchyLine>,val relations:List<RelationLine>)
+    private var cachedFrame:Frame?=null
     var sourceLabel: (Int) -> String = { it.toString() }
     var collapsedLabel:(Int)->String={it.toString()}
     private val badgeText=TextPaint(Paint.ANTI_ALIAS_FLAG).apply {textSize=TextSize.label.value}
@@ -32,8 +46,9 @@ class MapPainter {
         return Rect(node.width-width/2,node.height-height/2,width,height)
     }
     fun drawingBounds(doc:MindMapDocument,expanded:Set<String> = emptySet()):Rect {
-        val counts=doc.hiddenNodeCounts(expanded)
-        val nodes=doc.visible(expanded).map {node->
+        val frame=frame(doc,expanded)
+        val counts=frame.counts
+        val nodes=frame.nodes.map {node->
             val label=counts[node.id]?.let(collapsedLabel)
             if(label==null) node.bounds else {
                 val badge=badgeBounds(node,label)
@@ -44,55 +59,91 @@ class MapPainter {
             .outset(Space.s32.value.toDouble())
     }
     /** Labels are LEFT aligned at the middle's x, with the same 80-character display and baseline. */
-    internal fun relationGeometry(doc:MindMapDocument,expanded:Set<String> = emptySet())=MapRelationGeometry.visible(doc,expanded) {edge,anchor->
+    private fun buildRelationGeometry(doc:MindMapDocument,expanded:Set<String>)=MapRelationGeometry.visible(doc,expanded) {edge,anchor->
         val label=edge.label.take(80)
         if(label.isEmpty()) null else text.fontMetrics.let {metrics->
             Rect(anchor.x,anchor.y+metrics.ascent,text.measureText(label).toDouble(),(metrics.descent-metrics.ascent).toDouble())
         }
     }
+    internal fun relationGeometry(doc:MindMapDocument,expanded:Set<String> = emptySet())=frame(doc,expanded).relations.map {it.geometry}
+
+    private fun frame(doc:MindMapDocument,expanded:Set<String>):Frame {
+        cachedFrame?.takeIf {it.document===doc && it.expanded==expanded}?.let {return it}
+        val snapshot=expanded.toSet();val nodes=doc.visible(snapshot);val byId=nodes.associateBy {it.id}
+        val hierarchy=nodes.mapNotNull {node->
+            val parent=byId[node.parent] ?: return@mapNotNull null
+            val right=node.x+node.width/2>parent.x+parent.width/2
+            val x1=if(right) parent.x+parent.width else parent.x
+            val x2=if(right) node.x else node.x+node.width
+            val y1=parent.y+parent.height/2;val y2=node.y+node.height/2
+            // Both Bezier control points lie in this endpoint rectangle.
+            HierarchyLine(x1,y1,x2,y2,Rect.ltrb(x1,y1,x2,y2))
+        }
+        val edges=doc.relations.associateBy {it.id}
+        val relations=buildRelationGeometry(doc,snapshot).map {line->
+            var bounds=Rect.fromPoints(line.start,line.end)
+            for(wing in line.wings) bounds=bounds.union(Rect.fromPoints(wing.start,wing.end))
+            line.labelBounds?.let {bounds=bounds.union(it)}
+            RelationLine(edges.getValue(line.id),line,bounds)
+        }
+        return Frame(doc,snapshot,nodes,byId,doc.hiddenNodeCounts(snapshot),hierarchy,relations).also {cachedFrame=it}
+    }
+
+    /** quickReject includes the current Canvas transform/clip; never prune logical visibility. */
+    @Suppress("DEPRECATION")
+    private fun outside(canvas:Canvas,left:Double,top:Double,right:Double,bottom:Double):Boolean {
+        val margin=Space.s4.value
+        return canvas.quickReject((left-margin).toFloat(),(top-margin).toFloat(),(right+margin).toFloat(),(bottom+margin).toFloat(),Canvas.EdgeType.AA)
+    }
+    private fun outside(canvas:Canvas,bounds:Rect)=outside(canvas,bounds.left,bounds.top,bounds.right,bounds.bottom)
     internal var geometryBuildCount=0; private set
     /** Retain shared immutable strokes; evict only last frame's temporary ink previews. */
     fun retainInk(stable:List<MapInk>) {
-        val keep=IdentityHashMap<MapInk,Boolean>()
-        stable.forEach {keep[it]=true}
-        strokes.keys.removeAll { !keep.containsKey(it) }
+        stableDocument=null;stableInk.clear();stable.forEach {stableInk[it]=true}
+        strokes.keys.removeAll { !stableInk.containsKey(it) };temporaryInk.clear()
     }
-    fun clear() { strokes.clear(); layouts.clear() }
+    /** Reuse stable membership, while still dropping the previous frame's temporary live preview. */
+    fun retainInk(document:MindMapDocument) {
+        if(stableDocument!==document) {
+            stableDocument=document;stableInk.clear()
+            for(node in document.nodes) for(ink in node.ink) stableInk[ink]=true
+            strokes.keys.removeAll { !stableInk.containsKey(it) }
+        } else for(ink in temporaryInk.keys) strokes.remove(ink)
+        temporaryInk.clear()
+    }
+    fun clear() {strokes.clear();layouts.clear();stableInk.clear();temporaryInk.clear();stableDocument=null;cachedFrame=null}
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
              connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null,selectedNodes:Set<String> = emptySet(),
              expanded:Set<String> = emptySet()) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
-        val visible = doc.visible(expanded)
-        val byId = visible.associateBy { it.id }
-        val hiddenCounts=doc.hiddenNodeCounts(expanded)
+        val frame=frame(doc,expanded)
+        val visible=frame.nodes;val byId=frame.byId;val hiddenCounts=frame.counts
         paint.color = fg; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f
         connection?.let {(id,end)->byId[id]?.bounds?.center?.let {start->
             paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
-            paint.pathEffect=android.graphics.DashPathEffect(floatArrayOf(8f,6f),0f)
+            paint.pathEffect=relationDash
             canvas.drawLine(start.x.toFloat(),start.y.toFloat(),end.x.toFloat(),end.y.toFloat(),paint)
             paint.pathEffect=null
         }}
-        for (n in visible) {
-            val p = byId[n.parent] ?: continue
-            val right = n.bounds.centerX > p.bounds.centerX
-            val x1 = if (right) p.x + p.width else p.x
-            val x2 = if (right) n.x else n.x + n.width
-            val y1 = p.y + p.height / 2; val y2 = n.y + n.height / 2
+        for (line in frame.hierarchy) {
+            if(outside(canvas,line.bounds)) continue
+            val x1=line.x1;val y1=line.y1;val x2=line.x2;val y2=line.y2
             val mid = ((x1 + x2) / 2).toFloat()
-            val path = Path().apply {
+            hierarchyPath.reset()
+            hierarchyPath.apply {
                 moveTo(x1.toFloat(), y1.toFloat())
                 cubicTo(mid, y1.toFloat(), mid, y2.toFloat(), x2.toFloat(), y2.toFloat())
             }
-            canvas.drawPath(path, paint)
+            canvas.drawPath(hierarchyPath, paint)
         }
-        val edges=doc.relations.associateBy {it.id}
-        for (line in relationGeometry(doc,expanded)) {
-            val edge=edges.getValue(line.id)
+        for (relation in frame.relations) {
+            if(outside(canvas,relation.bounds)) continue
+            val line=relation.geometry;val edge=relation.edge
             val start=line.start; val end=line.end
             paint.style=Paint.Style.STROKE;paint.color=fg
             paint.strokeWidth=if(line.id==selectedRelation) Space.s4.value else Space.s2.value
-            paint.pathEffect=android.graphics.DashPathEffect(floatArrayOf(8f,6f),0f)
+            paint.pathEffect=relationDash
             canvas.drawLine(start.x.toFloat(),start.y.toFloat(),end.x.toFloat(),end.y.toFloat(),paint)
             paint.pathEffect=null
             for(wing in line.wings) {
@@ -101,7 +152,21 @@ class MapPainter {
             text.color=fg
             canvas.drawText(edge.label.take(80),line.labelAnchor.x.toFloat(),line.labelAnchor.y.toFloat(),text)
         }
+        var inkRenderer:AndroidRenderer?=null
         for (n in visible) {
+            val collapsed=hiddenCounts[n.id]?.let(collapsedLabel)
+            val badge=collapsed?.let {badgeBounds(n,it)}
+            // Source counts paint after the node's inner clip is restored. Localized labels
+            // can therefore remain visible when a narrow node body has left the viewport.
+            val sources=n.sources.takeIf {it.isNotEmpty()}?.let {sourceLabel(it.size)}
+            val sourceRight=sources?.let {n.x+16+text.measureText(it)} ?: Double.NEGATIVE_INFINITY
+            val sourceTop=if(sources!=null) n.y+n.height-10+textMetrics.top else Double.POSITIVE_INFINITY
+            val sourceBottom=if(sources!=null) n.y+n.height-10+textMetrics.bottom else Double.NEGATIVE_INFINITY
+            val right=maxOf(n.x+n.width,badge?.let {n.x+it.right} ?: Double.NEGATIVE_INFINITY,sourceRight)
+            val bottom=maxOf(n.y+n.height,badge?.let {n.y+it.bottom} ?: Double.NEGATIVE_INFINITY,sourceBottom)
+            val left=minOf(n.x,badge?.let {n.x+it.left} ?: Double.POSITIVE_INFINITY,if(sources!=null) n.x+16 else Double.POSITIVE_INFINITY)
+            val top=minOf(n.y,badge?.let {n.y+it.top} ?: Double.POSITIVE_INFINITY,sourceTop)
+            if(outside(canvas,left,top,right,bottom)) continue
             val active = n.id == selected || n.id in selectedNodes
             val color = if (active) bg else fg
             canvas.save(); canvas.translate(n.x.toFloat(), n.y.toFloat())
@@ -117,15 +182,17 @@ class MapPainter {
                 text.color = color
                 canvas.translate(16f, maxOf(12f, (n.height.toFloat() - layout.height) / 2))
                 layout.draw(canvas)
-            } else drawInk(canvas, n.ink, color)
-            canvas.restore()
-            if(n.sources.isNotEmpty()) {
-                text.color=color
-                canvas.drawText(sourceLabel(n.sources.size),16f,n.height.toFloat()-10f,text)
+            } else {
+                val renderer=inkRenderer ?: AndroidRenderer(canvas).also {inkRenderer=it}
+                drawInk(renderer,n.ink,color)
             }
-            hiddenCounts[n.id]?.let {count->
-                val label=collapsedLabel(count)
-                val bounds=badgeBounds(n,label)
+            canvas.restore()
+            if(sources!=null) {
+                text.color=color
+                canvas.drawText(sources,16f,n.height.toFloat()-10f,text)
+            }
+            if(collapsed!=null && badge!=null) {
+                val label=collapsed;val bounds=badge
                 paint.style = Paint.Style.FILL; paint.color = fg
                 canvas.drawRoundRect(bounds.left.toFloat(),bounds.top.toFloat(),bounds.right.toFloat(),bounds.bottom.toFloat(),Space.s4.value,Space.s4.value,paint)
                 badgeText.color=bg
@@ -137,18 +204,24 @@ class MapPainter {
     }
     private fun layout(value: String, width: Double): StaticLayout {
         val w = (width - 32).toInt().coerceAtLeast(1)
-        if (layouts.size > MindMapDocument.MAX_NODES * 2) layouts.clear()
-        return layouts.getOrPut(value to w) {
-            StaticLayout.Builder.obtain(value, 0, value.length, text, w).setIncludePad(false).build()
-        }
+        val key=value to w
+        layouts[key]?.let {return it}
+        val layout=StaticLayout.Builder.obtain(value,0,value.length,text,w).setIncludePad(false).build()
+        layouts[key]=layout
+        if(layouts.size>MindMapDocument.MAX_NODES*2) layouts.entries.iterator().let {it.next();it.remove()}
+        return layout
     }
     fun textHeight(value:String,width:Double):Double = layout(value,width).height.toDouble()
     fun measuredHeight(value: String, width: Double) = maxOf(72.0, layout(value, width).height + 24.0)
     fun drawInk(canvas: Canvas, ink: List<MapInk>, color: Int = Color.BLACK) {
-        val renderer = AndroidRenderer(canvas)
+        drawInk(AndroidRenderer(canvas),ink,color)
+    }
+    private fun drawInk(renderer:AndroidRenderer,ink:List<MapInk>,color:Int) {
+        if(inkColor!=color) {inkColor=color;inkRgba=Rgba(Color.red(color),Color.green(color),Color.blue(color),255)}
         for (s in ink) {
             val stroke = strokes.getOrPut(s) { geometryBuildCount++; s.toStroke() }
-            stroke.config = stroke.config.copy(rgba = Rgba(Color.red(color), Color.green(color), Color.blue(color), 255))
+            if(!stableInk.containsKey(s)) temporaryInk[s]=true
+            if(stroke.config.rgba!=inkRgba) stroke.config=stroke.config.copy(rgba=inkRgba)
             stroke.paint(renderer)
         }
     }

@@ -342,7 +342,7 @@ class MindMapView(context: Context) : View(context) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         canvas.save(); canvas.translate(panX, panY); canvas.scale(scale, scale)
         val owner=document.nodes.firstOrNull {it.id==inkOwner}
-        painter.retainInk(document.nodes.flatMap {it.ink})
+        painter.retainInk(document)
         val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else nodeSelector.preview ?: preview ?: document
         painter.draw(canvas, shown, dark, if(nodeSelectionMode) null else selected, connectionTarget ?: dropTarget,editingText,
             connectionFrom?.let {from->connectionPreview?.let {from to it}},selectedRelation=selectedRelation,

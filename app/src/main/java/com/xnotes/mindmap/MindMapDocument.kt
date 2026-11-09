@@ -38,6 +38,8 @@ data class MindMapDocument(
     val previewAssets: Map<String, MapPreviewAsset> = emptyMap(),
     val organization: MapOrganization = MapOrganization.MIND_MAP,
 ) {
+    private class VisibleCache(val expanded:Set<String>,val nodes:List<MapNode>)
+    @Transient @Volatile private var visibleCache:VisibleCache?=null
     val centralRoot get() = nodes.singleOrNull { it.parent == null && !it.free }
     val root get() = requireNotNull(centralRoot)
     val initialSelection get() = centralRoot?.id ?: nodes.firstOrNull()?.id
@@ -55,14 +57,16 @@ data class MindMapDocument(
         return found
     }
     fun visible(expanded:Set<String> = emptySet()): List<MapNode> {
+        visibleCache?.takeIf {it.expanded==expanded}?.let {return it.nodes}
+        val expandedSnapshot=expanded.toSet()
         val children = nodes.groupBy { it.parent }
         val visible = hashSetOf<String>()
         val todo = ArrayDeque<MapNode>().apply { nodes.filter { it.parent == null }.forEach { add(it) } }
         while (todo.isNotEmpty()) {
             val at = todo.removeFirst()
-            if (visible.add(at.id) && (!at.collapsed || at.id in expanded)) children[at.id].orEmpty().forEach { todo.add(it) }
+            if (visible.add(at.id) && (!at.collapsed || at.id in expandedSnapshot)) children[at.id].orEmpty().forEach { todo.add(it) }
         }
-        return nodes.filter { it.id in visible }
+        return nodes.filter { it.id in visible }.also {visibleCache=VisibleCache(expandedSnapshot,it)}
     }
     /** Derive subtree sizes once in linear time, including nested collapsed descendants. */
     fun hiddenNodeCounts(expanded:Set<String> = emptySet()):Map<String,Int> {
