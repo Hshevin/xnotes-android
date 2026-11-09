@@ -16,12 +16,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.xnotes.R
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.ui.AlertDialog
-import com.xnotes.ui.DestinationPickerRequest
 import com.xnotes.ui.DestinationPickerState
 import com.xnotes.ui.InterruptedDestinationNotice
+import com.xnotes.ui.NativeDestinationPicker
 import com.xnotes.ui.rememberDestinationPickerState
 import com.xnotes.ui.theme.*
-import java.util.UUID
 import com.xnotes.storage.NotebookStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -29,51 +28,17 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 
 /** Two target contracts share one original slot; retired payloads never move to a later flow. */
-internal class NetworkCanvasPicker(private val registry:ActivityResultRegistry,
+internal class NetworkCanvasPicker(registry:ActivityResultRegistry,
     internal val saved:DestinationPickerState=DestinationPickerState()) {
-    private class Cell(val request:DestinationPickerRequest,var callback:((Uri?)->Unit)?,val current:()->Boolean) {var unregister:(()->Unit)?=null}
-    private var cell:Cell?=null
-    private var disposed=false
-    private var launchCurrent:(()->Unit)?=null
-    var busy by mutableStateOf(false);private set
-    init {saved.pending?.let {register(Cell(it,null,{false}))}}
+    private val picker=NativeDestinationPicker(registry,saved,
+        createContract=ActivityResultContracts.CreateDocument("application/octet-stream"),openContract=ActivityResultContracts.OpenDocument())
+    val busy get()=picker.busy
     fun launch(create:Boolean,name:String,isCurrent:()->Boolean={true},onResult:(Uri?)->Unit):Boolean {
-        if(disposed || cell!=null || saved.interrupted!=null) return false
-        val savedRequest=DestinationPickerRequest("network-canvas-${UUID.randomUUID()}",if(create) "CREATE" else "OPEN",name)
-        val request=Cell(savedRequest,onResult,isCurrent);saved.pending=savedRequest
-        return try {
-            register(request)
-            if(disposed || cell!==request) false else {
-                requireNotNull(launchCurrent).invoke();true
-            }
-        } catch(_:Exception) {release(request,consume=true);false}
+        return if(create) picker.launch(name,isCurrent=isCurrent,onResult=onResult)
+        else picker.launchOpen(arrayOf("application/json","application/octet-stream","*/*"),isCurrent=isCurrent,onResult=onResult)
     }
-    private fun register(request:Cell) {
-        cell=request;busy=true
-        fun receive(uri:Uri?) {if(!disposed && cell===request) {
-            val callback=request.callback;val accepted=callback!=null && runCatching(request.current).getOrDefault(false)
-            release(request,consume=true)
-            if(accepted) callback?.invoke(uri) else saved.retain(request.request,uri)
-        }}
-        if(request.request.kind=="CREATE") {
-            val launcher=registry.register(request.request.key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
-            if(disposed || cell!==request) launcher.unregister() else {
-                request.unregister=launcher::unregister;launchCurrent={launcher.launch(request.request.name)}
-            }
-        } else {
-            val launcher=registry.register(request.request.key,ActivityResultContracts.OpenDocument(),::receive)
-            if(disposed || cell!==request) launcher.unregister() else {
-                request.unregister=launcher::unregister;launchCurrent={launcher.launch(arrayOf("application/json","application/octet-stream","*/*"))}
-            }
-        }
-    }
-    fun retire() {cell?.callback=null}
-    fun dispose() {disposed=true;cell?.let {release(it,consume=false)}}
-    private fun release(request:Cell,consume:Boolean) {
-        if(cell===request) {cell=null;busy=false;launchCurrent=null}
-        if(consume && saved.pending==request.request) saved.pending=null
-        request.callback=null;val unregister=request.unregister;request.unregister=null;unregister?.invoke()
-    }
+    fun retire()=picker.retire()
+    fun dispose()=picker.dispose()
 }
 
 /** Registered at the root network host, including when its runtime network owner was not restored. */

@@ -4,9 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.activity.compose.LocalActivityResultRegistryOwner
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -264,56 +261,23 @@ internal class RecoveryPreviewController(context:Context) {
 /** Pending registration is saved independently of the preview's non-restorable publication owner. */
 @Composable
 internal fun RecoveryPreviewHost(controller:RecoveryPreviewController) {
-    val registry=requireNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
-    val saved=rememberDestinationPickerState()
-    DisposableEffect(registry,controller,saved) {
-        var registration:ActivityResultLauncher<*>?=null
-        fun register(request:DestinationPickerRequest,launch:Boolean) {
-            val id=request.owner.substringAfterLast(':').toLongOrNull()
-            val kind=if(request.kind=="CREATE") RecoveryPickerKind.CREATE else RecoveryPickerKind.RESUME
-            fun receive(uri:Uri?) {
-                if(saved.pending!=request) return
-                val belongs=id!=null && request.owner=="${controller.pickerNamespace}:$id"
-                val accepted=belongs && controller.ownsPickerResult(requireNotNull(id),kind)
-                saved.pending=null
-                registration?.unregister();registration=null
-                if(belongs) controller.receivePickerResult(requireNotNull(id),kind,if(accepted) uri else null)
-                if(!accepted) saved.retain(request,uri)
-            }
-            try {
-                when(kind) {
-                    RecoveryPickerKind.CREATE->{
-                        val launcher=registry.register(request.key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
-                        if(saved.pending!=request) launcher.unregister() else {
-                            registration=launcher
-                            if(launch) launcher.launch(request.name)
-                        }
-                    }
-                    RecoveryPickerKind.RESUME->{
-                        val launcher=registry.register(request.key,ActivityResultContracts.OpenDocument(),::receive)
-                        if(saved.pending!=request) launcher.unregister() else {
-                            registration=launcher
-                            if(launch) launcher.launch(arrayOf("*/*"))
-                        }
-                    }
-                }
-            } catch(error:Throwable) {
-                registration?.unregister();registration=null
-                if(saved.pending==request) saved.pending=null
-                throw error
-            }
-        }
-        saved.pending?.let {register(it,launch=false)}
+    val picker=rememberNativeDestinationPicker()
+    val saved=picker.saved
+    DisposableEffect(controller,picker) {
         controller.attachPicker {request->
-            check(saved.pending==null && saved.interrupted==null) {"A destination is still outstanding"}
-            val pending=DestinationPickerRequest("recovery-${controller.pickerNamespace}-${request.kind}-${request.id}",
-                if(request.kind==RecoveryPickerKind.CREATE) "CREATE" else "OPEN",request.filename.orEmpty(),
-                "${controller.pickerNamespace}:${request.id}")
-            saved.pending=pending;register(pending,launch=true)
+            val owner="${controller.pickerNamespace}:${request.id}"
+            val current={controller.ownsPickerResult(request.id,request.kind).also {valid->
+                if(!valid) controller.receivePickerResult(request.id,request.kind,null)
+            }}
+            val receive:(Uri?)->Unit={uri->controller.receivePickerResult(request.id,request.kind,uri)}
+            val launched=when(request.kind) {
+                RecoveryPickerKind.CREATE->picker.launch(requireNotNull(request.filename),owner,current,receive)
+                RecoveryPickerKind.RESUME->picker.launchOpen(arrayOf("*/*"),owner,current,receive)
+            }
+            check(launched) {"A destination is still outstanding or unavailable"}
         }
-        onDispose {controller.detachPicker();registration?.unregister();registration=null;controller.dispose()}
+        onDispose {controller.detachPicker();controller.dispose()}
     }
-    InterruptedDestinationNotice(saved)
     val state=controller.state ?: return
     val actions=controller.actions() ?: return
     val context=LocalContext.current

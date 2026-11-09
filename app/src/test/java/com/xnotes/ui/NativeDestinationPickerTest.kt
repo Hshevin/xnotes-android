@@ -9,6 +9,7 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.AbstractApplier
 import androidx.compose.runtime.Composition
 import androidx.compose.runtime.CompositionLocalProvider
@@ -28,6 +29,30 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class NativeDestinationPickerTest {
+    @Test fun configuredOpenAndCreateContractsShareOneOriginalOutstandingSlot() {
+        val intents=mutableListOf<Intent>();val codes=mutableListOf<Int>()
+        val registry=object:ActivityResultRegistry() {
+            override fun <I,O> onLaunch(code:Int,contract:ActivityResultContract<I,O>,input:I,options:ActivityOptionsCompat?) {
+                codes+=code;intents+=contract.createIntent(RuntimeEnvironment.getApplication(),input)
+            }
+        }
+        val picker=NativeDestinationPicker(registry,createContract=ActivityResultContracts.CreateDocument("application/octet-stream"),
+            openContract=ActivityResultContracts.OpenDocument())
+        var abandoned=0;val received=mutableListOf<Uri?>()
+        val uri=Uri.parse("content://native-picker/document/new-map")
+        try {
+            assertTrue(picker.launchOpen(arrayOf("application/json","*/*")) {abandoned++})
+            assertEquals(Intent.ACTION_OPEN_DOCUMENT,intents.single().action)
+            assertArrayEquals(arrayOf("application/json","*/*"),intents.single().getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
+            picker.retire();assertFalse(picker.launch("new.xmap") {received+=it})
+            assertTrue(registry.dispatchResult(codes.single(),Activity.RESULT_OK,Intent().setData(uri)))
+            assertFalse(picker.busy);assertEquals(0,abandoned)
+            assertTrue(picker.launch("new.xmap") {received+=it})
+            assertEquals(Intent.ACTION_CREATE_DOCUMENT,intents.last().action);assertEquals("application/octet-stream",intents.last().type)
+            assertTrue(registry.dispatchResult(codes.last(),Activity.RESULT_OK,Intent().setData(uri)))
+            assertEquals(listOf(uri),received)
+        } finally {picker.dispose()}
+    }
     private class NoViews:AbstractApplier<Unit>(Unit) {
         override fun insertTopDown(index:Int,instance:Unit)=Unit
         override fun insertBottomUp(index:Int,instance:Unit)=Unit
