@@ -230,4 +230,14 @@
     <string name="network_filter_reset">清除全部条件</string>
     <string name="network_filter_draft_changed">筛选条件已变化，请关闭并重新打开此对话框。</string>
     <string name="network_filter_empty">没有概念符合当前筛选条件。</string>
+    <string name="network_direct_only">仅直接关系</string>
+    <string name="network_expand_file">展开直接关系</string>
+    <string name="network_collapse_file">折叠此展开</string>
+    <string name="network_expansion_root">中心文件的直接关系会保持显示。</string>
+    <string name="network_expansion_context">作为通往匹配概念的路径上下文保留。</string>
+    <string name="network_origin_source">通过 %1$s 的来源关系到达 · 第 %2$d 层</string>
+    <string name="network_origin_owner">通过属于 %1$s 的概念到达 · 第 %2$d 层</string>
+    <string name="network_expansion_path">上次获知的路径</string>
+    <string name="network_expansion_path_step">%1$s · %2$s → 来源 %3$s</string>
+    <string name="network_files">文件</string>
 </resources>

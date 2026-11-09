@@ -36,26 +36,31 @@ internal class LocalNetworkEvidence internal constructor(val row:MapBacklinkRow,
     internal fun issuedBy(owner:Any,version:Long)=issuer===owner && generation==version
 }
 internal data class LocalNetworkConcept(val key:NetworkConceptKey,val location:BacklinkLocation,val title:String,
-    val kind:NodeKind,val members:List<LocalNetworkEvidence>)
+    val kind:NodeKind,val members:List<LocalNetworkEvidence>,val origin:NetworkConceptOrigin?=null)
 internal data class LocalNetworkFile(val documentId:String,val observedNames:List<String>)
 internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:List<LocalNetworkFile>,
     val concepts:List<LocalNetworkConcept>,val issues:List<BacklinkIssue>,val checkedMaps:Int,val complete:Boolean,
     val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false,
     val filterActive:Boolean=false,val matchedFiles:Set<String> = emptySet(),val unknownFilterFiles:Set<String> = emptySet(),
-    val filteredConcepts:Int=0)
+    val filteredConcepts:Int=0,val contextConcepts:Set<NetworkConceptKey> = emptySet())
 
 /** A graph explanation proves both its connection to the focus and the specific source to inspect. */
 internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,val anchor:MapBacklinkRow,
-    val target:MapBacklinkRow,val owner:Any,private val valid:()->Boolean) {
-    fun current():Boolean=coherent(query,anchor,target) && valid() && listOf(anchor,target).all {row->
-        row.membership?.let {it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)}!=false
+    val target:MapBacklinkRow,val owner:Any,private val valid:()->Boolean,private val origin:NetworkConceptOrigin?=null) {
+    fun current():Boolean=coherent(query,anchor,target,origin) && valid() && (origin?.path.orEmpty()+listOf(anchor,target)).all {row->
+        row.blocked==null && row.membership?.let {it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)}!=false
     }
     /** A view/host may only narrow an existing request; it cannot reissue either source membership. */
     fun withPresentationGuard(guard:()->Boolean):MapNetworkOpenRequest? =
-        MapNetworkOpenRequest(query,anchor,target,owner) {current() && guard()}.takeIf {it.current()}
+        MapNetworkOpenRequest(query,anchor,target,owner,{current() && guard()},origin).takeIf {it.current()}
     companion object {
-        private fun coherent(query:NetworkQuery,anchor:MapBacklinkRow,target:MapBacklinkRow):Boolean {
-            if(anchor.target.documentId!=query.focusId || anchor.blocked!=null || target.blocked!=null ||
+        private fun coherent(query:NetworkQuery,anchor:MapBacklinkRow,target:MapBacklinkRow,origin:NetworkConceptOrigin?):Boolean {
+            val local=when(origin?.kind) {
+                null->anchor.target.documentId==query.focusId
+                NetworkOriginKind.SOURCE->anchor.target.documentId==origin.fileId
+                NetworkOriginKind.OWNER->target.location.graphId==origin.fileId && anchor.sourceId==target.sourceId && anchor.target==target.target
+            }
+            if(!local || anchor.blocked!=null || target.blocked!=null ||
                 anchor.location.key!=target.location.key || anchor.location.graphId!=target.location.graphId || anchor.nodeId!=target.nodeId) return false
             val a=anchor.membership;val t=target.membership
             if((a==null)!=(t==null)) return false
@@ -65,5 +70,8 @@ internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,
         internal fun capture(query:NetworkQuery,anchor:MapBacklinkRow,target:MapBacklinkRow,owner:Any,
             valid:()->Boolean):MapNetworkOpenRequest? =
             MapNetworkOpenRequest(query,anchor,target,owner,valid).takeIf {it.current()}
+        internal fun captureExpanded(query:NetworkQuery,origin:NetworkConceptOrigin,anchor:MapBacklinkRow,target:MapBacklinkRow,
+            owner:Any,valid:()->Boolean):MapNetworkOpenRequest? =
+            MapNetworkOpenRequest(query,anchor,target,owner,valid,origin).takeIf {it.current()}
     }
 }

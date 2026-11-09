@@ -37,6 +37,8 @@ internal fun FileNetworkWorkspaceHost(workspace:FileNetworkWorkspace,actions:Fil
 @Composable
 private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetworkHostActions) {
     val controller=entry.controller;val currentReport=controller.report;val presentation=entry.presentation
+    val controls=controller.filterRevision
+    val observedControls=remember(entry) {longArrayOf(controls)}
     val labels=LocalNetworkLabels(stringResource(R.string.network_file),stringResource(R.string.network_concept),
         stringResource(R.string.map_ink_node),stringResource(R.string.graph_reference),
         stringResource(R.string.network_reference_count),stringResource(R.string.graph_belongs))
@@ -50,13 +52,19 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
     BackHandler {if(busy) actions.cancel(entry) else actions.close(entry)}
     val dark=LocalPalette.current.isDark
     XnotesTheme(monochromePalette(dark)) {
-        SideEffect {scene?.let(presentation::reconcile);if(!busy) openingVisual=null}
+        SideEffect {
+            if(observedControls[0]!=controls) {observedControls[0]=controls;presentation.invalidateInput()}
+            scene?.let(presentation::reconcile);if(!busy) openingVisual=null
+        }
         Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                     MapButton(R.string.map_close) {actions.close(entry)}
                     Text(stringResource(R.string.network_title),fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
                     NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
+                    MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
+                        if(controller.collapseAll(controls)) presentation.invalidateInput()
+                    }
                     MapButton(R.string.network_refresh,enabled=!busy && !controller.loading && !controller.filtering) {localProblem=null;controller.refresh()}
                     MapButton(R.string.network_fit,enabled=presentation.idle && !busy && scene!=null) {presentation.requestFit()}
                     if(controller.loading || controller.filtering) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
@@ -69,7 +77,7 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                     val canvas:@Composable (Modifier)->Unit={modifier->
                         scene?.let {LocalNetworkCanvas(it,presentation,true,modifier)} ?: Box(modifier)
                     }
-                    val details:@Composable (Modifier)->Unit={modifier->NetworkDetails(entry,report,modifier,
+                    val details:@Composable (Modifier)->Unit={modifier->NetworkDetails(entry,report,modifier,controls,
                         enabled=!busy && !controller.loading && !controller.filtering && presentation.idle && presentation.cameraReady,
                         open={anchor,target->
                             // Acquiring a stored map creates a live LOADING actor. Hold only the visible
@@ -110,7 +118,7 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
 
 @Composable
 private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetworkReport?,modifier:Modifier,
-    enabled:Boolean,open:(LocalNetworkEvidence,LocalNetworkEvidence)->Unit) {
+    controls:Long,enabled:Boolean,open:(LocalNetworkEvidence,LocalNetworkEvidence)->Unit) {
     val p=entry.presentation
     val selectedNode=p.selectedNode;val selectedEdge=p.selectedEdge
     val concepts=report?.concepts.orEmpty()
@@ -133,6 +141,16 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             }
             if(report?.filterActive==true && file!=null && file !in report.matchedFiles)
                 Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
+            if(selectedNode is NetworkSceneNodeKey.File) {
+                val id=selectedNode.documentId
+                val expanded=id in entry.controller.expandedFiles
+                Text(report?.files?.firstOrNull {it.documentId==id}?.observedNames?.firstOrNull().orEmpty()
+                    .ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
+                if(id==entry.query.focusId) Text(stringResource(R.string.network_expansion_root),fontSize=TextSize.caption)
+                else MapButton(if(expanded) R.string.network_collapse_file else R.string.network_expand_file,enabled=enabled) {
+                    if(entry.controller.setExpanded(id,!expanded,controls)) p.invalidateInput()
+                }
+            }
         }
         if(p.candidates.size>1) item {Column {
             Text(stringResource(R.string.network_overlapping),fontSize=TextSize.body)
@@ -162,14 +180,28 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                 NetworkSelectButton(c.title.ifBlank {stringResource(R.string.network_unnamed_concept)}) {
                     p.selectNode(NetworkSceneNodeKey.Concept(c.key))
                 }
+                if(c.key in report?.contextConcepts.orEmpty()) Text(stringResource(R.string.network_expansion_context),fontSize=TextSize.caption)
+                c.origin?.let {origin->
+                    val file=report?.files?.firstOrNull {it.documentId==origin.fileId}?.observedNames?.firstOrNull().orEmpty()
+                        .ifBlank {stringResource(R.string.network_file)}
+                    Text(stringResource(if(origin.kind==NetworkOriginKind.SOURCE) R.string.network_origin_source else R.string.network_origin_owner,
+                        file,origin.depth),fontSize=TextSize.caption)
+                    if(origin.path.isNotEmpty()) {
+                        Text(stringResource(R.string.network_expansion_path),fontSize=TextSize.caption)
+                        for(step in origin.path) Text(stringResource(R.string.network_expansion_path_step,step.location.title,
+                            step.nodeTitle.ifBlank {stringResource(R.string.network_unnamed_concept)},
+                            step.sourceFileName.ifBlank {stringResource(R.string.network_file)}),fontSize=TextSize.caption)
+                    }
+                }
             }}
             val sourceFile=when {
                 selectedEdge is NetworkSceneEdgeKey.References->selectedEdge.fileId
                 selectedNode is NetworkSceneNodeKey.File && c.members.any {it.fileId==selectedNode.documentId}->selectedNode.documentId
                 else->null
             }
-            val anchor=c.members.firstOrNull {it.fileId==entry.query.focusId}
             for(evidence in c.members.filter {sourceFile==null || it.fileId==sourceFile}) {
+                val anchor=if(c.origin?.kind==NetworkOriginKind.OWNER) evidence else
+                    c.members.firstOrNull {it.fileId==(c.origin?.fileId ?: entry.query.focusId)}
                 val row=evidence.row
                 item("source:${row.key}") {Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
                     Text(row.sourceFileName.ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
@@ -186,6 +218,12 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                     }
                     HorizontalDivider()
                 }}
+            }
+        }
+        if(report?.files?.isNotEmpty()==true) item {Text(stringResource(R.string.network_files),fontSize=TextSize.heading)}
+        for(file in report?.files.orEmpty()) item("file:${file.documentId}") {
+            NetworkSelectButton(file.observedNames.firstOrNull().orEmpty().ifBlank {stringResource(R.string.network_file)},enabled) {
+                p.selectNode(NetworkSceneNodeKey.File(file.documentId))
             }
         }
         if(concepts.isNotEmpty()) item {Text(stringResource(R.string.network_concepts),fontSize=TextSize.heading)}
@@ -214,8 +252,8 @@ internal fun networkProblemText(problem:BacklinkProblem)=when(problem) {
 }
 
 @Composable
-private fun NetworkSelectButton(text:String,onClick:()->Unit) {
-    androidx.compose.material3.TextButton(onClick=onClick,modifier=Modifier.heightIn(min=MinTouchTarget)) {
+private fun NetworkSelectButton(text:String,enabled:Boolean=true,onClick:()->Unit) {
+    androidx.compose.material3.TextButton(onClick=onClick,enabled=enabled,modifier=Modifier.heightIn(min=MinTouchTarget)) {
         Text(text,fontSize=TextSize.body)
     }
 }

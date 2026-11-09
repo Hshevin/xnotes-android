@@ -265,4 +265,49 @@ class MapNetworkNavigatorHostTest {
             withContext(Dispatchers.Main) {controller.close()}
         }
     }
+    @Test fun anExpandedFileOpensItsRealNextLayerSourceAndReturnsToTheSameNetwork()=scenario {f->
+        val t=withContext(Dispatchers.Main) {f.session.document!!.node("concept").sources[1]}
+        val u=MapSource(documentId=UUID.randomUUID().toString(),fileName="Next source U.xnote")
+        val next=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null),
+            MapNode(id="next",parent="r",text="Next-layer body",sources=listOf(t.copy(id=UUID.randomUUID().toString()),u))))
+        val file=File(f.file.parentFile,"expanded-next-${UUID.randomUUID()}.xmap")
+        file.writeBytes(MapCodec.encode(next));val bytes=file.readBytes()
+        withContext(Dispatchers.IO) {com.xnotes.storage.NotebookStorage.get(f.native.context).registry.registerMapObserved(next.id,file.name,Uri.fromFile(file).toString())}
+        val networks=withContext(Dispatchers.Main) {FileNetworkWorkspace(f.native.context,f.scope).also {it.bindHost(f.binding)}}
+        val coordinator=withContext(Dispatchers.Main) {LocalNetworkCoordinator(f.native.editor,f.workspace,networks,f.binding,f.scope)}
+        try {
+            val entry=withContext(Dispatchers.Main) {networks.admit(f.binding,f.query)!!}
+            f.await {!entry.controller.loading && entry.controller.report!=null}
+            withContext(Dispatchers.Main) {
+                assertFalse(entry.controller.report!!.concepts.any {it.key.graphId==next.id})
+                assertTrue(entry.controller.setExpanded(t.documentId,true))
+            }
+            f.await {!entry.controller.loading && entry.controller.report!!.concepts.any {it.key.graphId==next.id}}
+            withContext(Dispatchers.Main) {
+                val c=entry.controller.report!!.concepts.single {it.key.graphId==next.id}
+                assertEquals(t.documentId,c.origin!!.fileId);assertFalse(c.members.any {it.fileId==f.query.focusId})
+                val request=entry.controller.captureFocus(c.members.first(),c.members.last())!!
+                assertTrue(f.navigator.openNetwork(request) {shown->assertTrue(networks.parkForMap(f.binding,entry,shown))})
+            }
+            f.await {!f.navigator.busy}
+            val shown=withContext(Dispatchers.Main) {f.workspace.current!!}
+            withContext(Dispatchers.Main) {
+                assertTrue(f.workspace.visible);assertFalse(networks.visible);assertEquals(next.id,shown.session.document!!.id)
+                assertEquals("next",shown.session.selected);assertEquals(u.id,shown.presentation.pendingBacklinkFocus!!.sourceId)
+                assertFalse(shown.flushNativeOnPresent);assertFalse(shown.session.canUndo)
+                assertTrue(coordinator.resume(entry,shown))
+            }
+            f.await {!coordinator.busy}
+            withContext(Dispatchers.Main) {
+                assertTrue(networks.visible);assertFalse(f.workspace.visible);assertSame(entry,networks.current)
+                assertEquals(f.query.focusId,entry.query.focusId);assertTrue(t.documentId in entry.controller.expandedFiles)
+                assertSame(shown,f.workspace.current);assertEquals(0,f.native.writes.get())
+            }
+            assertArrayEquals(bytes,file.readBytes())
+        } finally {withContext(NonCancellable) {
+            val closed=withContext(Dispatchers.Main) {coordinator.dispose();networks.dispose()
+                f.workspace.current?.takeIf {it.uri==Uri.fromFile(file)}?.let {f.workspace.close(it)}}
+            closed?.join();file.delete()
+        }}
+    }
 }

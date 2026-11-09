@@ -93,6 +93,8 @@ internal class LocalNetworkPresentation {
         }
     }
     private fun retireSelectionInput() {inputSerial++;pending=null;forceFit=false}
+    /** Query controls retire old actions without detaching the View or scheduling another fit. */
+    fun invalidateInput() {retireSelectionInput()}
     fun selectNode(key:NetworkSceneNodeKey?):Boolean {
         if(!visible || key!=null && key !in nodes) return false
         if(selectedNode!=key || selectedEdge!=null || candidates.isNotEmpty()) {

@@ -37,6 +37,7 @@ internal class LocalFileNetworkController(
     private var projectionGeneration=0L
     private var filterWork:Job?=null
     var filter by mutableStateOf(NetworkFilter());private set
+    var expandedFiles by mutableStateOf<Set<String>>(emptySet());private set
     val filterRevision get()=actionGeneration
     var catalog by mutableStateOf<List<LocalNetworkFile>>(emptyList());private set
     var filtering by mutableStateOf(false);private set
@@ -67,11 +68,11 @@ internal class LocalFileNetworkController(
         val request=++scanGeneration
         scanWork?.cancel();loading=true;stored=null;library=null
         val version=MapDocuments.observationVersion();inventory=version
-        val live=MapDocuments.observations(app)
+        val live=MapDocuments.observations(app);val expanded=expandedFiles
         val reader=MapBacklinkLibrary(app,query.roots,budget.read)
         scanWork=workScope.launch {
             try {
-                val result=reader.scanNetwork(query.focusId,live,budget)
+                val result=reader.scanExpandedNetwork(query.focusId,expanded,live,budget)
                 if(!current() || request!=scanGeneration) return@launch
                 if(MapDocuments.observationVersion()!=version) {startScan();return@launch}
                 stored=result;library=reader;problem=null
@@ -90,13 +91,22 @@ internal class LocalFileNetworkController(
         val identities=linkedMapOf<String,String>()
         val projections=mutableListOf<NetworkConceptProjection>()
         val issues=scan.issues.toMutableList()
-        var limited=scan.limited
+        var limited=scan.limited;var direct=0;var deeper=0
+        fun append(items:List<NetworkConceptProjection>) {
+            for(concept in items) {
+                val isDirect=concept.members.any {it.target.documentId==query.focusId}
+                val used=if(isDirect) direct else deeper
+                if(concept.members.size>budget.evidenceLimit-used) {limited=true;continue}
+                projections+=concept
+                if(isDirect) direct+=concept.members.size else deeper+=concept.members.size
+            }
+        }
         for(graph in scan.graphs) if(graph.candidate.key !in actors) {
             graph.graphId?.let {identities[graph.candidate.key]=it}
             val blocked=graph.graphId?.let(scan.reservedIds::get)
-            projections+=if(blocked==null) graph.concepts else graph.concepts.map {concept->
+            append(if(blocked==null) graph.concepts else graph.concepts.map {concept->
                 concept.copy(members=concept.members.map {it.copy(blocked=blocked)})
-            }
+            })
         }
         val ready=mutableListOf<Pair<MapDocumentObservation,BacklinkProblem?>>()
         for(observation in live) {
@@ -116,28 +126,28 @@ internal class LocalFileNetworkController(
             if(observation.discoveryFailed) issues+=BacklinkIssue(BacklinkProblem.UNAVAILABLE,candidate?.name)
             ready+=observation to blocked
         }
-        var evidence=projections.sumOf {concept->concept.members.size}
         for((observation,blocked) in ready) {
             owner.ensureActive()
             val doc=observation.document ?: continue
             val candidate=candidates[observation.key]
             val location=BacklinkLocation(observation.uri,candidate?.aliases ?: setOf(observation.uri.toString()),
                 observation.key,doc.id,candidate?.name ?: observation.uri.lastPathSegment.orEmpty().take(BacklinkBudget.LABEL_CHARS))
-            val projected=reader.projectNetwork(doc,query.focusId,location,BacklinkOrigin.LIVE,observation.session.conflict,blocked,
+            val projected=reader.projectExpandedNetwork(doc,query.focusId,expandedFiles,location,BacklinkOrigin.LIVE,observation.session.conflict,blocked,
                 membership={node,id,target->observation.captureMembership(node,id,target)},networkBudget=budget,checkActive={owner.ensureActive()})
-            projections+=projected.concepts.map {concept->concept.copy(members=concept.members.map {row->
+            append(projected.concepts.map {concept->concept.copy(members=concept.members.map {row->
                 if(row.membership==null && row.blocked==null) row.copy(blocked=BacklinkProblem.CHANGED) else row
-            })}
-            evidence+=projected.concepts.sumOf {it.members.size}
-            if(projected.limited || evidence>budget.evidenceLimit) {limited=true;break}
+            })})
+            if(projected.limited) limited=true
         }
         val duplicates=identities.entries.groupBy {it.value}.filterValues {it.size>1}.keys
         val projected=projections.map {concept->if(concept.location.graphId in duplicates)
             concept.copy(members=concept.members.map {it.copy(blocked=BacklinkProblem.DUPLICATE)}) else concept}
         duplicates.forEach {issues+=BacklinkIssue(BacklinkProblem.DUPLICATE)}
         if(limited) issues+=BacklinkIssue(BacklinkProblem.LIMIT)
+        val expansion=NetworkExpansion.select(query.focusId,expandedFiles,projected)
+        val reachable=expansion.concepts
         val names=linkedMapOf<String,LinkedHashSet<String>>()
-        for(concept in projected) for(row in concept.members) {
+        for(concept in reachable) for(row in concept.members) {
             val values=names.getOrPut(row.target.documentId) {linkedSetOf()}
             if(values.size<8 && row.sourceFileName.isNotBlank()) values+=row.sourceFileName.take(BacklinkBudget.LABEL_CHARS)
         }
@@ -149,13 +159,20 @@ internal class LocalFileNetworkController(
             MapDocuments.observationVersion()==observationVersion && live.all {it.current()}
         fun commit(facts:NetworkFileFacts) {
             if(!accepted()) return
-            val selected=NetworkFilterSelector.select(projected,selection,facts)
-            report=LocalNetworkAssembler.assemble(query,selected.concepts,(issues+facts.issues).distinct(),identities.size,
+            val selected=NetworkFilterSelector.select(reachable,selection,facts)
+            val matches=selected.concepts.mapTo(hashSetOf()) {it.key}
+            val context=selected.concepts.flatMap {expansion.origins[it.key]?.path.orEmpty()}.mapTo(linkedSetOf()) {
+                NetworkConceptKey(it.location.key,it.location.graphId,it.nodeId)
+            }.apply {removeAll(matches)}
+            val retained=reachable.filter {it.key in matches || it.key in context}
+            val assembled=LocalNetworkAssembler.assemble(query,retained,(issues+facts.issues).distinct(),identities.size,
                 complete=!limited && issues.isEmpty() && facts.issues.isEmpty() && scan.omittedIssues==0 && selected.unknown.isEmpty(),
                 omittedIssues=scan.omittedIssues,excludedMaps=scan.excludedMaps,limited=limited,budget=budget,
-                issuer=issuer,generation=controlVersion).copy(filterActive=selection.active,
+                issuer=issuer,generation=controlVersion,origins=expansion.origins)
+            report=assembled.copy(filterActive=selection.active,
                 matchedFiles=if(selection.active) selected.matched else emptySet(),unknownFilterFiles=selected.unknown,
-                filteredConcepts=selected.filteredConcepts)
+                filteredConcepts=selected.filteredConcepts,
+                contextConcepts=assembled.concepts.mapTo(hashSetOf()) {it.key}.intersect(context))
         }
         val ids=names.keys.filterTo(linkedSetOf()) {selection.fileIds?.contains(it)!=false}
         if(selection.kinds==null && selection.folder==null || ids.isEmpty() || selection.kinds?.isEmpty()==true) {
@@ -191,6 +208,22 @@ internal class LocalFileNetworkController(
         else publish(MapDocuments.observations(app))
         return true
     }
+    /** Controls are runtime query state. They neither mutate graphs nor share content history. */
+    fun setExpanded(fileId:String,value:Boolean,expectedRevision:Long=filterRevision):Boolean {
+        if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision ||
+            fileId==query.focusId) return false
+        if(value && report?.files?.none {it.documentId==fileId}!=false) return false
+        if((fileId in expandedFiles)==value) return true
+        if(value && expandedFiles.size>=250) {problem=BacklinkProblem.LIMIT;return false}
+        val next=expandedFiles.toMutableSet().apply {if(value) add(fileId) else remove(fileId)}
+        expandedFiles=java.util.Collections.unmodifiableSet(next)
+        actionGeneration++;problem=null;startScan();return true
+    }
+    fun collapseAll(expectedRevision:Long=filterRevision):Boolean {
+        if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision) return false
+        if(expandedFiles.isEmpty()) return true
+        expandedFiles=emptySet();actionGeneration++;problem=null;startScan();return true
+    }
     private fun sameMembership(a:MapBacklinkMembership?,b:MapBacklinkMembership?):Boolean = when {
         a==null || b==null->a==null && b==null
         else->a.issuer===b.issuer && a.documentId==b.documentId && a.source==b.source
@@ -203,14 +236,18 @@ internal class LocalFileNetworkController(
         }}}==true
     }
     fun captureFocus(anchor:LocalNetworkEvidence,target:LocalNetworkEvidence):MapNetworkOpenRequest? {
-        if(!current() || !querying || loading || filtering || stored==null || !evidenceCurrent(anchor) || !evidenceCurrent(target)) {
+        if(!current() || !querying || loading || filtering || stored==null || !evidenceCurrent(target)) {
             problem=BacklinkProblem.CHANGED;return null
         }
         val generation=actionGeneration
         // Once accepted, this stored request may create its own actor. Its live overlay is not a new query.
-        return MapNetworkOpenRequest.capture(query,anchor.row,target.row,issuer) {
+        val concept=report?.concepts?.singleOrNull {it.key==target.conceptKey} ?: return null
+        val origin=concept.origin ?: return null
+        val localAnchor=if(origin.kind==NetworkOriginKind.OWNER) target else anchor
+        if(!evidenceCurrent(localAnchor)) {problem=BacklinkProblem.CHANGED;return null}
+        return MapNetworkOpenRequest.captureExpanded(query,origin,localAnchor.row,target.row,issuer) {
             current() && generation==actionGeneration &&
-                listOf(anchor.row,target.row).all {row->row.membership?.let {
+                listOf(localAnchor.row,target.row).all {row->row.membership?.let {
                     it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)
                 }!=false}
         }

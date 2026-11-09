@@ -197,7 +197,23 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             NetworkStoredGraph(graph.candidate,graph.graphId,graph.value.orEmpty(),graph.keys,graph.problem)
         },result.issues,result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
     }
-    private suspend fun <T> scanProjected(live:List<MapDocumentObservation>,
+    /** One actual observation per graph, with separate direct/deeper evidence allowances. */
+    suspend fun scanExpandedNetwork(focusId:String,expanded:Set<String>,live:List<MapDocumentObservation> = emptyList(),
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(read=budget)):NetworkLibraryScan {
+        val files=expanded.toSet();var direct=0;var deeper=0
+        val result=scanProjected(live,continueAfterProjectionLimit=true) {doc,location,origin,conflict,blocked,active->
+            val found=projectExpandedNetworkWithin(doc,focusId,files,location,origin,conflict,blocked,null,
+                (networkBudget.evidenceLimit-direct).coerceAtLeast(0),(networkBudget.evidenceLimit-deeper).coerceAtLeast(0),active)
+            for(concept in found.concepts) {
+                if(concept.members.any {it.target.documentId==focusId}) direct+=concept.members.size else deeper+=concept.members.size
+            }
+            Projection(found.concepts,found.limited)
+        }
+        return NetworkLibraryScan(result.candidates,result.graphs.map {graph->
+            NetworkStoredGraph(graph.candidate,graph.graphId,graph.value.orEmpty(),graph.keys,graph.problem)
+        },result.issues,result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
+    }
+    private suspend fun <T> scanProjected(live:List<MapDocumentObservation>,continueAfterProjectionLimit:Boolean=false,
         projector:(MindMapDocument,BacklinkLocation,BacklinkOrigin,Boolean,BacklinkProblem?,()->Unit)->Projection<T>):LibraryScan<T> = withContext(Dispatchers.IO) {
         candidates.clear();issues.clear();reservedRoots.clear();reservedIds.clear()
         omitted=0;directories=0;entries=0;bytes=0;rows=0;limited=false;exhausted=false;projectionLimited=false
@@ -264,7 +280,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             if(exhausted) break
             try {
                 val graph=read(candidate,active,projector);graphs+=graph
-                if(graph.limited) {issue(BacklinkProblem.LIMIT);break}
+                if(graph.limited) {issue(BacklinkProblem.LIMIT);if(!continueAfterProjectionLimit) break}
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:BacklinkLimit) {limited=true;issue(BacklinkProblem.LIMIT);break}
             catch(error:Exception) {
@@ -338,6 +354,39 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             count+=members.size
         }
         return NetworkProjection(concepts,false)
+    }
+    internal fun projectExpandedNetwork(doc:MindMapDocument,focusId:String,expanded:Set<String>,location:BacklinkLocation,
+        origin:BacklinkOrigin,conflict:Boolean,blocked:BacklinkProblem?=null,
+        membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?=null,
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(),checkActive:()->Unit={}):NetworkProjection =
+        projectExpandedNetworkWithin(doc,focusId,expanded,location,origin,conflict,blocked,membership,
+            networkBudget.evidenceLimit,networkBudget.evidenceLimit,checkActive)
+
+    private fun projectExpandedNetworkWithin(doc:MindMapDocument,focusId:String,expanded:Set<String>,location:BacklinkLocation,
+        origin:BacklinkOrigin,conflict:Boolean,blocked:BacklinkProblem?,
+        membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?,maxDirect:Int,maxDeeper:Int,
+        checkActive:()->Unit):NetworkProjection {
+        val concepts=mutableListOf<NetworkConceptProjection>();var direct=0;var deeper=0;var hitLimit=false
+        val owned=doc.id in expanded
+        for(node in doc.nodes) {
+            checkActive()
+            if(node.sources.isEmpty()) continue
+            var isDirect=false;var reachable=owned
+            for(source in node.sources) {
+                checkActive()
+                if(source.documentId==focusId) {isDirect=true;reachable=true}
+                else if(source.documentId in expanded) reachable=true
+            }
+            if(!reachable) continue
+            val left=if(isDirect) maxDirect-direct else maxDeeper-deeper
+            // A saturated deeper layer never stops the remaining nodes/graphs from finding the original focus.
+            if(node.sources.size>left) {hitLimit=true;continue}
+            val members=node.sources.map {source->checkActive();projectMember(node,source,location,origin,conflict,blocked,membership)}
+            concepts+=NetworkConceptProjection(NetworkConceptKey(location.key,location.graphId,node.id),location,
+                members.first().nodeTitle,node.kind,members)
+            if(isDirect) direct+=members.size else deeper+=members.size
+        }
+        return NetworkProjection(concepts,hitLimit)
     }
     private fun projectMember(node:MapNode,source:MapSource,location:BacklinkLocation,origin:BacklinkOrigin,
         conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?):MapBacklinkRow {

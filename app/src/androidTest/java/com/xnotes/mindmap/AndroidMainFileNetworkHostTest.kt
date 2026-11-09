@@ -62,12 +62,15 @@ class AndroidMainFileNetworkHostTest {
         waitUntil(label) {target=nodes().filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable);target!=null}
         assertTrue(target!!.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
-    private fun clickScrolled(label:String) {
+    private fun clickScrolled(label:String,backwards:Boolean=false) {
         repeat(35) {
             runner.waitForIdleSync()
             val target=nodes().filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable)
             if(target!=null) {assertTrue(target.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();return}
-            assertTrue("Dialog action remains reachable: $label",scroll());Thread.sleep(30)
+            val moved=if(!backwards) scroll() else nodes().filter {it.isVisibleToUser && it.isScrollable}.maxByOrNull {
+                AndroidRect().also(it::getBoundsInScreen).height()
+            }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)==true
+            assertTrue("Dialog action remains reachable: $label",moved);Thread.sleep(30)
         }
         fail("No visible dialog action: $label")
     }
@@ -112,11 +115,21 @@ class AndroidMainFileNetworkHostTest {
         val target=File(targetFolder,"Network target T.xnote").apply {createNewFile()}
         val map=File(AppStorageDocumentsProvider.rootDir(base),"network-main-${UUID.randomUUID()}.xmap")
         val mapUri=DocumentsContract.buildDocumentUriUsingTree(AppStorageDocumentsProvider.treeUri(base),"root/${map.name}")
-        val s=seed(source);val t=seed(target);assertNotEquals(s.identity.documentId,t.identity.documentId)
+        val nextSource=File(targetFolder,"Network next U.xnote").apply {createNewFile()}
+        val nextMap=File(AppStorageDocumentsProvider.rootDir(base),"network-next-${UUID.randomUUID()}.xmap")
+        val nextMapUri=DocumentsContract.buildDocumentUriUsingTree(AppStorageDocumentsProvider.treeUri(base),"root/${nextMap.name}")
+        val s=seed(source);val t=seed(target);val u=seed(nextSource);assertNotEquals(s.identity.documentId,t.identity.documentId)
         val anchor=MapSource(documentId=s.identity.documentId,fileName=source.name,scope=SourceScope.PAGE,
             pageId=s.pages[0].referenceIdentity.id,lastKnownPage=1,note="The original S membership")
         val coSource=MapSource(documentId=t.identity.documentId,fileName=target.name,scope=SourceScope.PAGE,
             pageId=t.pages[1].referenceIdentity.id,lastKnownPage=2,note="Actual co-source T permanent second page")
+        val nextT=coSource.copy(id=UUID.randomUUID().toString(),note="The next-layer T anchor")
+        val nextU=MapSource(documentId=u.identity.documentId,fileName=nextSource.name,scope=SourceScope.PAGE,
+            pageId=u.pages[1].referenceIdentity.id,lastKnownPage=2,note="Actual next-layer U second page")
+        val nextDocument=MindMapDocument(nodes=listOf(MapNode(id="root",parent=null,text="Next-layer owner"),
+            MapNode(id="next",parent="root",text="A next-layer concept without S",sources=listOf(nextT,nextU))))
+        nextMap.writeBytes(MapCodec.encode(nextDocument))
+        val nextSourceBytes=nextSource.readBytes();val nextMapBytes=nextMap.readBytes()
         val laterSources=listOf(anchor.copy(id=UUID.randomUUID().toString(),note="Added concept S membership"),
             coSource.copy(id=UUID.randomUUID().toString(),note="Added concept T membership"))
         val labels=LocalNetworkLabels(base.getString(R.string.network_file),base.getString(R.string.network_concept),base.getString(R.string.map_ink_node),
@@ -142,7 +155,7 @@ class AndroidMainFileNetworkHostTest {
         map.writeBytes(MapCodec.encode(original))
         val sourceBytes=source.readBytes();val targetBytes=target.readBytes()
         var activity:MainActivity?=null;var native:Editor?=null;var maps:MapWorkspace?=null;var networks:FileNetworkWorkspace?=null
-        val ownedIds=setOf(s.identity.documentId,t.identity.documentId)
+        val ownedIds=setOf(s.identity.documentId,t.identity.documentId,u.identity.documentId)
         try {
             val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             activity=host
@@ -165,6 +178,8 @@ class AndroidMainFileNetworkHostTest {
                     assertEquals(t.identity.documentId,actualT.header.identity!!.documentId)
                     assertEquals(coSource.pageId,actualT.orderedPageIds[1])
                     storage.registry.registerObserved(actualT.header,"xnote",target.name,Uri.fromFile(target).toString())
+                    storage.registry.registerObserved(BundleReferenceInfo.inspectStrict(nextSource).header,"xnote",nextSource.name,Uri.fromFile(nextSource).toString())
+                    storage.registry.registerMapObserved(nextDocument.id,nextMap.name,nextMapUri.toString())
                 }
                 withContext(Dispatchers.Main) {assertTrue(editor.openSingleFromHome(Uri.fromFile(source).toString(),source.name));editor.sidebarVisible=true}
             }}
@@ -339,10 +354,55 @@ class AndroidMainFileNetworkHostTest {
                 assertEquals("Unshown LOADING must not clear the builder's incrementally established positions",stablePositions,positions(graph(host)!!.document))}
             waitUntil("returned explanation remains reachable") {visible(coSource.note)}
             assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
+            // D2b: select the real T file, control one expansion, and inspect U from a concept with no S membership.
+            val directScene=main {graph(host)!!.document};val directViewport=main {graph(host)!!.viewport()}
+            val directCenter=main {center(graph(host)!!)}
+            val directPositions=positions(directScene)
+            clickScrolled(target.name)
+            waitUntil("the actual file-list action selects T") {main {entry.presentation.selectedNode==NetworkSceneNodeKey.File(t.identity.documentId)}}
+            clickScrolled(host.getString(R.string.network_expand_file),backwards=true)
+            waitUntil("T's real next-layer graph has complete T and U evidence") {main {
+                !entry.controller.loading && !entry.controller.filtering && entry.controller.report?.concepts?.any {
+                    it.location.graphId==nextDocument.id && it.members.map {e->e.fileId}.toSet()==setOf(t.identity.documentId,u.identity.documentId)
+                }==true
+            }}
+            val nextKey=NetworkConceptKey(MapSaves.key(nextMapUri),nextDocument.id,"next")
+            val nextBounds=main {val view=graph(host)!!
+                assertEquals(directViewport,view.viewport())
+                directPositions.forEach {(id,point)->assertEquals(point,positions(view.document).getValue(id))}
+                view.document.node(view.document.nodes.single {node->node.text.contains("A next-layer concept without S")}.id).bounds
+            }
+            clickScrolled(host.getString(R.string.network_collapse_file),backwards=true)
+            waitUntil("collapsing T removes only its deeper concept") {main {!entry.controller.loading &&
+                entry.controller.report?.concepts?.none {it.key==nextKey}==true}}
+            clickScrolled(host.getString(R.string.network_expand_file),backwards=true)
+            waitUntil("re-expanding restores the deeper concept") {main {!entry.controller.loading &&
+                entry.controller.report?.concepts?.any {it.key==nextKey}==true}}
+            main {
+                assertEquals(nextBounds,graph(host)!!.document.nodes.single {it.text.contains("A next-layer concept without S")}.bounds)
+                assertEquals(directViewport,graph(host)!!.viewport());assertEquals(NetworkSceneNodeKey.File(t.identity.documentId),entry.presentation.selectedNode)
+            }
+            clickScrolled("A next-layer concept without S")
+            waitUntil("next-layer U source is reachable") {visible(nextU.note)}
+            openSourceRow(nextU.note,host.getString(R.string.network_open_reference))
+            waitUntil("the actual next-layer graph opens its exact U source") {main {graphWorkspace.visible &&
+                graphWorkspace.current?.let {it.session.document?.id==nextDocument.id && it.presentation.sourceFocus?.sourceId==nextU.id}==true}}
+            openSourceRow(nextU.note,host.getString(R.string.open))
+            waitUntil("U's actual permanent second page opens") {main {!graphWorkspace.visible && editor.noteOpen &&
+                editor.state.document.identity.documentId==u.identity.documentId && editor.currentPage?.referenceIdentity?.id==nextU.pageId}}
+            click(host.getString(R.string.graph_return_map))
+            waitUntil("return to the actual next-layer graph") {main {graphWorkspace.visible && graphWorkspace.current?.session?.document?.id==nextDocument.id}}
+            click(host.getString(R.string.network_return))
+            waitUntil("same original S network after next-layer source navigation") {main {networkWorkspace.visible &&
+                networkWorkspace.current===entry && entry.presentation.cameraReady && entry.presentation.selectedNode==NetworkSceneNodeKey.Concept(nextKey)}}
+            main {assertEquals(s.identity.documentId,entry.query.focusId);assertEquals(directViewport.zoom,graph(host)!!.viewport().zoom,0.00001f)
+                assertEquals(directCenter.x,center(graph(host)!!).x,.02);assertEquals(directCenter.y,center(graph(host)!!).y,.02)}
+            assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
+            assertArrayEquals(nextSourceBytes,nextSource.readBytes());assertArrayEquals(nextMapBytes,nextMap.readBytes())
         } finally {
             // Only this test's pure network, graph URI and two freshly-created native identities may be closed.
             networks?.let {main {it.dispose()}}
-            maps?.let {workspace->join(main {workspace.current?.takeIf {MapSaves.key(it.uri)==MapSaves.key(mapUri)}?.let(workspace::close)})}
+            maps?.let {workspace->join(main {workspace.current?.takeIf {MapSaves.key(it.uri) in setOf(MapSaves.key(mapUri),MapSaves.key(nextMapUri))}?.let(workspace::close)})}
             native?.let {editor->
                 main {val panes=editor.openPanes;if(panes.all {it.visibleDocumentId in ownedIds})
                     editor.goHomeAll(panes.map {it.documentOwner.discardForOpen()}.toSet())}
@@ -350,7 +410,7 @@ class AndroidMainFileNetworkHostTest {
                 assertNotNull(runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {editor.awaitHostParking()}}})
             }
             activity?.let {main {it.finish()};runner.waitForIdleSync()}
-            source.delete();target.delete();targetFolder.delete();map.delete()
+            source.delete();target.delete();nextSource.delete();targetFolder.delete();map.delete();nextMap.delete()
         }
     }
 }

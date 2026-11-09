@@ -230,4 +230,14 @@
     <string name="network_filter_reset">Clear all conditions</string>
     <string name="network_filter_draft_changed">The filter changed. Close and reopen this dialog to edit it.</string>
     <string name="network_filter_empty">No concepts match the current filter.</string>
+    <string name="network_direct_only">Only direct relationships</string>
+    <string name="network_expand_file">Expand direct relationships</string>
+    <string name="network_collapse_file">Collapse this expansion</string>
+    <string name="network_expansion_root">Direct relationships of the center file stay visible.</string>
+    <string name="network_expansion_context">Kept as context for the path to a matching concept.</string>
+    <string name="network_origin_source">Reached through a source in %1$s · level %2$d</string>
+    <string name="network_origin_owner">Reached through concepts belonging to %1$s · level %2$d</string>
+    <string name="network_expansion_path">Last known path</string>
+    <string name="network_expansion_path_step">%1$s · %2$s → source %3$s</string>
+    <string name="network_files">Files</string>
 </resources>

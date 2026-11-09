@@ -24,7 +24,8 @@ internal data class LocalNetworkScene(val document:MindMapDocument,val nodes:Map
     val edges:Map<String,NetworkSceneEdgeKey>)
 
 /** A flat, read-only adapter for the existing painter. This object never enters a document actor. */
-internal class LocalNetworkSceneBuilder {
+internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
+    init {require(maxPositions in 1..16384)}
     private val positions=linkedMapOf<NetworkSceneNodeKey,Pt>()
     private fun encode(vararg values:String)=values.joinToString("") {"${it.length}:$it"}
     private fun nodeId(key:NetworkSceneNodeKey)=hash(when(key) {
@@ -42,7 +43,16 @@ internal class LocalNetworkSceneBuilder {
         val keys=report.files.map {NetworkSceneNodeKey.File(it.documentId)}+
             report.concepts.map {NetworkSceneNodeKey.Concept(it.key)}
         require(keys.distinct().size==keys.size)
-        positions.keys.retainAll(keys.toSet())
+        require(keys.size<=maxPositions)
+        val visible=keys.toSet()
+        // Access order is explicit: surviving visible cards stay, and the oldest hidden keys
+        // are the only eviction candidates. Hidden positions continue reserving their slots.
+        for(key in keys) positions.remove(key)?.let {positions[key]=it}
+        val missing=keys.count {it !in positions}
+        while(positions.size+missing>maxPositions) {
+            val oldest=positions.keys.firstOrNull {it !in visible} ?: break
+            positions.remove(oldest)
+        }
         fun column(key:NetworkSceneNodeKey)=when(key) {
             is NetworkSceneNodeKey.Concept->-1
             is NetworkSceneNodeKey.File->when(key.documentId) {report.focusDocumentId->0;in ownerIds->-2;else->1}
