@@ -61,3 +61,10 @@ val MindMapPenSliderWidth = 160.dp
 
 /** Last source image shown within the graph's existing scrollable source dialog. */
 val MindMapSourcePreviewHeight = 144.dp
+
+/** Temporary, paper-contrast navigation outline; it never becomes document content. */
+object ReferenceLocatorStyle {
+    const val DurationMillis = 1800L
+    val StrokeWidth = 2.dp
+    val Inset = Space.s4
+}

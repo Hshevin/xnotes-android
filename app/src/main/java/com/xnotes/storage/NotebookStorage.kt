@@ -260,6 +260,33 @@ class NotebookStorage internal constructor(private val context:Context,
             throw error
         }
     }
+    /** Reference opening never enters ensure/migrate or rewrites an embedded PDF container. */
+    internal fun prepareReferenceOpen(uri:String,name:String?,target:NativeReferenceTarget,noteCodec:com.xnotes.format.DocumentCodec,
+        canvasCodec:com.xnotes.format.CanvasCodec,pdfDir:File,assetRoot:File,timing:com.xnotes.format.DocumentCodec.ReadTiming?,
+        checkActive:()->Unit):PreparedNativeOpen {
+        val source=synchronized(lock) {
+            val held=openSource(uri,com.xnotes.core.util.DocumentKind.NOTE,checkActive)
+            try {verifyReferenceSource(uri,name,target,held,checkActive);held}
+            catch(error:Throwable) {try {held.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
+        }
+        var prepared:PreparedNativeOpen?=null
+        try {
+            source.use {prepared=PreparedNativeOpen.read(it,pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,timing,checkActive)}
+            return requireNotNull(prepared)
+        } catch(error:Throwable) {
+            try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
+            throw error
+        }
+    }
+    internal fun verifyReferenceSource(uri:String,name:String?,target:NativeReferenceTarget,source:NativeSourceSnapshot,
+                                      checkActive:()->Unit) = synchronized(lock) {
+        checkActive();target.verify(source.referenceCatalog())
+        val observedName=name?.takeIf {it.isNotBlank()} ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()}
+            ?: com.xnotes.core.util.DocumentKind.withSuffix(context.getString(com.xnotes.R.string.untitled),com.xnotes.core.util.DocumentKind.NOTE)
+        registry.registerObserved(BundleHeader.read(source.file) {checkActive();false},"xnote",observedName,uri)
+        if(registry.locations(target.documentId).size!=1) throw NativeReferenceFailure(NativeReferenceIssue.DUPLICATE)
+        checkActive()
+    }
     private fun inspect(file:File,checkActive:()->Unit={}):com.xnotes.format.BundleReferenceInfo = try {
         com.xnotes.format.BundleReferenceInfo.inspect(file,validatePayload=true) {checkActive();false}
     } catch(error:Exception) {
