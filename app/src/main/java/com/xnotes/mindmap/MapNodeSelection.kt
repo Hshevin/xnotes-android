@@ -8,6 +8,7 @@ internal class MapNodeSelectionCapture(
     internal val epoch:Long=0L,
     internal val revision:Long=0L,
     internal val selectionRevision:Long=0L,
+    internal val visibilityRevision:Long=0L,
 ) {
     val ids:Set<String> = ids.toSet()
 }

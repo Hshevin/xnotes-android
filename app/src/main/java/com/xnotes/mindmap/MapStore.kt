@@ -4,6 +4,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.FilterInputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
@@ -13,48 +14,79 @@ interface MapTarget {
     fun write(bytes: ByteArray)
 }
 class MapConflict : IOException()
+internal class MapRecoveryObservationException(message:String,cause:Throwable?=null):IOException(message,cause)
 
 /** Caller serializes operations. A durable private journal precedes every external write. */
 class MapStore(directory: File, key: String, private val target: MapTarget, legacyKeys:Set<String> = emptySet()) {
-    private val journals=(listOf(key)+legacyKeys).distinct().map {File(directory,hash(it.toByteArray())+".json")}
+    internal val recoveryKeys:Set<String> = java.util.Collections.unmodifiableSet(linkedSetOf(key).apply {addAll(legacyKeys)})
+    private val journals=recoveryKeys.map {File(directory,hash(it.toByteArray())+".json")}
     private var journal=journals.first()
     private var expectedHash: String? = null
     @Volatile var journalReady = false; private set
     data class Opened(val document: MindMapDocument, val recovered: Boolean = false, val conflict: Boolean = false)
+    data class Observed(val document:MindMapDocument,val recovered:Boolean,val conflict:Boolean,val remoteAvailable:Boolean,
+        val remoteBytes:Long,val journalBytes:Long)
+    private data class Inspection(val opened:Opened,val chosen:File,val expected:String?,val ready:Boolean,
+        val checkpoint:Boolean=false,val remoteAvailable:Boolean,val remoteBytes:Long,val journalBytes:Long)
 
     fun open(): Opened {
-        if(journals.any {staging(it).exists()}) throw IOException("Unfinished recovery checkpoint")
+        val read=inspect({})
+        journal=read.chosen;expectedHash=read.expected
+        if(read.ready) journalReady=true
+        if(read.checkpoint) checkpoint(read.opened.document,pending=false)
+        return read.opened
+    }
+    /** Indexing sees the same recovery winner without changing a writer's baseline or either file. */
+    fun observe(checkActive:()->Unit={},readJournalBytes:(Int)->Unit={}):Observed {
+        val read=inspect(checkActive,readJournalBytes)
+        return Observed(read.opened.document,read.opened.recovered,read.opened.conflict,read.remoteAvailable,read.remoteBytes,read.journalBytes)
+    }
+    /** A live editor must not claim to have inspected a newly discovered alias journal. */
+    internal fun recoveryOutside(covered:Set<String>):Boolean = recoveryKeys.zip(journals).any {(key,file)->
+        key !in covered && (file.exists() || staging(file).exists())
+    }
+    private fun inspect(checkActive:()->Unit,readJournalBytes:(Int)->Unit={}):Inspection {
+        checkActive()
+        if(journals.any {staging(it).exists()}) throw MapRecoveryObservationException("Unfinished recovery checkpoint")
         val existing=journals.filter {it.exists()}
-        if(existing.size>1) throw IOException("Conflicting recovery journals")
-        journal=existing.singleOrNull() ?: journals.first()
-        val remote = runCatching { target.read() }.getOrNull()
+        if(existing.size>1) throw MapRecoveryObservationException("Conflicting recovery journals")
+        val chosen=existing.singleOrNull() ?: journals.first()
+        val remote=try {target.read()} catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {checkActive();null}
+        checkActive()
         val remoteHash = remote?.let(::hash)
+        var journalBytes=0L
         // A corrupt journal is retained; do not mask an otherwise readable original or overwrite it.
-        val saved = if (journal.exists()) runCatching {
-            val j = journal.inputStream().use { JSONObject(String(MapCodec.readBytes(it), Charsets.UTF_8)) }
+        val saved = if (chosen.exists()) runCatching {
+            val bytes=chosen.inputStream().use {input->MapCodec.readBytes(object:FilterInputStream(input) {
+                override fun read():Int {checkActive();return super.read().also {if(it>=0) readJournalBytes(1)}}
+                override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length).also {if(it>0) readJournalBytes(it)}}
+            })};journalBytes=bytes.size.toLong();checkActive()
+            val j = JSONObject(String(bytes, Charsets.UTF_8))
             val doc = MapCodec.fromJson(j.getJSONObject("document"))
+            checkActive()
             Triple(doc, j.getString("baseHash"), j.getBoolean("pending"))
-        }.getOrElse { throw IOException("Invalid recovery journal", it) } else null
+        }.getOrElse {
+            if(it is java.util.concurrent.CancellationException) throw it
+            checkActive();throw MapRecoveryObservationException("Invalid recovery journal",it)
+        } else null
+        fun result(opened:Opened,expected:String?,ready:Boolean,checkpoint:Boolean=false)=Inspection(opened,chosen,expected,ready,
+            checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes)
         if (saved != null && saved.third) {
-            expectedHash = saved.second
-            journalReady = true
             val contentHash = hash(MapCodec.encode(saved.first))
+            checkActive()
             if (contentHash == remoteHash) {
-                expectedHash = remoteHash
-                checkpoint(saved.first, pending = false)
-                return Opened(saved.first)
+                return result(Opened(saved.first),remoteHash,true,true)
             }
-            return Opened(saved.first, recovered = true, conflict = remoteHash != saved.second)
+            return result(Opened(saved.first,recovered=true,conflict=remoteHash!=saved.second),saved.second,true)
         }
         val decoded = remote?.let { runCatching { MapCodec.decode(it) }.getOrNull() }
+        checkActive()
         if (decoded == null && saved != null) {
-            expectedHash = saved.second
-            journalReady = true
-            return Opened(saved.first, recovered = true, conflict = true)
+            return result(Opened(saved.first,recovered=true,conflict=true),saved.second,true)
         }
         val doc = decoded ?: throw IOException("Unreadable mind map")
-        expectedHash = remoteHash
-        return Opened(doc)
+        return result(Opened(doc),remoteHash,false)
     }
 
     /** A new copy may claim only a readable, empty destination without any earlier recovery work. */

@@ -151,7 +151,10 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
     DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
     SideEffect {editor.sync(snapshot)}
     fun dismiss() {if(alive.get()) {alive.set(false);editor.close();close()}}
-    AlertDialog(onDismissRequest=::dismiss,title={Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)},text={
+    AlertDialog(onDismissRequest=::dismiss,title={Column {
+        if(node.text.isNotBlank()) Text(node.text.take(256),fontSize=TextSize.heading)
+        Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
+    }},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
             item { Text(stringResource(R.string.graph_sources_notice),fontSize=TextSize.body) }
             item {
@@ -212,7 +215,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
 
 /** Only validated immutable PNG assets enter Android's decoder; late unpublished bitmaps are ours. */
 @Composable
-private fun SourcePreviewImage(asset:MapPreviewAsset?) {
+internal fun SourcePreviewImage(asset:MapPreviewAsset?) {
     val image by produceState<ImageBitmap?>(null,asset?.key) {
         value=null
         if(asset!=null) {

@@ -44,10 +44,11 @@ object MapFiles {
         }
     }
     /** Also discovers the raw URI journal written by older versions; never guesses unknown aliases. */
-    internal fun store(context:Context,uri:Uri,target:MapTarget=target(context,uri),checkActive:()->Unit={}):MapStore {
+    internal fun store(context:Context,uri:Uri,target:MapTarget=target(context,uri),checkActive:()->Unit={},knownAliases:Set<String> = emptySet()):MapStore {
         checkActive()
         val key=MapSaves.key(uri)
         val aliases=linkedSetOf(uri.toString(),key)
+        knownAliases.filterTo(aliases) {alias->runCatching {MapSaves.key(Uri.parse(alias))==key}.getOrDefault(false)}
         runCatching {android.provider.DocumentsContract.buildDocumentUri(requireNotNull(uri.authority),
             android.provider.DocumentsContract.getDocumentId(uri)).toString()}.getOrNull()?.let(aliases::add)
         if(uri.scheme=="content") {

@@ -22,6 +22,7 @@ internal class MapNodeSelectionGesture(
     private val pan:(Float,Float)->Unit,
     private val aborted:()->Unit,
     private val redraw:()->Unit,
+    private val visible:(MindMapDocument)->List<MapNode> = {it.visible()},
 ) {
     private data class Press(val doc:MindMapDocument,val original:Set<String>,val id:String?,val pointer:Int,val pen:Boolean,
         val x:Float,val y:Float,val origin:Pt,val scale:Double,val capture:MapNodeSelectionCapture,var moved:Boolean=false)
@@ -44,7 +45,7 @@ internal class MapNodeSelectionGesture(
     private fun begin(e:MotionEvent,i:Int) {
         cancel();cancelDetectors();pinching=false;focus=null
         val doc=document();val at=point(e.getX(i),e.getY(i))
-        val id=doc.visible().lastOrNull {it.bounds.contains(at)}?.id
+        val id=visible(doc).lastOrNull {it.bounds.contains(at)}?.id
         val original=selection().toSet();val ids=if(id==null) emptySet() else if(id in original) original else setOf(id)
         val token=capture(doc,ids,original) ?: return
         press=Press(doc,original,id,e.getPointerId(i),pen(e,i),e.getX(i),e.getY(i),at,scale(),token)
@@ -56,7 +57,7 @@ internal class MapNodeSelectionGesture(
         if(!p.moved) return
         if(p.id==null) {
             marquee=Rect.fromPoints(p.origin,position(p,x,y))
-            previewSelection=p.doc.visible().filter {it.bounds.intersects(requireNotNull(marquee))}.mapTo(linkedSetOf()) {it.id}
+            previewSelection=visible(p.doc).filter {it.bounds.intersects(requireNotNull(marquee))}.mapTo(linkedSetOf()) {it.id}
         } else {
             preview=runCatching {p.doc.translateNodes(p.capture.ids,(x-p.x)/p.scale,(y-p.y)/p.scale)}.getOrNull()
             previewSelection=p.capture.ids

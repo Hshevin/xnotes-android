@@ -53,6 +53,7 @@ class MapSession() : ViewModel() {
     private data class SourceLife(val nodeId:String,val target:MapSourceTarget,val token:Any=Any())
     private val sourceLifetimes=mutableMapOf<String,SourceLife>()
     private val nodeLifetimes=mutableMapOf<String,Any>()
+    private val appliedBacklinkRemovals=java.util.Collections.newSetFromMap(java.util.WeakHashMap<MapBacklinkRemovalTicket,Boolean>())
     private var previewController:MapSourcePreviewController?=null
     internal val sourcePreviews:MapSourcePreviewController get()=previewController ?:
         MapSourcePreviewController(this,app,viewModelScope).also {previewController=it}
@@ -67,6 +68,11 @@ class MapSession() : ViewModel() {
             if(previous==null || previous.nodeId!=node.id || previous.target!=source.target) sourceLifetimes[source.id]=SourceLife(node.id,source.target)
         }}
         sourceLifetimes.keys.retainAll(present)
+        appliedBacklinkRemovals.removeAll {ticket->
+            (ticket.sourceId in present || nodeLifetimes[ticket.nodeId]!==ticket.nodeLifetime || ticket.source.epoch!=connectedEpoch).also {
+                if(it) ticket.applied=false
+            }
+        }
         previewController?.documentChanged()
     }
     internal fun captureSourcePreview(nodeId:String,sourceId:String):MapSourcePreviewTicket? {
@@ -102,13 +108,92 @@ class MapSession() : ViewModel() {
     internal fun restoreSourceReturn(bookmark:MapSourceReturnBookmark):Boolean {
         if(!canRestoreSourceReturn(bookmark)) return false
         val doc=document ?: return false
-        val visible=doc.visible().mapTo(hashSetOf()) {it.id}
+        val visible=effectiveVisible().mapTo(hashSetOf()) {it.id}
         if(!setNodeSelectionMode(bookmark.nodeSelectionMode)) return false
         if(bookmark.nodeSelectionMode) return selectNodes(bookmark.selectedNodes.intersect(visible))
         val relation=bookmark.selectedRelation
         if(relation!=null && selectRelation(relation)) return true
         selected=bookmark.selectedNodes.singleOrNull()?.takeIf {it in visible}
         return true
+    }
+    internal fun captureBacklinkFocus(graphId:String,nodeId:String,sourceId:String,target:MapSourceTarget,
+        membership:MapBacklinkMembership?=null):MapBacklinkFocusTicket? {
+        if(document?.id!=graphId || !selectionReady()) return null
+        if(membership!=null && !membership.current(this,graphId,nodeId,sourceId,target)) return null
+        val source=captureSourceNavigation(nodeId,sourceId,target) ?: return null
+        return MapBacklinkFocusTicket(source,membership)
+    }
+    internal fun backlinkFocusCurrent(ticket:MapBacklinkFocusTicket,requireReady:Boolean=true):Boolean {
+        val source=ticket.source ?: return (!requireReady || selectionReady()) && backlinkRemovalAppliedCurrent(requireNotNull(ticket.removal))
+        return (!requireReady || selectionReady()) && currentSourceNavigation(source)!=null &&
+            (ticket.membership?.current(this,source.documentId,source.nodeId,source.sourceId,source.target)!=false)
+    }
+    internal fun applyBacklinkFocus(ticket:MapBacklinkFocusTicket):Boolean {
+        if(!backlinkFocusCurrent(ticket)) return false
+        if(!setNodeSelectionMode(false)) return false
+        setNavigationReveal(ticket.nodeId)
+        selected=ticket.nodeId
+        return true
+    }
+    internal fun captureBacklinkRemoval(graphId:String,nodeId:String,sourceId:String,target:MapSourceTarget,
+        membership:MapBacklinkMembership?=null):MapBacklinkRemovalTicket? {
+        if(document?.id!=graphId || membership?.current(this,graphId,nodeId,sourceId,target)==false) return null
+        val source=captureSourcePreview(nodeId,sourceId)?.takeIf {it.target==target} ?: return null
+        return MapBacklinkRemovalTicket(this,graphId,source,membership,nodeLifetimes[nodeId] ?: return null)
+    }
+    internal fun backlinkRemovalCurrent(ticket:MapBacklinkRemovalTicket):Boolean =
+        ticket.issuer===this && ticket.documentId==document?.id && currentSourcePreview(ticket.source)!=null &&
+            ticket.membership?.current(this,ticket.documentId,ticket.nodeId,ticket.sourceId,ticket.target)!=false
+    internal fun removeBacklinkSource(ticket:MapBacklinkRemovalTicket):MapBacklinkRemovalResult {
+        if(!backlinkRemovalCurrent(ticket)) return MapBacklinkRemovalResult.Changed
+        if(inkContact) return MapBacklinkRemovalResult.Busy
+        val doc=document ?: return MapBacklinkRemovalResult.Changed
+        val next=doc.update(ticket.nodeId) {node->node.copy(sources=node.sources.filterNot {it.id==ticket.sourceId},
+            primarySource=node.primarySource.takeUnless {it==ticket.sourceId})}
+        return if(commit(next)) {ticket.applied=true;appliedBacklinkRemovals.add(ticket);MapBacklinkRemovalResult.Applied}
+            else MapBacklinkRemovalResult.Invalid
+    }
+    internal fun backlinkRemovalAppliedCurrent(ticket:MapBacklinkRemovalTicket):Boolean =
+        ticket.applied && ticket in appliedBacklinkRemovals && ticket.issuer===this && ticket.documentId==document?.id && ticket.source.epoch==connectedEpoch &&
+            !closing && !replacingDocument && nodeLifetimes[ticket.nodeId]===ticket.nodeLifetime &&
+            document?.nodes?.firstOrNull {it.id==ticket.nodeId}?.sources?.none {it.id==ticket.sourceId}==true
+    internal fun captureRemovedBacklinkFocus(ticket:MapBacklinkRemovalTicket):MapBacklinkFocusTicket? =
+        if(backlinkRemovalAppliedCurrent(ticket) && selectionReady()) MapBacklinkFocusTicket(null,removal=ticket) else null
+
+    /** Navigation unfolds the existing geometry, without changing the stored document or history. */
+    internal var navigationRevealTarget by mutableStateOf<String?>(null);private set
+    internal var navigationExpandedAncestors by mutableStateOf<Set<String>>(emptySet());private set
+    internal var visibilityRevision by mutableStateOf(0L);private set
+    internal fun effectiveVisible():List<MapNode> = document?.visible(navigationExpandedAncestors).orEmpty()
+    internal fun isEffectivelyCollapsed(id:String):Boolean = document?.nodes?.firstOrNull {it.id==id}?.collapsed==true &&
+        id !in navigationExpandedAncestors
+    private fun setNavigationReveal(target:String?) {
+        val before=navigationRevealTarget
+        navigationRevealTarget=target
+        if(!reconcileNavigationReveal() && before!=navigationRevealTarget) visibilityRevision++
+    }
+    private fun reconcileNavigationReveal():Boolean {
+        val byId=document?.nodes.orEmpty().associateBy {it.id}
+        val target=navigationRevealTarget?.takeIf {it in byId}
+        val ancestors=linkedSetOf<String>()
+        var parent=target?.let {byId[it]?.parent}
+        while(parent!=null && ancestors.add(parent)) parent=byId[parent]?.parent
+        val changed=navigationRevealTarget!=target || navigationExpandedAncestors!=ancestors
+        navigationRevealTarget=target
+        if(changed) {navigationExpandedAncestors=ancestors;visibilityRevision++}
+        return changed
+    }
+    internal fun toggleCollapse(id:String):Boolean {
+        if(!selectionReady()) return false
+        val node=document?.nodes?.firstOrNull {it.id==id} ?: return false
+        if(document?.children(id).isNullOrEmpty()) return false
+        val priorTarget=navigationRevealTarget
+        if(node.collapsed && id in navigationExpandedAncestors) {setNavigationReveal(id);return true}
+        if(!node.collapsed && id in navigationExpandedAncestors) setNavigationReveal(id)
+        val accepted=try {operate {MapLayout.arrange(it.update(id) {n->n.copy(collapsed=!n.collapsed)})}}
+            catch(_:IllegalArgumentException) {limitError=true;false}
+        if(!accepted) setNavigationReveal(priorTarget)
+        return accepted
     }
     /** Prepare every history frame off Main; retry a changed history with the same rendered values. */
     internal suspend fun mergeSourceDerived(patches:List<MapSourceDerivedPatch>,current:(MapSourceDerivedPatch)->Boolean):Boolean {
@@ -198,6 +283,8 @@ class MapSession() : ViewModel() {
         connectedImport?.cancel();connectedImport=null;connectedImportId=null;connectedSourceRequest=null;connectedDraft=null
     }
     private fun retireConnectedDraft() {
+        setNavigationReveal(null)
+        appliedBacklinkRemovals.forEach {it.applied=false};appliedBacklinkRemovals.clear()
         previewController?.retireAll();sourceLifetimes.clear();nodeLifetimes.clear()
         sourcePickerInstance?.retire()
         selectedRelation=null
@@ -312,6 +399,7 @@ class MapSession() : ViewModel() {
     var selectedNodes by mutableStateOf<Set<String>>(emptySet());private set
     var nodeSelectionMode by mutableStateOf(false);private set
     private var selectionRevision=0L
+    internal val selectionSerial:Long get()=selectionRevision
     internal val contentRevision:Long get()=revision
     var selected:String?
         get()=selectedNodes.singleOrNull()
@@ -330,7 +418,8 @@ class MapSession() : ViewModel() {
     }
     fun selectNodes(ids:Set<String>):Boolean {
         if(!selectionReady() || !nodeSelectionMode && ids.size>1) return false
-        val visible=document?.visible()?.mapTo(hashSetOf()) {it.id} ?: return false
+        if(document==null) return false
+        val visible=effectiveVisible().mapTo(hashSetOf()) {it.id}
         if(!visible.containsAll(ids)) return false
         replaceNodeSelection(ids);selectedRelation=null
         return true
@@ -339,13 +428,13 @@ class MapSession() : ViewModel() {
         accepts(capture) && selectNodes(ids)
     internal fun captureNodes(expected:MindMapDocument,ids:Set<String>,expectedSelection:Set<String> = selectedNodes):MapNodeSelectionCapture? {
         if(!selectionReady() || expected!==document || expectedSelection!=selectedNodes) return null
-        val visible=expected.visible().mapTo(hashSetOf()) {it.id}
+        val visible=expected.visible(navigationExpandedAncestors).mapTo(hashSetOf()) {it.id}
         if(!visible.containsAll(ids)) return null
-        return MapNodeSelectionCapture(expected,ids,this,connectedEpoch,revision,selectionRevision)
+        return MapNodeSelectionCapture(expected,ids,this,connectedEpoch,revision,selectionRevision,visibilityRevision)
     }
     private fun accepts(capture:MapNodeSelectionCapture):Boolean = selectionReady() &&
         capture.owner===this && capture.document===document && capture.epoch==connectedEpoch &&
-        capture.revision==revision && capture.selectionRevision==selectionRevision
+        capture.revision==revision && capture.selectionRevision==selectionRevision && capture.visibilityRevision==visibilityRevision
     internal fun moveNodes(capture:MapNodeSelectionCapture,dx:Double,dy:Double):Boolean {
         if(!accepts(capture)) return false
         return operate {it.translateNodes(capture.ids,dx,dy)}.also {if(it) selectNodes(capture.ids)}
@@ -363,7 +452,7 @@ class MapSession() : ViewModel() {
         if(closing || replacingDocument || inkContact || textDraft!=null || textRestore!=null) return false
         if(id==null) {selectedRelation=null;return true}
         val doc=document ?: return false
-        val visible=doc.visible().mapTo(hashSetOf()) {it.id}
+        val visible=effectiveVisible().mapTo(hashSetOf()) {it.id}
         if(doc.relations.none {it.id==id && it.from in visible && it.to in visible}) return false
         nodeSelectionMode=false;selectionRevision++
         replaceNodeSelection(emptySet());selectedRelation=id
@@ -388,27 +477,34 @@ class MapSession() : ViewModel() {
     private lateinit var store: MapStore
     private lateinit var app: Context
     private lateinit var lock: Mutex
+    private lateinit var storedUri:Uri
+    internal var recoveryKeys by mutableStateOf<Set<String>>(emptySet());private set
+    internal var discoveryFailed by mutableStateOf(false);private set
     @Volatile private var revision = 0L
     @Volatile private var durableRevision = -1L
     private var debounce: Job? = null
+    internal fun cancelPendingAutosave() {debounce?.cancel();debounce=null}
     private var saveTail:Deferred<MapSaveOutcome>?=null
     private var acceptedSaves=0
     internal val hasUnconfirmedContent get()=inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null
     val recoverySafe get() = ::store.isInitialized && store.journalReady && durableRevision == revision
 
-    fun open(context: Context, uri: Uri) {
+    fun open(context: Context, uri: Uri, knownAliases:Set<String> = emptySet()) {
         if (opened) return
-        opened = true; app = context.applicationContext
+        opened = true; app = context.applicationContext;storedUri=uri
         lock = MapSaves.lockFor(uri)
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { lock.withLock { runCatching {
-                store=MapFiles.store(app,uri,target(uri));store.open()
+                store=MapFiles.store(app,uri,target(uri),knownAliases=knownAliases);store.open()
             } } }
             result.onSuccess {
+                recoveryKeys=store.recoveryKeys
                 history = MapHistory(it.document); document = it.document; selected = it.document.root.id
+                reconcileNavigationReveal()
                 reconcileSourceLifetimes()
                 recovered = it.recovered; conflict = it.conflict; dirty = it.recovered
                 if (store.journalReady) durableRevision = revision
+                if(!it.recovered) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,uri,it.document.id)
             }.onFailure { loadFailed = true }
             loading = false
         }
@@ -446,9 +542,10 @@ class MapSession() : ViewModel() {
     private fun publish(h: MapHistory) {
         limitError=false
         document = h.document
+        reconcileNavigationReveal()
         reconcileSourceLifetimes()
         retireInvalidSourceRequests()
-        val visible=h.document.visible().mapTo(hashSetOf()) {it.id}
+        val visible=effectiveVisible().mapTo(hashSetOf()) {it.id}
         if(h.document.relations.none {it.id==selectedRelation && it.from in visible && it.to in visible}) selectedRelation=null
         if(selectedRelation!=null) replaceNodeSelection(emptySet())
         else if(nodeSelectionMode) replaceNodeSelection(selectedNodes.intersect(visible))
@@ -481,6 +578,7 @@ class MapSession() : ViewModel() {
                         if(store.journalReady) durableRevision=version
                     }
                 }} ?: return@async MapSaveOutcome.Changed(version)
+                if(result.isSuccess) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
                 val latest=history===expectedHistory && connectedEpoch==epoch && revision==version && !replacingDocument
                 result.fold({
                     if(latest) {dirty=false;saveFailed=false;recovered=false;conflict=false}
@@ -648,10 +746,12 @@ class MapSession() : ViewModel() {
                 // A new revision drops any save still queued for the discarded edits.
                 revision++
                 history = MapHistory(it.document); document = it.document; selected = it.document.root.id
+                reconcileNavigationReveal()
                 reconcileSourceLifetimes()
                 canUndo = false; canRedo = false
                 dirty = false; saveFailed = false; recovered = false; conflict = false; copySaved = false
                 sourceFailed=false
+                discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,it.document.id)
             }.onFailure { saveFailed = true }
             replacingDocument=false
             if(result.isFailure) reconcileSourceLifetimes()
@@ -666,7 +766,10 @@ class MapSession() : ViewModel() {
                 val result=try {MapFiles.create(app,uri,doc,targetOverride?.invoke(uri));Result.success(Unit)}
                     catch(error:java.util.concurrent.CancellationException) {throw error}
                     catch(error:Exception) {Result.failure(error)}
-                if (result.isSuccess) { copySaved = true; onComplete() } else saveFailed = true
+                if (result.isSuccess) {
+                    discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,uri,doc.id)
+                    copySaved = true; onComplete()
+                } else saveFailed = true
             } finally {saving=false}
         }
     }

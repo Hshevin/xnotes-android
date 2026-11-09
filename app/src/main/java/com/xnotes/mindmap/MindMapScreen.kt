@@ -139,7 +139,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 if(view===owned) view=null
             }
         }
-        LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token,presentationState.restoreVersion) {
+        LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token,presentationState.restoreVersion,
+            presentationState.pendingBacklinkFocus,session.selectedNodes,session.nodeSelectionMode,session.selectedRelation) {
             val graph=view ?: return@LaunchedEffect
             if(textDraft!=null || textRestore!=null) {
                 // Text transactions own their pre-edit camera and their existing restoration path.
@@ -152,6 +153,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 session.interactionEpoch!=graphEpoch || graph.document.id!=session.document?.id) return@LaunchedEffect
             if(!textOwnedCamera) presentationState.restore(session,graph)
             cameraReady=true
+            presentationState.applyPendingBacklinkFocus(session,graph,imeBottom,cameraReady)
             presentationState.capture(session,graph)
         }
         var preparedText by remember(view,textDraft?.token) {mutableStateOf(false)}
@@ -257,8 +259,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             enabled = !nodeMode && (node != null || relation!=null) && !session.closing) {
                             if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
                         }
-                        MapButton(if (node?.collapsed == true) R.string.map_expand else R.string.map_collapse, enabled = !nodeMode && node != null && doc.children(node.id).isNotEmpty()) {
-                            node?.let { session.operate { d -> MapLayout.arrange(d.update(it.id) { n -> n.copy(collapsed = !n.collapsed) }) } }
+                        MapButton(if (node?.let {session.isEffectivelyCollapsed(it.id)} == true) R.string.map_expand else R.string.map_collapse, enabled = !nodeMode && node != null && doc.children(node.id).isNotEmpty()) {
+                            node?.let {session.toggleCollapse(it.id)}
                         }
                         MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.root.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
@@ -309,6 +311,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             }
                             v.documentEpoch=graphEpoch
                             v.documentRevision=session.contentRevision;v.nodeSelectionMode=nodeMode
+                            v.expandedAncestors=session.navigationExpandedAncestors;v.visibilityRevision=session.visibilityRevision
+                            v.onGraphContact=presentationState::cancelPendingBacklinkFocus
                             v.document = proposed ?: doc; v.dark = dark
                             if(session.selectedRelation!=null) v.selectedRelation=session.selectedRelation else v.setSelectedNodes(session.selectedNodes)
                             v.onCaptureNodes=session::captureNodes;v.onMoveNodes=session::moveNodes;v.onSelectNodes={capture,ids->session.selectNodes(capture,ids)}
@@ -416,7 +420,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 title = { Text(stringResource(if (reparenting) R.string.map_change_parent else R.string.map_nodes), fontSize = TextSize.heading) },
                 text = {
                     androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = MindMapNodeListHeight)) {
-                        val nodes = doc?.visible().orEmpty().filter { it.id !in excluded }
+                        val nodes = session.effectiveVisible().filter { it.id !in excluded }
                         items(nodes.size, key = { nodes[it].id }) { index ->
                             val n = nodes[index]
                             TextButton(onClick = {

@@ -31,20 +31,20 @@ class MapPainter {
         val height=Space.s24.value.toDouble()
         return Rect(node.width-width/2,node.height-height/2,width,height)
     }
-    fun drawingBounds(doc:MindMapDocument):Rect {
-        val counts=doc.hiddenNodeCounts()
-        val nodes=doc.visible().map {node->
+    fun drawingBounds(doc:MindMapDocument,expanded:Set<String> = emptySet()):Rect {
+        val counts=doc.hiddenNodeCounts(expanded)
+        val nodes=doc.visible(expanded).map {node->
             val label=counts[node.id]?.let(collapsedLabel)
             if(label==null) node.bounds else {
                 val badge=badgeBounds(node,label)
                 node.bounds.union(Rect(node.x+badge.x,node.y+badge.y,badge.w,badge.h))
             }
         }.reduce {a,b->a.union(b)}
-        return relationGeometry(doc).mapNotNull {it.labelBounds}.fold(nodes) {bounds,label->bounds.union(label)}
+        return relationGeometry(doc,expanded).mapNotNull {it.labelBounds}.fold(nodes) {bounds,label->bounds.union(label)}
             .outset(Space.s32.value.toDouble())
     }
     /** Labels are LEFT aligned at the middle's x, with the same 80-character display and baseline. */
-    internal fun relationGeometry(doc:MindMapDocument)=MapRelationGeometry.visible(doc) {edge,anchor->
+    internal fun relationGeometry(doc:MindMapDocument,expanded:Set<String> = emptySet())=MapRelationGeometry.visible(doc,expanded) {edge,anchor->
         val label=edge.label.take(80)
         if(label.isEmpty()) null else text.fontMetrics.let {metrics->
             Rect(anchor.x,anchor.y+metrics.ascent,text.measureText(label).toDouble(),(metrics.descent-metrics.ascent).toDouble())
@@ -59,12 +59,13 @@ class MapPainter {
     }
     fun clear() { strokes.clear(); layouts.clear() }
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
-             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null,selectedNodes:Set<String> = emptySet()) {
+             connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null,selectedNodes:Set<String> = emptySet(),
+             expanded:Set<String> = emptySet()) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
-        val visible = doc.visible()
+        val visible = doc.visible(expanded)
         val byId = visible.associateBy { it.id }
-        val hiddenCounts=doc.hiddenNodeCounts()
+        val hiddenCounts=doc.hiddenNodeCounts(expanded)
         paint.color = fg; paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f
         connection?.let {(id,end)->byId[id]?.bounds?.center?.let {start->
             paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=2f
@@ -86,7 +87,7 @@ class MapPainter {
             canvas.drawPath(path, paint)
         }
         val edges=doc.relations.associateBy {it.id}
-        for (line in relationGeometry(doc)) {
+        for (line in relationGeometry(doc,expanded)) {
             val edge=edges.getValue(line.id)
             val start=line.start; val end=line.end
             paint.style=Paint.Style.STROKE;paint.color=fg

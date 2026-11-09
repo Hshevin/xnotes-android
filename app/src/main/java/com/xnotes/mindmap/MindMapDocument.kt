@@ -48,18 +48,18 @@ data class MindMapDocument(
         }
         return found
     }
-    fun visible(): List<MapNode> {
+    fun visible(expanded:Set<String> = emptySet()): List<MapNode> {
         val children = nodes.groupBy { it.parent }
         val visible = hashSetOf<String>()
         val todo = ArrayDeque<MapNode>().apply { nodes.filter { it.parent == null }.forEach { add(it) } }
         while (todo.isNotEmpty()) {
             val at = todo.removeFirst()
-            if (visible.add(at.id) && !at.collapsed) children[at.id].orEmpty().forEach { todo.add(it) }
+            if (visible.add(at.id) && (!at.collapsed || at.id in expanded)) children[at.id].orEmpty().forEach { todo.add(it) }
         }
         return nodes.filter { it.id in visible }
     }
     /** Derive subtree sizes once in linear time, including nested collapsed descendants. */
-    fun hiddenNodeCounts():Map<String,Int> {
+    fun hiddenNodeCounts(expanded:Set<String> = emptySet()):Map<String,Int> {
         val remaining=nodes.groupingBy {it.parent}.eachCount().toMutableMap()
         val sizes=nodes.associate {it.id to 1}.toMutableMap()
         val byId=nodes.associateBy {it.id}
@@ -70,8 +70,8 @@ data class MindMapDocument(
             val left=remaining.getValue(parent.id)-1;remaining[parent.id]=left
             if(left==0) leaves.add(parent)
         }
-        return visible().mapNotNull {node->
-            (sizes.getValue(node.id)-1).takeIf {node.collapsed && it>0}?.let {node.id to it}
+        return visible(expanded).mapNotNull {node->
+            (sizes.getValue(node.id)-1).takeIf {node.collapsed && node.id !in expanded && it>0}?.let {node.id to it}
         }.toMap()
     }
     fun add(parent: String, kind: NodeKind, text: String): Pair<MindMapDocument, String> {

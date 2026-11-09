@@ -7,7 +7,10 @@ import java.lang.ref.WeakReference
 
 /** Per-host, runtime presentation. This is neither document content nor a selection snapshot. */
 class MapPresentationState internal constructor() {
-    internal var visible by mutableStateOf(true)
+    private var shown by mutableStateOf(true)
+    internal var visible:Boolean
+        get()=shown
+        set(value) {if(!value) cancelPendingBacklinkFocus();shown=value}
     internal var sourcesFor by mutableStateOf<String?>(null)
     private var owner:MapSession?=null
     private var epoch=-1L
@@ -18,12 +21,15 @@ class MapPresentationState internal constructor() {
     private var protectedCamera=false
     internal var restoreVersion by mutableStateOf(0L);private set
     internal var sourceFocus by mutableStateOf<MapSourcePanelFocus?>(null);private set
+    internal var pendingBacklinkFocus by mutableStateOf<MapBacklinkFocusTicket?>(null);private set
+    private var pendingSelectionSerial=-1L
 
     internal fun synchronize(session:MapSession) {
         val id=session.document?.id
         if(owner!==session || epoch!=session.interactionEpoch || documentId!=id) {
             owner=session;epoch=session.interactionEpoch;documentId=id
             camera=null;restoredView.clear();sourcesFor=null;sourceFocus=null;protectedCamera=false
+            cancelPendingBacklinkFocus()
         } else if(sourcesFor!=null && session.document?.nodes?.none {it.id==sourcesFor}!=false) closeSources()
     }
     private fun current(session:MapSession,view:MindMapView)=owner===session && documentId!=null &&
@@ -56,6 +62,7 @@ class MapPresentationState internal constructor() {
         if(!cameraReady || !current(session,view) || !ordinary(session,imeBottom) || session.document?.nodes?.none {it.id==nodeId}!=false) return false
         if(!protectedCamera && !capture(session,view,imeBottom)) return false
         if(camera==null) return false
+        cancelPendingBacklinkFocus()
         sourcesFor=nodeId;sourceFocus=null;protectedCamera=true
         return true
     }
@@ -63,7 +70,32 @@ class MapPresentationState internal constructor() {
     private fun requestCameraRestore() {
         protectedCamera=camera!=null;restoredView.clear();restoreVersion=Math.incrementExact(restoreVersion)
     }
-    internal fun closeSources() {sourcesFor=null;sourceFocus=null;requestCameraRestore()}
+    internal fun closeSources() {cancelPendingBacklinkFocus();sourcesFor=null;sourceFocus=null;requestCameraRestore()}
+    internal fun requestBacklinkFocus(session:MapSession,ticket:MapBacklinkFocusTicket):Boolean {
+        synchronize(session)
+        if(!visible || !session.backlinkFocusCurrent(ticket) || session.selected!=ticket.nodeId || session.nodeSelectionMode) return false
+        pendingBacklinkFocus=ticket;pendingSelectionSerial=session.selectionSerial
+        sourcesFor=null;sourceFocus=null;protectedCamera=false
+        return true
+    }
+    internal fun cancelPendingBacklinkFocus() {pendingBacklinkFocus=null;pendingSelectionSerial=-1L}
+    /** Only the stable, visible host consumes this once; a fresh graph contact cancels it first. */
+    internal fun applyPendingBacklinkFocus(session:MapSession,view:MindMapView,imeBottom:Int=0,cameraReady:Boolean=true):Boolean {
+        val ticket=pendingBacklinkFocus ?: return false
+        if(!visible || !current(session,view)) {cancelPendingBacklinkFocus();return false}
+        if(!session.backlinkFocusCurrent(ticket,requireReady=false) || session.selectionSerial!=pendingSelectionSerial ||
+            session.selected!=ticket.nodeId || session.nodeSelectionMode) {cancelPendingBacklinkFocus();return false}
+        if(session.hasUnconfirmedContent) {cancelPendingBacklinkFocus();return false}
+        if(!cameraReady || !ordinary(session,imeBottom) || !session.backlinkFocusCurrent(ticket) || view.width<=0 || view.height<=0) return false
+        view.centerOn(ticket.nodeId)
+        if(!capture(session,view,imeBottom)) return false
+        cancelPendingBacklinkFocus()
+        if(ticket.opensSource) {
+            if(!showSources(session,view,ticket.nodeId,imeBottom,cameraReady)) return false
+            sourceFocus=MapSourcePanelFocus(requireNotNull(ticket.source))
+        }
+        return true
+    }
     private fun graphCurrent(session:MapSession)=owner===session && documentId!=null && documentId==session.document?.id && epoch==session.interactionEpoch
     internal fun reopenSourcePanel(session:MapSession,ticket:MapSourceNavigationTicket):Boolean {
         if(!graphCurrent(session) || ticket.issuer!==session || ticket.documentId!=documentId || ticket.source.epoch!=epoch) return false

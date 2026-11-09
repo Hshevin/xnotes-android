@@ -18,8 +18,8 @@ internal object MapRelationGeometry {
         val labelAnchor get() = Pt((start.x + end.x) / 2, (start.y + end.y) / 2 - Space.s8.value)
     }
 
-    fun visible(doc: MindMapDocument, labelBounds: (MapRelation, Pt) -> Rect? = { _, _ -> null }): List<Line> {
-        val nodes = doc.visible().associateBy { it.id }
+    fun visible(doc: MindMapDocument, expanded:Set<String> = emptySet(),labelBounds: (MapRelation, Pt) -> Rect? = { _, _ -> null }): List<Line> {
+        val nodes = doc.visible(expanded).associateBy { it.id }
         return doc.relations.mapNotNull { edge ->
             val from = nodes[edge.from] ?: return@mapNotNull null
             val to = nodes[edge.to] ?: return@mapNotNull null
