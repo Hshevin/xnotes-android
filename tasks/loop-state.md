@@ -1,9 +1,17 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；当前原PDF独立原文 verified，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-original-pdf/xnotes；分支 codex/mind-map-original-pdf；2026-11-10 用户明确要求在当前工作树基础上新建并继续，以 mind-map-region-continue 的实际 HEAD 579e5f54a25579ca8dfb5465f8a80e1a24c52272 创建。原树两份未提交的原PDF阶段计划逐字节校验后复制，原树保持原样。新树迁移清单 tmp/original-pdf-worktree-copy.json；新阶段构建与项目缓存分别独立为 /private/tmp/xnotes-mind-map-original-pdf-build、/private/tmp/xnotes-mind-map-original-pdf-cache。
+工作树：/Users/kita/.codex/worktrees/mind-map-original-network/xnotes；分支 codex/mind-map-original-network。2026-11-10 再次按用户明确要求，以原工作树 mind-map-original-pdf 的实际 HEAD 64fec4179beecbc838650f2b570ed36a9025ddc0 新建。迁移38个未提交文件，逐文件SHA-256及Git差异清单一致，原树保持原样；迁移记录 tmp/original-network-worktree-copy.json。旧阶段证据与本机SDK配置一并保留，新阶段独立构建与项目缓存为 /private/tmp/xnotes-mind-map-original-network-build、/private/tmp/xnotes-mind-map-original-network-cache。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
+
+## 当前阶段：原文文件网络整合（in_progress）
+
+本轮基线64fec417 clean。上一goal turn为progress：9982ac5b/cf276494/64fec417实现、验证并提交独立原文全流程；34437已终态，185有效相关case/Android源码compile/1158输入SHA一致，独审结案，不重跑未变验证。完整14组持续不缩减。
+
+只读核得：网络无filter原文可打开所属图再reader，但kind/folder facts只读native registry导致原文UNKNOWN；无filter又跳facts，catalog删除后旧CURRENT可能保留；未入图独立原文不在全库choices。新阶段要让metadata/type与availability分离、保全概念/PNG/具体证据、epoch START即退旧票且END重投影、目录明确原件库OUTSIDE；并闭合可选原文→关系画布canonical首页锚/v6/实际reader的互操作，不能造FILE+OriginalUUID坏卡。
+
+完整计划在docs/movinkpad/original-pdf-network-2026-11-10.md；计划独审完成，聚合输入预算／GC墓碑／实际no-fallback／接受发布续接／跨域epoch等Required已纳入。typed只读metadata、network默认状态／filter／orphan、canonical原文文件卡与UI已开始实现，正在补实际Host及存储回归；尚未编译或运行本阶段测试。迁移时全部作者暂停、无运行构建，已仅在新树恢复。预算默认支持单个最大合法原文200000页元数据、总量有界，不读/hash/engine/lease PDF、不发native写权限，坏资料与跨域同UUID拒歧义保pin。目录/状态/卡片/Main消费者纳真正端到端验收。运行状态tmp/original-pdf-network-runtime.json，整体active/complete=false。 新树首次接口编译11117终态0，51s，677个main/构建输入SHA全部相同；记录tmp/original-network-first-compile.log及inputs.json。仅证明当时生产接口可编译，随后异常路径／未来capability小修及行为测试仍待统一验证。
 
 ## 已验证阶段：原PDF独立原文（verified）
 
