@@ -8,4 +8,6 @@
     <string name="graph_region_copy_retained">副本尚未完整发布，恢复资料已保留。请继续同一副本，不要另建一份。</string>
     <string name="graph_region_continue_copy">继续此副本</string>
     <string name="graph_region_copy_written">副本已保存，但采用前当前画布已变化。已保存的副本保留；请重新打开它再创建引用。</string>
+    <string name="graph_region_single_page_required">请先结束编辑，再选择完整位于同一页内的区域。跨页或页间空隙不能作为区域引用。</string>
+    <string name="graph_page_region_context">此固定区域属于这份笔记中的该页；PDF 包含这份笔记已保存的批注。移动选中内容不会移动引用范围。</string>
 </resources>

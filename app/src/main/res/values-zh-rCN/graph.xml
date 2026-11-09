@@ -97,11 +97,11 @@
     <string name="graph_preview_backup_notice">预览不构成来源文件的备份。整份笔记与 PDF 的预览显示首页。</string>
     <string name="graph_reference_this_page">引用此页</string>
     <string name="graph_ref_preparing">正在准备已保存的来源…</string>
-    <string name="graph_ref_save_then_retry">请先保存笔记，然后在所需页面再次引用。</string>
-    <string name="graph_ref_save_copy_then_retry">请先将当前修改另存为独立副本，再从保存后的页面引用。原来源保持不变。</string>
-    <string name="graph_ref_enable_notice">此笔记尚未启用页面引用。启用会保存永久页编号；完成后请重新打开，并在所需页面再次引用。原有笔迹和 PDF 保留。</string>
-    <string name="graph_ref_reopened_retry">文件已重新打开，请在所需页面再次引用。</string>
-    <string name="graph_ref_reopen_notice">请先重新打开文件，再在所需页面发起引用，确保页面对应正确。重新打开失败会保留当前文档。</string>
+    <string name="graph_ref_save_then_retry">请先保存此笔记，再重新选择页面或区域，创建引用。</string>
+    <string name="graph_ref_save_copy_then_retry">请先将修改另存为独立副本，再重新选择页面或区域，创建引用。原来源保持不变。</string>
+    <string name="graph_ref_enable_notice">此笔记需要启用永久页编号。启用会保存编号，保留已有笔迹和 PDF 内容。之后请重新打开文件，再重新选择页面或区域，创建引用。</string>
+    <string name="graph_ref_reopened_retry">文件已重新打开。请重新选择页面或区域，创建引用。</string>
+    <string name="graph_ref_reopen_notice">请重新打开文件以可靠识别页面，再重新选择页面或区域。重新打开失败时，当前文档仍保持打开。</string>
     <string name="graph_ref_reopen">重新打开此笔记</string>
     <string name="graph_ref_destination_notice">将此引用添加到已有导图，或新建导图。当前阅读位置保持不变。</string>
     <string name="graph_ref_choose_map">选择已有导图</string>

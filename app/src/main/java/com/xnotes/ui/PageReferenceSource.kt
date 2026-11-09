@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageReferenceScope
@@ -15,11 +16,14 @@ internal class PageReferenceRequest private constructor(
     internal val model:Document,internal val page:Page,internal val documentId:String,
     internal val path:String?,internal val scope:PageReferenceScope?,internal val initialPageId:String?,
     internal val paneSession:LegacySessionQueue.Owner,internal val ownerSession:LegacySessionQueue.Owner,
+    val region:Rect?,internal val regionIdentity:com.xnotes.format.BundleIdentity?,internal val regionPath:String?,
+    internal val regionPdfPath:String?,
 ) : SourceCreationRequest {
     override val id:String=UUID.randomUUID().toString()
     override val hasSavedPath get()=model.path!=null
     override val dirty get()=model.dirty
-    override val titleRes get()=com.xnotes.R.string.graph_reference_this_page
+    override val titleRes get()=if(region!=null) com.xnotes.R.string.graph_reference_this_region else com.xnotes.R.string.graph_reference_this_page
+    override val contextNoticeRes get()=if(region!=null) com.xnotes.R.string.graph_page_region_context else null
     override fun current()=pane.pageReferenceCurrent(this)
     override suspend fun prepare()=pane.preparePageReference(this)
     override suspend fun enablePages(offer:MapSourceOffer)=pane.enablePageReference(this,offer)
@@ -33,9 +37,10 @@ internal class PageReferenceRequest private constructor(
     internal fun active()=!retired.get() && paneSession.isCurrent() && ownerSession.isCurrent()
     companion object {
         internal fun capture(issuer:Any,pane:Editor,owner:Editor,model:Document,page:Page,path:String?,
-                             paneSession:LegacySessionQueue.Owner,ownerSession:LegacySessionQueue.Owner)=
+                             paneSession:LegacySessionQueue.Owner,ownerSession:LegacySessionQueue.Owner,region:Rect?=null)=
             PageReferenceRequest(issuer,pane,owner,model,page,model.identity.documentId,path,
-                model.pageReferenceScope,page.referenceIdentity.id,paneSession,ownerSession)
+                model.pageReferenceScope,page.referenceIdentity.id,paneSession,ownerSession,region?.copy(),
+                model.identity.takeIf {region!=null},model.path,model.pdfFile?.path)
     }
 }
 

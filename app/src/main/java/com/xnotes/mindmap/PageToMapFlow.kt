@@ -87,6 +87,7 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
     CompositionLocalProvider(LocalInkBusy provides false) {
         AlertDialog(onDismissRequest=close,title={Text(stringResource(flow.request.titleRes),fontSize=TextSize.heading)},text={
             LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                flow.request.contextNoticeRes?.let {notice->item {Text(stringResource(notice),fontSize=TextSize.caption)}}
                 flow.source?.let {source->item {
                     Text(source.fileName,fontSize=TextSize.title)
                     Text(sourceScopeLabel(source),fontSize=TextSize.caption)

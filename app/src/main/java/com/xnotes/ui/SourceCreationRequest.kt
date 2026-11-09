@@ -9,6 +9,7 @@ internal interface SourceCreationRequest {
     val hasSavedPath:Boolean
     val dirty:Boolean
     val titleRes:Int
+    val contextNoticeRes:Int? get()=null
     val canSaveInPlace:Boolean get()=false
     val canSaveCopy:Boolean get()=false
     val pendingSaveCopy:com.xnotes.storage.NativeCreationPending? get()=null

@@ -97,11 +97,11 @@
     <string name="graph_preview_backup_notice">Previews do not back up source files. Whole-note and PDF previews show the first page.</string>
     <string name="graph_reference_this_page">Reference this page</string>
     <string name="graph_ref_preparing">Preparing the saved source…</string>
-    <string name="graph_ref_save_then_retry">Save this note first, then reference the desired page again.</string>
-    <string name="graph_ref_save_copy_then_retry">Save an independent copy of these changes, then reference the saved page again. The original source stays unchanged.</string>
-    <string name="graph_ref_enable_notice">This note needs page references enabled. Enabling saves permanent page IDs. Reopen the file afterwards, then reference the desired page again. Existing ink and PDF content are kept.</string>
-    <string name="graph_ref_reopened_retry">The file was reopened. Reference the desired page again.</string>
-    <string name="graph_ref_reopen_notice">Reopen the file to identify the page reliably, then reference the desired page again. The current document stays open if reopening fails.</string>
+    <string name="graph_ref_save_then_retry">Save this note first, then select the page or region again to create the reference.</string>
+    <string name="graph_ref_save_copy_then_retry">Save an independent copy of these changes, then select the page or region again to create the reference. The original source stays unchanged.</string>
+    <string name="graph_ref_enable_notice">This note needs permanent page IDs. Enabling saves them while keeping existing ink and PDF content. Reopen the file afterwards, then select the page or region again to create the reference.</string>
+    <string name="graph_ref_reopened_retry">The file was reopened. Select the page or region again to create the reference.</string>
+    <string name="graph_ref_reopen_notice">Reopen the file to identify the page reliably, then select the page or region again. The current document stays open if reopening fails.</string>
     <string name="graph_ref_reopen">Reopen this note</string>
     <string name="graph_ref_destination_notice">Add this reference to an existing map or create a map. Reading stays in this pane.</string>
     <string name="graph_ref_choose_map">Choose an existing map</string>

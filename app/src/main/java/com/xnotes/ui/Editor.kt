@@ -792,6 +792,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private class NativeOpenRequest {val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)}
     @Volatile private var nativeOpenRequest:NativeOpenRequest?=null
     private var noteEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
+    // Sticky for this actual model: an ordinary tolerant save cannot launder a dropped payload.
+    private var incompleteNoteModel=java.lang.ref.WeakReference<Document>(null)
     private var canvasEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
     private fun retireNoteEditSource() {
         referenceLocator.clear()
@@ -1145,13 +1147,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             doc.path?.let {notebookStorage.registry.locationKey(it)}!=version.locationKey) return
         noteSourceObservation=NoteSourceObservation(doc,revision,version,doc.identity,doc.hasReferenceAnchors,doc.pageReferenceScope)
     }
-    internal fun requestPageReference(page:Page):Boolean {
+    internal fun sourceSelectionRegion():com.xnotes.canvas.PageSourceRegion? =
+        if(noteOpen && !canvasOpen) controller.sourceSelectionRegion() else null
+    internal fun sourceCaptureRegion():com.xnotes.canvas.PageSourceRegion? =
+        if(noteOpen && !canvasOpen) controller.sourceCaptureRegion() else null
+    internal fun requestPageRegionReference(target:com.xnotes.canvas.PageSourceRegion):Boolean {
+        fun rejected():Boolean {message=appContext.getString(R.string.graph_region_single_page_required);return false}
+        val region=target.region;val doc=state.document
+        if(!target.current() || target.document!==doc || doc.pages.count {it===target.page}!=1 || region.w<=0 || region.h<=0 ||
+            listOf(region.x,region.y,region.w,region.h,region.right,region.bottom).any {!it.isFinite()} ||
+            listOf(region.x,region.y,region.w,region.h).any {kotlin.math.abs(it)>com.xnotes.mindmap.MindMapDocument.MAX_COORD}) return rejected()
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root.openPanes.any {pane->pane.hostTouching || pane.stylusInContact ||
+            (if(pane.canvasOpen) pane.infiniteOrNull?.hasPendingContentTransaction==true
+                else pane.controller.hasPendingContentTransaction || pane.tablePreviews.values.any {pane.currentTablePreview(it) && it.table.snapshot()!=it.before})})
+            return rejected()
+        return if(capturePageReference(target.page,region)) true else rejected()
+    }
+    internal fun requestPageReference(page:Page):Boolean = capturePageReference(page,null)
+    private fun capturePageReference(page:Page,region:Rect?):Boolean {
         val owner=documentOwner;val doc=state.document
         if(!noteOpen || canvasOpen || missingDocument!=null || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent() ||
-            owner.state.document!==doc || doc.pages.none {it===page}) return false
+            owner.state.document!==doc || doc.pages.count {it===page}!=1) return false
         pageReferenceRequest?.retire()
         pageReferenceRequest=PageReferenceRequest.capture(pageReferenceIssuer,this,owner,doc,page,
-            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner)
+            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner,region)
         return true
     }
     internal fun clearPageReference(request:PageReferenceRequest) {
@@ -1166,7 +1186,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.document===doc && owner.state.document===doc && doc.pages.any {it===request.page} &&
             doc.identity.documentId==request.documentId && doc.path?.let(::documentKey)==request.path &&
             (request.scope==null || doc.pageReferenceScope===request.scope) &&
-            (request.initialPageId==null || request.page.referenceIdentity.id==request.initialPageId)
+            (request.initialPageId==null || request.page.referenceIdentity.id==request.initialPageId) &&
+            (request.region==null || doc.pages.count {it===request.page}==1 && doc.identity==request.regionIdentity &&
+                doc.path==request.regionPath && doc.pdfFile?.path==request.regionPdfPath)
     }
     private fun retireInvalidPageReference() {
         pageReferenceRequest?.let {if(!pageReferenceCurrent(it)) clearPageReference(it)}
@@ -1247,6 +1269,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     internal suspend fun preparePageReference(request:PageReferenceRequest):PageReferencePreparation {
         if(!pageReferenceCurrent(request)) return PageReferencePreparation.Changed
+        if(request.region!=null && request.owner.incompleteNoteModel.get()===request.model) return PageReferencePreparation.Failed
         val uri=request.model.path ?: return PageReferencePreparation.SaveRequired
         request.owner.pageReferenceProtection=PageReferenceProtection(request.model,notebookStorage.registry.locationKey(uri))
         request.owner.beginPageReferenceSave()
@@ -1273,7 +1296,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     val index=pages.orderedIds.indexOf(id)
                     if(index<0 || !request.model.hasReferenceAnchors) return PageReferencePreparation.ReopenRequired
                     PageReferencePreparation.Ready(offer.fileSource.copy(id=request.sourceId,scope=com.xnotes.mindmap.SourceScope.PAGE,
-                        pageId=id,lastKnownPage=index+1).also {it.validate()})
+                        pageId=id,lastKnownPage=index+1,region=request.region).also {it.validate()})
                 }
                 com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.NotPaginated -> PageReferencePreparation.Failed
             }
@@ -4600,6 +4623,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun sharedLayoutSnapshot() = state.document.pages.map { Triple(it, state.footprint(it), it.pdfTurn) }
 
     private fun refreshContent(notifySharedView: Boolean = true) {
+        controller.sourceRegionsChanged()
         retireInvalidPageReference();sharedPeer()?.retireInvalidPageReference()
         contentTransactionChanged()
         republishFlowIfStale()
@@ -4992,6 +5016,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             val model=owner?.takeUnless {it.canvasOpen}?.state?.document
             val canvas=owner?.takeIf {it.canvasOpen}?.infiniteOrNull?.document
+            if(region!=null && kind==DocumentKind.NOTE && model!=null && owner?.incompleteNoteModel?.get()===model)
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
             if(owner!=null && (if(kind==DocumentKind.CANVAS) canvas==null else model==null))
                 return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             // A retained source keeps its original strict edit source; this navigation never saves it.
@@ -5159,7 +5185,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     if(!nativeOpenCurrent(request) || reference?.reference?.ioCurrent()==false) throw java.util.concurrent.CancellationException("Open request expired")
                 }
                 val prepared=if(reference==null) notebookStorage.prepareOpen(uri,kind,codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
-                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,kind=reference.reference.kind,checkActive=checkActive)
+                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,kind=reference.reference.kind,
+                        requireCompleteNote=reference.reference.kind==DocumentKind.NOTE && reference.reference.region!=null,checkActive=checkActive)
                 // The outer holder owns the result even if withContext's return dispatch is cancelled.
                 owned.set(prepared)
                 prepared.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
@@ -5193,7 +5220,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         try {
                             refreshed=com.xnotes.storage.PreparedNativeOpen.read(source,notebookStorage.pdfResources,
                                 codec,canvasCodec,pdfDir,imageDir,timing,
-                                requireCompleteCanvas=reference?.reference?.kind==DocumentKind.CANVAS,checkActive=checkActive)
+                                requireCompleteCanvas=reference?.reference?.kind==DocumentKind.CANVAS,
+                                requireCompleteNote=reference?.reference?.let {it.kind==DocumentKind.NOTE && it.region!=null}==true,checkActive=checkActive)
                             refreshed.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             refreshed.canvas?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             checkActive();refreshed.protectForAdoption();checkActive()
@@ -5238,7 +5266,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             } else {
                 val doc=requireNotNull(prepared.note)
                 try {replaceDocument(doc)} finally {
-                    if(state.document===doc) {prepared.adopt(doc);noteEditSource=prepared.editSource();observePublishedNote(doc,prepared.version);adopted=true;adoptedModel=doc}
+                    if(state.document===doc) {
+                        prepared.adopt(doc);noteEditSource=prepared.editSource()
+                        incompleteNoteModel=java.lang.ref.WeakReference<Document>(doc.takeUnless {prepared.completeNoteOrigin(it)})
+                        observePublishedNote(doc,prepared.version);adopted=true;adoptedModel=doc
+                    }
                 }
                 state.openFileBytes=prepared.byteSize;state.lastSaveBytes=prepared.byteSize
                 state.lastOpenInflateMs=timing.inflateMs;state.lastOpenParseMs=timing.parseMs

@@ -2395,14 +2395,19 @@ private fun EditorPane(
                                 com.xnotes.ui.TextEditorOverlay(editor, field)
                             }
                             floatingBar()
+                            val regionModel=editor.state.document
+                            val selectionSource=editor.selectionMenuRect?.let {editor.sourceSelectionRegion()}
+                            val captureSource=editor.screenshotMenu?.let {editor.sourceCaptureRegion()}
                             com.xnotes.ui.SelectionMenu(
                                 editor,
                                 onSaveAudio = { actions.onSaveAudio(editor, it) },
                                 onShareAudio = { actions.onShareAudio(editor, it) },
                                 onShareImage = actions.onShareImage,
+                                onReferenceSelection = {requestPagedRegionReference(editor,regionModel,selectionSource)},
                             )
                             com.xnotes.ui.CropOverlay(editor)
-                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage)
+                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage,
+                                onReferenceRegion = {requestPagedRegionReference(editor,regionModel,captureSource)})
                             com.xnotes.ui.TextStyleBar(editor)
                             com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
                             com.xnotes.ui.FlowEditMenu(editor)
@@ -2857,3 +2862,11 @@ private fun displayNameOf(resolver: android.content.ContentResolver, uri: Uri): 
         } else null
     }
 }.getOrNull()
+
+/** A rendered menu keeps its own model and fixed range; a late action cannot bind a new selection. */
+internal fun requestPagedRegionReference(editor:Editor,model:com.xnotes.core.model.Document,
+    target:com.xnotes.canvas.PageSourceRegion?):Boolean {
+    if(!editor.noteOpen || editor.canvasOpen || editor.state.document!==model) return false
+    if(target==null) {editor.message=editor.view.context.getString(R.string.graph_region_single_page_required);return false}
+    return editor.requestPageRegionReference(target)
+}

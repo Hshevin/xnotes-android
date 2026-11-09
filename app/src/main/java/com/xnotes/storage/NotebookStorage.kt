@@ -285,7 +285,8 @@ class NotebookStorage internal constructor(private val context:Context,
     /** Reference opening never enters ensure/migrate or rewrites an embedded PDF container. */
     internal fun prepareReferenceOpen(uri:String,name:String?,target:NativeReferenceTarget,noteCodec:com.xnotes.format.DocumentCodec,
         canvasCodec:com.xnotes.format.CanvasCodec,pdfDir:File,assetRoot:File,timing:com.xnotes.format.DocumentCodec.ReadTiming?,
-        kind:com.xnotes.core.util.DocumentKind=com.xnotes.core.util.DocumentKind.NOTE,checkActive:()->Unit):PreparedNativeOpen {
+        kind:com.xnotes.core.util.DocumentKind=com.xnotes.core.util.DocumentKind.NOTE,
+        requireCompleteNote:Boolean=false,checkActive:()->Unit):PreparedNativeOpen {
         val source=synchronized(lock) {
             val held=openSource(uri,kind,checkActive)
             try {verifyReferenceSource(uri,name,target,held,checkActive);held}
@@ -294,7 +295,8 @@ class NotebookStorage internal constructor(private val context:Context,
         var prepared:PreparedNativeOpen?=null
         try {
             source.use {prepared=PreparedNativeOpen.read(it,pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,timing,
-                requireCompleteCanvas=kind==com.xnotes.core.util.DocumentKind.CANVAS,checkActive=checkActive)}
+                requireCompleteCanvas=kind==com.xnotes.core.util.DocumentKind.CANVAS,
+                requireCompleteNote=requireCompleteNote,checkActive=checkActive)}
             return requireNotNull(prepared)
         } catch(error:Throwable) {
             try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
