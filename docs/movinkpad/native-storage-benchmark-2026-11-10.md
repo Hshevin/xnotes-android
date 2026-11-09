@@ -58,4 +58,4 @@ master 的实际 Editor 保存确认走原有 `writeNoteInPlace` manifest splice
 - [分支优化前原始 JSONL](benchmarks/native-storage-2026-11-10/branch-before.jsonl)。
 - [分支优化后原始 JSONL](benchmarks/native-storage-2026-11-10/branch-after.jsonl)。
 - [基线源码摘要](benchmarks/native-storage-2026-11-10/baseline-source-manifest.json)：master 固定为完整 `fdc1f0fe` 提交，优化前 native 管线主要六份源码与 `a571080c` 一致，包含实际逐文件匹配证明。
-- [优化后源码摘要](benchmarks/native-storage-2026-11-10/branch-after-source-manifest.json)：以 `3877c4bb180828d74ea935a2fb1079d075ebd84b` 加当时已冻结的源码覆盖构建；记录 hook 前后各文件 SHA、覆盖清单和配方 SHA。全部六份 hook 前摘要已与冻结工作树逐项一致，实际 `writeNoteSafely` 入口与优化前逐字符相同。最终 B1 提交需由主记录核对这些摘要后绑定。
+- [优化后源码摘要](benchmarks/native-storage-2026-11-10/branch-after-source-manifest.json)：以 `3877c4bb180828d74ea935a2fb1079d075ebd84b` 加当时已冻结的源码覆盖构建；记录 hook 前后各文件 SHA、覆盖清单和配方 SHA。全部六份 hook 前摘要已与冻结工作树逐项一致，实际 `writeNoteSafely` 入口与优化前逐字符相同。全部六份摘要已逐项与最终 B1 提交 `f87b4338` 的源码核对一致，绑定证明已写入同一 manifest。

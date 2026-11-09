@@ -37,5 +37,14 @@
   "editor_lock_wrappers": 1,
   "measured_editor_save_entrypoint_sha256": "18968c3dc413dd4e913a1270130b15966f904d38337241a6fd13762c66467e4b",
   "measured_editor_save_entrypoint_unchanged_from_before": true,
-  "pre_hook_pipeline_matches_frozen_worktree": true
+  "pre_hook_pipeline_matches_frozen_worktree": true,
+  "validated_against_final_b1_commit": "f87b4338b384792d270a1c402df2d0288b0a4b3b",
+  "pre_hook_pipeline_matches_final_b1_commit": {
+    "app/src/main/java/com/xnotes/storage/NotebookStorage.kt": true,
+    "app/src/main/java/com/xnotes/ui/Editor.kt": true,
+    "app/src/main/java/com/xnotes/storage/MigrationPublication.kt": true,
+    "app/src/main/java/com/xnotes/storage/OwnedRecoveryTarget.kt": true,
+    "app/src/main/java/com/xnotes/storage/NativeSourceVersion.kt": true,
+    "app/src/main/java/com/xnotes/format/BundleSnapshot.kt": true
+  }
 }

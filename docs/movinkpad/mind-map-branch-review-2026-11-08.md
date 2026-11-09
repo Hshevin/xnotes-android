@@ -68,3 +68,5 @@
 ## 未深入复核
 
 `format/` 下的锚点、清单与整包复制代码（约 1500 行），`WorkingSessionCache` / `NativeWorkingSession`，`PreparedNativeOpen`，以及 `DocumentCodec` 改动的逐行细节，只读到判断兼容性和保存路径所需的程度。修复 P1 时应一并复核。
+
+后续逐项修复与本地合并见 [2026-11-10 修复记录](mind-map-merge-fixes-2026-11-10.md)。
