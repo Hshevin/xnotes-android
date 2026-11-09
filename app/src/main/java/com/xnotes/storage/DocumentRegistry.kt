@@ -39,6 +39,7 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     }
     private class MutationFrame {
         val nativeIdentities=mutableSetOf<String>()
+        val structuralIdentities=mutableSetOf<String>()
         val notifications=mutableListOf<AutoCloseable>()
     }
     private val mutationFrame=ThreadLocal<MutationFrame?>()
@@ -71,13 +72,34 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         val frame=checkNotNull(mutationFrame.get())
         if(frame.nativeIdentities.add(id)) frame.notifications+=OriginalPdfNetworkEpoch.forDatabase(databaseName).begin()
     }
+    /** Pure-memory continuation check; capture before reading the actual identity structure. */
+    internal fun identityObservation(id:String):DocumentRegistryIdentityEpoch.Ticket {
+        require(UUID.fromString(id).toString()==id)
+        return DocumentRegistryIdentityEpoch.forDatabase(databaseName).observe(id)
+    }
+    private data class IdentityPosition(val id:String,val uri:String,val available:Int)
+    private fun identityPosition(db:SQLiteDatabase,key:String):IdentityPosition? = db.rawQuery(
+        "SELECT document_id,uri,available FROM locations WHERE location_key=?",arrayOf(key),
+    ).use {c->if(c.moveToFirst()) IdentityPosition(c.getString(0),c.getString(1),c.getInt(2)) else null}
+    private fun beginIdentityChanges(ids:Set<String>) {
+        val frame=checkNotNull(mutationFrame.get())
+        val fresh=ids.filterTo(linkedSetOf()) {frame.structuralIdentities.add(it)}
+        if(fresh.isNotEmpty()) frame.notifications+=DocumentRegistryIdentityEpoch.forDatabase(databaseName).begin(fresh)
+    }
     fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
         register(db,id,kind,name,uri,pageReferences)
     }
     private fun register(db:SQLiteDatabase,id:String,kind:String,name:String,uri:String,pageReferences:Boolean) {
         require(UUID.fromString(id).toString() == id)
+        val key=locationKey(uri)
+        val position=identityPosition(db,key)
+        val known=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
+        val pages=if(pageReferences) db.rawQuery("SELECT 1 FROM page_reference_contracts WHERE document_id=?",arrayOf(id)).use {it.moveToFirst()} else true
+        // Display-name refreshes and the same already-known URI do not retire valid readers.
+        if(!known || !pages || position==null || position.id!=id || position.uri!=uri || position.available!=1)
+            beginIdentityChanges(setOfNotNull(id,position?.id))
         observeNativeIdentityInsertion(db,id)
-        db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
+        db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(key,uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
@@ -184,13 +206,21 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     fun moved(old: String, new: String) = transaction { db ->
         val oldKey = locationKey(old)
         val newKey = locationKey(new)
+        val source=identityPosition(db,oldKey)
+        val destination=if(oldKey!=newKey) identityPosition(db,newKey) else null
         // Called only after a successful filesystem move. A reused destination may have a stale row.
-        if (idAt(old) != null && oldKey != newKey) {
+        if(source!=null && (oldKey!=newKey || source.uri!=new || source.available!=1))
+            beginIdentityChanges(setOfNotNull(source.id,destination?.id))
+        if (source != null && oldKey != newKey) {
             db.execSQL("DELETE FROM locations WHERE location_key=?", arrayOf(newKey))
         }
         db.execSQL("UPDATE locations SET uri=?,location_key=?,available=1 WHERE location_key=?", arrayOf(new,newKey,oldKey))
     }
-    fun markUnavailable(uri: String) { writableDatabase.execSQL("UPDATE locations SET available=0 WHERE location_key=?", arrayOf(locationKey(uri))) }
+    fun markUnavailable(uri: String) = transaction {db->
+        val key=locationKey(uri);val position=identityPosition(db,key)
+        if(position!=null && position.available!=0) beginIdentityChanges(setOf(position.id))
+        db.execSQL("UPDATE locations SET available=0 WHERE location_key=?",arrayOf(key))
+    }
     fun referenceIds(owner: String): Set<String> = readableDatabase.rawQuery("SELECT resource_id FROM resource_refs WHERE owner=?",arrayOf(owner)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun owners(prefix: String): Set<String> = readableDatabase.rawQuery("SELECT DISTINCT owner FROM resource_refs WHERE owner LIKE ?",arrayOf("$prefix%" )).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun knownLocations(): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations",null).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }

@@ -30,6 +30,12 @@ internal class MapDocumentLease internal constructor(private val entry:MapDocume
     val session:MapSession get()=entry.session
     var alive:Boolean=true;private set
     private var release:Job?=null
+    @get:MainThread internal val hasOtherOwners:Boolean get()=alive && entry.references>1
+    /** A failed source-open may protect its sole recovery actor, never another owner's autosave. */
+    @MainThread internal fun closeUnadoptedSource():Job {
+        release?.let {return it}
+        return close(preserveDirty=entry.references==1)
+    }
     @MainThread fun close(preserveDirty:Boolean=false):Job {
         if(preserveDirty) {entry.retainDirty=true;session.cancelPendingAutosave()}
         release?.let {return it}
@@ -72,7 +78,7 @@ internal object MapDocuments {
     internal class Entry(val key:String,val context:Context,val uri:Uri) {
         val store=ViewModelStore()
         val session=ViewModelProvider(store,ViewModelProvider.NewInstanceFactory())[MapSession::class.java]
-        var references=0
+        var references by mutableStateOf(0)
         var generation=0L
         var creating by mutableStateOf(false)
         var retired=false
