@@ -4801,12 +4801,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val context=kotlinx.coroutines.currentCoroutineContext()
                 val check={context.ensureActive();prepared.ensureOpen();checkActive()}
                 check();require(pageIndex in 0 until prepared.pageCount)
-                val side=maxSidePx.coerceIn(1,2048);val style=SnapshotPaint()
-                val bitmap=when(prepared.kind) {
-                    DocumentKind.NOTE->renderDocPage(requireNotNull(prepared.note),pageIndex,side,com.xnotes.canvas.PdfPageFilter.NONE,
-                        style=style,maxSidePx=side,strictPdf=true,checkActive=check)
-                    DocumentKind.CANVAS->renderCanvasThumbnail(requireNotNull(prepared.canvas),side,side,style,check)
-                    else->throw IllegalArgumentException("Unsupported recovery preview kind")
+                val side=maxSidePx.coerceIn(1,2048)
+                val bitmap=com.xnotes.platform.NativeDocumentPreview(appContext,textMeasurer,highlighter).use {painter->
+                    when(prepared.kind) {
+                        DocumentKind.NOTE->painter.note(requireNotNull(prepared.note),pageIndex,side,checkActive=check)
+                        DocumentKind.CANVAS->painter.canvas(requireNotNull(prepared.canvas),side,side,check)
+                        else->throw IllegalArgumentException("Unsupported recovery preview kind")
+                    }
                 }
                 owned.set(bitmap);check();bitmap
             }

@@ -9,7 +9,37 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
     private var expected=initial
     private var active=true
     var conflict by mutableStateOf(false);private set
-    fun close() {active=false}
+    val busySourceIds:Set<String> get()=session.sourcePreviews.busy(this)
+    val failedSourceIds:Set<String> get()=session.sourcePreviews.failures(this)
+    private fun alive()=active && session.sourceEditSnapshot(expected.node.id)?.let {
+        it.epoch==expected.epoch && it.documentId==expected.documentId
+    }==true
+    fun previewAsset(id:String):MapPreviewAsset? {
+        if(!alive()) return null
+        val source=session.document?.nodes?.firstOrNull {it.id==expected.node.id}?.sources?.firstOrNull {it.id==id} ?: return null
+        return source.lastPreview?.assetKey?.let {session.document?.previewAssets?.get(it)}
+    }
+    private fun request(id:String,mode:MapSourcePreviewMode,target:MapSourceTarget?=null):Boolean {
+        if(!alive()) return false
+        val ticket=session.captureSourcePreview(expected.node.id,id) ?: return false
+        if(target!=null && ticket.target!=target) return false
+        return session.sourcePreviews.request(this,listOf(ticket),mode,::alive)
+    }
+    fun showPreview(id:String,target:MapSourceTarget?=null)=request(id,MapSourcePreviewMode.AUTO,target)
+    fun check(id:String,target:MapSourceTarget?=null)=request(id,MapSourcePreviewMode.CHECK,target)
+    fun refresh(id:String,target:MapSourceTarget?=null)=request(id,MapSourcePreviewMode.REFRESH,target)
+    fun refreshGraph():Boolean {
+        if(!alive()) return false
+        val tickets=session.document?.nodes.orEmpty().flatMap {node->node.sources.mapNotNull {session.captureSourcePreview(node.id,it.id)}}
+        return session.sourcePreviews.request(this,tickets,MapSourcePreviewMode.REFRESH,::alive)
+    }
+    fun checkGraph():Boolean {
+        if(!alive()) return false
+        val tickets=session.document?.nodes.orEmpty().flatMap {node->node.sources.mapNotNull {session.captureSourcePreview(node.id,it.id)}}
+        return session.sourcePreviews.request(this,tickets,MapSourcePreviewMode.CHECK,::alive)
+    }
+    fun cancel() {session.sourcePreviews.cancel(this)}
+    fun close() {if(active) {active=false;cancel()}}
     fun sync(displayed:SourceEditSnapshot) {
         if(!active) return
         val actual=session.sourceEditSnapshot(expected.node.id) ?: return close()
@@ -19,7 +49,7 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
             displayed.node.primarySource==actual.node.primarySource) expected=actual
     }
     private fun apply(next:MapNode):Boolean {
-        if(!active) return false
+        if(!alive()) return false
         if(!session.editSources(expected,next)) {conflict=true;return false}
         session.sourceEditSnapshot(expected.node.id)?.let {expected=it} ?: close()
         conflict=false;return true

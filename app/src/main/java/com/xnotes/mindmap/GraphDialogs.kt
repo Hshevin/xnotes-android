@@ -1,10 +1,14 @@
 package com.xnotes.mindmap
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import com.xnotes.R
 import com.xnotes.ui.theme.*
@@ -137,11 +141,24 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
     AlertDialog(onDismissRequest=::dismiss,title={Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight)) {
             item { Text(stringResource(R.string.graph_sources_notice),fontSize=TextSize.body) }
+            item {
+                Text(stringResource(R.string.graph_preview_backup_notice),fontSize=TextSize.caption)
+                Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
+                    MapButton(R.string.graph_preview_check_all) {if(alive.get()) editor.checkGraph()}
+                    MapButton(R.string.graph_preview_refresh_all) {if(alive.get()) editor.refreshGraph()}
+                }
+                if(editor.busySourceIds.isNotEmpty()) MapButton(R.string.cancel) {if(alive.get()) editor.cancel()}
+            }
             if(editor.conflict) item {Text(stringResource(R.string.graph_sources_changed),fontSize=TextSize.body)}
             items(node.sources.size,key={node.sources[it].id}) { index ->
                 val s=node.sources[index]
+                LaunchedEffect(editor,s.id,s.target) {if(alive.get()) editor.showPreview(s.id,s.target)}
                 Text(s.fileName,fontSize=TextSize.title)
                 Text(sourceScopeLabel(s),fontSize=TextSize.caption)
+                SourcePreviewImage(editor.previewAsset(s.id))
+                if(s.lastPreview?.target?.let {it!=s.target}==true) Text(stringResource(R.string.graph_preview_old_target),fontSize=TextSize.caption)
+                if(s.id in editor.busySourceIds) Text(stringResource(R.string.graph_preview_working),fontSize=TextSize.caption)
+                if(s.id in editor.failedSourceIds) Text(stringResource(R.string.graph_preview_failed),fontSize=TextSize.caption)
                 Text(stringResource(when(s.status) {
                     SourceStatus.UNVERIFIED->R.string.graph_status_unverified
                     SourceStatus.CURRENT->R.string.graph_status_current
@@ -152,6 +169,10 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                     SourceStatus.EMPTY->R.string.graph_status_empty
                     SourceStatus.TRASHED->R.string.graph_status_trashed
                 }),fontSize=TextSize.caption)
+                Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
+                    MapButton(R.string.graph_preview_check,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.check(s.id,s.target)}
+                    MapButton(R.string.graph_preview_refresh,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.refresh(s.id,s.target)}
+                }
                 OutlinedTextField(s.note,{ note -> if(alive.get()) editor.note(s.id,note) },
                     label={Text(stringResource(R.string.graph_note),fontSize=TextSize.body)},textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.body))
                 Row {
@@ -168,6 +189,30 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
             }
         }
     },confirmButton={MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
+}
+
+/** Only validated immutable PNG assets enter Android's decoder; late unpublished bitmaps are ours. */
+@Composable
+private fun SourcePreviewImage(asset:MapPreviewAsset?) {
+    val image by produceState<ImageBitmap?>(null,asset?.key) {
+        value=null
+        if(asset!=null) {
+            val owned=java.util.concurrent.atomic.AtomicReference<android.graphics.Bitmap?>()
+            try {
+                val decoded=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val bytes=asset.pngBytes()
+                    requireNotNull(android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)).also(owned::set).asImageBitmap()
+                }
+                value=decoded;owned.set(null) // Compose owns the published image while a frame may use it.
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {value=null}
+            finally {owned.getAndSet(null)?.recycle()}
+        }
+    }
+    image?.let {
+        Image(it,stringResource(R.string.graph_preview_image),Modifier.fillMaxWidth().heightIn(max=MindMapSourcePreviewHeight),contentScale=ContentScale.Fit)
+        Text(stringResource(R.string.graph_preview_image),fontSize=TextSize.caption)
+    }
 }
 
 @Composable

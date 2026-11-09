@@ -32,6 +32,7 @@ data class MindMapDocument(
     val nodes: List<MapNode> = listOf(MapNode(parent = null)),
     val relations: List<MapRelation> = emptyList(),
     val direction: MapDirection = MapDirection.BOTH,
+    val previewAssets: Map<String, MapPreviewAsset> = emptyMap(),
 ) {
     val root get() = nodes.single { it.parent == null && !it.free }
     fun node(id: String) = nodes.first { it.id == id }
@@ -108,6 +109,11 @@ data class MindMapDocument(
         relations.forEach { require(it.id.isNotBlank() && it.id.length <= 128 && it.from in byId && it.to in byId && it.from != it.to && it.label.length <= 20_000) }
         val sources = nodes.flatMap { it.sources }
         require(sources.size <= 5000 && sources.map { it.id }.distinct().size == sources.size)
+        require(previewAssets.size <= MapPreviewAsset.MAX_ASSETS)
+        require(previewAssets.all { (key, asset) -> key == asset.key })
+        require(previewAssets.values.sumOf { it.byteSize.toLong() } <= MapPreviewAsset.MAX_TOTAL_BYTES)
+        require(previewAssets.values.sumOf { it.width.toLong() * it.height } <= MapPreviewAsset.MAX_TOTAL_PIXELS)
+        sources.forEach { source -> source.lastPreview?.let { require(it.assetKey in previewAssets) } }
         var pointCount = 0
         for (n in nodes) {
             require(!n.free || n.parent == null)
@@ -134,29 +140,15 @@ data class MindMapDocument(
             }
         }
     }
+    /** History frames own their asset maps; pruning a new frame never alters an older frame. */
+    fun prunePreviewAssets(): MindMapDocument {
+        val used = nodes.flatMap { it.sources }.mapNotNull { it.lastPreview?.assetKey }.toSet()
+        return copy(previewAssets = previewAssets.filterKeys { it in used })
+    }
     companion object {
         const val MAX_NODES = 1000
         const val MAX_DEPTH = 128
         const val MAX_POINTS = 250_000
         const val MAX_COORD = 1_000_000.0
     }
-}
-
-/** Selection and viewport never enter content history. Each accepted gesture is one snapshot. */
-class MapHistory(initial: MindMapDocument) {
-    var document = initial; private set
-    private val past = ArrayDeque<MindMapDocument>()
-    private val future = ArrayDeque<MindMapDocument>()
-    val canUndo get() = past.isNotEmpty()
-    val canRedo get() = future.isNotEmpty()
-    fun commit(next: MindMapDocument) {
-        if (next == document) return
-        next.validate()
-        past.addLast(document)
-        if (past.size > 80) past.removeFirst()
-        document = next
-        future.clear()
-    }
-    fun undo() { if (canUndo) { future.addLast(document); document = past.removeLast() } }
-    fun redo() { if (canRedo) { past.addLast(document); document = future.removeLast() } }
 }

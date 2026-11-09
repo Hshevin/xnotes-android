@@ -3,6 +3,9 @@ package com.xnotes.mindmap
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
+import java.io.DataOutputStream
+import java.security.DigestOutputStream
+import java.security.MessageDigest
 
 /** Independent, versioned .xmap format. Never decoded as a notebook bundle. */
 object MapCodec {
@@ -28,7 +31,10 @@ object MapCodec {
         return fromJson(JSONObject(String(bytes, Charsets.UTF_8)))
     }
     internal fun toJson(doc: MindMapDocument) = JSONObject()
-        .put("format", "xnotes-mind-map").put("version", 2).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+        .put("format", "xnotes-mind-map").put("version", 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+        .put("previewAssets",JSONArray().also {array->doc.prunePreviewAssets().previewAssets.values.forEach {asset->
+            array.put(JSONObject().put("key",asset.key).put("pngBase64",asset.pngBase64).put("width",asset.width).put("height",asset.height))
+        }})
         .put("nodes", JSONArray().also { array -> doc.nodes.forEach { n ->
             array.put(JSONObject().put("id", n.id).put("parent", n.parent ?: JSONObject.NULL)
                 .put("kind", n.kind.name).put("text", n.text).put("x", n.x).put("y", n.y)
@@ -44,7 +50,8 @@ object MapCodec {
 
     internal fun fromJson(j: JSONObject): MindMapDocument {
         require(j.string("format") == "xnotes-mind-map")
-        val version=j.number("version"); require(version == 1.0 || version == 2.0)
+        val version=j.number("version");val versionValue=j.get("version")
+        require(version==1.0 || version==2.0 || version==3.0 && (versionValue is Int || versionValue is Long))
         val array = j.getJSONArray("nodes")
         require(array.length() in 1..MindMapDocument.MAX_NODES)
         var count = 0
@@ -56,9 +63,9 @@ object MapCodec {
                 kind = NodeKind.valueOf(n.string("kind")), text = n.string("text"),
                 width = n.number("width"), height = n.number("height"), x = n.number("x"), y = n.number("y"),
                 collapsed = n.get("collapsed").let { require(it is Boolean); it },
-                free=if(version==2.0) MapGraphJson.bool(n,"free") else false,
-                sources=if(version==2.0) MapGraphJson.readSources(n) else emptyList(),
-                primarySource=if(version==2.0) MapGraphJson.nullable(n,"primarySource") else null,
+                free=if(version>=2.0) MapGraphJson.bool(n,"free") else false,
+                sources=if(version>=2.0) MapGraphJson.readSources(n,previews=version>=3.0) else emptyList(),
+                primarySource=if(version>=2.0) MapGraphJson.nullable(n,"primarySource") else null,
                 ink = (0 until ink.length()).map { k ->
                     val s = ink.getJSONObject(k)
                     val points = s.getJSONArray("points")
@@ -69,8 +76,57 @@ object MapCodec {
                     } }, s.number("width"))
                 })
         }
-        return MindMapDocument(j.string("id"), nodes, if(version==2.0) MapGraphJson.readRelations(j) else emptyList(), if(version==2.0) MapDirection.valueOf(j.string("direction")) else MapDirection.BOTH).also { it.validate() }
+        return MindMapDocument(j.string("id"), nodes, if(version>=2.0) MapGraphJson.readRelations(j) else emptyList(),
+            if(version>=2.0) MapDirection.valueOf(j.string("direction")) else MapDirection.BOTH,
+            if(version>=3.0) readAssets(j.getJSONArray("previewAssets")) else emptyMap()).also { it.validate() }
+    }
+    private fun readAssets(array:JSONArray):Map<String,MapPreviewAsset> {
+        require(array.length()<=MapPreviewAsset.MAX_ASSETS)
+        val assets=linkedMapOf<String,MapPreviewAsset>();var bytes=0L;var pixels=0L
+        for(i in 0 until array.length()) {
+            val j=array.getJSONObject(i);val key=j.string("key");val png=j.string("pngBase64")
+            val width=j.integer("width");val height=j.integer("height")
+            require(key !in assets && width in 1..MapPreviewAsset.MAX_SIDE && height in 1..MapPreviewAsset.MAX_SIDE)
+            require(png.length<=4*((MapPreviewAsset.MAX_BYTES+2)/3) && png.length%4==0)
+            bytes+=png.length.toLong()/4*3-png.takeLast(2).count {it=='='}
+            pixels+=width.toLong()*height
+            require(bytes<=MapPreviewAsset.MAX_TOTAL_BYTES && pixels<=MapPreviewAsset.MAX_TOTAL_PIXELS)
+            assets[key]=MapPreviewAsset.fromEncoded(key,png,width,height)
+        }
+        return assets
+    }
+    /** Cache identity for what the map renderer sees, never a source-write/conflict authority.
+     * Derived observations and retained PNGs are excluded so self/cyclic references converge.
+     * A typed ordered stream avoids platform-specific JSONObject ordering and large PNG JSONs.
+     */
+    fun semanticPreviewVersion(doc:MindMapDocument):String {
+        doc.validate()
+        val digest=MessageDigest.getInstance("SHA-256")
+        val sink=object:java.io.OutputStream() {
+            override fun write(b:Int) {}
+            override fun write(b:ByteArray,off:Int,len:Int) {}
+        }
+        val out=DataOutputStream(DigestOutputStream(sink,digest))
+        fun text(value:String) {val bytes=value.toByteArray(Charsets.UTF_8);out.writeInt(bytes.size);out.write(bytes)}
+        fun optional(value:String?) {out.writeBoolean(value!=null);if(value!=null) text(value)}
+        text("xmap-render-v1");text(doc.id);text(doc.direction.name);out.writeInt(doc.nodes.size)
+        doc.nodes.forEach {n->
+            text(n.id);optional(n.parent);text(n.kind.name);text(n.text)
+            out.writeDouble(n.width);out.writeDouble(n.height);out.writeDouble(n.x);out.writeDouble(n.y)
+            out.writeBoolean(n.collapsed);out.writeBoolean(n.free);optional(n.primarySource)
+            out.writeInt(n.ink.size);n.ink.forEach {s->out.writeDouble(s.width);out.writeInt(s.points.size);s.points.forEach {p->
+                out.writeDouble(p.x);out.writeDouble(p.y);out.writeDouble(p.pressure);out.writeDouble(p.time)
+            }}
+            out.writeInt(n.sources.size);n.sources.forEach {s->
+                text(s.id);text(s.documentId);text(s.fileName);text(s.scope.name);optional(s.pageId);text(s.note)
+                out.writeBoolean(s.region!=null);s.region?.let {r->out.writeDouble(r.x);out.writeDouble(r.y);out.writeDouble(r.w);out.writeDouble(r.h)}
+            }
+        }
+        out.writeInt(doc.relations.size);doc.relations.forEach {r->text(r.id);text(r.from);text(r.to);text(r.kind.name);text(r.label)}
+        out.flush()
+        return "xmap-render-v1:"+digest.digest().joinToString("") {"%02x".format(it)}
     }
     private fun JSONObject.string(key: String): String = get(key).let { require(it is String); it }
     private fun JSONObject.number(key: String): Double = get(key).let { require(it is Number); it.toDouble().also { d -> require(d.isFinite()) } }
+    private fun JSONObject.integer(key:String):Int=get(key).let {require(it is Int || it is Long);(it as Number).toLong().also {n->require(n in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong())}.toInt()}
 }

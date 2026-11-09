@@ -73,7 +73,7 @@ class PageSourceFormatTest {
         for(hint in listOf(null,1,2,com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS)) {
             val s=MapSource(documentId=owner,scope=SourceScope.PAGE,pageId=page,lastKnownPage=hint,note="User note",sourceVersion="actual SHA")
             val doc=document(s);val j=JSONObject(String(MapCodec.encode(doc)));val encoded=source(j)
-            assertEquals(2,j.getInt("version"));assertEquals(hint!=null,encoded.has("lastKnownPage"))
+            assertEquals(3,j.getInt("version"));assertEquals(hint!=null,encoded.has("lastKnownPage"))
             assertEquals(doc,MapCodec.decode(j.toString().toByteArray()))
             // Earlier v2 readers ignore this optional display field; removing it preserves the target.
             encoded.remove("lastKnownPage")

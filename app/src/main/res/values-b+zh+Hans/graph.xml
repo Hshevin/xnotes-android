@@ -24,7 +24,7 @@
     <string name="graph_invalid">关系重复或无效，已有数据保持不变。</string>
     <string name="graph_sources">来源</string>
     <string name="graph_sources_count">来源 %1$d</string>
-    <string name="graph_sources_notice">可引用整份文件或具有永久编号的页面。页面缩略图与来源跳转仍待接入。导图备份不包含原文件。</string>
+    <string name="graph_sources_notice">可引用整份文件或具有永久编号的页面。选页目前使用页码列表，来源跳转仍待接入。导图备份不包含原文件。</string>
     <string name="graph_note">来源备注</string>
     <string name="graph_primary">主要预览来源</string>
     <string name="graph_up">上移</string>
@@ -38,7 +38,7 @@
     <string name="graph_preview">布局预览</string>
     <string name="graph_preview_notice">画布正在显示候选布局。确认后整次整理一步撤销，取消则保持原位置。自由节点保持原位。</string>
     <string name="graph_status_unverified">预览尚未校验</string>
-    <string name="graph_status_current">预览有效</string>
+    <string name="graph_status_current">来源已核实</string>
     <string name="graph_status_stale">预览需要刷新</string>
     <string name="graph_status_unavailable">来源暂不可访问</string>
     <string name="graph_status_partial">部分引用对象已删除</string>
@@ -86,4 +86,13 @@
     <string name="graph_source_complete_activation">继续启用页面引用</string>
     <string name="graph_source_choice_changed">来源或导图已变化。请取消并重新选择来源，本次未添加引用。</string>
     <string name="graph_source_activation_failed">未能完成页面启用。来源可能已包含写入版本，恢复资料将保留。请明确继续，或取消后重新选择来源。</string>
+    <string name="graph_preview_check">检查来源</string>
+    <string name="graph_preview_refresh">刷新预览</string>
+    <string name="graph_preview_check_all">检查整图</string>
+    <string name="graph_preview_refresh_all">刷新整图预览</string>
+    <string name="graph_preview_working">正在读取来源…</string>
+    <string name="graph_preview_failed">无法刷新预览，已保留最后图像。</string>
+    <string name="graph_preview_old_target">上次引用范围的预览</string>
+    <string name="graph_preview_image">最后保存的来源预览</string>
+    <string name="graph_preview_backup_notice">预览不构成来源文件的备份。整份笔记与 PDF 的预览显示首页。</string>
 </resources>

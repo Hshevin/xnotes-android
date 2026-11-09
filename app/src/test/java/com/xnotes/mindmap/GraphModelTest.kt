@@ -56,7 +56,7 @@ class GraphModelTest {
         val bytes=legacy.toString().toByteArray()
         val before=bytes.copyOf()
         assertEquals(original,MapCodec.decode(bytes));assertArrayEquals(before,bytes)
-        assertEquals(2,org.json.JSONObject(String(MapCodec.encode(MapCodec.decode(bytes)))).getInt("version"))
+        assertEquals(3,org.json.JSONObject(String(MapCodec.encode(MapCodec.decode(bytes)))).getInt("version"))
     }
     @Test fun allDirectionsAreNonOverlappingAndDoNotMoveFreeBranches() {
         val original=doc().addFree(NodeKind.TEXT,"free",500.0,1000.0).first

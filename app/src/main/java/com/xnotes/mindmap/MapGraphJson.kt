@@ -11,9 +11,16 @@ internal object MapGraphJson {
             .put("note",s.note).put("status",s.status.name)
             .put("previewKey",s.previewKey ?: JSONObject.NULL).put("sourceVersion",s.sourceVersion ?: JSONObject.NULL)
             .put("region",s.region?.let { JSONArray(listOf(it.x,it.y,it.w,it.h)) } ?: JSONObject.NULL)
-            .also {json->s.lastKnownPage?.let {json.put("lastKnownPage",it)}})
+            .also {json->
+                s.lastKnownPage?.let {json.put("lastKnownPage",it)}
+                s.observedVersion?.let {json.put("observedVersion",it)}
+                s.acceptedPreviewVersion?.let {json.put("acceptedPreviewVersion",it)}
+                s.lastPreview?.let {preview->json.put("lastPreview",JSONObject()
+                    .put("assetKey",preview.assetKey).put("renderedVersion",preview.renderedVersion)
+                    .put("generatedAt",preview.generatedAt).put("target",target(preview.target)))}
+            })
     } }
-    fun readSources(n: JSONObject): List<MapSource> {
+    fun readSources(n: JSONObject, previews:Boolean = false): List<MapSource> {
         val a=n.getJSONArray("sources"); require(a.length()<=128)
         return (0 until a.length()).map { i -> val s=a.getJSONObject(i)
             // Earlier v2 whole-file sources wrote these empty fields. Reject obsolete semantics
@@ -24,9 +31,26 @@ internal object MapGraphJson {
             MapSource(id=str(s,"id"),documentId=str(s,"documentId"),fileName=str(s,"fileName"),scope=SourceScope.valueOf(str(s,"scope")),
                 pageId=nullable(s,"pageId"),region=r,
                 note=str(s,"note"),status=SourceStatus.valueOf(str(s,"status")),previewKey=nullable(s,"previewKey"),
-                sourceVersion=nullable(s,"sourceVersion"),lastKnownPage=lastKnownPage(s))
+                sourceVersion=nullable(s,"sourceVersion"),lastKnownPage=lastKnownPage(s),
+                observedVersion=if(previews) nullable(s,"observedVersion",true,::strValue) else null,
+                acceptedPreviewVersion=if(previews) nullable(s,"acceptedPreviewVersion",true,::strValue) else null,
+                lastPreview=if(previews) nullable(s,"lastPreview",true) {value->
+                    require(value is JSONObject)
+                    MapLastPreview(str(value,"assetKey"),readTarget(value.getJSONObject("target")),
+                        str(value,"renderedVersion"),long(value.get("generatedAt")))
+                } else null)
         }
     }
+    private fun target(t:MapSourceTarget) = JSONObject().put("documentId",t.documentId)
+        .put("scope",t.scope.name).put("pageId",t.pageId ?: JSONObject.NULL)
+        .put("region",t.region?.let {JSONArray(listOf(it.x,it.y,it.w,it.h))} ?: JSONObject.NULL)
+    private fun readTarget(j:JSONObject):MapSourceTarget {
+        val region=if(j.get("region")===JSONObject.NULL) null else j.getJSONArray("region").let {
+            require(it.length()==4);Rect(num(it.get(0)),num(it.get(1)),num(it.get(2)),num(it.get(3)))
+        }
+        return MapSourceTarget(str(j,"documentId"),SourceScope.valueOf(str(j,"scope")),nullable(j,"pageId"),region)
+    }
+    private fun long(value:Any):Long {require(value is Int || value is Long);return (value as Number).toLong()}
     fun relations(doc: MindMapDocument) = JSONArray().also { a -> doc.relations.forEach { r ->
         a.put(JSONObject().put("id",r.id).put("from",r.from).put("to",r.to).put("kind",r.kind.name).put("label",r.label))
     } }

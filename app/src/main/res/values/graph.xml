@@ -24,7 +24,7 @@
     <string name="graph_invalid">Duplicate or invalid relationship; existing data kept.</string>
     <string name="graph_sources">Sources</string>
     <string name="graph_sources_count">Sources %1$d</string>
-    <string name="graph_sources_notice">Choose a whole file or a permanent page reference. Page thumbnails and source navigation are still pending. Map backups do not include source files.</string>
+    <string name="graph_sources_notice">Choose a whole file or a permanent page reference. The page picker currently lists page numbers; source navigation is still pending. Map backups do not include source files.</string>
     <string name="graph_note">Source note</string>
     <string name="graph_primary">Main preview source</string>
     <string name="graph_up">Up</string>
@@ -38,7 +38,7 @@
     <string name="graph_preview">Layout preview</string>
     <string name="graph_preview_notice">The canvas shows the proposed layout. Confirm to apply as one undo step; cancel to keep original positions. Free nodes stay in place.</string>
     <string name="graph_status_unverified">Preview not verified</string>
-    <string name="graph_status_current">Preview current</string>
+    <string name="graph_status_current">Source verified</string>
     <string name="graph_status_stale">Preview needs refresh</string>
     <string name="graph_status_unavailable">Source unavailable</string>
     <string name="graph_status_partial">Some referenced objects deleted</string>
@@ -86,4 +86,13 @@
     <string name="graph_source_complete_activation">Continue page enabling</string>
     <string name="graph_source_choice_changed">The source or graph changed. Cancel and choose the source again; no reference was added.</string>
     <string name="graph_source_activation_failed">Page enabling could not be completed. The source may already contain the written version; retained recovery data is kept. Continue explicitly, or cancel and choose the source again.</string>
+    <string name="graph_preview_check">Check</string>
+    <string name="graph_preview_refresh">Refresh preview</string>
+    <string name="graph_preview_check_all">Check all</string>
+    <string name="graph_preview_refresh_all">Refresh all previews</string>
+    <string name="graph_preview_working">Reading source…</string>
+    <string name="graph_preview_failed">The preview could not be refreshed. The last image is kept.</string>
+    <string name="graph_preview_old_target">Last preview of the previous reference range</string>
+    <string name="graph_preview_image">Last saved source preview</string>
+    <string name="graph_preview_backup_notice">Previews do not back up source files. Whole-note and PDF previews show the first page.</string>
 </resources>

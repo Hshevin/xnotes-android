@@ -58,3 +58,6 @@ val LayerThumbnailSize = 48.dp
 val MindMapNodeListHeight = 400.dp
 
 val MindMapPenSliderWidth = 160.dp
+
+/** Last source image shown within the graph's existing scrollable source dialog. */
+val MindMapSourcePreviewHeight = 144.dp

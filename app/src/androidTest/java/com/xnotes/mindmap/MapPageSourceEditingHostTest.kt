@@ -141,7 +141,9 @@ class MapPageSourceEditingHostTest {
         waitUntil {visible(second) && f.host.onMain {f.session.sourcePicker.state?.busy==false}}
         val ids=BundleReferenceInfo.inspectStrict(f.source).orderedPageIds
         assertEquals(1,f.sourceWrites.get());BundleAnchors.verifyActivation(a,f.source)
-        click(second);waitUntil {f.host.onMain {f.session.document!!.root.sources.isNotEmpty()}}
+        click(second);waitUntil {f.host.onMain {f.session.document!!.root.sources.firstOrNull()?.let {
+            it.lastPreview!=null && it.status==SourceStatus.CURRENT
+        }==true}}
         val changed=f.host.onMain {f.session.document!!};val attached=changed.root.sources.single()
         assertEquals(SourceScope.PAGE,attached.scope);assertEquals(ids[1],attached.pageId);assertEquals(f.sourceId,attached.documentId)
         assertEquals(2,attached.lastKnownPage)
