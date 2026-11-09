@@ -34,6 +34,8 @@
 
 2026-11-09，本机 JDK 21、仓库 Gradle Wrapper／Android SDK 36，使用隔离构建目录与项目缓存，执行 `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin`。最终作业 20677 正常结束：340 套、3695 项，失败／错误／跳过均为 0；Android 测试源码编译通过。全部生产和测试在最终验证前冻结，之后仅更新文档与本地提交。日志 `tmp/source-preview-final-full.log`，计数 `tmp/source-preview-final-full-summary.json`；临时证据按规则不提交。
 
+本阶段代码、测试及文档已本地提交 `6cc2293a`（`feat: persist and refresh mind map source previews`），未推送或合并。
+
 新增 31 项主机测试直接覆盖以下行为：
 
 - `MapPreviewFormatTest` 13 项：不可变 PNG、坏 base64／SHA／CRC／chunk／尺寸与总像素预算，严格版本与数值、v1／v2 兼容、v3 全结构往返、原目标绑定、派生摘要及 provider 截断失败后的精确 PNG 日志恢复。
