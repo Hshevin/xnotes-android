@@ -37,16 +37,46 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     private fun createPageContracts(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
     }
+    private class MutationFrame {
+        val nativeIdentities=mutableSetOf<String>()
+        val notifications=mutableListOf<AutoCloseable>()
+    }
+    private val mutationFrame=ThreadLocal<MutationFrame?>()
     private fun <T> transaction(block: (SQLiteDatabase) -> T): T {
-        val db = writableDatabase
+        val db=writableDatabase
+        val outer=mutationFrame.get()==null
+        val frame=mutationFrame.get() ?: MutationFrame()
+        // Wrapper nesting shares the owner frame. An externally begun SQLite transaction has
+        // no observable commit hook here, so do not accept writes which could strand its token.
+        check(!outer || !db.inTransaction()) {"Registry writes require a registry-owned transaction"}
         db.beginTransaction()
-        try { val result = block(db); db.setTransactionSuccessful(); return result } finally { db.endTransaction() }
+        if(outer) mutationFrame.set(frame)
+        try {val result=block(db);db.setTransactionSuccessful();return result}
+        finally {
+            try {db.endTransaction()}
+            finally {if(outer) {
+                mutationFrame.remove()
+                // Do not announce END before a surrounding SQLite transaction has actually ended.
+                if(!db.inTransaction()) frame.notifications.asReversed().forEach {it.close()}
+            }}
+        }
+    }
+    /** Only a newly introduced cross-domain identity retires network reads. Existing map reads
+     * register the same actor routinely and must not invalidate their own valid network handoff. */
+    private fun observeNativeIdentityInsertion(db:SQLiteDatabase,id:String) {
+        val first=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {!it.moveToFirst()}
+        if(!first) return
+        val reserved=db.rawQuery("SELECT 1 FROM original_pdf_documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
+        if(!reserved) return
+        val frame=checkNotNull(mutationFrame.get())
+        if(frame.nativeIdentities.add(id)) frame.notifications+=OriginalPdfNetworkEpoch.forDatabase(databaseName).begin()
     }
     fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
         register(db,id,kind,name,uri,pageReferences)
     }
     private fun register(db:SQLiteDatabase,id:String,kind:String,name:String,uri:String,pageReferences:Boolean) {
         require(UUID.fromString(id).toString() == id)
+        observeNativeIdentityInsertion(db,id)
         db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))

@@ -13,6 +13,34 @@ internal class OriginalPdfCatalog internal constructor(
     internal val registry:DocumentRegistry,
     private val mutationHook:(String)->Unit={},
 ) {
+    internal data class NetworkEpoch(val version:Long,val busy:Boolean)
+    internal enum class MetadataState {ABSENT,VALID,CORRUPT,UNSUPPORTED,LIMITED}
+    internal enum class ResourcePresence {NOT_CHECKED,PRESENT_HINT,MISSING,INACCESSIBLE}
+    internal enum class TargetCheck {MATCHED,PAGE_NOT_REGISTERED,DESCRIPTOR_MISMATCH,UNVERIFIABLE,LIMITED}
+    internal data class MetadataTarget(val documentId:String,val pageId:String,val sha256:String,val pageIndex:Int)
+    internal data class MetadataHeader(val id:String,val sha256:String,val title:String,val pageCount:Int,
+        val firstPageId:String,val generation:Long,val deleted:Boolean)
+    internal data class Metadata(val header:MetadataHeader?,val state:MetadataState,
+        val presence:ResourcePresence=ResourcePresence.NOT_CHECKED,val nativeIdentityPresent:Boolean=false)
+    internal data class MetadataIssue(val documentId:String?,val state:MetadataState)
+    internal class IdentityDomainsBatch internal constructor(val reservedOriginalIds:Set<String>,val nativeIdentityIds:Set<String>,
+        val supported:Boolean,val unverifiable:Boolean,private val valid:()->Boolean) {
+        fun current()=valid()
+    }
+    internal class MetadataBatch internal constructor(val files:Map<String,Metadata>,val orphans:List<Metadata>,
+        val targetChecks:Map<MetadataTarget,TargetCheck>,val issues:List<MetadataIssue>,val limited:Boolean,
+        val reservedOriginalIds:Set<String>,val nativeIdentityIds:Set<String>,val supported:Boolean,val unverifiable:Boolean,
+        private val valid:()->Boolean) {
+        fun current()=valid()
+    }
+    private val network=OriginalPdfNetworkEpoch.forDatabase(registry.databaseName)
+    val networkEpoch get()=network.flow
+    internal fun beginNetworkMutation()=network.begin()
+    fun identityDomains(ids:Set<String>,checkActive:()->Unit={}):IdentityDomainsBatch=
+        OriginalPdfMetadataReader(registry.databaseName,network).domains(ids,checkActive)
+    fun networkMetadata(ids:Set<String>,targets:Set<MetadataTarget> = emptySet(),orphanLimit:Int=0,
+        pageBudget:Int=ReferenceAnchors.MAX_TARGETS,checkActive:()->Unit={}):MetadataBatch=
+        OriginalPdfMetadataReader(registry.databaseName,network).metadata(ids,targets,orphanLimit,pageBudget,checkActive)
     internal data class Record(val id:String,val sha256:String,val title:String,val pageCount:Int,
         val pages:List<String>,val generation:Long,val deleted:Boolean)
     internal class Observation private constructor(val record:Record,private val stamp:Stamp) {
@@ -90,10 +118,12 @@ internal class OriginalPdfCatalog internal constructor(
             val existing=bySha(registry.readableDatabase,candidate.sha256)
             if(existing!=null) {
                 require(existing.pageCount==candidate.pageCount)
+                check(!nativeIdentityPresent(registry.readableDatabase,existing.id))
                 return@synchronized if(existing.deleted) Retention.RestoreRequired(observation(existing)) else Retention.Retained(observation(existing))
             }
             val record=mutate {
                 val id=UUID.randomUUID().toString()
+                check(!nativeIdentityPresent(it,id))
                 val pages=List(candidate.pageCount) {UUID.randomUUID().toString()}
                 val next=Record(id,candidate.sha256,candidate.title,candidate.pageCount,pages,1,false)
                 it.execSQL("INSERT INTO original_pdf_documents(id,resource_sha,title,page_count,generation,deleted,row_schema) VALUES(?,?,?,?,1,0,1)",
@@ -112,6 +142,7 @@ internal class OriginalPdfCatalog internal constructor(
             check(expected.belongs(state) && (expected.current() || candidate.authorizesRelink(expected)) && candidate.current() && candidate.belongs(this))
             val actual=requireNotNull(read(registry.readableDatabase,expected.record.id))
             check(actual==expected.record)
+            check(!nativeIdentityPresent(registry.readableDatabase,actual.id))
             require(actual.sha256==candidate.sha256 && actual.pageCount==candidate.pageCount)
             val restored=mutate {db->
                 // Re-read the entire ordinal/UUID mapping in the same transaction as re-pinning.
@@ -156,9 +187,14 @@ internal class OriginalPdfCatalog internal constructor(
     private fun <T> mutate(block:(SQLiteDatabase)->T):T {
         check(!state.busy && state.epoch<Long.MAX_VALUE)
         // Retire before SQLite commits, including failed/rolled-back attempts. No post-commit window.
+        val notification=network.begin()
         state.busy=true;state.epoch++
-        return try {registry.originalPdfTransaction(block)} finally {state.busy=false}
+        return try {registry.originalPdfTransaction(block)} finally {state.busy=false;notification.close()}
     }
+    private fun nativeIdentityPresent(db:SQLiteDatabase,id:String):Boolean =
+        db.rawQuery("SELECT EXISTS(SELECT 1 FROM documents WHERE id=?) OR EXISTS(SELECT 1 FROM locations WHERE document_id=?) OR EXISTS(SELECT 1 FROM page_reference_contracts WHERE document_id=?)",arrayOf(id,id,id)).use {
+            check(it.moveToFirst());it.getLong(0)!=0L
+        }
     internal fun sameDatabase(other:OriginalPdfCatalog)=state===other.state
     companion object {
         private val states=ConcurrentHashMap<String,State>()
