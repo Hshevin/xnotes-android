@@ -1,3 +1,9 @@
+## D2b 可操作展开流程（2026-11-09）
+
+按用户纠偏只在阶段边界复核新合同及本次展开差异，不重审未变Native/存储。review_d2_filters快速计划审核通过；实现Required仅一项：已blocked前序仍可作桥/打开。现Expansion不经受阻证据激活，Request.current也拒path.blocked，pure回归已通过。SOURCE/OWNER不伪造S，现有Navigator与actor双成员消费者复用。
+
+15623相关80中78绿+Android源码compile；2个测试夹具复用来源ID触旧格式validator，原目标/断言不变，仅赋测试独立ID。54046只重跑失败2并通过，生产unchanged；合并80准确全绿，未重跑有效78和未变化的全仓。独立核日志/清单/当前1062交接SHA通过，无Required；manifest为交接记录，不声称是测试前后双摘要。实际Android/设备/SAF/GPU未运行。bc26a9db已本地保存，可继续下一可操作流程。
+
 ## D2a 局部网络筛选（2026-11-09）
 
 fresh 独立代理review_d2_filters仅只读计划、源码、真实失败及终态证据，不构建/不派生。Required全部关闭：来源条件不由每组的owner MAP自动匹配；内部目录另有入口并避开会mkdir的provider；目录存在/预算/未知和单source AND；filter/draft单调版本；外部名称查询真实CancellationSignal；格式与位置分离，kind-only保上次类型且folder另核。身份冲突/重复/超限不被last kind洗白。

@@ -1,9 +1,25 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。D2a局部网络来源集合／格式／目录筛选已verified（3879主机全量与Android源码编译）；真实平台／目标设备未运行，D2b/完整D及其他原需求仍未完成。
+目标：按原需求继续实现，active，overall complete=false。D2b逐层展开/折叠/下一层条目打开与原网络返回源码已verified（本阶段80相关与Android源码编译）；真实平台未运行，多中心/全库等及其他原需求仍缺。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 最新恢复点：D2b 可操作流程已保存，下一多中心／全库与手工关系画布
+
+用户经侧对话明确纠偏（长期规则已AGENTS）：不要长期基础设施/反复审计，以真实用户流程交付，审核集中阶段边界/实质风险，未变有效证据不重复跑；原完整需求和权限不变。已快速确认D2a提交7932c2d5/36bcc561/9cb7e4b0实际完成且clean、10650成功日志，不重新全仓审计。ps受执行权限限制未据此重启旧作业；所有Root已知构建handle现均终态。
+
+本turn为progress：直接完成选择文件→展开下一层→共享折叠/原位再展→下一层具体条目Open→同一网络返回。功能本地提交bc26a9db；随后docs检查点。阶段记录docs/movinkpad/file-network-expansion-2026-11-09.md，合同tmp/network-expansion-contract.txt。整体仍active，不把这一闭环当全产品或只差收尾。
+
+实际代码：Library additive一次实际read/decode投影S+expanded sources/owner，direct/deeper独立最多5000轻量成员，深层LIMIT不抢光later S，最终仍250nodes/750edges/5000 members；旧single wrappers保留。NetworkExpansion BFS/fixed point只激活明确展开、保共享/止循环；Origin SOURCE是真实本层file成员，OWNER同graphUUID且target作anchor，不伪造S。path存前序last-known轻量rows，live membership ABA退旧，blocked既不能继续作桥也不能Open，不额外acquire所有前序图。Assembler按层/键whole concept；filter保必要完整path context。Scene保16384有界隐藏位置/占槽，仅淘汰最旧hidden，不改现存点/zoom/center/selection；Presentation input退休不fit，Screen控制变化SideEffect不晚到自废。Main/Nav/Native保存/Renderer未改。
+
+验证15623终态1：80相关78绿，Android源码compile成功；2失败是新增Data fixture同图复用Source.id触旧validate，未进入待测行为。只改2fixture t/u的新entry ID（docUUID/target/断言保留），54046仅重跑这2终态0，production unchanged/compileDebugKotlin UP-TO-DATE。其余78和旧全仓不为安心重跑。合并80 case0fail的证据tmp/network-expansion-related.log/-related-summary.json、-fixture-recheck.log、-verified-summary.json。-verified-inputs.json是当前1062 Kotlin/Java/XML交接SHA，不声称初次前后冻结。新15方法=Pure6/Data5/SceneView3/Nav1，包含真实Navigator/Workspace不含S的H/U打开及原S网络返回。原AndroidMain场景扩T→H[T,U]→fold/reexpand→U第二永久页→H→原网络，只有源码compile，Android页面/窗口/GPU未运行。
+
+review_d2_filters一次快速边界审核和本次差异复核已通过，无未闭合Required；唯一known-blocked prefix已最窄修并回归，未回头重审Native/存储。Source/Ui/Reviewer均completed且formal freeze，Root统一Gradle/提交，无运行作业、无用户待答/外部阻塞。未APK/安装/推送/合并/发布。
+
+下一真实流程优先：指定多文件集合/全库网络入口→筛选/探索→解释/打开条目/返回；随后显式文件关联编辑与将所选文件加入可保存关系画布。沿当前源/owner模型、原Actor/Nav/文件身份使用，不再先建完整全库持久索引。阶段计划短，独审只新边界，作者可并行实施。
+
+仍缺（不是只待验收）：集合多中心/全库、显式用户关联/可选同图出现、失效检查、加入关系画布；区域/Canvas引用与Canvas/导图来源打开、真正Map双窗格、来源权限/身份/移动/回收站修复、独立副本/完整备份、主要预览/目录缩略图、无中心/同级插入/边缘平移等原需求。只待平台/硬件的现有阶段另列：真实Android/SAF/DocumentsUI/配置重建和杀进程/MovinkPad Pro14 Android15 ProPen3/掌触/Surface/GPU/性能均未运行，不以JVM或源码compile代替。
 
 ## 当前恢复点：D2a 筛选 verified，下一 D2b 逐层展开／折叠
 
