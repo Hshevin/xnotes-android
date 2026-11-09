@@ -20,7 +20,8 @@ internal sealed interface NetworkSceneEdgeKey {
 }
 /** Strings only: the retained geometry never owns a Context or a resource-dependent callback. */
 internal data class LocalNetworkLabels(val file:String,val concept:String,val ink:String,val reference:String,
-    val references:String,val belongs:String,val empty:String="",val userRelation:String="")
+    val references:String,val belongs:String,val empty:String="",val userRelation:String="",
+    val fileKinds:Map<NetworkFileKind,String> = emptyMap(),val availability:Map<SourceStatus,String> = emptyMap())
 internal data class LocalNetworkScene(val document:MindMapDocument,val nodes:Map<String,NetworkSceneNodeKey>,
     val edges:Map<String,NetworkSceneEdgeKey>)
 
@@ -82,7 +83,11 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
         val model=nodes.map {(id,key)->
             val point=positions.getValue(key)
             val text=when(key) {
-                is NetworkSceneNodeKey.File->labels.file+"\n"+files.getValue(key.documentId).observedNames.firstOrNull().orEmpty().ifBlank {labels.file}
+                is NetworkSceneNodeKey.File->files.getValue(key.documentId).let {file->
+                    listOfNotNull(labels.fileKinds[file.kind] ?: labels.file,
+                        file.observedNames.firstOrNull().orEmpty().ifBlank {labels.file},
+                        labels.availability[file.availability]).joinToString("\n")
+                }
                 is NetworkSceneNodeKey.Concept->{val c=concepts.getValue(key.key)
                     labels.concept+"\n"+c.title.ifBlank {when(c.kind) {NodeKind.INK->labels.ink;NodeKind.REFERENCE->labels.reference;else->labels.concept}}}
             }

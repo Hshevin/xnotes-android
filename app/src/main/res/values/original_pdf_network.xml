@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="network_filter_kind_pdf_original">Original PDFs (original library)</string>
+    <string name="network_original_folder_notice">Original PDFs belong to the original library. Folder filters do not use the locations of their annotation notes.</string>
+    <string name="network_original_metadata_notice">Original availability is checked against the library. Previews keep the last checked content; opening checks the actual original.</string>
+    <string name="network_original_card_notice">This card represents the entire original PDF and opens at its first page.</string>
+    <string name="network_name_with_kind">%1$s · %2$s</string>
+    <string name="network_original_cached_status">Last preview status: %1$s</string>
+</resources>

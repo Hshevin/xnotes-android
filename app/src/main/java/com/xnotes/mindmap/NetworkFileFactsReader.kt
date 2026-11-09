@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import com.xnotes.core.util.DocKeys
 import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.storage.NotebookStorage
+import com.xnotes.storage.OriginalPdfCatalog
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
@@ -117,7 +118,102 @@ internal class NetworkFileFactsReader(context:Context) {
                 else DocumentsContract.buildDocumentUri(requireNotNull(uri.authority),id)
         }
     }
-    suspend fun read(ids:Set<String>,folder:NetworkFolder?,observedMaps:List<BacklinkLocation> = emptyList()):NetworkFileFacts = withContext(Dispatchers.IO) {
+    /** Exact targets are independent of the selected file filter, so context rows get diagnostics too.
+     * The catalog helper is strictly read-only; native registry bootstrap remains the existing path. */
+    suspend fun read(ids:Set<String>,folder:NetworkFolder?,observedMaps:List<BacklinkLocation> = emptyList(),
+        targets:Set<MapSourceTarget> = emptySet(),includeOriginalOrphans:Boolean=false,orphanLimit:Int=0,
+        nativeDiagnostics:Boolean=true):NetworkFileFacts = withContext(Dispatchers.IO) {
+        val allIds=ids+targets.map {it.documentId}
+        require(allIds.size<=NetworkFilter.MAX_FILES && targets.size<=NetworkFilter.MAX_FILES && orphanLimit in 0..NetworkFilter.MAX_FILES)
+        targets.forEach {it.validate()}
+        val coroutine=currentCoroutineContext();val check={coroutine.ensureActive()}
+        val catalog=OriginalPdfCatalog(NotebookStorage.get(app).registry)
+        val start=catalog.networkEpoch.value
+        val originalTargets=targets.filter {it.scope==SourceScope.PDF_ORIGINAL}
+        val points=originalTargets.associateWith {target->val p=requireNotNull(target.originalPdf)
+            OriginalPdfCatalog.MetadataTarget(target.documentId,requireNotNull(target.pageId),p.sha256,p.pageIndex)}
+        val metadata=catalog.networkMetadata(allIds,points.values.toSet(),
+            orphanLimit=if(includeOriginalOrphans) minOf(orphanLimit,250) else 0,
+            checkActive=check)
+        fun proof()=!start.busy && catalog.networkEpoch.value==start && metadata.current()
+        if(!metadata.supported || metadata.unverifiable) {
+            // A future/unknown identity domain cannot prove a native fallback is safe either.
+            // Old schemas with no Original catalog explicitly report supported+ABSENT instead.
+            val problem=BacklinkProblem.UNAVAILABLE
+            return@withContext NetworkFileFacts(allIds.associateWith {NetworkFileFact(null,problem=problem,
+                availability=SourceStatus.UNAVAILABLE,metadataChecked=true)},listOf(BacklinkIssue(problem)),
+                targets.associateWith {NetworkTargetState(SourceStatus.UNAVAILABLE,problem,true)},
+                limited=metadata.limited,currentProof=::proof)
+        }
+        val originalIds=metadata.reservedOriginalIds.intersect(allIds)+originalTargets.map {it.documentId}
+        val native=readNative(allIds-originalIds,folder,observedMaps)
+        val files=native.files.mapValuesTo(linkedMapOf()) {(id,fact)->
+            fact.copy(cardTarget=if(fact.kind!=null && fact.problem !in setOf(BacklinkProblem.IDENTITY,BacklinkProblem.DUPLICATE,
+                BacklinkProblem.LIMIT,BacklinkProblem.CORRUPT,BacklinkProblem.RECOVERY_CONFLICT)) MapSourceTarget(id,SourceScope.FILE) else null)
+        }
+        val states=linkedMapOf<MapSourceTarget,NetworkTargetState>()
+        val issues=linkedSetOf<BacklinkIssue>().apply {if(nativeDiagnostics) addAll(native.issues)}
+        val observedIds=observedMaps.mapTo(hashSetOf()) {it.graphId}
+        fun stateProblem(state:OriginalPdfCatalog.MetadataState)=when(state) {
+            OriginalPdfCatalog.MetadataState.LIMITED->BacklinkProblem.LIMIT
+            OriginalPdfCatalog.MetadataState.CORRUPT->BacklinkProblem.CORRUPT
+            OriginalPdfCatalog.MetadataState.UNSUPPORTED->BacklinkProblem.UNAVAILABLE
+            else->BacklinkProblem.IDENTITY
+        }
+        fun fileFact(id:String,value:OriginalPdfCatalog.Metadata?):NetworkFileFact {
+            val header=value?.header
+            val collision=value?.nativeIdentityPresent==true || id in metadata.nativeIdentityIds || id in observedIds
+            if(collision) return NetworkFileFact(null,problem=BacklinkProblem.IDENTITY,availability=SourceStatus.UNAVAILABLE,metadataChecked=true)
+            if(value?.state!=OriginalPdfCatalog.MetadataState.VALID || header==null)
+                return NetworkFileFact(null,problem=stateProblem(value?.state ?: OriginalPdfCatalog.MetadataState.ABSENT),
+                    availability=SourceStatus.UNAVAILABLE,metadataChecked=true)
+            val unavailable=when {
+                header.deleted->SourceStatus.TRASHED
+                value.presence in setOf(OriginalPdfCatalog.ResourcePresence.MISSING,OriginalPdfCatalog.ResourcePresence.INACCESSIBLE)->SourceStatus.UNAVAILABLE
+                else->null
+            }
+            val target=MapSourceTarget(id,SourceScope.PDF_ORIGINAL,header.firstPageId,originalPdf=PdfOriginalProjection(header.sha256,0))
+            return NetworkFileFact(NetworkFileKind.PDF_ORIGINAL,
+                if(folder==null) NetworkFolderMatch.UNKNOWN else NetworkFolderMatch.OUTSIDE,
+                availability=unavailable,cardTarget=target,metadataChecked=true)
+        }
+        for(id in originalIds) {
+            check();val value=metadata.files[id];val fact=fileFact(id,value);files[id]=fact
+            fact.problem?.let {issues+=BacklinkIssue(it,value?.header?.title)}
+        }
+        val orphans=mutableListOf<LocalNetworkFile>()
+        for(value in metadata.orphans) {
+            check();val header=value.header ?: continue
+            val fact=fileFact(header.id,value);files[header.id]=fact
+            if(fact.problem!=null) {issues+=BacklinkIssue(fact.problem,header.title);continue}
+            orphans+=LocalNetworkFile(header.id,listOf(header.title),fact.kind,fact.availability,fact.problem,fact.cardTarget,fact.metadataChecked)
+        }
+        for(target in targets) {
+            check()
+            val fact=files[target.documentId]
+            val checkPoint=points[target]?.let(metadata.targetChecks::get)
+            val related=target.scope==SourceScope.PDF_ORIGINAL || target.documentId in metadata.reservedOriginalIds
+            if(!related) continue
+            val problem=when {
+                fact?.problem!=null->fact.problem
+                target.scope!=SourceScope.PDF_ORIGINAL->BacklinkProblem.IDENTITY
+                checkPoint==OriginalPdfCatalog.TargetCheck.MATCHED->null
+                checkPoint==OriginalPdfCatalog.TargetCheck.LIMITED->BacklinkProblem.LIMIT
+                checkPoint==OriginalPdfCatalog.TargetCheck.UNVERIFIABLE->BacklinkProblem.UNAVAILABLE
+                else->BacklinkProblem.IDENTITY
+            }
+            states[target]=NetworkTargetState(if(problem!=null) SourceStatus.UNAVAILABLE else fact?.availability,problem,true)
+            problem?.let {issues+=BacklinkIssue(it,metadata.files[target.documentId]?.header?.title)}
+        }
+        for(issue in metadata.issues) {
+            // Empty/old original capability must not poison an otherwise native-only query.
+            if(issue.documentId!=null || originalTargets.isNotEmpty() || metadata.reservedOriginalIds.isNotEmpty() || includeOriginalOrphans)
+                issues+=BacklinkIssue(stateProblem(issue.state))
+        }
+        check()
+        NetworkFileFacts(files,issues.take(MAX_ISSUES),states,orphans,metadata.limited || issues.size>MAX_ISSUES,::proof)
+    }
+    private suspend fun readNative(ids:Set<String>,folder:NetworkFolder?,observedMaps:List<BacklinkLocation>):NetworkFileFacts = withContext(Dispatchers.IO) {
         require(ids.size<=NetworkFilter.MAX_FILES && ids.all {runCatching {UUID.fromString(it).toString()==it}.getOrDefault(false)})
         if(ids.isEmpty()) return@withContext NetworkFileFacts(emptyMap())
         val coroutine=currentCoroutineContext();val read=Read {coroutine.ensureActive()}

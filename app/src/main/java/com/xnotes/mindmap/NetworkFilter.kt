@@ -4,7 +4,7 @@ import java.util.Collections
 import java.util.UUID
 
 /** Native formats last observed by the identity registry. PDF annotations are paged notes. */
-internal enum class NetworkFileKind { NOTE,CANVAS,MAP }
+internal enum class NetworkFileKind { NOTE,CANVAS,MAP,PDF_ORIGINAL }
 internal class NetworkFolder(val uri:String,title:String) {
     val title=title.take(BacklinkBudget.LABEL_CHARS)
     init {require(uri.isNotBlank() && uri.length<=8192)}
@@ -25,8 +25,15 @@ internal class NetworkFilter(fileIds:Set<String>?=null,kinds:Set<NetworkFileKind
 }
 internal enum class NetworkFolderMatch { INSIDE,OUTSIDE,UNKNOWN }
 internal data class NetworkFileFact(val kind:NetworkFileKind?,val folder:NetworkFolderMatch=NetworkFolderMatch.UNKNOWN,
-    val problem:BacklinkProblem?=null)
-internal data class NetworkFileFacts(val files:Map<String,NetworkFileFact>,val issues:List<BacklinkIssue> = emptyList())
+    val problem:BacklinkProblem?=null,val availability:SourceStatus?=null,val cardTarget:MapSourceTarget?=null,
+    val metadataChecked:Boolean=false)
+internal data class NetworkTargetState(val statusOverride:SourceStatus?=null,val problem:BacklinkProblem?=null,
+    val metadataChecked:Boolean=false)
+internal data class NetworkFileFacts(val files:Map<String,NetworkFileFact>,val issues:List<BacklinkIssue> = emptyList(),
+    val targetStates:Map<MapSourceTarget,NetworkTargetState> = emptyMap(),val originalOrphans:List<LocalNetworkFile> = emptyList(),
+    val limited:Boolean=false,private val currentProof:()->Boolean={true}) {
+    fun current()=currentProof()
+}
 internal data class NetworkFolderListing(val folders:List<NetworkFolder>,val problem:BacklinkProblem?=null,val limited:Boolean=false)
 internal data class NetworkFilterResult(val concepts:List<NetworkConceptProjection>,val matched:Set<String>,val unknown:Set<String>,
     val filteredConcepts:Int)
@@ -52,11 +59,14 @@ internal object NetworkFilterSelector {
     }
     fun select(projections:List<NetworkConceptProjection>,filter:NetworkFilter,
         facts:NetworkFileFacts=NetworkFileFacts(emptyMap())):NetworkFilterResult {
-        val ids=projections.flatMapTo(linkedSetOf()) {it.members.map {row->row.target.documentId}}
-        val matches=ids.associateWith {match(it,filter,facts)}
-        val kept=projections.filter {p->p.members.any {matches[it.target.documentId]==Match.YES}}
-        return NetworkFilterResult(kept,Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.toSet()),
-            Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.toSet()),projections.size-kept.size)
+        val targets=projections.flatMapTo(linkedSetOf()) {it.members.map {row->row.target}}
+        val matches=targets.associateWith {target->
+            val file=match(target.documentId,filter,facts)
+            if(file==Match.YES && (filter.kinds!=null || filter.folder!=null) && facts.targetStates[target]?.problem!=null) Match.UNKNOWN else file
+        }
+        val kept=projections.filter {p->p.members.any {matches[it.target]==Match.YES}}
+        return NetworkFilterResult(kept,Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.mapTo(linkedSetOf()) {it.documentId}),
+            Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.mapTo(linkedSetOf()) {it.documentId}),projections.size-kept.size)
     }
     fun selectRelations(rows:List<MapFileRelationRow>,filter:NetworkFilter,
         facts:NetworkFileFacts=NetworkFileFacts(emptyMap())):NetworkRelationFilterResult {

@@ -21,14 +21,16 @@ internal class NetworkCanvasSelection(seeds:List<MapFileCardSeed>,private val va
             val controller=entry.controller
             if(!entry.alive || controller.loading || controller.filtering || controller.browseMode!=NetworkBrowseMode.FILES) return null
             val revision=controller.filterRevision;val ids=controller.centreFiles.toSet()
+            val metadata=controller.captureFileCardMetadataGuard() ?: return null
             if(ids.isEmpty() || ids.size>250) return null
             val seeds=ids.sorted().map {id->
                 val render=scene.nodes.entries.singleOrNull {it.value==NetworkSceneNodeKey.File(id)}?.key ?: return null
                 val node=scene.document.nodes.firstOrNull {it.id==render} ?: return null
                 val file=controller.fileChoices.firstOrNull {it.documentId==id} ?: return null
-                MapFileCardSeed(id,file.observedNames.firstOrNull().orEmpty(),node.x,node.y)
+                val target=file.cardTarget ?: return null
+                runCatching {MapFileCardSeed(id,file.observedNames.firstOrNull().orEmpty(),node.x,node.y,target)}.getOrNull() ?: return null
             }
-            return NetworkCanvasSelection(seeds) {entry.alive && controller.filterRevision==revision &&
+            return NetworkCanvasSelection(seeds) {entry.alive && metadata() && controller.filterRevision==revision &&
                 controller.browseMode==NetworkBrowseMode.FILES && controller.centreFiles==ids}
         }
     }
@@ -57,6 +59,9 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
     private var targetId:String?=null
     private var fixed:MapFileCardsAdded?=null
     private var newTarget=false
+    // Once actual creation or append is accepted, its fixed payload/receipt owns continuation.
+    // A later catalog epoch must not strand already published or dirty graph content.
+    private var payloadAccepted by mutableStateOf(false)
     private var openAttempt:Any?=null
     private var newPreparation:NetworkCanvasCreateRequest?=null
     var step by mutableStateOf(NetworkCanvasStep.DESTINATION);private set
@@ -71,7 +76,7 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
     val canRetrySave get()=current() && !busy && step==NetworkCanvasStep.SAVE_FAILED && matchingCards()
     val canView get()=current() && !busy && step in setOf(NetworkCanvasStep.ADDED,NetworkCanvasStep.SAVE_FAILED) && matchingCards()
     val title get()=targetTitle
-    fun current()=active && scope.isActive && selection.current()
+    fun current()=active && scope.isActive && (payloadAccepted || selection.current())
 
     private fun release():Job? {
         val owned=lease;lease=null
@@ -79,8 +84,8 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
         return owned?.close(preserveDirty=true)
     }
     private fun choose(uri:Uri,create:Boolean,label:String?,prepared:MapFileCardsAdded?=null):Boolean {
-        if(!current() || busy || nodeIds.isNotEmpty() || step==NetworkCanvasStep.CREATE_RETAINED) return false
-        release();targetUri=uri;newTarget=create;targetEpoch=null;targetId=null;ticket=null;fixed=prepared;newPreparation=null
+        if(!current() || !selection.current() || busy || nodeIds.isNotEmpty() || step==NetworkCanvasStep.CREATE_RETAINED) return false
+        release();targetUri=uri;newTarget=create;payloadAccepted=false;targetEpoch=null;targetId=null;ticket=null;fixed=prepared;newPreparation=null
         targetTitle=label?.takeIf {it.isNotBlank()}?.take(BacklinkBudget.LABEL_CHARS) ?:
             if(create) app.getString(com.xnotes.R.string.network_canvas_new_title) else
                 uri.lastPathSegment.orEmpty().substringAfterLast('/').ifBlank {app.getString(com.xnotes.R.string.map_title)}.take(BacklinkBudget.LABEL_CHARS)
@@ -90,13 +95,13 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
     fun chooseNew(uri:Uri,title:String?=null)=choose(uri,true,title)
     /** The system Save button confirms this already-complete, validated candidate. */
     fun prepareNew():NetworkCanvasCreateRequest? {
-        if(!current() || busy || step!=NetworkCanvasStep.DESTINATION || nodeIds.isNotEmpty()) return null
+        if(!current() || !selection.current() || busy || step!=NetworkCanvasStep.DESTINATION || nodeIds.isNotEmpty()) return null
         return try {
             val candidate=MindMapDocument(nodes=emptyList(),organization=MapOrganization.RELATION_CANVAS).addFileCards(selection.seeds)
             NetworkCanvasCreateRequest(this,candidate).also {newPreparation=it}
         } catch(_:IllegalArgumentException) {problem=true;null}
     }
-    fun creationCurrent(request:NetworkCanvasCreateRequest)=current() && !busy && step==NetworkCanvasStep.DESTINATION &&
+    fun creationCurrent(request:NetworkCanvasCreateRequest)=current() && selection.current() && !busy && step==NetworkCanvasStep.DESTINATION &&
         request.issuer===this && newPreparation===request
     fun cancelNew(request:NetworkCanvasCreateRequest) {if(newPreparation===request) newPreparation=null}
     fun completeNew(request:NetworkCanvasCreateRequest,uri:Uri,title:String?=null):Boolean {
@@ -104,11 +109,12 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
         return choose(uri,true,title,request.candidate) && confirm()
     }
     fun changeTarget():Boolean {
-        if(!current() || busy || nodeIds.isNotEmpty() || step==NetworkCanvasStep.CREATE_RETAINED) return false
-        release();targetUri=null;fixed=null;ticket=null;newPreparation=null;problem=false;step=NetworkCanvasStep.DESTINATION;return true
+        if(!current() || !selection.current() || busy || nodeIds.isNotEmpty() || step==NetworkCanvasStep.CREATE_RETAINED) return false
+        release();targetUri=null;fixed=null;ticket=null;newPreparation=null;payloadAccepted=false;problem=false;step=NetworkCanvasStep.DESTINATION;return true
     }
-    private fun runAccepted(action:suspend ()->Unit):Boolean {
+    private fun runAccepted(acceptCreate:Boolean=false,action:suspend ()->Unit):Boolean {
         if(!current() || busy) return false
+        if(acceptCreate) {if(!selection.current()) return false;payloadAccepted=true}
         problem=false;step=NetworkCanvasStep.WORKING
         lateinit var job:Job
         job=MapSaves.scope.launch(start=CoroutineStart.LAZY) {
@@ -137,7 +143,7 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
         if(newTarget) {
             val candidate=try {fixed ?: MindMapDocument(nodes=emptyList(),organization=MapOrganization.RELATION_CANVAS)
                 .addFileCards(selection.seeds).also {fixed=it}} catch(_:IllegalArgumentException) {problem=true;return false}
-            return runAccepted {
+            return runAccepted(acceptCreate=true) {
                 when(val result=MapDocuments.create(app,uri,candidate.document)) {
                     is MapCreateOutcome.Created->if(loaded(result.lease,candidate.document.id)) acceptCreated(candidate)
                     is MapCreateOutcome.Retained->if(active) {targetId=result.documentId;problem=true;step=NetworkCanvasStep.CREATE_RETAINED}
@@ -156,7 +162,7 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
             val prepared=session.captureFileCards(selection.seeds)
             if(prepared==null) {problem=true;step=NetworkCanvasStep.CONFIRM;return@runAccepted}
             when(val result=session.importFileCards(prepared)) {
-                is MapFileCardsImportResult.Applied->{ticket=prepared;nodeIds=result.nodeIds.toSet();saveImported()}
+                is MapFileCardsImportResult.Applied->{payloadAccepted=true;ticket=prepared;nodeIds=result.nodeIds.toSet();saveImported()}
                 MapFileCardsImportResult.Busy->{problem=true;step=NetworkCanvasStep.CONFIRM}
                 MapFileCardsImportResult.Changed,MapFileCardsImportResult.Invalid->{problem=true;step=NetworkCanvasStep.FAILED}
             }
@@ -167,12 +173,17 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
         if(session.interactionEpoch!=targetEpoch || doc.id!=targetId || nodeIds.isEmpty()) return false
         ticket?.let {if(!session.fileCardsCurrent(it)) return false}
         fixed?.let {candidate->
-            val expected=candidate.document.nodes.associate {it.id to it.fileCardId}
-            if(nodeIds.any {id->doc.nodes.none {it.id==id && it.fileCardId==expected[id]}}) return false
+            val expected=candidate.document.nodes.associateBy {it.id}
+            if(nodeIds.any {id->
+                val before=expected[id]?.canonicalFileCardSource()
+                val after=doc.nodes.firstOrNull {it.id==id}?.canonicalFileCardSource()
+                before==null || after==null || before.id!=after.id || before.target!=after.target
+            }) return false
         }
-        val files=selection.seeds.mapTo(hashSetOf()) {it.documentId}
-        return nodeIds.all {node->doc.nodes.any {it.id==node && it.fileCardId in files}} &&
-            doc.nodes.filter {it.id in nodeIds}.mapTo(hashSetOf()) {it.fileCardId}==files
+        val targets=selection.seeds.associate {it.documentId to it.target}
+        return nodeIds.all {node->doc.nodes.any {it.id==node && it.fileCardId in targets &&
+            it.canonicalFileCardSource()?.target==targets[it.fileCardId]}} &&
+            doc.nodes.filter {it.id in nodeIds}.mapTo(hashSetOf()) {it.fileCardId}==targets.keys
     }
     private fun acceptCreated(candidate:MapFileCardsAdded) {
         if(!attachCreatedReceipt(candidate)) {problem=true;step=NetworkCanvasStep.FAILED}

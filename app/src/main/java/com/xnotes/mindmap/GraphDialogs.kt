@@ -156,7 +156,11 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
         Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
     }},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
-            item { Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body) }
+            item {
+                Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body)
+                if(node.fileCardId!=null && node.sources.singleOrNull()?.scope==SourceScope.PDF_ORIGINAL)
+                    Text(stringResource(R.string.network_original_card_notice),fontSize=TextSize.caption)
+            }
             item {
                 Text(stringResource(R.string.graph_preview_backup_notice),fontSize=TextSize.caption)
                 Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {

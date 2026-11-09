@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="network_filter_kind_pdf_original">原 PDF 原文（原件库）</string>
+    <string name="network_original_folder_notice">原 PDF 原文属于原件库。目录筛选不会借用批注笔记的位置。</string>
+    <string name="network_original_metadata_notice">原文可用状态按本次原件库核对显示，预览保留上次内容；打开时重新核对原文。</string>
+    <string name="network_original_card_notice">此卡片代表整份原件，从首页开始阅读。</string>
+    <string name="network_name_with_kind">%1$s · %2$s</string>
+    <string name="network_original_cached_status">上次预览状态：%1$s</string>
+</resources>

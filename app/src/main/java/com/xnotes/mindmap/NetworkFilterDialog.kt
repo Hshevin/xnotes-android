@@ -115,12 +115,13 @@ internal fun NetworkFilterControls(entry:FileNetworkWorkspace.Entry,enabled:Bool
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
             item("notice") {
                 Text(stringResource(R.string.network_filter_notice),fontSize=TextSize.caption)
+                Text(stringResource(R.string.network_original_folder_notice),fontSize=TextSize.caption)
                 if(!current(shown.id)) Text(stringResource(R.string.network_filter_draft_changed),fontSize=TextSize.body)
             }
             item("files") {FilterSection(R.string.network_filter_files,shown.fileIds==null,canEdit,
                 all={update {it.copy(fileIds=null)}},none={update {it.copy(fileIds=emptySet())}})}
             for(file in controller.catalog) item("file:${file.documentId}") {
-                FilterCheck(file.observedNames.firstOrNull().orEmpty().ifBlank {stringResource(R.string.network_file)},
+                FilterCheck(networkFileTitle(file),
                     shown.fileIds==null || file.documentId in shown.fileIds,canEdit) {
                     update {latest->val selected=latest.fileIds ?: controller.catalog.mapTo(linkedSetOf()) {it.documentId}
                         latest.copy(fileIds=if(file.documentId in selected) selected-file.documentId else selected+file.documentId)}
@@ -129,11 +130,7 @@ internal fun NetworkFilterControls(entry:FileNetworkWorkspace.Entry,enabled:Bool
             item("kinds") {FilterSection(R.string.network_filter_kinds,shown.kinds==null,canEdit,
                 all={update {it.copy(kinds=null)}},none={update {it.copy(kinds=emptySet())}})}
             for(kind in NetworkFileKind.entries) item("kind:${kind.name}") {
-                FilterCheck(stringResource(when(kind) {
-                    NetworkFileKind.NOTE->R.string.network_filter_kind_note
-                    NetworkFileKind.CANVAS->R.string.network_filter_kind_canvas
-                    NetworkFileKind.MAP->R.string.network_filter_kind_map
-                }),shown.kinds==null || kind in shown.kinds,canEdit) {update {latest->
+                FilterCheck(networkFileKindLabel(kind),shown.kinds==null || kind in shown.kinds,canEdit) {update {latest->
                     val selected=latest.kinds ?: NetworkFileKind.entries.toSet()
                     latest.copy(kinds=if(kind in selected) selected-kind else selected+kind)
                 }}

@@ -44,7 +44,9 @@ internal class LocalNetworkEvidence internal constructor(val row:MapBacklinkRow,
 }
 internal data class LocalNetworkConcept(val key:NetworkConceptKey,val location:BacklinkLocation,val title:String,
     val kind:NodeKind,val members:List<LocalNetworkEvidence>,val origin:NetworkConceptOrigin?=null)
-internal data class LocalNetworkFile(val documentId:String,val observedNames:List<String>)
+internal data class LocalNetworkFile(val documentId:String,val observedNames:List<String>,val kind:NetworkFileKind?=null,
+    val availability:SourceStatus?=null,val problem:BacklinkProblem?=null,val cardTarget:MapSourceTarget?=null,
+    val metadataChecked:Boolean=false)
 internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:List<LocalNetworkFile>,
     val concepts:List<LocalNetworkConcept>,val issues:List<BacklinkIssue>,val checkedMaps:Int,val complete:Boolean,
     val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false,
@@ -52,7 +54,7 @@ internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:
     val filteredConcepts:Int=0,val contextConcepts:Set<NetworkConceptKey> = emptySet(),
     val browseMode:NetworkBrowseMode=NetworkBrowseMode.LOCAL,val centreFiles:Set<String> = emptySet(),
     val fileRelations:List<MapFileRelationRow> = emptyList(),val contextFileRelations:Set<FileRelationKey> = emptySet(),
-    val filteredFileRelations:Int=0) {
+    val filteredFileRelations:Int=0,val targetStates:Map<MapSourceTarget,NetworkTargetState> = emptyMap()) {
     val aggregatedFileRelations:List<LocalNetworkFileRelation> get()=fileRelations.groupBy(NetworkFileRelationKey::of)
         .map {LocalNetworkFileRelation(it.key,it.value)}
 }
