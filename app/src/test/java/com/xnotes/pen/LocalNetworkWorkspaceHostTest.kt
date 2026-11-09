@@ -25,10 +25,10 @@ class LocalNetworkWorkspaceHostTest {
         lateinit var coordinator:LocalNetworkCoordinator
         var panel=true
         var shown=0
-        suspend fun start() {
-            openParkingPanes(native)
+        suspend fun start(openNative:Boolean=true) {
+            if(openNative) openParkingPanes(native)
             withContext(Dispatchers.Main) {
-                native.editor.goToPage(0)
+                if(openNative) native.editor.goToPage(0)
                 maps.bindHost(binding);networks.bindHost(binding)
                 coordinator=LocalNetworkCoordinator(native.editor,maps,networks,binding,scope,onShown={shown++})
             }
@@ -39,8 +39,50 @@ class LocalNetworkWorkspaceHostTest {
             withContext(Dispatchers.Main) {coordinator.dispose();networks.dispose();maps.dispose()}.join();scope.cancel()
         }
     }
-    private fun scenario(block:suspend(Fixture)->Unit)=runParkingScenario {native->val f=Fixture(native)
-        try {f.start();block(f)} finally {f.finish()}
+    private fun scenario(openNative:Boolean=true,block:suspend(Fixture)->Unit)=runParkingScenario {native->val f=Fixture(native)
+        try {f.start(openNative);block(f)} finally {f.finish()}
+    }
+    @Test fun theHomepageCanOpenAndCloseALibraryWithoutAnOpenDocumentOrAnInventedNativeContext()=scenario(openNative=false) {f->
+        val model=f.native.editor.state.document
+        withContext(Dispatchers.Main) {
+            assertFalse(f.native.editor.noteOpen);assertNull(f.native.editor.captureBacklinkContext())
+            val request=LibraryNetworkLaunchRequest.capture("Library",emptyList()) {f.panel}!!
+            assertTrue(f.coordinator.openLibrary(request))
+        }
+        f.await {!f.coordinator.busy}
+        withContext(Dispatchers.Main) {
+            val entry=requireNotNull(f.networks.current)
+            assertTrue(f.networks.visible);assertFalse(entry.query.hasLocalFocus)
+            assertEquals(NetworkBrowseMode.LIBRARY,entry.controller.browseMode)
+            assertTrue(entry.controller.centreFiles.isEmpty());assertFalse(entry.controller.showLocal())
+            assertSame(model,f.native.editor.state.document);assertFalse(f.native.editor.noteOpen)
+            f.panel=false // Only the initial composition depends on the homepage request.
+            assertTrue(f.networks.current(f.binding,entry));assertTrue(f.coordinator.close(entry))
+            assertFalse(f.networks.visible);assertFalse(f.native.editor.noteOpen)
+        }
+        assertEquals(0,f.native.writes.get())
+    }
+    @Test fun cancellingTheLibraryHandoffWhileThePenIsDownRetainsTheNativeStrokeAndNeverOpensLater()=scenario {f->
+        lateinit var request:LibraryNetworkLaunchRequest
+        val original=f.native.source.readBytes()
+        withContext(Dispatchers.Main) {
+            parkingPen(f.native.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0))
+            request=LibraryNetworkLaunchRequest.capture("Library",emptyList()) {f.panel}!!
+            assertTrue(f.coordinator.openLibrary(request))
+        }
+        parkingDispatch()
+        withContext(Dispatchers.Main) {
+            assertTrue(f.coordinator.busy);assertFalse(f.networks.visible)
+            assertTrue(f.coordinator.canCancel(request));f.coordinator.cancel(request)
+            assertTrue(f.native.editor.stylusInContact)
+            parkingPen(f.native.editor,MotionEvent.ACTION_UP,Pt(160.0,130.0))
+        }
+        parkingDispatch()
+        withContext(Dispatchers.Main) {
+            assertFalse(f.coordinator.busy);assertNull(f.networks.current)
+            assertTrue(f.native.editor.state.document.dirty);assertTrue(f.native.editor.history.canUndo)
+        }
+        assertArrayEquals(original,f.native.source.readBytes());assertEquals(0,f.native.writes.get())
     }
     @Test fun aNetworkWaitsForTheRealPenAndOwnsItsQueryAfterTheSidebarAndReadPageChange()=scenario {f->
         val model=f.native.editor.state.document;val history=f.native.editor.history

@@ -870,6 +870,9 @@ private fun EditorScreen(
             })
     }
     DisposableEffect(networkCoordinator) {onDispose {networkCoordinator.dispose()}}
+    var libraryNetworkLaunch by remember(networkCoordinator) {
+        mutableStateOf<com.xnotes.mindmap.LibraryNetworkLaunchRequest?>(null)
+    }
     LaunchedEffect(networks.current,networks.resumeRequested,mapBinding) {
         networks.current?.takeIf {networks.resumeRequested && !maps.visible}?.let {networkCoordinator.resume(it)}
     }
@@ -1366,19 +1369,25 @@ private fun EditorScreen(
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
-        bottomBar={if(maps.current?.sourceReturn!=null || networks.current!=null) androidx.compose.material3.Surface {
+        bottomBar={if(maps.current?.sourceReturn!=null || networks.current!=null || libraryNetworkLaunch?.let {
+            networkCoordinator.canCancel(it) || networkCoordinator.failureFor(it)!=null
+        }==true) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
                 val network=networks.current
+                val libraryLaunch=libraryNetworkLaunch
                 val issue=sourceNavigator.failure
-                val networkIssue=network?.let {networkCoordinator.failureFor(it)}
+                val networkIssue=libraryLaunch?.let {networkCoordinator.failureFor(it)} ?: network?.let {networkCoordinator.failureFor(it)}
                 val returning=sourceNavigator.busy || networkCoordinator.busy
                 if(networkIssue!=null) Text(stringResource(com.xnotes.mindmap.networkProblemText(networkIssue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                 else if(issue!=null) Text(stringResource(referenceFailureText(issue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
-                else if(returning) Text(stringResource(R.string.graph_source_returning),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                else if(returning) Text(stringResource(if(libraryLaunch?.let {networkCoordinator.canCancel(it)}==true)
+                    R.string.network_preparing else R.string.graph_source_returning),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                 else Spacer(Modifier.weight(1f))
                 if(returning) androidx.compose.material3.TextButton(onClick={
-                    if(sourceNavigator.busy) sourceNavigator.cancel() else network?.let {networkCoordinator.cancel(it)}
+                    if(sourceNavigator.busy) sourceNavigator.cancel()
+                    else if(libraryLaunch?.let {networkCoordinator.canCancel(it)}==true) networkCoordinator.cancel(libraryLaunch)
+                    else network?.let {networkCoordinator.cancel(it)}
                 },modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                     Text(stringResource(R.string.cancel),fontSize=TextSize.body)
                 } else {
@@ -1405,6 +1414,15 @@ private fun EditorScreen(
                 allowSplits = target == null,
                 initialDocument = target?.let { paneHomes[it.pane] },
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
+                onOpenNetwork = {
+                    if(!networkCoordinator.busy) {
+                        val request=com.xnotes.mindmap.LibraryNetworkLaunchRequest.capture(
+                            context.getString(R.string.network_library_title),editor.workspaceRoots(),captureMapHost())
+                        libraryNetworkLaunch=request
+                        if(request==null || !networkCoordinator.openLibrary(request))
+                            editor.message=context.getString(com.xnotes.mindmap.networkProblemText(com.xnotes.mindmap.BacklinkProblem.CHANGED))
+                    }
+                },
                 backEnabled = target == null || homeFocus == target.pane,
                 onExitApp = { if (target == null) (context as? android.app.Activity)?.finish() else closePaneHome(target) },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },

@@ -200,11 +200,11 @@
     <string name="network_empty">No concept references this file in the checked locations.</string>
     <string name="network_unnamed_concept">Untitled concept</string>
     <string name="network_open_reference">Open this reference in its map</string>
-    <string name="network_concepts">Concepts in this local network</string>
+    <string name="network_concepts">Concepts in this network</string>
     <string name="network_import_notice">An import is waiting. Close the relationship network to continue.</string>
     <string name="network_opening_snapshot">Opening the selected reference. The diagram is held while current sources are checked.</string>
     <string name="network_filter">Filter</string>
-    <string name="network_filter_title">Filter this local network</string>
+    <string name="network_filter_title">Filter this relationship network</string>
     <string name="network_filter_notice">Conditions apply to source files, using their last identified format and registered location. Included concepts keep all their sources; other files remain as context. These details do not verify the current source identity.</string>
     <string name="network_filter_files">Source file collection</string>
     <string name="network_filter_unrestricted">Unrestricted</string>
@@ -240,4 +240,21 @@
     <string name="network_expansion_path">Last known path</string>
     <string name="network_expansion_path_step">%1$s · %2$s → source %3$s</string>
     <string name="network_files">Files</string>
+    <string name="network_library_title">File relationship network</string>
+    <string name="network_scope_library">Library relationships</string>
+    <string name="network_scope_files">Multiple-file network</string>
+    <string name="network_scope_local">Current file neighborhood</string>
+    <string name="network_scope_title">Choose files for this network</string>
+    <string name="network_scope_notice">Choose up to 250 known files by identity. Names and registered locations are last-known details. Existing source filters stay applied.</string>
+    <string name="network_scope_changed">The network scope changed or a selected file is no longer available. Close and reopen this dialog, or clear the selection.</string>
+    <string name="network_scope_library_first">View the library to choose from known files across your authorized folders. Canceling this dialog keeps the current neighborhood.</string>
+    <string name="network_scope_view_library">View library first</string>
+    <string name="network_scope_selection_count">Selected %1$d of up to 250 files</string>
+    <string name="network_scope_no_files">No known files are available in this inventory. Refresh the library to check again.</string>
+    <string name="network_scope_centres">Network for %1$d selected files</string>
+    <string name="network_scope_inventory">Known files and content references in authorized folders</string>
+    <string name="network_empty_overview">No files or references to display</string>
+    <string name="network_file_no_displayed_refs">No content references to this file are displayed in the current view.</string>
+    <string name="network_preparing">Preparing relationship network…</string>
+    <string name="network_no_displayed_refs">No content references are displayed in the current view.</string>
 </resources>

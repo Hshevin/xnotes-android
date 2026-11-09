@@ -18,6 +18,15 @@ internal class LocalNetworkLaunchRequest private constructor(val context:NativeB
     }
 }
 
+/** A homepage handoff has no native source identity; the fresh host parking proof is still required. */
+internal class LibraryNetworkLaunchRequest private constructor(val query:NetworkQuery,private val valid:()->Boolean) {
+    fun current()=!query.hasLocalFocus && valid()
+    companion object {
+        fun capture(title:String,roots:List<String>,valid:()->Boolean):LibraryNetworkLaunchRequest? =
+            LibraryNetworkLaunchRequest(NetworkQuery.library(title,roots),valid).takeIf {it.current()}
+    }
+}
+
 /** Retains exploration data across configuration changes, never native owners or presentation closures. */
 @MainThread
 internal class FileNetworkWorkspace(context:Context,private val scope:CoroutineScope) {
@@ -48,7 +57,8 @@ internal class FileNetworkWorkspace(context:Context,private val scope:CoroutineS
     internal fun admit(binding:Any,query:NetworkQuery):Entry? {
         if(!isHostCurrent(binding)) return null
         val prior=current
-        val same=prior?.takeIf {it.alive && it.query.focusId==query.focusId && it.query.title==query.title && it.query.roots==query.roots}
+        val same=prior?.takeIf {it.alive && it.query.focusId==query.focusId && it.query.title==query.title &&
+            it.query.roots==query.roots && it.query.hasLocalFocus==query.hasLocalFocus}
         val next=same ?: Entry(query,LocalFileNetworkController(app,scope,query))
         if(prior!=null && prior!==next) {prior.alive=false;prior.presentation.visible=false;prior.controller.close()}
         current=next;next.graphReturn=null;visible=true;resumeRequested=false;next.presentation.visible=true

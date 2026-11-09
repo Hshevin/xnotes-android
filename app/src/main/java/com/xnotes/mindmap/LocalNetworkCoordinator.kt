@@ -28,6 +28,7 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
     private var problem by mutableStateOf<BacklinkProblem?>(null)
     var busy by mutableStateOf(false);private set
     fun failureFor(context:NativeBacklinkContext)=problem.takeIf {owner===context && context.current()}
+    fun failureFor(request:LibraryNetworkLaunchRequest)=problem.takeIf {owner===request && request.current()}
     fun failureFor(entry:FileNetworkWorkspace.Entry)=problem.takeIf {owner===entry && entry.alive}
     fun canCancel(expected:Any)=busy && owner===expected
     fun cancel(expected:Any) {if(canCancel(expected)) cancel()}
@@ -35,6 +36,12 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
     fun open(request:LocalNetworkLaunchRequest):Boolean {
         if(!hostCurrent() || busy || maps.visible || networks.visible || !request.current()) return false
         return present(request.context,{request.current() && !maps.visible && !networks.visible}) {
+            networks.admit(binding,request.query)!=null
+        }
+    }
+    fun openLibrary(request:LibraryNetworkLaunchRequest):Boolean {
+        if(!hostCurrent() || busy || maps.visible || networks.visible || !request.current()) return false
+        return present(request,{request.current() && !maps.visible && !networks.visible}) {
             networks.admit(binding,request.query)!=null
         }
     }

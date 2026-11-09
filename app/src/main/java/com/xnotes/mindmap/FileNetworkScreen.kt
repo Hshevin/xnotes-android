@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import com.xnotes.R
 import com.xnotes.ui.theme.*
 
@@ -41,7 +42,7 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
     val observedControls=remember(entry) {longArrayOf(controls)}
     val labels=LocalNetworkLabels(stringResource(R.string.network_file),stringResource(R.string.network_concept),
         stringResource(R.string.map_ink_node),stringResource(R.string.graph_reference),
-        stringResource(R.string.network_reference_count),stringResource(R.string.graph_belongs))
+        stringResource(R.string.network_reference_count),stringResource(R.string.graph_belongs),stringResource(R.string.network_empty_overview))
     val busy=actions.busy()
     var openingVisual by remember(entry) {mutableStateOf<NetworkOpeningVisual?>(null)}
     val held=openingVisual.takeIf {busy}
@@ -60,9 +61,11 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                     MapButton(R.string.map_close) {actions.close(entry)}
-                    Text(stringResource(R.string.network_title),fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
+                    Text(stringResource(if(controller.browseMode==NetworkBrowseMode.LOCAL) R.string.network_title else R.string.network_library_title),
+                        fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
+                    NetworkScopeControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
                     NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
-                    MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
+                    if(controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
                         if(controller.collapseAll(controls)) presentation.invalidateInput()
                     }
                     MapButton(R.string.network_refresh,enabled=!busy && !controller.loading && !controller.filtering) {localProblem=null;controller.refresh()}
@@ -70,7 +73,11 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                     if(controller.loading || controller.filtering) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
                     if(busy) MapButton(R.string.cancel) {actions.cancel(entry)}
                 }
-                Text(entry.query.title,Modifier.padding(horizontal=Space.s12),fontSize=TextSize.body,fontWeight=FontWeight.SemiBold)
+                Text(when(controller.browseMode) {
+                    NetworkBrowseMode.LOCAL->entry.query.title
+                    NetworkBrowseMode.FILES->stringResource(R.string.network_scope_centres,controller.centreFiles.size)
+                    NetworkBrowseMode.LIBRARY->stringResource(R.string.network_scope_inventory)
+                },Modifier.padding(horizontal=Space.s12),fontSize=TextSize.body,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
                 Text(stringResource(R.string.network_semantics),Modifier.padding(Space.s12),fontSize=TextSize.caption)
                 HorizontalDivider()
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -146,8 +153,12 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                 val expanded=id in entry.controller.expandedFiles
                 Text(report?.files?.firstOrNull {it.documentId==id}?.observedNames?.firstOrNull().orEmpty()
                     .ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
-                if(id==entry.query.focusId) Text(stringResource(R.string.network_expansion_root),fontSize=TextSize.caption)
-                else MapButton(if(expanded) R.string.network_collapse_file else R.string.network_expand_file,enabled=enabled) {
+                if(selected.isEmpty()) Text(stringResource(R.string.network_file_no_displayed_refs),fontSize=TextSize.caption)
+                if(entry.controller.browseMode!=NetworkBrowseMode.LIBRARY &&
+                    (entry.controller.browseMode==NetworkBrowseMode.LOCAL && id==entry.query.focusId ||
+                        entry.controller.browseMode==NetworkBrowseMode.FILES && id in entry.controller.centreFiles))
+                    Text(stringResource(R.string.network_expansion_root),fontSize=TextSize.caption)
+                else if(entry.controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(if(expanded) R.string.network_collapse_file else R.string.network_expand_file,enabled=enabled) {
                     if(entry.controller.setExpanded(id,!expanded,controls)) p.invalidateInput()
                 }
             }
@@ -172,6 +183,8 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
         if(report!=null && concepts.isEmpty()) item {Text(stringResource(when {
             !report.complete->R.string.graph_backlinks_empty_partial
             report.filterActive->R.string.network_filter_empty
+            report.browseMode!=NetworkBrowseMode.LOCAL && report.files.isNotEmpty()->R.string.network_no_displayed_refs
+            report.browseMode!=NetworkBrowseMode.LOCAL->R.string.network_empty_overview
             else->R.string.network_empty
         }),fontSize=TextSize.body)}
         for(c in selected) {

@@ -59,7 +59,12 @@ class AndroidMainFileNetworkHostTest {
     }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)==true
     private fun click(label:String) {
         var target:AccessibilityNodeInfo?=null
-        waitUntil(label) {target=nodes().filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable);target!=null}
+        waitUntil(label) {
+            val current=nodes()
+            target=current.filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable)
+            if(target==null) current.firstOrNull {matches(it,label)}?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            target!=null
+        }
         assertTrue(target!!.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
     private fun clickScrolled(label:String,backwards:Boolean=false) {
@@ -181,8 +186,27 @@ class AndroidMainFileNetworkHostTest {
                     storage.registry.registerObserved(BundleReferenceInfo.inspectStrict(nextSource).header,"xnote",nextSource.name,Uri.fromFile(nextSource).toString())
                     storage.registry.registerMapObserved(nextDocument.id,nextMap.name,nextMapUri.toString())
                 }
-                withContext(Dispatchers.Main) {assertTrue(editor.openSingleFromHome(Uri.fromFile(source).toString(),source.name));editor.sidebarVisible=true}
+                // The source is opened after proving the actual empty-home library entry below.
             }}
+            val homeModel=main {editor.state.document}
+            click(host.getString(R.string.network_library_title))
+            waitUntil("actual homepage library opens without a native reading context") {main {
+                networkWorkspace.visible && networkWorkspace.current?.let {entry->!entry.query.hasLocalFocus &&
+                    !entry.controller.loading && entry.controller.browseMode==NetworkBrowseMode.LIBRARY && entry.presentation.cameraReady &&
+                    entry.controller.report?.concepts?.any {it.location.graphId==nextDocument.id}==true}==true
+            }}
+            main {
+                val library=networkWorkspace.current!!;val report=library.controller.report!!
+                assertTrue(editor.openPanes.isEmpty());assertSame(homeModel,editor.state.document)
+                assertTrue(report.files.none {it.documentId==library.query.focusId})
+                assertEquals(report.files.size+report.concepts.size,graph(host)!!.document.nodes.size)
+            }
+            click(host.getString(R.string.map_close))
+            waitUntil("closing library restores the unchanged empty native home") {main {!networkWorkspace.visible && editor.openPanes.isEmpty()}}
+            main {assertSame(homeModel,editor.state.document)}
+            runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {
+                assertTrue(editor.openSingleFromHome(Uri.fromFile(source).toString(),source.name));editor.sidebarVisible=true
+            }}}
             val originalNative=main {editor.state.document}
             click(host.getString(R.string.graph_backlinks_title))
             waitUntil("real sidebar current-page relation") {visible(anchor.note)}
@@ -397,6 +421,43 @@ class AndroidMainFileNetworkHostTest {
                 networkWorkspace.current===entry && entry.presentation.cameraReady && entry.presentation.selectedNode==NetworkSceneNodeKey.Concept(nextKey)}}
             main {assertEquals(s.identity.documentId,entry.query.focusId);assertEquals(directViewport.zoom,graph(host)!!.viewport().zoom,0.00001f)
                 assertEquals(directCenter.x,center(graph(host)!!).x,.02);assertEquals(directCenter.y,center(graph(host)!!).y,.02)}
+            assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
+            assertArrayEquals(nextSourceBytes,nextSource.readBytes());assertArrayEquals(nextMapBytes,nextMap.readBytes())
+            // D2c: a local catalog is not offered as the global collection chooser.
+            click(host.getString(R.string.network_scope_files))
+            waitUntil("local mode explicitly requires a library inventory") {visible(host.getString(R.string.network_scope_view_library))}
+            click(host.getString(R.string.cancel))
+            main {assertEquals(NetworkBrowseMode.LOCAL,entry.controller.browseMode)}
+            click(host.getString(R.string.network_scope_library))
+            waitUntil("actual global inventory is ready") {main {!entry.controller.loading && !entry.controller.filtering &&
+                entry.controller.browseMode==NetworkBrowseMode.LIBRARY && entry.controller.fileChoices.any {it.documentId==u.identity.documentId}}}
+            click(host.getString(R.string.network_scope_files))
+            clickScrolled(target.name)
+            click(host.getString(R.string.cancel))
+            main {assertEquals(NetworkBrowseMode.LIBRARY,entry.controller.browseMode)}
+            click(host.getString(R.string.network_scope_files))
+            clickScrolled(target.name)
+            val targetOrder=main {entry.controller.fileChoices.map {it.documentId}}
+            clickScrolled(nextSource.name,backwards=targetOrder.indexOf(u.identity.documentId)<targetOrder.indexOf(t.identity.documentId))
+            click(host.getString(R.string.apply))
+            waitUntil("actual T and U multi-file network") {main {!entry.controller.loading && !entry.controller.filtering &&
+                entry.controller.browseMode==NetworkBrowseMode.FILES && entry.controller.centreFiles==setOf(t.identity.documentId,u.identity.documentId) &&
+                    entry.controller.report?.concepts?.any {it.key==nextKey}==true}}
+            val collectionViewport=main {graph(host)!!.viewport()};val collectionCenter=main {center(graph(host)!!)}
+            clickScrolled("A next-layer concept without S",backwards=true)
+            openSourceRow(nextU.note,host.getString(R.string.network_open_reference))
+            waitUntil("collection opens the actual U membership in H") {main {graphWorkspace.visible &&
+                graphWorkspace.current?.let {it.session.document?.id==nextDocument.id && it.presentation.sourceFocus?.sourceId==nextU.id}==true}}
+            click(host.getString(R.string.network_return))
+            waitUntil("same collection and camera return") {main {networkWorkspace.visible && networkWorkspace.current===entry &&
+                entry.controller.browseMode==NetworkBrowseMode.FILES && entry.presentation.cameraReady &&
+                    entry.controller.centreFiles==setOf(t.identity.documentId,u.identity.documentId)}}
+            main {
+                assertEquals(collectionViewport.zoom,graph(host)!!.viewport().zoom,.00001f)
+                assertEquals(collectionCenter.x,center(graph(host)!!).x,.02);assertEquals(collectionCenter.y,center(graph(host)!!).y,.02)
+                assertEquals(NetworkSceneNodeKey.Concept(nextKey),entry.presentation.selectedNode)
+                assertEquals(setOf(t.identity.documentId),entry.controller.filter.fileIds)
+            }
             assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
             assertArrayEquals(nextSourceBytes,nextSource.readBytes());assertArrayEquals(nextMapBytes,nextMap.readBytes())
         } finally {

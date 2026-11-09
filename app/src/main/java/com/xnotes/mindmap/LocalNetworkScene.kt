@@ -19,7 +19,7 @@ internal sealed interface NetworkSceneEdgeKey {
 }
 /** Strings only: the retained geometry never owns a Context or a resource-dependent callback. */
 internal data class LocalNetworkLabels(val file:String,val concept:String,val ink:String,val reference:String,
-    val references:String,val belongs:String)
+    val references:String,val belongs:String,val empty:String="")
 internal data class LocalNetworkScene(val document:MindMapDocument,val nodes:Map<String,NetworkSceneNodeKey>,
     val edges:Map<String,NetworkSceneEdgeKey>)
 
@@ -55,10 +55,16 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
         }
         fun column(key:NetworkSceneNodeKey)=when(key) {
             is NetworkSceneNodeKey.Concept->-1
-            is NetworkSceneNodeKey.File->when(key.documentId) {report.focusDocumentId->0;in ownerIds->-2;else->1}
+            is NetworkSceneNodeKey.File->when {
+                report.browseMode==NetworkBrowseMode.LOCAL && key.documentId==report.focusDocumentId->0
+                key.documentId in report.centreFiles->0
+                key.documentId in ownerIds->-2
+                else->1
+            }
         }
-        val root=NetworkSceneNodeKey.File(report.focusDocumentId)
-        positions[root]=Pt(0.0,0.0)
+        val root=if(report.browseMode==NetworkBrowseMode.LOCAL) NetworkSceneNodeKey.File(report.focusDocumentId)
+            else keys.firstOrNull()
+        if(report.browseMode==NetworkBrowseMode.LOCAL) positions[requireNotNull(root)]=Pt(0.0,0.0)
         val occupied=positions.values.groupBy {it.x}.mapValues {(_,points)->points.mapTo(hashSetOf()) {it.y}}.toMutableMap()
         for(key in keys.sortedBy(::nodeId)) if(key !in positions) {
             val x=column(key)*FileNetworkColumnStep.value.toDouble()
@@ -80,7 +86,8 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
             }
             MapNode(id=id,parent=null,free=key!=root,text=text,x=point.x,y=point.y,
                 width=FileNetworkCardWidth.value.toDouble(),height=FileNetworkCardHeight.value.toDouble())
-        }
+        }.ifEmpty {listOf(MapNode(id=hash(encode("network-empty",report.focusDocumentId)),parent=null,
+            text=labels.empty,width=FileNetworkCardWidth.value.toDouble(),height=FileNetworkCardHeight.value.toDouble()))}
         val edges=linkedMapOf<String,NetworkSceneEdgeKey>()
         val relations=mutableListOf<MapRelation>()
         for(c in report.concepts.sortedBy {it.key.stableKey}) {

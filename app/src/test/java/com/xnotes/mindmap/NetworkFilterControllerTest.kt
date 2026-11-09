@@ -118,7 +118,8 @@ class NetworkFilterControllerTest {
             f.storage.registry.register(uuid,"xnote","Source $index",provider.uri("item-$index").toString())
         }}
         val lease=withContext(Dispatchers.Main) {MapDocuments.acquire(f.context,f.uri(file)).also(f.leases::add)}
-        await {!lease.session.loading && !c.loading && c.report!!.concepts.single().members.all {it.row.origin==BacklinkOrigin.LIVE}}
+        await {!lease.session.loading && !c.loading &&
+            c.report?.concepts?.singleOrNull()?.members?.all {it.row.origin==BacklinkOrigin.LIVE}==true}
         val entered=CountDownLatch(1);val release=CountDownLatch(1);val queries=AtomicInteger()
         var oldSignal:android.os.CancellationSignal?=null
         provider.beforeQuery={signal->if(queries.incrementAndGet()==1) {

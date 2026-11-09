@@ -200,11 +200,11 @@
     <string name="network_empty">已检查的位置中，没有概念引用此文件。</string>
     <string name="network_unnamed_concept">无标题概念</string>
     <string name="network_open_reference">在图中打开此条引用</string>
-    <string name="network_concepts">局部网络中的概念</string>
+    <string name="network_concepts">关系网络中的概念</string>
     <string name="network_import_notice">有导入等待处理，关闭关系网络后继续。</string>
     <string name="network_opening_snapshot">正在打开所选引用。检查当前来源期间，暂时保留图示。</string>
     <string name="network_filter">筛选</string>
-    <string name="network_filter_title">筛选当前局部网络</string>
+    <string name="network_filter_title">筛选此关系网络</string>
     <string name="network_filter_notice">条件作用于真实来源文件，使用上次识别的格式和登记位置。纳入的概念保留全部来源，其他文件作为上下文显示。这些信息不代表已核实来源当前身份。</string>
     <string name="network_filter_files">来源文件集合</string>
     <string name="network_filter_unrestricted">不限</string>
@@ -240,4 +240,21 @@
     <string name="network_expansion_path">上次获知的路径</string>
     <string name="network_expansion_path_step">%1$s · %2$s → 来源 %3$s</string>
     <string name="network_files">文件</string>
+    <string name="network_library_title">文件关系网络</string>
+    <string name="network_scope_library">全库关系</string>
+    <string name="network_scope_files">多文件网络</string>
+    <string name="network_scope_local">当前文件局部</string>
+    <string name="network_scope_title">选择此网络的文件</string>
+    <string name="network_scope_notice">按文件身份选择，最多 250 份。名称和登记位置是上次获知的信息，现有来源筛选条件会继续生效。</string>
+    <string name="network_scope_changed">网络范围已变化，或所选文件已不可用。请关闭并重开对话框，或清除选择。</string>
+    <string name="network_scope_library_first">先查看全库，再从已授权文件夹中的已知文件里选择。取消此对话框会保留当前局部网络。</string>
+    <string name="network_scope_view_library">先查看全库</string>
+    <string name="network_scope_selection_count">已选 %1$d 份，最多 250 份</string>
+    <string name="network_scope_no_files">当前清单中没有可选的已知文件，可刷新全库后重试。</string>
+    <string name="network_scope_centres">所选 %1$d 份文件的网络</string>
+    <string name="network_scope_inventory">已授权资料中已知的文件与内容引用</string>
+    <string name="network_empty_overview">没有可显示的文件或引用</string>
+    <string name="network_file_no_displayed_refs">当前视图没有显示指向此文件的内容引用。</string>
+    <string name="network_preparing">正在准备关系网络…</string>
+    <string name="network_no_displayed_refs">当前视图没有显示内容引用。</string>
 </resources>
