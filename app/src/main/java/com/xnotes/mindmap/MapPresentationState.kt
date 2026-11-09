@@ -15,13 +15,16 @@ class MapPresentationState internal constructor() {
     private data class Camera(val viewport:MindMapView.Viewport,val width:Int,val height:Int,val density:Float)
     private var camera:Camera?=null
     private var restoredView=WeakReference<MindMapView>(null)
+    private var protectedCamera=false
+    internal var restoreVersion by mutableStateOf(0L);private set
+    internal var sourceFocus by mutableStateOf<MapSourcePanelFocus?>(null);private set
 
     internal fun synchronize(session:MapSession) {
         val id=session.document?.id
         if(owner!==session || epoch!=session.interactionEpoch || documentId!=id) {
             owner=session;epoch=session.interactionEpoch;documentId=id
-            camera=null;restoredView.clear();sourcesFor=null
-        } else if(sourcesFor!=null && session.document?.nodes?.none {it.id==sourcesFor}!=false) sourcesFor=null
+            camera=null;restoredView.clear();sourcesFor=null;sourceFocus=null;protectedCamera=false
+        } else if(sourcesFor!=null && session.document?.nodes?.none {it.id==sourcesFor}!=false) closeSources()
     }
     private fun current(session:MapSession,view:MindMapView)=owner===session && documentId!=null &&
         epoch==session.interactionEpoch && documentId==session.document?.id &&
@@ -31,7 +34,7 @@ class MapPresentationState internal constructor() {
 
     /** A detached old-epoch View or an editing camera cannot replace the normal bookmark. */
     internal fun capture(session:MapSession,view:MindMapView,imeBottom:Int=0):Boolean {
-        if(!current(session,view) || !ordinary(session,imeBottom) || view.width<=0 || view.height<=0) return false
+        if(protectedCamera || !current(session,view) || !ordinary(session,imeBottom) || view.width<=0 || view.height<=0) return false
         val density=view.resources.displayMetrics.density
         val viewport=view.viewport()
         if(!density.isFinite() || density<=0 || !viewport.zoom.isFinite() || viewport.zoom<=0 ||
@@ -45,6 +48,37 @@ class MapPresentationState internal constructor() {
         val saved=camera ?: return false
         view.restoreViewport(saved.viewport,saved.width,saved.height,saved.density)
         restoredView=WeakReference(view)
+        protectedCamera=sourcesFor!=null
         return true
     }
+    /** Freeze before a source-note keyboard can resize the ordinary graph View. */
+    internal fun showSources(session:MapSession,view:MindMapView,nodeId:String,imeBottom:Int=0,cameraReady:Boolean=true):Boolean {
+        if(!cameraReady || !current(session,view) || !ordinary(session,imeBottom) || session.document?.nodes?.none {it.id==nodeId}!=false) return false
+        if(!protectedCamera && !capture(session,view,imeBottom)) return false
+        if(camera==null) return false
+        sourcesFor=nodeId;sourceFocus=null;protectedCamera=true
+        return true
+    }
+    internal fun parkSourcePanel() {sourcesFor=null;sourceFocus=null;protectedCamera=camera!=null}
+    private fun requestCameraRestore() {
+        protectedCamera=camera!=null;restoredView.clear();restoreVersion=Math.incrementExact(restoreVersion)
+    }
+    internal fun closeSources() {sourcesFor=null;sourceFocus=null;requestCameraRestore()}
+    private fun graphCurrent(session:MapSession)=owner===session && documentId!=null && documentId==session.document?.id && epoch==session.interactionEpoch
+    internal fun reopenSourcePanel(session:MapSession,ticket:MapSourceNavigationTicket):Boolean {
+        if(!graphCurrent(session) || ticket.issuer!==session || ticket.documentId!=documentId || ticket.source.epoch!=epoch) return false
+        if(session.currentSourceNavigation(ticket)==null) {closeSources();return false}
+        sourcesFor=ticket.nodeId;sourceFocus=MapSourcePanelFocus(ticket);requestCameraRestore()
+        return true
+    }
+    internal fun applySourceReturn(session:MapSession,bookmark:MapSourceReturnBookmark):Boolean {
+        if(!graphCurrent(session) || !session.restoreSourceReturn(bookmark)) return false
+        val ticket=bookmark.source
+        if(session.currentSourceNavigation(ticket)!=null) {
+            sourcesFor=ticket.nodeId;sourceFocus=MapSourcePanelFocus(ticket)
+        } else {sourcesFor=null;sourceFocus=null}
+        requestCameraRestore()
+        return true
+    }
+    internal fun consumeSourceFocus(token:Any) {if(sourceFocus?.token===token) sourceFocus=null}
 }

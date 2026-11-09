@@ -14,6 +14,10 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
     private fun alive()=active && session.sourceEditSnapshot(expected.node.id)?.let {
         it.epoch==expected.epoch && it.documentId==expected.documentId
     }==true
+    fun captureNavigation(id:String,target:MapSourceTarget):MapSourceNavigationTicket? {
+        if(!alive()) return null
+        return session.captureSourceNavigation(expected.node.id,id,target)
+    }
     fun previewAsset(id:String):MapPreviewAsset? {
         if(!alive()) return null
         val source=session.document?.nodes?.firstOrNull {it.id==expected.node.id}?.sources?.firstOrNull {it.id==id} ?: return null

@@ -40,11 +40,14 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     internal class Entry internal constructor(val uri:Uri,val title:String,val lease:MapDocumentLease,
         val presentation:MapPresentationState=MapPresentationState(),internal var parkingCheck:()->Boolean={true}) {
         val session get()=lease.session
+        // Runtime map data only. A retained Entry must never keep an old native Editor/Activity.
+        internal var sourceReturn by mutableStateOf<MapSourceReturnBookmark?>(null)
     }
     private val app=context.applicationContext
     private var active=true
     private var generation=0L
     private var work:Job?=null
+    private var openOperation:Any?=null
     private val acceptedOpens=mutableSetOf<Job>()
     private var hostBinding:Any?=null
     private var disposal:Job?=null
@@ -53,10 +56,11 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     var opening by mutableStateOf(false);private set
     var failure by mutableStateOf<MapWorkspaceFailure?>(null);private set
 
-    fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true}):Boolean {
+    fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true},
+        operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={}):Boolean {
         if(!active) return false
         val request=++generation
-        work?.cancel();opening=true;failure=null
+        work?.cancel();openOperation=operation;opening=true;failure=null
         fun valid()=active && generation==request && stillCurrent()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var incoming:MapDocumentLease?=null
@@ -81,11 +85,13 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 next.presentation.visible=true
                 current=next;visible=true;adopted=true
                 if(prior!=null && prior!==next) {prior.presentation.visible=false;prior.lease.close()}
+                onPresented(next)
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
             finally {
                 if(!adopted) withContext(NonCancellable+Dispatchers.Main.immediate) {incoming?.close()?.join()}
-                if(generation==request) opening=false
+                if(generation==request) {opening=false;openOperation=null}
+                onFinished(adopted)
             }
         }
         work=pending;acceptedOpens+=pending
@@ -94,7 +100,11 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         return true
     }
     fun clearFailure() {failure=null}
-    fun cancelOpen() {generation++;val pending=work;work=null;pending?.cancel();opening=false;failure=null}
+    fun cancelOpen() {generation++;val pending=work;work=null;openOperation=null;pending?.cancel();opening=false;failure=null}
+    internal fun cancelOpen(operation:Any):Boolean {
+        if(openOperation!==operation) return false
+        cancelOpen();return true
+    }
     fun bindHost(binding:Any) {
         if(hostBinding===binding) return
         cancelOpen();current?.parkingCheck={false};hostBinding=binding
@@ -104,9 +114,10 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(hostBinding!==binding) return false
         cancelOpen();current?.parkingCheck={false};hostBinding=null;return true
     }
+    internal fun canHide(expected:Entry)=active && current===expected && expected.lease.alive &&
+        !expected.session.hasUnconfirmedContent && !expected.session.closing && !expected.session.replacingDocument
     fun hide(expected:Entry):Boolean {
-        if(!active || current!==expected || !expected.lease.alive || expected.session.hasUnconfirmedContent ||
-            expected.session.closing || expected.session.replacingDocument) return false
+        if(!canHide(expected)) return false
         cancelOpen();expected.presentation.visible=false;visible=false;return true
     }
     /** Real native callers re-prepare via open(); this fast path still checks its original proof. */
@@ -134,11 +145,12 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
 
 /** Keep map pickers registered while its body is parked; never cover an on-top ink Surface. */
 @Composable
-internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entry)->Unit,nativeContent:@Composable ()->Unit) {
+internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entry)->Unit,
+    hooks:((MapWorkspace.Entry)->MapHostHooks)?=null,nativeContent:@Composable ()->Unit) {
     Box(Modifier.fillMaxSize()) {
         if(!workspace.visible) nativeContent()
         workspace.current?.let {entry->key(entry) {
-            MindMapScreen(entry.session,entry.title,onClose={onClosed(entry)},presentation=entry.presentation)
+            MindMapScreen(entry.session,entry.title,onClose={onClosed(entry)},presentation=entry.presentation,hostHooks=hooks?.invoke(entry))
         }}
         if(workspace.opening || workspace.visible && workspace.failure!=null) {
             Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {

@@ -3,6 +3,7 @@ package com.xnotes.mindmap
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -132,14 +133,26 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
     }},dismissButton={MapButton(R.string.cancel,onClick=::dismiss)})
 }
 @Composable
-internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,close:()->Unit) {
+internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,
+                                open:((MapSourceNavigationTicket)->Unit)?=null,focus:MapSourcePanelFocus?=null,
+                                focusHandled:(Any)->Unit={},feedback:Int?=null,close:()->Unit) {
     val node=snapshot.node
+    val scroll=rememberLazyListState()
+    val sourceIds=node.sources.map {it.id}
+    LaunchedEffect(focus?.token,sourceIds,editor.conflict,feedback) {
+        val pending=focus ?: return@LaunchedEffect
+        if(pending.nodeId==node.id) {
+            val at=sourceIds.indexOf(pending.sourceId)
+            if(at>=0) scroll.scrollToItem(2+(if(editor.conflict) 1 else 0)+(if(feedback!=null) 1 else 0)+at)
+        }
+        focusHandled(pending.token)
+    }
     val alive=remember(editor) {java.util.concurrent.atomic.AtomicBoolean(true)}
     DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
     SideEffect {editor.sync(snapshot)}
     fun dismiss() {if(alive.get()) {alive.set(false);editor.close();close()}}
     AlertDialog(onDismissRequest=::dismiss,title={Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)},text={
-        LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight)) {
+        LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
             item { Text(stringResource(R.string.graph_sources_notice),fontSize=TextSize.body) }
             item {
                 Text(stringResource(R.string.graph_preview_backup_notice),fontSize=TextSize.caption)
@@ -150,8 +163,11 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 if(editor.busySourceIds.isNotEmpty()) MapButton(R.string.cancel) {if(alive.get()) editor.cancel()}
             }
             if(editor.conflict) item {Text(stringResource(R.string.graph_sources_changed),fontSize=TextSize.body)}
+            feedback?.let {message->item {Text(stringResource(message),fontSize=TextSize.body)}}
             items(node.sources.size,key={node.sources[it].id}) { index ->
                 val s=node.sources[index]
+                // Bind the visible row before click; remove/undo must not let an old UI mint a new lifetime.
+                val navigation=if(open!=null) editor.captureNavigation(s.id,s.target) else null
                 LaunchedEffect(editor,s.id,s.target) {if(alive.get()) editor.showPreview(s.id,s.target)}
                 Text(s.fileName,fontSize=TextSize.title)
                 Text(sourceScopeLabel(s),fontSize=TextSize.caption)
@@ -170,10 +186,13 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                     SourceStatus.TRASHED->R.string.graph_status_trashed
                 }),fontSize=TextSize.caption)
                 Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
+                    if(open!=null) MapButton(R.string.open,enabled=navigation!=null) {
+                        if(alive.get() && navigation!=null) open(navigation)
+                    }
                     MapButton(R.string.graph_preview_check,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.check(s.id,s.target)}
                     MapButton(R.string.graph_preview_refresh,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.refresh(s.id,s.target)}
                 }
-                OutlinedTextField(s.note,{ note -> if(alive.get()) editor.note(s.id,note) },
+                OutlinedTextField(s.note,{ note -> if(alive.get()) editor.note(s.id,note) },enabled=!LocalInkBusy.current,
                     label={Text(stringResource(R.string.graph_note),fontSize=TextSize.body)},textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.body))
                 Row {
                     MapButton(R.string.graph_primary,selected=node.primarySource==s.id){if(alive.get()) editor.primary(s.id)}

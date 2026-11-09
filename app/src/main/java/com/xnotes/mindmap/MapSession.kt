@@ -79,6 +79,37 @@ class MapSession() : ViewModel() {
         if(closing || replacingDocument || connectedEpoch!=ticket.epoch || sourceLifetimes[ticket.sourceId]?.token!==ticket.lifetime) return null
         return document?.nodes?.firstOrNull {it.id==ticket.nodeId}?.sources?.firstOrNull {it.id==ticket.sourceId && it.target==ticket.target}
     }
+    internal fun captureSourceNavigation(nodeId:String,sourceId:String,expectedTarget:MapSourceTarget?=null):MapSourceNavigationTicket? {
+        if(!selectionReady()) return null
+        val doc=document ?: return null
+        val source=captureSourcePreview(nodeId,sourceId) ?: return null
+        if(expectedTarget!=null && source.target!=expectedTarget) return null
+        return MapSourceNavigationTicket(this,doc.id,source)
+    }
+    internal fun currentSourceNavigation(ticket:MapSourceNavigationTicket):MapSource? {
+        if(ticket.issuer!==this || ticket.documentId!=document?.id) return null
+        return currentSourcePreview(ticket.source)
+    }
+    internal fun captureSourceReturn(ticket:MapSourceNavigationTicket):MapSourceReturnBookmark? {
+        if(!selectionReady() || currentSourceNavigation(ticket)==null) return null
+        return MapSourceReturnBookmark(ticket,selectedNodes,nodeSelectionMode,selectedRelation)
+    }
+    internal fun canRestoreSourceReturn(bookmark:MapSourceReturnBookmark,requireReady:Boolean=true):Boolean {
+        val ticket=bookmark.source
+        return ticket.issuer===this && ticket.documentId==document?.id && ticket.source.epoch==interactionEpoch &&
+            !closing && !replacingDocument && (!requireReady || selectionReady())
+    }
+    internal fun restoreSourceReturn(bookmark:MapSourceReturnBookmark):Boolean {
+        if(!canRestoreSourceReturn(bookmark)) return false
+        val doc=document ?: return false
+        val visible=doc.visible().mapTo(hashSetOf()) {it.id}
+        if(!setNodeSelectionMode(bookmark.nodeSelectionMode)) return false
+        if(bookmark.nodeSelectionMode) return selectNodes(bookmark.selectedNodes.intersect(visible))
+        val relation=bookmark.selectedRelation
+        if(relation!=null && selectRelation(relation)) return true
+        selected=bookmark.selectedNodes.singleOrNull()?.takeIf {it in visible}
+        return true
+    }
     /** Prepare every history frame off Main; retry a changed history with the same rendered values. */
     internal suspend fun mergeSourceDerived(patches:List<MapSourceDerivedPatch>,current:(MapSourceDerivedPatch)->Boolean):Boolean {
         while(!closing && !replacingDocument) {

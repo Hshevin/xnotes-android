@@ -24,7 +24,7 @@
     <string name="graph_invalid">Duplicate or invalid relationship; existing data kept.</string>
     <string name="graph_sources">Sources</string>
     <string name="graph_sources_count">Sources %1$d</string>
-    <string name="graph_sources_notice">Choose a whole file or a permanent page reference. The page picker currently lists page numbers; source navigation is still pending. Map backups do not include source files.</string>
+    <string name="graph_sources_notice">Choose a whole file or a permanent page reference. Open a specific source to locate its note or PDF page, then use Return to map. Map backups do not include source files.</string>
     <string name="graph_note">Source note</string>
     <string name="graph_primary">Main preview source</string>
     <string name="graph_up">Up</string>
@@ -125,4 +125,16 @@
     <string name="graph_ref_retry_source">Check the page again</string>
     <string name="graph_ref_target_changed">The target map changed or is unavailable. Choose it again or open it to review. Reading remains unchanged.</string>
     <string name="graph_host_import_notice">An import is waiting. Close this map to continue.</string>
+    <string name="graph_source_opening">Opening source…</string>
+    <string name="graph_source_returning">Returning to map…</string>
+    <string name="graph_return_map">Return to map</string>
+    <string name="graph_source_region_outside">The referenced page is open. The saved region is outside the current page.</string>
+    <string name="graph_source_live_note">Opened the existing note, including its unsaved changes.</string>
+    <string name="graph_source_page_deleted">The referenced page was deleted. The map and last preview are kept.</string>
+    <string name="graph_source_duplicate">More than one source has this identity. Resolve the duplicate before opening.</string>
+    <string name="graph_source_busy">An edit is still in progress. Finish it and retry opening the source.</string>
+    <string name="graph_source_navigation_changed">The source or workspace changed. Review the source and retry.</string>
+    <string name="graph_source_open_unsupported">Opening canvas and map sources is not available yet. The reference is kept.</string>
+    <string name="graph_source_open_unavailable">The source could not be opened. Check its identity, permission or original PDF in the file browser. The map is kept.</string>
+    <string name="graph_source_guard_save_failed">The outgoing note could not be saved. The map is kept. Review the save problem and retry opening the source.</string>
 </resources>

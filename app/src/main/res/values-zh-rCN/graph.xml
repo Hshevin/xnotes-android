@@ -24,7 +24,7 @@
     <string name="graph_invalid">关系重复或无效，已有数据保持不变。</string>
     <string name="graph_sources">来源</string>
     <string name="graph_sources_count">来源 %1$d</string>
-    <string name="graph_sources_notice">可引用整份文件或具有永久编号的页面。选页目前使用页码列表，来源跳转仍待接入。导图备份不包含原文件。</string>
+    <string name="graph_sources_notice">选择整份文件或永久页面引用。打开具体来源可定位笔记或 PDF 页面，再使用“返回导图”。导图备份不包含来源文件。</string>
     <string name="graph_note">来源备注</string>
     <string name="graph_primary">主要预览来源</string>
     <string name="graph_up">上移</string>
@@ -125,4 +125,16 @@
     <string name="graph_ref_retry_source">重新核实此页</string>
     <string name="graph_ref_target_changed">目标导图已变化或不可用。请重新选择，或打开导图核实；当前阅读内容保持不变。</string>
     <string name="graph_host_import_notice">有文件等待导入，请关闭当前导图后继续。</string>
+    <string name="graph_source_opening">正在打开来源…</string>
+    <string name="graph_source_returning">正在返回导图…</string>
+    <string name="graph_return_map">返回导图</string>
+    <string name="graph_source_region_outside">已打开引用页面，保存的区域位于当前页面范围之外。</string>
+    <string name="graph_source_live_note">已定位到打开中的笔记，保留其未保存修改。</string>
+    <string name="graph_source_page_deleted">引用的页面已删除，导图与最后预览已保留。</string>
+    <string name="graph_source_duplicate">存在重复的来源身份，请先处理身份冲突再打开。</string>
+    <string name="graph_source_busy">仍有编辑尚未结束，请完成后重试打开来源。</string>
+    <string name="graph_source_navigation_changed">来源或工作区已变化，请核对来源后重试。</string>
+    <string name="graph_source_open_unsupported">尚未支持打开画布与导图来源，引用已保留。</string>
+    <string name="graph_source_open_unavailable">无法打开来源，请在文件浏览器中检查其身份、权限或原 PDF。导图已保留。</string>
+    <string name="graph_source_guard_save_failed">原文档未能保存，导图已保留。请处理保存问题后重试打开来源。</string>
 </resources>
