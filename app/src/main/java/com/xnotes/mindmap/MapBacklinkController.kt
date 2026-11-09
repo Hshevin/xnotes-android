@@ -180,6 +180,11 @@ internal class MapBacklinkController(
         return MapBacklinkOpenRequest.capture(source,row,{current() && actionGeneration==generation &&
             (row.membership?.let {it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)}!=false)})
     }
+    fun captureNetwork(title:String):LocalNetworkLaunchRequest? {
+        if(!current()) return null
+        val generation=actionGeneration
+        return LocalNetworkLaunchRequest.capture(source,title) {current() && actionGeneration==generation}
+    }
     fun prepareRemove(row:MapBacklinkRow) {
         if(!current() || loading || row.blocked!=null || !rowCurrent(row)) {problem=BacklinkProblem.CHANGED;return}
         operation?.let {if(it.saving) {problem=BacklinkProblem.BUSY;return} else retireRemoval(it)}

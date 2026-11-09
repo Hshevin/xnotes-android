@@ -156,6 +156,11 @@ private fun standardPenAction(action: Int): Int = when (action) {
     else -> -1
 }
 
+/** Network exploration parks native buffers without starting an extra persistence operation. */
+internal fun persistNativeForMapPresentation(editor:Editor,entry:com.xnotes.mindmap.MapWorkspace.Entry) {
+    if(entry.flushNativeOnPresent) editor.persist()
+}
+
 class MainActivity : ComponentActivity() {
 
     // The editor owns the fullscreen state (persisted preference, default depends on the display
@@ -163,17 +168,23 @@ class MainActivity : ComponentActivity() {
     // the swipe-in transient bars overlay (no resize), non-fullscreen insets under the bars.
     private var editor: Editor? = null
     internal var mapWorkspace:com.xnotes.mindmap.MapWorkspace?=null
+    internal var networkWorkspace:com.xnotes.mindmap.FileNetworkWorkspace?=null
+    private val graphicalSurfaceVisible get()=mapWorkspace?.visible==true || networkWorkspace?.visible==true
     internal val documentEditor:Editor? get()=editor
     internal val documentMaps:com.xnotes.mindmap.MapWorkspace by lazy {
         androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
             com.xnotes.mindmap.MapWorkspaceOwner::class.java].workspace
+    }
+    internal val documentNetworks:com.xnotes.mindmap.FileNetworkWorkspace by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].networks
     }
     // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingImport by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mapWorkspace=documentMaps
+        mapWorkspace=documentMaps;networkWorkspace=documentNetworks
         com.xnotes.platform.FontCatalog.init(this)
         com.xnotes.platform.TemplateLibrary.init(this)
         com.xnotes.ui.AudioPlayback.init(this)
@@ -230,7 +241,7 @@ class MainActivity : ComponentActivity() {
     var cancelPenRecording: (() -> Unit)? = null
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if(mapWorkspace?.visible==true) return super.dispatchKeyEvent(event)
+        if(graphicalSurfaceVisible) return super.dispatchKeyEvent(event)
         if (penKeyRecorder?.invoke(event) == true) return true
         val workspace = editor
         // Release every pane: focus can have moved since the original press.
@@ -254,7 +265,7 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val workspace = editor
-        when (workspaceFourFingerTap.track(ev, mapWorkspace?.visible!=true && workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
+        when (workspaceFourFingerTap.track(ev, !graphicalSurfaceVisible && workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
             com.xnotes.pen.FourFingerTap.Result.CAPTURE -> {
                 val cancel = MotionEvent.obtain(ev)
                 cancel.action = MotionEvent.ACTION_CANCEL
@@ -268,7 +279,7 @@ class MainActivity : ComponentActivity() {
             com.xnotes.pen.FourFingerTap.Result.CONSUME -> return true
             com.xnotes.pen.FourFingerTap.Result.PASS -> Unit
         }
-        if(mapWorkspace?.visible==true) return super.dispatchTouchEvent(ev)
+        if(graphicalSurfaceVisible) return super.dispatchTouchEvent(ev)
         StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
@@ -364,33 +375,40 @@ private fun EditorScreen(
     val scope = rememberCoroutineScope()
     val mapActivity=context as? MainActivity
     val maps=mapActivity?.documentMaps ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.MapWorkspace(context,scope)}
+    val networks=mapActivity?.documentNetworks ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.FileNetworkWorkspace(context,scope)}
+    val graphicsVisible=maps.visible || networks.visible
     val mapBinding=remember(maps) {Any()}
     var savedMapUri by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var savedMapTitle by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("")}
     val focusManager=androidx.compose.ui.platform.LocalFocusManager.current
     val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    DisposableEffect(maps,mapActivity,mapBinding) {
-        maps.bindHost(mapBinding)
-        mapActivity?.mapWorkspace=maps
+    DisposableEffect(maps,networks,mapActivity,mapBinding) {
+        maps.bindHost(mapBinding);networks.bindHost(mapBinding)
+        mapActivity?.mapWorkspace=maps;mapActivity?.networkWorkspace=networks
         onDispose {
-            maps.unbindHost(mapBinding)
-            if(mapActivity==null) maps.dispose()
+            maps.unbindHost(mapBinding);networks.unbindHost(mapBinding)
+            if(mapActivity==null) {maps.dispose();networks.dispose()}
         }
     }
     SideEffect {maps.current?.let {savedMapUri=it.uri.toString();savedMapTitle=it.title}}
-    LaunchedEffect(maps.visible) {if(maps.visible) {
+    LaunchedEffect(maps.visible,maps.current?.flushNativeOnPresent) {if(maps.visible) {
         mapActivity?.cancelPenRecording?.invoke()
         editor.openPanes.forEach {it.resetPenButtons()}
         StylusButtonLatch.releaseKey()
         if(maps.current?.session?.textDraft==null) {focusManager.clearFocus();keyboard?.hide()}
-        editor.persist()
+        maps.current?.let {persistNativeForMapPresentation(editor,it)}
+    }}
+    LaunchedEffect(networks.visible) {if(networks.visible) {
+        mapActivity?.cancelPenRecording?.invoke()
+        editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
+        focusManager.clearFocus();keyboard?.hide()
     }}
     LaunchedEffect(maps.failure,maps.visible) {maps.failure?.takeIf {!maps.visible}?.let {
         editor.message=context.getString(if(it==com.xnotes.mindmap.MapWorkspaceFailure.CHANGED) R.string.native_open_changed else R.string.map_open_error)
         maps.clearFailure()
     }}
     val recoveryPreview=remember(editor) {com.xnotes.ui.RecoveryPreviewController(context.applicationContext)}
-    if(!maps.visible) com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
+    if(!graphicsVisible) com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
     val snackbar = remember { SnackbarHostState() }
     // The LaTeX renderer resolves its fonts through the composition, so this is the
     // only place it can be built; the flow reaches it through MathRendering after.
@@ -443,7 +461,7 @@ private fun EditorScreen(
         val pane = relinkPane; relinkPane = null
         if (uri != null && pane != null) { relinking = true; scope.launch { try { pane.relinkMissingPdf(uri.toString()) } finally { relinking = false } } }
     }
-    storageProblemPane?.takeIf {!maps.visible}?.let { pane ->
+    storageProblemPane?.takeIf {!graphicsVisible}?.let { pane ->
         var working by remember(pane) { mutableStateOf(false) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { if (!working && !relinking) pane.storageProblemUri = null },
@@ -841,12 +859,26 @@ private fun EditorScreen(
     }
     val backlinkNavigator=remember(editor,maps,mapBinding,scope) {
         com.xnotes.mindmap.MapBacklinkNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
-            onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire()})
+            onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
     }
     DisposableEffect(backlinkNavigator) {onDispose {backlinkNavigator.dispose()}}
-    val backlinkHooks=remember(backlinkNavigator) {com.xnotes.mindmap.BacklinkHostHooks(
-        open=backlinkNavigator::open,busy={backlinkNavigator.busy},cancel=backlinkNavigator::cancel,
-        canCancel=backlinkNavigator::canCancel,problem=backlinkNavigator::failureFor)}
+    val networkCoordinator=remember(editor,maps,networks,mapBinding,scope) {
+        com.xnotes.mindmap.LocalNetworkCoordinator(editor,maps,networks,mapBinding,scope,captureHost=::captureMapHost,
+            onStarting={backlinkNavigator.cancel();sourceNavigator.cancel()},onShown={
+                sourceNavigator.retire()
+                if(maps.current==null) {savedMapUri=null;savedMapTitle=""}
+            })
+    }
+    DisposableEffect(networkCoordinator) {onDispose {networkCoordinator.dispose()}}
+    LaunchedEffect(networks.current,networks.resumeRequested,mapBinding) {
+        networks.current?.takeIf {networks.resumeRequested && !maps.visible}?.let {networkCoordinator.resume(it)}
+    }
+    val backlinkHooks=remember(backlinkNavigator,networkCoordinator) {com.xnotes.mindmap.BacklinkHostHooks(
+        open=backlinkNavigator::open,busy={backlinkNavigator.busy || networkCoordinator.busy},
+        cancel={ctx->if(backlinkNavigator.canCancel(ctx)) backlinkNavigator.cancel(ctx) else networkCoordinator.cancel(ctx)},
+        canCancel={ctx->backlinkNavigator.canCancel(ctx) || networkCoordinator.canCancel(ctx)},
+        problem={ctx->backlinkNavigator.failureFor(ctx) ?: networkCoordinator.failureFor(ctx)},
+        openNetwork=networkCoordinator::open)}
     LaunchedEffect(sourceNavigator.failure,sourceNavigator.saveFailed,maps.visible) {
         sourceNavigator.failure?.takeIf {!maps.visible}?.let {editor.message=context.getString(
             if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else referenceFailureText(it))}
@@ -1039,7 +1071,7 @@ private fun EditorScreen(
 
     fun openMap(uri:String,title:String=stemOf(uri)) {
         if(!maps.isHostCurrent(mapBinding)) return
-        backlinkNavigator.cancel();sourceNavigator.retire()
+        networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();sourceNavigator.retire()
         val current=captureMapHost()
         maps.open(Uri.parse(uri),title,preparePresentation={
             if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
@@ -1271,8 +1303,8 @@ private fun EditorScreen(
     // and land on the backstage so its name dialog appears, exactly like the in-app "Import PDF"
     // button. With no folder chosen yet, fall back to App storage so the explorer renders and the
     // note autosaves. A markdown file becomes a new note whose text it is.
-    LaunchedEffect(importUri,maps.visible) {
-        if(maps.visible) return@LaunchedEffect
+    LaunchedEffect(importUri,graphicsVisible) {
+        if(graphicsVisible) return@LaunchedEffect
         val src = importUri ?: return@LaunchedEffect
         onImportConsumed() // consume once; the body has no suspend point so it runs to completion
         val name = displayNameOf(resolver, src)
@@ -1295,32 +1327,67 @@ private fun EditorScreen(
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
     com.xnotes.mindmap.PageToMapFlowHost(editor,
         onSave={target->launchSaveAs(target)},
-        onOpenMap={uri->openMap(uri.toString())},visible=!maps.visible)
+        onOpenMap={uri->openMap(uri.toString())},visible=!graphicsVisible)
 
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
-        if(maps.isHostCurrent(mapBinding) && maps.current===entry) {backlinkNavigator.cancel();sourceNavigator.retire()}
-        if(maps.isHostCurrent(mapBinding) && maps.close(entry)!=null) {
-            savedMapUri=null;savedMapTitle=""
-            editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
+        val back=networks.returnEntry(entry)
+        if(maps.isHostCurrent(mapBinding) && maps.current===entry) {
+            backlinkNavigator.cancel();sourceNavigator.retire()
+            if(back!=null) networkCoordinator.resume(back,entry,closeMap=true)
+            else if(maps.close(entry)!=null) {
+                savedMapUri=null;savedMapTitle=""
+                editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
+            }
         }
-    },hooks={entry->com.xnotes.mindmap.MapHostHooks(
-        openSource={ticket,bookmark->sourceNavigator.open(entry,ticket,bookmark)},
-        busy={sourceNavigator.busy},cancel={sourceNavigator.cancel()},
-        feedback={if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else sourceNavigator.failure?.let(::referenceFailureText)})}) {
+    },hooks={entry->
+        val back=networks.returnEntry(entry)
+        com.xnotes.mindmap.MapHostHooks(
+            openSource={ticket,bookmark->sourceNavigator.open(entry,ticket,bookmark)},
+            busy={sourceNavigator.busy || networkCoordinator.busy},
+            cancel={if(sourceNavigator.busy) sourceNavigator.cancel() else back?.let {networkCoordinator.cancel(it)}},
+            feedback={if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed
+                else sourceNavigator.failure?.let(::referenceFailureText)
+                    ?: back?.let {networkCoordinator.failureFor(it)}?.let {com.xnotes.mindmap.networkProblemText(it)}},
+            returnToNetwork=back?.let {network->{ {networkCoordinator.resume(network,entry);Unit} }})}) {
+    com.xnotes.mindmap.FileNetworkWorkspaceHost(networks,com.xnotes.mindmap.FileNetworkHostActions(
+        open={entry,anchor,target->
+            if(!networks.current(mapBinding,entry) || !networks.visible) false else {
+                val input=entry.presentation.captureInput()
+                val request=entry.controller.captureFocus(anchor,target)
+                val guarded=if(input==null) null else request?.withPresentationGuard {
+                    input.current() && networks.current(mapBinding,entry) && networks.visible
+                }
+                guarded!=null && backlinkNavigator.openNetwork(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
+            }
+        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.close(entry)},
+        busy={backlinkNavigator.busy || networkCoordinator.busy},
+        cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
+        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)})) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
-        bottomBar={if(maps.current?.sourceReturn!=null) androidx.compose.material3.Surface {
+        bottomBar={if(maps.current?.sourceReturn!=null || networks.current!=null) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
+                val network=networks.current
                 val issue=sourceNavigator.failure
-                if(issue!=null) Text(stringResource(referenceFailureText(issue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
-                else if(sourceNavigator.busy) Text(stringResource(R.string.graph_source_returning),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                val networkIssue=network?.let {networkCoordinator.failureFor(it)}
+                val returning=sourceNavigator.busy || networkCoordinator.busy
+                if(networkIssue!=null) Text(stringResource(com.xnotes.mindmap.networkProblemText(networkIssue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                else if(issue!=null) Text(stringResource(referenceFailureText(issue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                else if(returning) Text(stringResource(R.string.graph_source_returning),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                 else Spacer(Modifier.weight(1f))
-                if(sourceNavigator.busy) androidx.compose.material3.TextButton(onClick={sourceNavigator.cancel()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                if(returning) androidx.compose.material3.TextButton(onClick={
+                    if(sourceNavigator.busy) sourceNavigator.cancel() else network?.let {networkCoordinator.cancel(it)}
+                },modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                     Text(stringResource(R.string.cancel),fontSize=TextSize.body)
-                } else androidx.compose.material3.TextButton(onClick={backlinkNavigator.cancel();sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
-                    Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
+                } else {
+                    if(maps.current?.sourceReturn!=null) androidx.compose.material3.TextButton(onClick={backlinkNavigator.cancel();sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                        Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
+                    }
+                    if(network!=null) androidx.compose.material3.TextButton(onClick={networkCoordinator.resume(network)},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                        Text(stringResource(R.string.network_return),fontSize=TextSize.body)
+                    }
                 }
             }
         }},
@@ -1560,19 +1627,20 @@ private fun EditorScreen(
         }
     }
     }
+    }
     val latestImport by androidx.compose.runtime.rememberUpdatedState(importUri)
-    if(maps.visible && importUri!=null) {
+    if(graphicsVisible && importUri!=null) {
         val expectedImport=importUri
         Box(Modifier.fillMaxSize()) {
             androidx.compose.material3.Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
                 Row(Modifier.padding(Space.s8),verticalAlignment=Alignment.CenterVertically) {
-                    Text(stringResource(R.string.graph_host_import_notice),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                    Text(stringResource(if(networks.visible) R.string.network_import_notice else R.string.graph_host_import_notice),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                     com.xnotes.mindmap.MapButton(R.string.cancel) {if(latestImport==expectedImport) onImportConsumed()}
                 }
             }
         }
     }
-    if(!maps.visible) {
+    if(!graphicsVisible) {
     if (showShareChooser) {
         val shareUri = pendingShareUri
         // Remembered because resolving the kind is a SAF query, and this is composition.
@@ -1618,7 +1686,7 @@ private fun EditorScreen(
         )
     }
     }
-    guardState.current?.takeIf {!maps.visible || it.sourceNavigation!=null && sourceNavigator.busy}?.let { request ->
+    guardState.current?.takeIf {!graphicsVisible || it.sourceNavigation!=null && sourceNavigator.busy}?.let { request ->
         val guarded = request.editor
         fun changed() {editor.message=context.getString(R.string.native_open_changed);request.stop(NativeActionStop.CHANGED)}
         fun saved() {if(request.current() && request.discard.afterSaveApplies()) request.proceed() else changed()}
@@ -1657,7 +1725,7 @@ private fun EditorScreen(
             },
         )
     }
-    if(!maps.visible) {
+    if(!graphicsVisible) {
     exportProgress?.let { p ->
         PdfExportDialog(done = p.done, total = p.total, counting = p.counting, onCancel = {
             exportCancel?.set(true) // abort this export's page loop AND its write stream

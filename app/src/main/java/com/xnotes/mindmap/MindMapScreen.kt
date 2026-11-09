@@ -202,6 +202,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8), verticalAlignment = Alignment.CenterVertically) {
                     MapButton(R.string.map_close, enabled = !session.closing) { close() }
+                    hostHooks?.returnToNetwork?.let {back->MapButton(R.string.network_return,
+                        enabled=!session.closing && !session.hasUnconfirmedContent) {back()}}
                     Text(title.ifBlank { stringResource(R.string.map_title) }, fontSize = TextSize.title, modifier = Modifier.padding(horizontal = Space.s12))
                     Text(stringResource(when {
                         session.loading -> R.string.map_loading

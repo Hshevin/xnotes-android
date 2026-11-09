@@ -8,7 +8,8 @@ import androidx.lifecycle.viewModelScope
 /** Configuration recreation transfers this one host lease; final Activity closure releases it. */
 internal class MapWorkspaceOwner(context:Context):ViewModel() {
     val workspace=MapWorkspace(context.applicationContext,viewModelScope)
-    override fun onCleared() {workspace.dispose();super.onCleared()}
+    val networks=FileNetworkWorkspace(context.applicationContext,viewModelScope)
+    override fun onCleared() {networks.dispose();workspace.dispose();super.onCleared()}
     class Factory(private val context:Context):ViewModelProvider.Factory {
         override fun <T:ViewModel> create(modelClass:Class<T>):T {
             require(modelClass==MapWorkspaceOwner::class.java)

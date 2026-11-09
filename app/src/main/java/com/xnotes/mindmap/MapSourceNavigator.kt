@@ -114,7 +114,7 @@ internal class MapSourceNavigator(
         fun valid()=current(entry,token) && entry.sourceReturn===bookmark && entry.session.canRestoreSourceReturn(bookmark)
         val accepted=workspace.open(entry.uri,entry.title,preparePresentation={
             if(!valid()) null else editor.awaitHostParking()?.let {proof->({valid() && proof.current()})}
-        },stillCurrent={valid() && !workspace.visible},operation=operation,onPresented={shown->
+        },stillCurrent={valid() && !workspace.visible},operation=operation,flushNativeOnPresent=entry.flushNativeOnPresent,onPresented={shown->
             if(current(entry,token) && shown===entry && entry.sourceReturn===bookmark) {
                 if(entry.presentation.applySourceReturn(entry.session,bookmark)) entry.sourceReturn=null
                 returnOperation=null;busy=false;returning=false

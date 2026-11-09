@@ -33,4 +33,5 @@ class MapHostHooks internal constructor(
     internal val busy:()->Boolean={false},
     internal val cancel:()->Unit={},
     internal val feedback:()->Int?={null},
+    internal val returnToNetwork:(()->Unit)?=null,
 )

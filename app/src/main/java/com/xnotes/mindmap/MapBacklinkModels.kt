@@ -54,6 +54,7 @@ class BacklinkHostHooks internal constructor(
     internal val cancel:(NativeBacklinkContext)->Unit={},
     internal val canCancel:(NativeBacklinkContext)->Boolean={false},
     internal val problem:(NativeBacklinkContext)->BacklinkProblem?={null},
+    internal val openNetwork:((LocalNetworkLaunchRequest)->Boolean)?=null,
 )
 
 internal sealed interface BacklinkRemovalState {

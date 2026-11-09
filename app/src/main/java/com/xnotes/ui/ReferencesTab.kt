@@ -64,6 +64,9 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
         }),fontSize=TextSize.caption,color=palette.textDim.toComposeColor())
         Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
             MapButton(R.string.graph_backlinks_refresh,enabled=!busy && !controller.loading) {controller.refresh()}
+            if(hooks?.openNetwork!=null) MapButton(R.string.network_title,enabled=!busy) {
+                controller.captureNetwork(editor.title)?.let {hooks.openNetwork.invoke(it)}
+            }
             if(controller.loading) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
             if(busy && hooks?.canCancel?.invoke(context)==true) MapButton(R.string.cancel) {hooks.cancel(context)}
         }

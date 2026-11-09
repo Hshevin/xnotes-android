@@ -24,6 +24,7 @@ internal class LocalFileNetworkController(
     private val owner=SupervisorJob(scope.coroutineContext[Job])
     private val workScope=CoroutineScope(scope.coroutineContext+owner+Dispatchers.Main.immediate)
     private val issuer=Any()
+    internal val requestOwner:Any get()=issuer
     private var active=true
     private var actionGeneration=0L
     private var scanGeneration=0L

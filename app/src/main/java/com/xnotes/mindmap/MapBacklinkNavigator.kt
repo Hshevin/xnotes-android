@@ -33,24 +33,34 @@ internal class MapBacklinkNavigator(
     private var generation=0L
     private var job:Job?=null
     private var operation:Any?=null
-    private var failureContext:NativeBacklinkContext?=null
+    private var failureOwner:Any?=null
     private var failure by mutableStateOf<BacklinkProblem?>(null)
     var busy by mutableStateOf(false);private set
 
     fun failureFor(context:NativeBacklinkContext):BacklinkProblem? =
-        failure.takeIf {failureContext===context && context.current()}
+        failure.takeIf {failureOwner===context && context.current()}
 
-    fun open(request:MapBacklinkOpenRequest):Boolean {
-        if(!active || busy || workspace.visible || !workspace.isHostCurrent(binding) || !request.current()) return false
-        failureContext=request.context;failure=null
-        request.row.blocked?.let {failure=it;return false}
+    fun failureForNetwork(owner:Any)=failure.takeIf {failureOwner===owner}
+    fun cancelNetwork(owner:Any) {if(busy && failureOwner===owner) cancel()}
+
+    fun open(request:MapBacklinkOpenRequest):Boolean = start(request.row,request.review,request.context.libraryRoots,
+        request.context,request::current,null) {}
+
+    fun openNetwork(request:MapNetworkOpenRequest,onCommitted:(MapWorkspace.Entry)->Unit={}):Boolean =
+        start(request.target,null,request.query.roots,request.owner,request::current,request,onCommitted)
+
+    private fun start(row:MapBacklinkRow,review:MapBacklinkRemovalTicket?,roots:List<String>,owner:Any,
+        origin:()->Boolean,network:MapNetworkOpenRequest?,onCommitted:(MapWorkspace.Entry)->Unit):Boolean {
+        if(!active || busy || workspace.visible || !workspace.isHostCurrent(binding) || !origin()) return false
+        failureOwner=owner;failure=null
+        row.blocked?.let {failure=it;return false}
         val host=captureHost()
         if(!host()) {failure=BacklinkProblem.CHANGED;return false}
         onStarting()
         workspace.cancelOpen()
         val token=++generation;val op=Any()
         operation=op;busy=true
-        fun current()=active && generation==token && workspace.isHostCurrent(binding) && request.current() && host()
+        fun current()=active && generation==token && workspace.isHostCurrent(binding) && origin() && host()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var held:MapDocumentLease?=null
             var committed=false
@@ -63,11 +73,15 @@ internal class MapBacklinkNavigator(
                 }
             }
             try {
-                val row=request.row
-                val review=request.review
+                var anchor:MapBacklinkMembership?=null
                 val membership:MapBacklinkMembership?
-                if(review==null) {
-                    when(val access=acquireBacklink(app,row,::current,roots=request.context.libraryRoots)) {
+                if(network!=null) {
+                    when(val access=acquireNetwork(app,network,::current,roots)) {
+                        is MapNetworkAccessResult.Failed->{if(current()) failure=access.problem;return@launch}
+                        is MapNetworkAccessResult.Ready->{held=access.lease;membership=access.targetMembership;anchor=access.anchorMembership}
+                    }
+                } else if(review==null) {
+                    when(val access=acquireBacklink(app,row,::current,roots=roots)) {
                         is BacklinkAccessResult.Failed->{if(current()) failure=access.problem;return@launch}
                         is BacklinkAccessResult.Ready->{held=access.lease;membership=access.membership}
                     }
@@ -82,8 +96,11 @@ internal class MapBacklinkNavigator(
                     membership=null
                 }
                 val lease=requireNotNull(held);val session=lease.session
-                val ticket=if(review==null) session.captureBacklinkFocus(row.location.graphId,row.nodeId,row.sourceId,row.target,membership)
-                    else session.captureRemovedBacklinkFocus(review)
+                val ticket=when {
+                    network!=null->session.captureNetworkFocus(row.location.graphId,row.nodeId,row.sourceId,row.target,requireNotNull(anchor),requireNotNull(membership))
+                    review!=null->session.captureRemovedBacklinkFocus(review)
+                    else->session.captureBacklinkFocus(row.location.graphId,row.nodeId,row.sourceId,row.target,membership)
+                }
                 if(!current() || ticket==null) {
                     if(current()) failure=if(session.hasUnconfirmedContent) BacklinkProblem.BUSY else BacklinkProblem.CHANGED
                     return@launch
@@ -93,19 +110,20 @@ internal class MapBacklinkNavigator(
                 var locationFailure:BacklinkProblem?=null
                 val accepted=workspace.open(row.location.uri,row.location.title,preparePresentation={
                     if(!ready()) null else editor.awaitHostParking()?.let {proof->
-                        locationFailure=backlinkLocationProblem(app,request.context.libraryRoots,row)
-                        if(locationFailure==null && backlinkRecoveryOutside(app,lease.uri,row.location.aliases,session.recoveryKeys))
+                        locationFailure=backlinkLocationProblem(app,roots,row)
+                        if(locationFailure==null && backlinkRecoveryOutside(app,lease.uri,
+                            row.location.aliases+network?.anchor?.location?.aliases.orEmpty(),session.recoveryKeys))
                             locationFailure=BacklinkProblem.RECOVERY_CONFLICT
                         if(locationFailure!=null) {preserveDirty=true;null} else ({ready() && proof.current()})
                     }
-                },stillCurrent=::ready,operation=op,onPresented={shown->
+                },stillCurrent=::ready,operation=op,flushNativeOnPresent=network==null,onPresented={shown->
                     // The final predicate above and this callback run on Main without suspension.
                     // Hiding the source panel after this point must not undo an accepted handoff.
                     check(shown.session===session)
                     check(session.applyBacklinkFocus(ticket))
                     check(shown.presentation.requestBacklinkFocus(session,ticket))
                     committed=true;shown.sourceReturn=null;failure=null
-                    onPresented(shown)
+                    onPresented(shown);onCommitted(shown)
                 },onFinished={shown->finished.complete(shown)})
                 if(!accepted || !finished.await()) {
                     if(current()) failure=locationFailure ?: if(session.hasUnconfirmedContent) BacklinkProblem.BUSY else BacklinkProblem.CHANGED
@@ -122,13 +140,13 @@ internal class MapBacklinkNavigator(
         job=pending;pending.start();return true
     }
 
-    fun canCancel(context:NativeBacklinkContext)=busy && failureContext===context
+    fun canCancel(context:NativeBacklinkContext)=busy && failureOwner===context
     fun cancel(context:NativeBacklinkContext) {if(canCancel(context)) cancel()}
 
     fun cancel() {
         generation++;val pending=job;job=null
         operation?.let {workspace.cancelOpen(it)};operation=null
-        pending?.cancel();busy=false;failure=null;failureContext=null
+        pending?.cancel();busy=false;failure=null;failureOwner=null
     }
     fun dispose() {cancel();active=false}
 }

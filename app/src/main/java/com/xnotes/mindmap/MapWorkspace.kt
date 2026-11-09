@@ -42,6 +42,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         val session get()=lease.session
         // Runtime map data only. A retained Entry must never keep an old native Editor/Activity.
         internal var sourceReturn by mutableStateOf<MapSourceReturnBookmark?>(null)
+        internal var flushNativeOnPresent by mutableStateOf(true)
     }
     private val app=context.applicationContext
     private var active=true
@@ -57,7 +58,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     var failure by mutableStateOf<MapWorkspaceFailure?>(null);private set
 
     fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true},
-        operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={}):Boolean {
+        operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={},flushNativeOnPresent:Boolean=true):Boolean {
         if(!active) return false
         val request=++generation
         work?.cancel();openOperation=operation;opening=true;failure=null
@@ -81,10 +82,10 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                     return@launch
                 }
                 val next=reused ?: Entry(lease.uri,title,lease)
-                next.parkingCheck=ready
+                next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent
                 next.presentation.visible=true
                 current=next;visible=true;adopted=true
-                if(prior!=null && prior!==next) {prior.presentation.visible=false;prior.lease.close()}
+                if(prior!=null && prior!==next) {prior.presentation.visible=false;prior.parkingCheck={false};prior.lease.close()}
                 onPresented(next)
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
@@ -128,7 +129,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     }
     fun close(expected:Entry):Job? {
         if(!active || current!==expected) return null
-        cancelOpen();current=null;visible=false;expected.presentation.visible=false
+        cancelOpen();current=null;visible=false;expected.presentation.visible=false;expected.parkingCheck={false}
         return expected.lease.close()
     }
     fun persist() {current?.takeIf {it.lease.alive && it.session.dirty}?.session?.save()}
@@ -137,7 +138,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         active=false;generation++;opening=false
         hostBinding=null
         val pending=acceptedOpens.toList();work=null;pending.forEach {it.cancel()}
-        val entry=current;current=null;visible=false;entry?.presentation?.visible=false
+        val entry=current;current=null;visible=false;entry?.presentation?.visible=false;entry?.parkingCheck={false}
         val released=entry?.lease?.close()
         return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released?.join()}.also {disposal=it}
     }
