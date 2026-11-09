@@ -1,9 +1,27 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。前goal turn为progress（当前页引用3726全量与4本地提交）；本轮为progress（Main图宿主/停车/运行时相机实现、3744全量、本地提交），未整体完成。
+目标：按原需求继续实现，active，overall complete=false。前阶段为Main图宿主/停车/运行时相机，3744全量与本地提交；本轮为progress（实际来源Open/定位/返回，3771全量与3项功能本地提交），未整体完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 最新阶段：严格来源打开、定位与返回（verified）
+
+基线ad1c012f干净。本片已verified（源码／主机与Android源码编译），整体active/complete=false。用户询问“完工了吗”已明确答整体未完；不视为暂停或缩小范围。本地功能提交：171128c6（native严格来源/actual attach定位/10用例）、70848824（Map来源票/相机与返回/15用例）、25546ccd（Main原guard/save终态/Return接线/2guard用例与2Android场景）。随后仅docs检查点，不需重复已绿测试。
+
+最终17885终态0：351套3771项，失败/错误/跳过均0，Android源码编译绿；tmp/map-source-navigation-final-full.log与-summary.json。所有production/tests在full前冻结，之后仅文档/提交。相关5450终态0：44套395项及Androidcompile绿，tmp/map-source-navigation-related.log与-summary.json；最后fresh笔与save失败专门反馈由final全量覆盖。新增27方法：NativeReferenceHostTest10、MapSourceNavigationSessionTest7、MapSourceNavigatorHostTest8、NativeGuardHandoffHostTest2。新增AndroidMainMapSourceNavigationHostTest2已登记，仅编译未运行；既有Main重建fixture也加空profile保护。无运行Gradle/exec作业，三作者均completed/frozen。
+
+已接真实路径：具体source row Open／单源REF双击→registry唯一UUID与永久PageID→保已开actual owner原槽/修改/history、其它owner走原Save/Discard/Cancel→全窗口单native→actual attach稳定preDraw后页/region与临时对比轮廓→Return先parking再同Entry恢复camera/选择/sourceId。文本/手绘主体双击仍编辑，多源不任意选first；来源备注IME缩屏不覆盖普通camera，失效source收尾解冻；普通ViewMap不消费旧return选择。Entry只存纯Map数据，不retain Native Editor/Activity。
+
+Native stored首/晚/最终expected核验跳ensure，不迁移补ID、不按ordinal；live删页不借disk旧页复活；known registry多位置Duplicate，prepare前后物理model/原live身份scope与最终IO fresh stamps均核。strict source base沿原private actual observation，不拿preview/fresh C洗白RAM A，保已写B、C1与原PDF。identified embedded v1首次严格打开后保存保包装/PDF原bytes；secondary单文档persist/restore不复活closed primary。缺PDF只typed unavailable，不建ordinary自动relink/open续接。来源失败/Cancel保图及最后PNG；guard保存失败专门反馈，不等待挂死；旧Dialog callback先CAS identity不能清新prompt。
+
+独审全部Required闭合，无剩余确定必修。真行为红：89159 footprint把合法negative margin/Rooms误报OUTSIDE；62583 detached旧尺寸提前page0→1；83316 fresh笔DOWN后仍page0→1。窄修后全量绿。66124中Map7为harness Main虚拟delay超时、Native1为把erasePages当删除页的fixture误用，修fixture而非降断言；93625 callback默认形状、56532 runner类名仅compile接线，均不算产品红。详细规格/失败界限/证据见docs/movinkpad/mind-map-source-navigation-2026-11-09.md。
+
+精确scope先NOTE／批注PDF FILE/PAGE与已有region提示；Canvas／xmap FILE打开尚不支持。真实Android/DocsUI/SAF权限恢复、PDFium成功绘制、IME与配置重建/杀进程/Surface/GPU/MovinkPad Pro14 Android15 ProPen3/掌触/大PDF性能未运行；Robolectric Window不替代设备。返回bookmark/选择/history只runtime，不承诺跨进程。无APK/安装/推送/合并/发布。
+
+下一条执行：来源文件／页面的“引用与关联”反向列表，自动来自图中真实sources，按graph/node/source稳定身份定位，不双向手工维护；复用MapDocuments唯一actor、现Main宿主和原保存保护，先独立规格/审查再实现/真实tests。之后局部／筛选／全库网络，严格区分content-reference/user-association/可选co-occurrence，不因多来源概念推导文件彼此依赖。真正Map双pane、region/Canvas入口和范围调整、精确身份/权限/移动/删除与回收站恢复、复制/完整备份、主画布primary大图/目录缩略预览、A2无中心/同级插入/边缘平移与设备验收等原未完范围保留，不重做已绿基础、不把native4全量producer迁移作UI硬前置。
+
+协作仍Root统一Gradle/提交；source_loop_audit源端，cancel_event_tests Map/Android，review_input_plan独审。完成代理需followup_task唤醒。下轮先核Git/证据/活作业；本检查点已无挂起用户问题或外部阻塞。
 
 ## 最新已验证阶段：来源往返的Main可见宿主前置
 

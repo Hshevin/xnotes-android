@@ -511,3 +511,9 @@ native4生产统一仍待整片迁移，精确接口和未具备的恢复／acti
 Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Surface也不能以Compose盖板遮住；因此主图入口改为同Main宿主复用现Screen/MapDocuments，停放全部native owner/物理输入后只卸View、不替换原模型。VM保同Entry/lease/presentation跨配置，宿主token隔离旧打开/关闭回调；图raw触摸不触native latch/兼容改写，系统picker常驻，native浮层仅停显。347套3744项全量、Android源码编译及独立复核通过，无APK；实际平台/Surface/GPU/目标设备未运行，见mind-map-main-host-2026-11-09.md。
 
 下一片仍是具体来源Open→严格UUID/永久PageID保护采用→定位轮廓→返回原图和具体来源条目；本片hide/show消费者只证明宿主基础，不能冒充该用户闭环。真正Map双窗格、反向引用与网络等原范围均保留。
+
+### 来源打开、定位和返回已验证（2026-11-09）
+
+本阶段接具体来源入口、严格NOTE/PDF FILE/PAGE打开、actual owner原槽保留与其余文档原保存保护、真实attach/稳定preDraw定位、fresh DOWN取消pending跳转、同Entry相机/选集/来源条返回。范围变化/删除undo/重载旧票不复活，来源备注IME和失效成员收尾不污染相机；embedded PDF v1保包装/原字节、secondary单文档恢复无phantom primary。351套3771项全量与Android测试源码编译、独立复核通过；无APK，实际平台与目标设备未运行。详见 `docs/movinkpad/mind-map-source-navigation-2026-11-09.md`。
+
+下一阶段优先从现有文件/页面查看真实反向引用并定位图中具体来源条目，复用MapDocuments唯一actor及现有窗口/保存保护；不手工维护双向关系。随后局部及筛选/全库文件网络，严格区分内容引用、用户关联、可选同图出现，不因概念多来源推导文件彼此依赖。真正图双窗格、Canvas/xmap来源打开、区域/画布创建入口及范围调整、精确失效与权限/身份恢复、复制/完整备份、无中心/同级插入/边缘平移与真机验收仍保留；整体未完成。
