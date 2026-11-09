@@ -19,7 +19,7 @@ import com.xnotes.ui.theme.*
 
 /** Pickers belong to the reading host, so a retired page cannot clear/rebind an old system result. */
 @Composable
-internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri)->Unit,visible:Boolean=true) {
+internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri,Boolean)->Unit,visible:Boolean=true) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val request:com.xnotes.ui.SourceCreationRequest?=editor.openPanes.firstNotNullOfOrNull {
@@ -30,15 +30,16 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
     val sourceCopyPicker=com.xnotes.ui.rememberNativeDestinationPicker()
     var pickerRequest by rememberSaveable {mutableStateOf<String?>(null)}
     var pickerKind by rememberSaveable {mutableStateOf<String?>(null)}
+    var pickerAccept by remember {mutableStateOf<((Uri)->Boolean)?>(null)}
     fun receive(uri:Uri?,kind:String) {
-        val owner=pickerRequest;val expected=pickerKind
-        pickerRequest=null;pickerKind=null
+        val owner=pickerRequest;val expected=pickerKind;val accept=pickerAccept
+        pickerRequest=null;pickerKind=null;pickerAccept=null
         val current=latest
         if(uri==null || expected!=kind || owner==null || current?.request?.id!=owner || !current.request.current()) return
         val resolver=context.contentResolver
         runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}
             .onFailure {runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}}
-        if(kind=="OPEN") current.selectMap(uri) else current.createMap(uri)
+        accept?.invoke(uri)
     }
     val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {receive(it,"OPEN")}
     val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {receive(it,"NEW")}
@@ -51,14 +52,18 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
         val openUri=flow.targetUri;val openContext=flow.targetContext
         PageToMapDialog(flow,pickerRequest!=null || sourceCopyPicker.busy,
             choose={if(pickerRequest==null && flow.request.current()) {
-                pickerRequest=flow.request.id;pickerKind="OPEN"
+                val accept=flow.mapDestination(false)
+                if(accept!=null) {pickerAccept=accept;pickerRequest=flow.request.id;pickerKind="OPEN"
                 try {choose.launch(arrayOf("application/json","application/octet-stream","*/*"))}
-                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null;pickerAccept=null}
+                }
             }},
             create={if(pickerRequest==null && flow.request.current()) {
-                pickerRequest=flow.request.id;pickerKind="NEW"
+                val accept=flow.mapDestination(true)
+                if(accept!=null) {pickerAccept=accept;pickerRequest=flow.request.id;pickerKind="NEW"
                 try {create.launch(context.getString(R.string.map_title)+".xmap")}
-                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null;pickerAccept=null}
+                }
             }},
             save={
                 if(!flow.canSaveSourceInPlace && flow.canSaveSourceCopy) {
@@ -67,7 +72,7 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
                 } else flow.saveSource {pane->pane.message=context.getString(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry);onSave(pane)}
             },
             reopen={flow.reopen {flow.request.pane.message=context.getString(R.string.graph_ref_reopened_retry)}},
-            open={flow.openMap(openUri,openContext,onOpenMap)},close={flow.close()})
+            open={flow.openMap(openUri,openContext) {uri->onOpenMap(uri,flow.request.flushNativeOnPresent)}},close={flow.close()})
     }
 }
 
@@ -82,6 +87,8 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
     val palette=LocalPalette.current
     val targetContext=flow.targetContext
     val confirmation=flow.confirmationToken
+    val modeContext=flow.sourceModeContext
+    val restoreOffer=flow.originalRestoreOffer
     val newBranch=(flow.destination as? MapReferenceDestination.New)?.node?.parent
     val branchEditing=newBranch!=null && (session?.textDraft!=null || session?.textRestore!=null)
     CompositionLocalProvider(LocalInkBusy provides false) {
@@ -95,6 +102,23 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                 when(step) {
                     PageToMapStep.PREPARING,PageToMapStep.TARGET_LOADING,PageToMapStep.CONFIRMING,PageToMapStep.SAVING->item {
                         Text(stringResource(if(step==PageToMapStep.SAVING) R.string.map_saving else R.string.graph_ref_preparing),fontSize=TextSize.body)
+                    }
+                    PageToMapStep.SOURCE_MODE->item {
+                        Text(stringResource(R.string.graph_source_mode_notice),fontSize=TextSize.body)
+                        Text(stringResource(R.string.graph_source_mode_original_retention),fontSize=TextSize.caption)
+                        flow.sourceModeIssue?.let {issue->Text(stringResource(when(issue) {
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_REGION->R.string.graph_source_original_region_unavailable
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_UNAVAILABLE->R.string.graph_source_original_unavailable
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_CHANGED->R.string.graph_source_original_changed
+                        }),fontSize=TextSize.body)}
+                        if(com.xnotes.ui.SourceCreationMode.NOTE_PAGE in flow.sourceModes)
+                            MapButton(R.string.graph_source_mode_note) {flow.selectSourceMode(com.xnotes.ui.SourceCreationMode.NOTE_PAGE,modeContext)}
+                        if(com.xnotes.ui.SourceCreationMode.PDF_ORIGINAL in flow.sourceModes)
+                            MapButton(R.string.graph_source_mode_original) {flow.selectSourceMode(com.xnotes.ui.SourceCreationMode.PDF_ORIGINAL,modeContext)}
+                    }
+                    PageToMapStep.ORIGINAL_RESTORE_REQUIRED->item {
+                        Text(stringResource(R.string.graph_source_original_restore_notice),fontSize=TextSize.body)
+                        MapButton(R.string.graph_source_original_restore) {flow.restoreOriginal(restoreOffer)}
                     }
                     PageToMapStep.SAVE_REQUIRED->item {
                         Text(stringResource(when {
@@ -188,6 +212,9 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                         if(flow.targetUri!=null) MapButton(R.string.graph_ref_view_map,onClick=open)
                     }
                     PageToMapStep.CLOSED->Unit
+                }
+                if(flow.canChangeSourceMode && step!=PageToMapStep.SOURCE_MODE) item {
+                    MapButton(R.string.graph_source_mode_change,enabled=!pickerBusy) {flow.changeSourceMode()}
                 }
             }
         },confirmButton={

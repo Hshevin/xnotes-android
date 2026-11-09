@@ -57,6 +57,13 @@ class PageTextCache(private val read: (Int) -> PageText?) {
         synchronized(pages) { pages.clear() }
     }
 
+    /** IO-only. Keep the PDF lease until a running text reader has actually returned. */
+    fun closeAndAwait() {
+        close()
+        awaitClosedExecutor(synchronized(workerLock) {worker})
+        synchronized(pages) {pages.clear()}
+    }
+
     private fun prefetchPass() {
         try {
             while (!closed) {

@@ -161,6 +161,15 @@ internal fun persistNativeForMapPresentation(editor:Editor,entry:com.xnotes.mind
     if(entry.flushNativeOnPresent && !entry.skipNativePersistOnPresent) editor.persist()
 }
 
+/** Open the original library only after actual native input and accepted jobs have parked. */
+internal suspend fun presentOriginalPdfLibrary(editor:Editor,library:com.xnotes.mindmap.OriginalPdfLibraryState,
+    stillCurrent:()->Boolean):Boolean {
+    if(!stillCurrent() || library.visible) return false
+    val proof=editor.awaitHostParking() ?: return false
+    if(!stillCurrent() || !proof.current()) return false
+    return library.open()
+}
+
 class MainActivity : ComponentActivity() {
 
     // The editor owns the fullscreen state (persisted preference, default depends on the display
@@ -169,7 +178,10 @@ class MainActivity : ComponentActivity() {
     private var editor: Editor? = null
     internal var mapWorkspace:com.xnotes.mindmap.MapWorkspace?=null
     internal var networkWorkspace:com.xnotes.mindmap.FileNetworkWorkspace?=null
-    private val graphicalSurfaceVisible get()=mapWorkspace?.visible==true || networkWorkspace?.visible==true
+    internal var originalWorkspace:com.xnotes.mindmap.OriginalPdfWorkspace?=null
+    internal var originalLibrary:com.xnotes.mindmap.OriginalPdfLibraryState?=null
+    private val graphicalSurfaceVisible get()=mapWorkspace?.visible==true || networkWorkspace?.visible==true ||
+        originalWorkspace?.current!=null || originalLibrary?.visible==true
     internal val documentEditor:Editor? get()=editor
     internal val documentMaps:com.xnotes.mindmap.MapWorkspace by lazy {
         androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
@@ -179,12 +191,21 @@ class MainActivity : ComponentActivity() {
         androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
             com.xnotes.mindmap.MapWorkspaceOwner::class.java].networks
     }
+    internal val documentOriginals:com.xnotes.mindmap.OriginalPdfWorkspace by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].originals
+    }
+    internal val documentOriginalLibrary:com.xnotes.mindmap.OriginalPdfLibraryState by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].originalLibrary
+    }
     // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingImport by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mapWorkspace=documentMaps;networkWorkspace=documentNetworks
+        originalWorkspace=documentOriginals;originalLibrary=documentOriginalLibrary
         com.xnotes.platform.FontCatalog.init(this)
         com.xnotes.platform.TemplateLibrary.init(this)
         com.xnotes.ui.AudioPlayback.init(this)
@@ -376,18 +397,21 @@ private fun EditorScreen(
     val mapActivity=context as? MainActivity
     val maps=mapActivity?.documentMaps ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.MapWorkspace(context,scope)}
     val networks=mapActivity?.documentNetworks ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.FileNetworkWorkspace(context,scope)}
-    val graphicsVisible=maps.visible || networks.visible
+    val originals=mapActivity?.documentOriginals ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.OriginalPdfWorkspace(context,scope)}
+    val originalLibrary=mapActivity?.documentOriginalLibrary ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.OriginalPdfLibraryState(context,scope)}
+    val graphicsVisible=maps.visible || networks.visible || originals.current!=null || originalLibrary.visible
     val mapBinding=remember(maps) {Any()}
     var savedMapUri by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var savedMapTitle by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("")}
     val focusManager=androidx.compose.ui.platform.LocalFocusManager.current
     val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    DisposableEffect(maps,networks,mapActivity,mapBinding) {
-        maps.bindHost(mapBinding);networks.bindHost(mapBinding)
+    DisposableEffect(maps,networks,originals,originalLibrary,mapActivity,mapBinding) {
+        maps.bindHost(mapBinding);networks.bindHost(mapBinding);originals.bindHost(mapBinding)
         mapActivity?.mapWorkspace=maps;mapActivity?.networkWorkspace=networks
+        mapActivity?.originalWorkspace=originals;mapActivity?.originalLibrary=originalLibrary
         onDispose {
-            maps.unbindHost(mapBinding);networks.unbindHost(mapBinding)
-            if(mapActivity==null) {maps.dispose();networks.dispose()}
+            maps.unbindHost(mapBinding);networks.unbindHost(mapBinding);originals.unbindHost(mapBinding)
+            if(mapActivity==null) {originalLibrary.dispose();originals.dispose();maps.dispose();networks.dispose()}
         }
     }
     SideEffect {maps.current?.let {savedMapUri=it.uri.toString();savedMapTitle=it.title}}
@@ -403,6 +427,13 @@ private fun EditorScreen(
         editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
         focusManager.clearFocus();keyboard?.hide()
     }}
+    LaunchedEffect(originals.current,originalLibrary.visible) {
+        if(originals.current!=null || originalLibrary.visible) {
+            mapActivity?.cancelPenRecording?.invoke()
+            editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
+            focusManager.clearFocus();keyboard?.hide()
+        }
+    }
     LaunchedEffect(maps.failure,maps.visible) {maps.failure?.takeIf {!maps.visible}?.let {
         editor.message=context.getString(if(it==com.xnotes.mindmap.MapWorkspaceFailure.CHANGED) R.string.native_open_changed else R.string.map_open_error)
         maps.clearFailure()
@@ -833,17 +864,6 @@ private fun EditorScreen(
             }}
             step(0)
         }
-    val sourceNavigator=remember(editor,maps,mapBinding,scope) {
-        com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference) {opened,live->
-            paneHomes=emptyMap();homeFocus=null;mainMenu=false
-            editor.message=when {
-                opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
-                live->context.getString(if(opened.pane.canvasOpen) R.string.graph_source_live_canvas else R.string.graph_source_live_note)
-                else->null
-            }
-        }
-    }
-    DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
     fun captureMapHost():()->Boolean {
         val panes=(listOf(editor)+editor.openPanes).distinct()
         val checks=panes.map {pane->
@@ -857,6 +877,23 @@ private fun EditorScreen(
         return {maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
             paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
     }
+    val originalNavigator=remember(editor,maps,networks,originals,mapBinding,scope) {
+        com.xnotes.mindmap.OriginalPdfNavigator(editor,maps,networks,originals,mapBinding,scope,
+            captureHost={captureMapHost()},onPresented={focusManager.clearFocus();keyboard?.hide()})
+    }
+    DisposableEffect(originalNavigator) {onDispose {originalNavigator.dispose()}}
+    LaunchedEffect(originals.resumeRequested) {if(originals.resumeRequested) originalNavigator.resume()}
+    val sourceNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference,originalNavigator=originalNavigator) {opened,live->
+            paneHomes=emptyMap();homeFocus=null;mainMenu=false
+            editor.message=when {
+                opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
+                live->context.getString(if(opened.pane.canvasOpen) R.string.graph_source_live_canvas else R.string.graph_source_live_note)
+                else->null
+            }
+        }
+    }
+    DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
     val fileRelationNavigator=remember(editor,maps,mapBinding,scope) {
         com.xnotes.mindmap.MapFileRelationNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
             onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
@@ -875,6 +912,13 @@ private fun EditorScreen(
             })
     }
     DisposableEffect(networkCoordinator) {onDispose {networkCoordinator.dispose()}}
+    LaunchedEffect(originalNavigator.failure,originalLibrary.visible,originals.current) {
+        if(originalLibrary.visible && originals.current==null) originalNavigator.failure?.let {issue->
+            if(issue==com.xnotes.storage.NativeReferenceIssue.CHANGED) originalLibrary.reportChanged()
+            else originalLibrary.reportUnavailable()
+            originalNavigator.clearFailure()
+        }
+    }
     var libraryNetworkLaunch by remember(networkCoordinator) {
         mutableStateOf<com.xnotes.mindmap.LibraryNetworkLaunchRequest?>(null)
     }
@@ -1083,13 +1127,27 @@ private fun EditorScreen(
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
-    fun openMap(uri:String,title:String=stemOf(uri)) {
-        if(!maps.isHostCurrent(mapBinding)) return
+    var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
+    fun openOriginalLibrary() {
+        if(originalLibraryLaunch!=null || originalLibrary.visible || originals.current!=null || maps.visible || networks.visible) return
+        val launch=Any();originalLibraryLaunch=launch
+        val current=captureMapHost()
+        scope.launch {
+            try {
+                presentOriginalPdfLibrary(editor,originalLibrary) {
+                    originalLibraryLaunch===launch && current() && originals.current==null && !maps.visible && !networks.visible
+                }
+            } finally {if(originalLibraryLaunch===launch) originalLibraryLaunch=null}
+        }
+    }
+
+    fun openMap(uri:String,title:String=stemOf(uri),flushNativeOnPresent:Boolean=true) {
+        if(!maps.isHostCurrent(mapBinding) || originals.current!=null || originalLibrary.visible) return
         networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
         val current=captureMapHost()
         maps.open(Uri.parse(uri),title,preparePresentation={
             if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
-        },stillCurrent=current)
+        },stillCurrent=current,flushNativeOnPresent=flushNativeOnPresent)
     }
     LaunchedEffect(Unit) {if(maps.current==null) savedMapUri?.let {openMap(it,savedMapTitle)}}
 
@@ -1341,8 +1399,15 @@ private fun EditorScreen(
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
     com.xnotes.mindmap.PageToMapFlowHost(editor,
         onSave={target->launchSaveAs(target)},
-        onOpenMap={uri->openMap(uri.toString())},visible=!graphicsVisible)
+        onOpenMap={uri,flush->openMap(uri.toString(),flushNativeOnPresent=flush)},visible=!graphicsVisible)
 
+    com.xnotes.mindmap.OriginalPdfWorkspaceHost(originals,onClose={originalNavigator.close()}) {
+    com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary,onOpen={observation,current->
+        val record=observation.record
+        val target=com.xnotes.mindmap.MapSourceTarget(record.id,com.xnotes.mindmap.SourceScope.PDF_ORIGINAL,
+            pageId=record.pages.first(),originalPdf=com.xnotes.mindmap.PdfOriginalProjection(record.sha256,0))
+        originalNavigator.openLibrary(target,current)
+    }) {
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
         val back=networks.returnEntry(entry)
         if(maps.isHostCurrent(mapBinding) && maps.current===entry) {
@@ -1437,6 +1502,7 @@ private fun EditorScreen(
                 allowSplits = target == null,
                 initialDocument = target?.let { paneHomes[it.pane] },
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
+                onOpenOriginalPdfs = ::openOriginalLibrary,
                 onOpenNetwork = {
                     if(!networkCoordinator.busy) {
                         val request=com.xnotes.mindmap.LibraryNetworkLaunchRequest.capture(
@@ -1668,6 +1734,21 @@ private fun EditorScreen(
         }
     }
     }
+    }
+    }
+    }
+    if(originals.current!=null && (originalNavigator.busy || originalNavigator.failure!=null)) {
+        Box(Modifier.fillMaxSize()) {
+            androidx.compose.material3.Surface(Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
+                Row(Modifier.padding(Space.s8),verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
+                    Text(stringResource(originalNavigator.failure?.let(::referenceFailureText) ?: R.string.graph_source_returning),fontSize=TextSize.body)
+                    com.xnotes.mindmap.MapButton(R.string.cancel) {
+                        if(originalNavigator.busy) originalNavigator.cancel() else originalNavigator.clearFailure()
+                    }
+                }
+            }
+        }
     }
     val latestImport by androidx.compose.runtime.rememberUpdatedState(importUri)
     if(graphicsVisible && importUri!=null) {

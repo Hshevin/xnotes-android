@@ -817,16 +817,16 @@ class MapSession() : ViewModel() {
         if(current.sources.map(::sourceSemantic)!=expected.node.sources.map(::sourceSemantic) || current.primarySource!=expected.node.primarySource) return false
         val latest=current.sources.associateBy {it.id}
         val merged=proposed.sources.map {source->latest[source.id]?.let {actual->
-            actual.copy(documentId=source.documentId,scope=source.scope,pageId=source.pageId,region=source.region,note=source.note,
+            actual.copy(documentId=source.documentId,scope=source.scope,pageId=source.pageId,region=source.region,originalPdf=source.originalPdf,note=source.note,
                 lastKnownPage=if(source.target==actual.target) actual.lastKnownPage
-                    else if(source.scope!=SourceScope.PAGE) null else source.lastKnownPage,
+                    else if(source.scope !in setOf(SourceScope.PAGE,SourceScope.PDF_ORIGINAL)) null else source.lastKnownPage,
                 status=if(source.target!=actual.target) {
                     if(actual.lastPreview!=null) SourceStatus.STALE else SourceStatus.UNVERIFIED
                 } else actual.status)
         } ?: source}
         return operate {it.update(current.id) {node->node.copy(sources=merged,primarySource=proposed.primarySource)}}
     }
-    private fun sourceSemantic(source:MapSource)=listOf(source.id,source.documentId,source.scope,source.pageId,source.region,source.note)
+    private fun sourceSemantic(source:MapSource)=listOf(source.id,source.documentId,source.scope,source.pageId,source.region,source.originalPdf,source.note)
     /** Explicit conflict choice: discard the recovered edits and reload the destination's version. */
     fun useFileVersion() {
         if (closing || saving || inkContact || textDraft != null) return

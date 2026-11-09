@@ -263,7 +263,7 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                     if(report?.filterActive==true && evidence.fileId !in report.matchedFiles)
                         Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
                     val range=sourceRangeLabel(row.target.scope,row.lastKnownPage)
-                    Text(if(row.target.scope==SourceScope.PAGE && row.target.region!=null)
+                    Text(if(row.target.scope==SourceScope.PAGE && row.target.region!=null || row.target.originalPdf?.userRegion!=null)
                         stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)
                     if(row.hasHistoricalPreview) Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
                     if(row.sourceNote.isNotBlank()) Text(row.sourceNote,fontSize=TextSize.body)

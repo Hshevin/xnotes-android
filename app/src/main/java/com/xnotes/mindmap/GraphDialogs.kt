@@ -238,12 +238,18 @@ internal fun SourcePreviewImage(asset:MapPreviewAsset?) {
 }
 
 @Composable
-internal fun sourceScopeLabel(source:MapSource)=sourceRangeLabel(source.scope,source.lastKnownPage)
+internal fun sourceScopeLabel(source:MapSource):String {
+    val range=sourceRangeLabel(source.scope,source.lastKnownPage)
+    return if(source.region!=null || source.originalPdf?.userRegion!=null)
+        stringResource(R.string.graph_backlinks_range_region,range) else range
+}
 
 @Composable
 internal fun sourceRangeLabel(scope:SourceScope,lastKnownPage:Int?):String=when(scope) {
     SourceScope.FILE->stringResource(R.string.graph_source_whole_file)
     SourceScope.CANVAS_REGION->stringResource(R.string.graph_source_canvas_region)
+    SourceScope.PDF_ORIGINAL->lastKnownPage?.let {stringResource(R.string.original_pdf_page_last_known,it)}
+        ?: stringResource(R.string.original_pdf_readonly)
     SourceScope.PAGE->lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)}
         ?: stringResource(R.string.graph_source_page_unknown)
 }

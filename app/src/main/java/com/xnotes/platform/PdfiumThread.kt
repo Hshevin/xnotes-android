@@ -97,6 +97,18 @@ class PdfiumTask<T> internal constructor(
         return result
     }
 
+    /** Cleanup must finish even if its waiter was interrupted; unlike [await], this never cancels a queued job. */
+    internal fun awaitUninterruptibly(): T? {
+        var interrupted=false
+        try {
+            while (true) {
+                try {done.await();break} catch (_:InterruptedException) {interrupted=true}
+            }
+            error?.let {throw it}
+            return result
+        } finally {if(interrupted) Thread.currentThread().interrupt()}
+    }
+
     private companion object {
         const val QUEUED = 0
         const val RUNNING = 1

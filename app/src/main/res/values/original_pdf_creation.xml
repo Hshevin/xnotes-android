@@ -1,0 +1,13 @@
+<resources>
+    <string name="graph_source_mode_notice">Choose what this source should show.</string>
+    <string name="graph_source_mode_note">This note page (with annotations)</string>
+    <string name="graph_source_mode_original">Keep and reference the original PDF</string>
+    <string name="graph_source_mode_original_retention">The original PDF is kept in your local originals library. Cancelling this addition or deleting the annotated note will not remove it.</string>
+    <string name="graph_source_mode_change">Change source mode</string>
+    <string name="graph_source_original_region_unavailable">This range crosses inserted space, a page margin, or a clipped PDF edge. Adjust the range, or reference the note with annotations.</string>
+    <string name="graph_source_original_unavailable">The original PDF could not be verified or kept. Retry, or reference this note with annotations.</string>
+    <string name="graph_source_original_changed">The source or its original-library entry changed. Choose again, or reference this note with annotations.</string>
+    <string name="graph_source_original_restore_notice">This original PDF was deleted from your originals library. Restore it with its existing document and page identities before adding this source.</string>
+    <string name="graph_source_original_restore">Restore and reference the original PDF</string>
+    <string name="graph_source_original_context">This source shows only the original PDF. Note annotations, inserted space and paper styling are excluded.</string>
+</resources>

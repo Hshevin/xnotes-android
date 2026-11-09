@@ -3,7 +3,15 @@ package com.xnotes.mindmap
 import com.xnotes.core.geometry.Rect
 import java.util.UUID
 
-enum class SourceScope { FILE, PAGE, CANVAS_REGION }
+enum class SourceScope { FILE, PAGE, CANVAS_REGION, PDF_ORIGINAL }
+/** Fixed original-PDF user-space frame; the ordinal only corroborates the catalog page identity. */
+data class PdfOriginalProjection(val sha256:String,val pageIndex:Int,val viewTurns:Int=0,val userRegion:Rect?=null) {
+    fun validate() {
+        require(sha256.matches(Regex("[0-9a-f]{64}")))
+        require(pageIndex in 0 until com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS && viewTurns in 0..3)
+        userRegion?.let {r->require(listOf(r.x,r.y,r.w,r.h).all {it.isFinite() && kotlin.math.abs(it)<=MindMapDocument.MAX_COORD} && r.w>0 && r.h>0)}
+    }
+}
 enum class SourceStatus { UNVERIFIED, CURRENT, STALE, UNAVAILABLE, PARTIALLY_DELETED, DELETED, EMPTY, TRASHED }
 /** Cached display fields never participate in source identity. Preview keys are opaque asset IDs. */
 data class MapSource(
@@ -24,6 +32,7 @@ data class MapSource(
     val observedVersion:String?=null,
     val acceptedPreviewVersion:String?=null,
     val lastPreview:MapLastPreview?=null,
+    val originalPdf:PdfOriginalProjection?=null,
 ) {
     val target get()=MapSourceTarget.from(this)
     fun validate() {
@@ -38,9 +47,12 @@ data class MapSource(
         lastPreview?.let {it.validate();require(previewKey==it.assetKey)}
         require(lastKnownPage == null || lastKnownPage in 1..com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS)
         region?.let { r -> require(listOf(r.x,r.y,r.w,r.h).all { it.isFinite() && kotlin.math.abs(it) <= MindMapDocument.MAX_COORD } && r.w > 0 && r.h > 0) }
+        originalPdf?.validate()
+        require(scope==SourceScope.PDF_ORIGINAL || originalPdf==null)
         when(scope) {
             SourceScope.FILE -> require(pageId == null && region == null && lastKnownPage == null)
             SourceScope.PAGE -> require(pageId != null)
+            SourceScope.PDF_ORIGINAL -> require(pageId != null && region == null && originalPdf != null)
             SourceScope.CANVAS_REGION -> require(pageId == null && region != null && lastKnownPage == null)
         }
     }

@@ -9,7 +9,9 @@ import androidx.lifecycle.viewModelScope
 internal class MapWorkspaceOwner(context:Context):ViewModel() {
     val workspace=MapWorkspace(context.applicationContext,viewModelScope)
     val networks=FileNetworkWorkspace(context.applicationContext,viewModelScope)
-    override fun onCleared() {networks.dispose();workspace.dispose();super.onCleared()}
+    val originals=OriginalPdfWorkspace(context.applicationContext,viewModelScope)
+    val originalLibrary=OriginalPdfLibraryState(context.applicationContext,viewModelScope)
+    override fun onCleared() {originalLibrary.dispose();originals.dispose();networks.dispose();workspace.dispose();super.onCleared()}
     class Factory(private val context:Context):ViewModelProvider.Factory {
         override fun <T:ViewModel> create(modelClass:Class<T>):T {
             require(modelClass==MapWorkspaceOwner::class.java)

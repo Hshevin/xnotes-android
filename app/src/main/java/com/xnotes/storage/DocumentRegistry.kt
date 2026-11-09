@@ -6,12 +6,13 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.io.File
 import java.util.UUID
 
-/** Private index only. Documents and immutable resources remain independently recoverable files. IO callers only. */
-class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 2) {
+/** Native location index plus authoritative independent-original identities. IO callers only. */
+class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 3) {
     private val liveLeases = java.util.concurrent.ConcurrentHashMap<String,String>()
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         createPageContracts(db)
+        createOriginalPdfs(db)
         db.execSQL("CREATE TABLE documents(id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL)")
         db.execSQL("CREATE TABLE locations(uri TEXT PRIMARY KEY, location_key TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL REFERENCES documents(id), available INTEGER NOT NULL DEFAULT 1)")
         db.execSQL("CREATE INDEX locations_document ON locations(document_id,available)")
@@ -23,9 +24,15 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("CREATE TABLE migrations(uri TEXT PRIMARY KEY, original TEXT NOT NULL, candidate TEXT NOT NULL, source_hash TEXT NOT NULL, document_id TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion==1 && newVersion==2) {"Unsupported registry upgrade"}
-        createPageContracts(db)
+        check(oldVersion in 1..2 && newVersion==3) {"Unsupported registry upgrade"}
+        if(oldVersion<2) createPageContracts(db)
+        createOriginalPdfs(db)
     }
+    private fun createOriginalPdfs(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE original_pdf_documents(id TEXT PRIMARY KEY NOT NULL,resource_sha TEXT NOT NULL UNIQUE,title TEXT NOT NULL,page_count INTEGER NOT NULL,generation INTEGER NOT NULL,deleted INTEGER NOT NULL,row_schema INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE original_pdf_pages(document_id TEXT NOT NULL REFERENCES original_pdf_documents(id),ordinal INTEGER NOT NULL,page_id TEXT NOT NULL UNIQUE,PRIMARY KEY(document_id,ordinal))")
+    }
+    internal fun <T> originalPdfTransaction(block:(SQLiteDatabase)->T):T=transaction(block)
     /** No location/document FK: losing a location or removing an index row must not erase evidence. */
     private fun createPageContracts(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")

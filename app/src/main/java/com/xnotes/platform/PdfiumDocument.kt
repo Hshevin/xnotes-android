@@ -156,20 +156,31 @@ class PdfiumDocument private constructor(
         pdfium.submit(PdfPriority.INTERACTIVE, lifetime) { if (handle != 0L) PdfiumNative.nativeTrim(handle) }
     }
 
-    /** Frees the native document once its running job, if any, ends. Never blocks. */
-    override fun close() {
-        if (!closed.compareAndSet(false, true)) return
+    private var closing:PdfiumTask<Unit>?=null
+
+    /** The same uncancellable queued close is shared by ordinary close and every waiting owner. */
+    @Synchronized
+    private fun beginClose():PdfiumTask<Unit> {
+        closing?.let {return it}
+        closed.set(true)
         live.remove(this)
         lifetime.cancel()
         // Behind what is on screen: freeing a big book takes tens of ms.
-        pdfium.submit(PdfPriority.THUMBNAIL) {
+        return pdfium.submit(PdfPriority.THUMBNAIL) {
             if (handle != 0L) {
                 PdfiumNative.nativeClose(handle)
                 handle = 0L
                 openCount.decrementAndGet()
             }
-        }
+            Unit
+        }.also {closing=it}
     }
+
+    /** Frees the native document once its running job, if any, ends. Never blocks. */
+    override fun close() {beginClose()}
+
+    /** IO-only. The backing PDF lease may be released only after this actual native close completes. */
+    fun closeAndAwait() {beginClose().awaitUninterruptibly()}
 
     companion object {
         /** How long one job of a sliced read may run, so renders queued meanwhile get their turn. */

@@ -121,7 +121,7 @@ internal class MapSourcePreviewController(private val session:MapSession,private
         task.job.start();return true
     }
     private fun patch(ticket:MapSourcePreviewTicket,source:MapSource,read:MapSourcePreviewRead,mode:MapSourcePreviewMode):MapSourceDerivedPatch {
-        val semantic=read.renderedVersion?.let {it.startsWith("xmap-render-v1:") || it.startsWith("xmap-render-v2:")}==true
+        val semantic=read.renderedVersion?.let {it.startsWith("xmap-render-v1:") || it.startsWith("xmap-render-v2:") || it.startsWith("xmap-render-v3:") || it.startsWith("original-pdf-v1:")}==true
         val observed=read.renderedVersion
         val matches=if(semantic && source.acceptedPreviewVersion!=null) source.acceptedPreviewVersion==read.renderedVersion
             else source.sourceVersion!=null && source.sourceVersion==read.rawVersion

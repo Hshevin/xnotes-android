@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="original_pdf_library_title">原 PDF 原件库</string>
+    <string name="original_pdf_library_notice">保留的原文不随批注笔记删除。在此删除原文后，图中的引用和最后预览仍保留。</string>
+    <string name="original_pdf_backup_notice">导图副本不包含这些原 PDF 及恢复引用所需的资料，完整引用备份尚未提供。</string>
+    <string name="original_pdf_empty">尚无保留的原文。创建页面或区域引用时可选择原 PDF 原文。</string>
+    <string name="original_pdf_pages">%1$d 页</string>
+    <string name="original_pdf_deleted">已从原件库删除</string>
+    <string name="original_pdf_open">阅读原文</string>
+    <string name="original_pdf_delete">删除原文</string>
+    <string name="original_pdf_restore">恢复原文</string>
+    <string name="original_pdf_relink">重新关联原件</string>
+    <string name="original_pdf_delete_title">删除这份原文？</string>
+    <string name="original_pdf_delete_notice">引用将暂时无法打开，恢复原文后可继续使用。批注笔记及其共用原件仍由各自独立保护。</string>
+    <string name="original_pdf_restore_notice">只恢复或重新关联完全相同的原 PDF，让已有引用继续使用。</string>
+    <string name="original_pdf_choose_file">选择相同的 PDF</string>
+    <string name="original_pdf_missing">保留的原件缺失或无法读取，请选择相同的 PDF 恢复。</string>
+    <string name="original_pdf_unavailable">无法读取或处理原件，已有引用保留。</string>
+    <string name="original_pdf_changed">此操作已失效，请刷新原件库后重试。</string>
+    <string name="original_pdf_limited">列表已达上限，结果可能不完整。</string>
+    <string name="original_pdf_readonly">原 PDF 原文 · 只读</string>
+    <string name="original_pdf_back_library">返回原件库</string>
+    <string name="original_pdf_page_last_known">原 PDF 原文 · 上次核对第 %1$d 页</string>
+    <string name="original_pdf_refresh">刷新</string>
+</resources>

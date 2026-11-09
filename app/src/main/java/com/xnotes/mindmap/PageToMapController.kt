@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
 
 internal enum class PageToMapStep {
-    PREPARING,SAVE_REQUIRED,SOURCE_COPY_RETAINED,SOURCE_COPY_WRITTEN,ENABLE_REQUIRED,ENABLE_RETAINED,REOPEN_REQUIRED,DESTINATION,
+    PREPARING,SOURCE_MODE,ORIGINAL_RESTORE_REQUIRED,SAVE_REQUIRED,SOURCE_COPY_RETAINED,SOURCE_COPY_WRITTEN,ENABLE_REQUIRED,ENABLE_RETAINED,REOPEN_REQUIRED,DESTINATION,
     TARGET_LOADING,TARGET,CONFIRMING,SAVING,ADDED,SAVE_FAILED,CREATE_RETAINED,SOURCE_ERROR,TARGET_ERROR,CLOSED,
 }
 
@@ -41,6 +41,11 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
     var confirmationToken by mutableStateOf<Any?>(null);private set
     var step by mutableStateOf(PageToMapStep.PREPARING);private set
     var source by mutableStateOf<MapSource?>(null);private set
+    var sourceModes by mutableStateOf<Set<com.xnotes.ui.SourceCreationMode>>(emptySet());private set
+    var sourceModeIssue by mutableStateOf<com.xnotes.ui.SourceCreationIssue?>(null);private set
+    var sourceModeContext by mutableStateOf<Any?>(null);private set
+    var originalRestoreOffer by mutableStateOf<com.xnotes.storage.OriginalPdfCatalog.Observation?>(null);private set
+    val canChangeSourceMode get()=sourceModes.isNotEmpty() && imported==null && !busy
     var destination by mutableStateOf<MapReferenceDestination?>(null);private set
     var saveOutcome by mutableStateOf<MapSaveOutcome?>(null);private set
     var targetUri by mutableStateOf<Uri?>(null);private set
@@ -72,11 +77,39 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
     private fun acceptPreparation(result:PageReferencePreparation,token:Long) {
         if(!valid(token)) return
         step=when(result) {
+            is PageReferencePreparation.ModeRequired->{
+                source=null;sourceModes=result.modes;sourceModeIssue=result.issue;sourceModeContext=Any()
+                originalRestoreOffer=null;PageToMapStep.SOURCE_MODE
+            }
+            is PageReferencePreparation.RestoreRequired->{originalRestoreOffer=result.offer;PageToMapStep.ORIGINAL_RESTORE_REQUIRED}
             is PageReferencePreparation.Ready->{source=result.source;if(targetSession?.document!=null) PageToMapStep.TARGET else PageToMapStep.DESTINATION}
             PageReferencePreparation.SaveRequired->PageToMapStep.SAVE_REQUIRED
             is PageReferencePreparation.EnableRequired->{enableOffer=result.offer;PageToMapStep.ENABLE_REQUIRED}
             PageReferencePreparation.ReopenRequired->reopenStep()
             PageReferencePreparation.Changed,PageReferencePreparation.Failed->PageToMapStep.SOURCE_ERROR
+        }
+    }
+    fun selectSourceMode(mode:com.xnotes.ui.SourceCreationMode,expectedContext:Any?=sourceModeContext):Boolean {
+        if(step!=PageToMapStep.SOURCE_MODE || imported!=null || expectedContext==null || expectedContext!==sourceModeContext || mode !in sourceModes) return false
+        sourceModeContext=null
+        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.selectMode(mode),token)}
+    }
+    fun changeSourceMode():Boolean {
+        if(!current() || !canChangeSourceMode || !request.resetMode()) return false
+        source=null;originalRestoreOffer=null;sourceModeContext=null
+        return start()
+    }
+    fun restoreOriginal(expected:com.xnotes.storage.OriginalPdfCatalog.Observation?=originalRestoreOffer):Boolean {
+        if(step!=PageToMapStep.ORIGINAL_RESTORE_REQUIRED || expected==null || expected!==originalRestoreOffer || imported!=null) return false
+        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.restoreOriginal(expected),token)}
+    }
+    /** A mode change or another picker retires this callback, even though the outer request ID is unchanged. */
+    internal fun mapDestination(create:Boolean):((Uri)->Boolean)? {
+        if(!canChoose()) return null
+        val token=generation;val target=source?.target;var consumed=false
+        return {uri->
+            if(consumed || !valid(token) || source?.target!=target || !canChoose()) false
+            else {consumed=true;if(create) createMap(uri) else selectMap(uri)}
         }
     }
     private fun reopenStep()=if(request.dirty) PageToMapStep.SAVE_REQUIRED else PageToMapStep.REOPEN_REQUIRED

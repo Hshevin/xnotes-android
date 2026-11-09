@@ -32,12 +32,13 @@ object MapCodec {
     }
     private fun extended(doc:MindMapDocument)=doc.organization!=MapOrganization.MIND_MAP || doc.nodes.any {it.fileCardId!=null}
     internal fun toJson(doc: MindMapDocument):JSONObject {
+        val originalSchema=doc.nodes.any {n->n.sources.any {it.scope==SourceScope.PDF_ORIGINAL || it.originalPdf!=null || it.lastPreview?.target?.let {t->t.scope==SourceScope.PDF_ORIGINAL || t.originalPdf!=null}==true}}
         val regionSchema=doc.nodes.any {node->node.sources.any {
             it.scope==SourceScope.CANVAS_REGION || it.lastPreview?.target?.scope==SourceScope.CANVAS_REGION
         }}
-        val expanded=extended(doc) || regionSchema
+        val expanded=extended(doc) || regionSchema || originalSchema
         return JSONObject()
-        .put("format", "xnotes-mind-map").put("version", if(regionSchema) 5 else if(expanded) 4 else 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+        .put("format", "xnotes-mind-map").put("version", if(originalSchema) 6 else if(regionSchema) 5 else if(expanded) 4 else 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
         .also {if(expanded) it.put("organization",doc.organization.name)}
         .put("previewAssets",JSONArray().also {array->doc.prunePreviewAssets().previewAssets.values.forEach {asset->
             array.put(JSONObject().put("key",asset.key).put("pngBase64",asset.pngBase64).put("width",asset.width).put("height",asset.height))
@@ -60,11 +61,12 @@ object MapCodec {
     internal fun fromJson(j: JSONObject): MindMapDocument {
         require(j.string("format") == "xnotes-mind-map")
         val version=j.number("version");val versionValue=j.get("version")
-        require(version==1.0 || version==2.0 || version in setOf(3.0,4.0,5.0) && (versionValue is Int || versionValue is Long))
+        require(version==1.0 || version==2.0 || version in setOf(3.0,4.0,5.0,6.0) && (versionValue is Int || versionValue is Long))
         val organization=if(version>=4.0) MapOrganization.valueOf(j.string("organization")) else MapOrganization.MIND_MAP
         val array = j.getJSONArray("nodes")
         require(array.length() in (if(organization==MapOrganization.MIND_MAP) 1 else 0)..MindMapDocument.MAX_NODES)
         if(version<5.0) MapGraphJson.rejectCanvasRegions(array)
+        if(version<6.0) MapGraphJson.rejectOriginalPdfs(array)
         var count = 0
         val nodes = (0 until array.length()).map { i ->
             val n = array.getJSONObject(i)
@@ -121,8 +123,10 @@ object MapCodec {
         val out=DataOutputStream(DigestOutputStream(sink,digest))
         fun text(value:String) {val bytes=value.toByteArray(Charsets.UTF_8);out.writeInt(bytes.size);out.write(bytes)}
         fun optional(value:String?) {out.writeBoolean(value!=null);if(value!=null) text(value)}
+        val original=doc.nodes.any {it.sources.any {s->s.originalPdf!=null}}
         val expanded=extended(doc)
-        text(if(expanded) "xmap-render-v2" else "xmap-render-v1");text(doc.id);text(doc.direction.name)
+        val prefix=if(original) "xmap-render-v3" else if(expanded) "xmap-render-v2" else "xmap-render-v1"
+        text(prefix);text(doc.id);text(doc.direction.name)
         if(expanded) text(doc.organization.name)
         out.writeInt(doc.nodes.size)
         doc.nodes.forEach {n->
@@ -136,11 +140,18 @@ object MapCodec {
             out.writeInt(n.sources.size);n.sources.forEach {s->
                 text(s.id);text(s.documentId);text(s.fileName);text(s.scope.name);optional(s.pageId);text(s.note)
                 out.writeBoolean(s.region!=null);s.region?.let {r->out.writeDouble(r.x);out.writeDouble(r.y);out.writeDouble(r.w);out.writeDouble(r.h)}
+                if(original) {
+                    out.writeBoolean(s.originalPdf!=null)
+                    s.originalPdf?.let {p->
+                        text(p.sha256);out.writeInt(p.pageIndex);out.writeInt(p.viewTurns)
+                        out.writeBoolean(p.userRegion!=null);p.userRegion?.let {r->out.writeDouble(r.x);out.writeDouble(r.y);out.writeDouble(r.w);out.writeDouble(r.h)}
+                    }
+                }
             }
         }
         out.writeInt(doc.relations.size);doc.relations.forEach {r->text(r.id);text(r.from);text(r.to);text(r.kind.name);text(r.label)}
         out.flush()
-        return (if(expanded) "xmap-render-v2:" else "xmap-render-v1:")+digest.digest().joinToString("") {"%02x".format(it)}
+        return (prefix+":")+digest.digest().joinToString("") {"%02x".format(it)}
     }
     private fun JSONObject.string(key: String): String = get(key).let { require(it is String); it }
     private fun JSONObject.number(key: String): Double = get(key).let { require(it is Number); it.toDouble().also { d -> require(d.isFinite()) } }

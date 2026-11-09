@@ -926,6 +926,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val referenceIssuer=Any()
     private val referenceLocator by lazy {NativeReferenceLocator(state,view) {refreshView()}}
     private val pageReferenceIssuer=Any()
+    /** Per-owner PDF engine boundary; production defaults to the actual immutable PDF reader. */
+    internal var originalPdfAccess:com.xnotes.storage.OriginalPdfAccess?=null
     internal var pageReferenceRequest by mutableStateOf<PageReferenceRequest?>(null)
         private set
 
@@ -1171,8 +1173,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             owner.state.document!==doc || doc.pages.count {it===page}!=1) return false
         pageReferenceRequest?.retire()
         pageReferenceRequest=PageReferenceRequest.capture(pageReferenceIssuer,this,owner,doc,page,
-            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner,region)
+            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner,region,
+            OriginalPdfCreationRequest.capture(appContext,originalPdfAccess ?: com.xnotes.storage.OriginalPdfAccess(appContext),doc,page,region))
         return true
+    }
+    /** Read-only preparation never settles previews, flushes the note or creates note page IDs. */
+    internal fun originalPdfReferenceReady(request:PageReferenceRequest):Boolean {
+        if(!pageReferenceCurrent(request)) return false
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        return root.hostParkingSlots().none {root.hostParkingInputBusy(it)}
     }
     internal fun clearPageReference(request:PageReferenceRequest) {
         if(pageReferenceRequest!==request) return

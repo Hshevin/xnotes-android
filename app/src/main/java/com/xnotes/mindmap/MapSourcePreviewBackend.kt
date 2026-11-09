@@ -43,6 +43,8 @@ internal object MapSourcePreviewBackend {
         val check={coroutine.ensureActive();checkActive()}
         require(targets.isNotEmpty() && targets.all {it.documentId==targets[0].documentId})
         targets.forEach {it.validate()};require(render.all {it in targets});check()
+        if(targets.any {it.scope==SourceScope.PDF_ORIGINAL})
+            return OriginalPdfSourcePreviewBackend.load(context,targets,render,check)
         try {
             val app=context.applicationContext
             com.xnotes.platform.FontCatalog.ensureInitialized(app)
