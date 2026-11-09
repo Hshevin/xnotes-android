@@ -1,0 +1,6 @@
+<resources>
+    <string name="graph_return_parent_map">返回上一导图</string>
+    <string name="graph_map_source_busy">导图仍有未完成的编辑或来源选择。请完成或取消后重试。</string>
+    <string name="graph_map_source_limit">来源导航已达到上限。请先返回起始导图并关闭，再打开其他来源。</string>
+    <string name="graph_map_close_failed">导图尚未保存，已保留当前修改。请处理保存问题后重试关闭。</string>
+</resources>

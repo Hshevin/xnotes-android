@@ -1401,6 +1401,16 @@ private fun EditorScreen(
         onSave={target->launchSaveAs(target)},
         onOpenMap={uri,flush->openMap(uri.toString(),flushNativeOnPresent=flush)},visible=!graphicsVisible)
 
+    fun closeMapEntry(entry:com.xnotes.mindmap.MapWorkspace.Entry,preserveRecovery:Boolean=false):Boolean {
+        if(!maps.isHostCurrent(mapBinding) || maps.current!==entry) return false
+        val back=networks.returnEntry(entry)
+        backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+        if(back!=null) return networkCoordinator.resume(back,entry,closeMap=true,preserveMapRecovery=preserveRecovery)
+        if(maps.close(entry,preserveRecovery=preserveRecovery)==null) return false
+        savedMapUri=null;savedMapTitle=""
+        editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
+        return true
+    }
     com.xnotes.mindmap.OriginalPdfWorkspaceHost(originals,onClose={originalNavigator.close()}) {
     com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary,onOpen={observation,current->
         val record=observation.record
@@ -1408,26 +1418,19 @@ private fun EditorScreen(
             pageId=record.pages.first(),originalPdf=com.xnotes.mindmap.PdfOriginalProjection(record.sha256,0))
         originalNavigator.openLibrary(target,current)
     }) {
-    com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
-        val back=networks.returnEntry(entry)
-        if(maps.isHostCurrent(mapBinding) && maps.current===entry) {
-            backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
-            if(back!=null) networkCoordinator.resume(back,entry,closeMap=true)
-            else if(maps.close(entry)!=null) {
-                savedMapUri=null;savedMapTitle=""
-                editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
-            }
-        }
-    },hooks={entry->
+    com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->closeMapEntry(entry)},hooks={entry->
         val back=networks.returnEntry(entry)
         com.xnotes.mindmap.MapHostHooks(
             openSource={ticket,bookmark->sourceNavigator.open(entry,ticket,bookmark)},
             busy={sourceNavigator.busy || networkCoordinator.busy},
             cancel={if(sourceNavigator.busy) sourceNavigator.cancel() else back?.let {networkCoordinator.cancel(it)}},
-            feedback={if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed
+            feedback={sourceNavigator.mapFeedback ?: if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed
                 else sourceNavigator.failure?.let(::referenceFailureText)
                     ?: back?.let {networkCoordinator.failureFor(it)}?.let {com.xnotes.mindmap.networkProblemText(it)}},
-            returnToNetwork=back?.let {network->{ {networkCoordinator.resume(network,entry);Unit} }})}) {
+            returnToNetwork=back?.let {network->{ {networkCoordinator.resume(network,entry);Unit} }},
+            returnToSourceMap=if(maps.canReturnSource) ({sourceNavigator.returnToSourceMap();Unit}) else null,
+            closeEntry={sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}},
+            closeRecoveryEntry={sourceNavigator.closeEntry(entry,preserveRecovery=true) {closeMapEntry(entry,true)}})}) {
     com.xnotes.mindmap.FileNetworkWorkspaceHost(networks,com.xnotes.mindmap.FileNetworkHostActions(
         open={entry,anchor,target->
             if(!networks.current(mapBinding,entry) || !networks.visible) false else {

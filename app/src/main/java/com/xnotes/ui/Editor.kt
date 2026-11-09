@@ -1396,6 +1396,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             else ed.controller.hasPendingContentTransaction ||
                 ed.tablePreviews.values.any {ed.currentTablePreview(it) && it.table.snapshot()!=it.before}
     }
+    /** Map-to-map presentation observes drafts; even an unchanged live editor must finish itself. */
+    private fun mapSourceParkingInputBusy(slot:OpenSlot)=hostParkingInputBusy(slot) ||
+        listOf(slot.pane,slot.owner).distinct().any {ed->
+            if(slot.canvas) ed.infiniteOrNull?.editingField!=null
+            else ed.controller.isEditingText || ed.editingField!=null || ed.flowEditingActive || ed.flowText.active ||
+                ed.editingTable!=null || ed.tablePreviews.values.any {ed.currentTablePreview(it)}
+        }
     private fun hostParkingWriterBusy(slot:OpenSlot)=listOf(slot.pane,slot.owner).any {
         it.noteWriteJob?.isActive==true || it.canvasWriteJob?.isActive==true || it.sessionWriteJob?.isActive==true}
 
@@ -1445,9 +1452,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Park the existing workspace intact; dirty is allowed and no native write is requested here. */
-    internal suspend fun awaitHostParking():NativeHostParking? {
+    internal suspend fun awaitHostParking():NativeHostParking? = awaitHostParking(commitText=true)
+
+    /** Pure observation for a map source hop: no text, flow, table or selection is confirmed. */
+    internal suspend fun awaitMapSourceParking():NativeHostParking? = awaitHostParking(commitText=false)
+
+    private suspend fun awaitHostParking(commitText:Boolean):NativeHostParking? {
         val workspace=sibling?.takeIf {it.secondary===this} ?: this
-        if(workspace!==this) return workspace.awaitHostParking()
+        if(workspace!==this) return workspace.awaitHostParking(commitText)
+        fun inputBusy(slot:OpenSlot)=if(commitText) hostParkingInputBusy(slot) else mapSourceParkingInputBusy(slot)
         val slots=hostParkingSlots()
         val replacements=slots.map {it.pane.replacementSequence}
         fun current()=sameHostParkingSlots(slots) && slots.zip(replacements).all {(slot,sequence)->
@@ -1457,7 +1470,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 ed.noteWriteJob?.join();ed.canvasWriteJob?.join();ed.awaitSessionEncoders()
                 if(!current()) return null
             }
-            for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
+            if(commitText) for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
                 if(slot.canvas) slot.owner.infiniteOrNull?.commitText()
                 else {slot.owner.commitNoteTextForSave();slot.owner.flowText.endSession()}
             }
@@ -1466,14 +1479,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if(!current()) return null
             val wakes=slots.map {it.pane.captureBoundary}
             if(slots.any(::hostParkingWriterBusy)) continue
-            if(slots.none(::hostParkingInputBusy)) {
+            if(slots.none(::inputBusy)) {
                 val stamps=slots.map(::HostParkingStamp)
                 return NativeHostParking.observe {
-                    current() && slots.none(::hostParkingInputBusy) && slots.none(::hostParkingWriterBusy) && stamps.all {it.current()}
+                    current() && slots.none(::inputBusy) && slots.none(::hostParkingWriterBusy) && stamps.all {it.current()}
                 }
             }
             // A closed physical surface cannot ask the user to finish an invisible transaction.
-            if(slots.any {!it.open && hostParkingInputBusy(it)}) return null
+            if(slots.any {!it.open && inputBusy(it)}) return null
             kotlinx.coroutines.selects.select<Unit> {
                 for(wake in wakes) wake.onAwait { }
                 for(slot in slots) slot.pane.sessionOwner.onRetired { }
@@ -10265,6 +10278,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (editingTable == null) return
         editingTable = null
         if (!flowText.active) setFlowLifted(false)
+        contentTransactionChanged()
     }
 
     private fun setFlowLifted(lifted: Boolean) {

@@ -80,7 +80,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         // The host parks only the visible editor. OS picker slots above retain their original owner.
         if(!presentationState.visible) return@screen
-        val close = { if (session.document == null) onClose() else session.save(onClose) }
+        val close:()->Unit = {
+            val closeEntry=hostHooks?.closeEntry
+            if(closeEntry!=null) closeEntry()
+            else if(session.document==null) onClose() else session.save(onClose)
+        }
         val focus = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
         val density = LocalDensity.current
@@ -205,6 +209,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8), verticalAlignment = Alignment.CenterVertically) {
                     MapButton(R.string.map_close, enabled = !session.closing) { close() }
+                    hostHooks?.returnToSourceMap?.let {back->MapButton(R.string.graph_return_parent_map,
+                        enabled=!session.closing && !session.hasUnconfirmedContent) {back()}}
                     hostHooks?.returnToNetwork?.let {back->MapButton(R.string.network_return,
                         enabled=!session.closing && !session.hasUnconfirmedContent) {back()}}
                     Text(title.ifBlank { stringResource(R.string.map_title) }, fontSize = TextSize.title, modifier = Modifier.padding(horizontal = Space.s12))
@@ -334,7 +340,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                     } }
                     problem?.takeIf {textDraft==null}?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
                         Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
-                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
+                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {
+                            hostHooks?.closeRecoveryEntry?.invoke() ?: onClose()
+                        }
                         if(session.conflict) {
                             MapButton(R.string.map_conflict_keep, enabled = !session.saving) { session.save(overwrite = true) }
                             MapButton(R.string.map_conflict_use_file, enabled = !session.saving) { discardingRecovery = true }

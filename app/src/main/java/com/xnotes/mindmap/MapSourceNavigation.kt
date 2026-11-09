@@ -34,4 +34,7 @@ class MapHostHooks internal constructor(
     internal val cancel:()->Unit={},
     internal val feedback:()->Int?={null},
     internal val returnToNetwork:(()->Unit)?=null,
+    internal val returnToSourceMap:(()->Unit)?=null,
+    internal val closeEntry:(()->Unit)?=null,
+    internal val closeRecoveryEntry:(()->Unit)?=null,
 )
