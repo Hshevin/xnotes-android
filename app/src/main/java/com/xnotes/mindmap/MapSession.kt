@@ -60,6 +60,13 @@ class MapSession() : ViewModel() {
     private val fileRelationLifetimes=mutableMapOf<String,FileRelationLife>()
     private val appliedBacklinkRemovals=java.util.Collections.newSetFromMap(java.util.WeakHashMap<MapBacklinkRemovalTicket,Boolean>())
     private var previewController:MapSourcePreviewController?=null
+    private var targetEditController:SourceTargetEditController?=null
+    private var applyingSourceTargetEdit=false
+    internal val sourceTargetEdits:SourceTargetEditController get()=targetEditController ?:
+        SourceTargetEditController(app,this,viewModelScope).also {targetEditController=it}
+    internal fun retireSourceTargetEditOwner(owner:Any) {targetEditController?.retireOwner(owner)}
+    internal val sourceTargetEditPickerBusy:Boolean get()=existingSourceRequest!=null || connectedSourceRequest!=null ||
+        sourcePickerInstance?.state!=null || connectedImport?.isActive==true || existingSourceJobs.any {it.isActive}
     internal val sourcePreviews:MapSourcePreviewController get()=previewController ?:
         MapSourcePreviewController(this,app,viewModelScope).also {previewController=it}
     private fun reconcileSourceLifetimes() {
@@ -98,6 +105,7 @@ class MapSession() : ViewModel() {
             }
         }
         previewController?.documentChanged()
+        if(!applyingSourceTargetEdit) targetEditController?.documentChanged()
     }
     internal fun captureFileRelationMembership(relationId:String,entryCurrent:()->Boolean):MapFileRelationMembership? {
         if(closing || replacingDocument || loading || !entryCurrent()) return null
@@ -362,6 +370,7 @@ class MapSession() : ViewModel() {
         selectionRevision++
         connectedDraft?.let {cancelConnectedNode(it.token)};connectedEpoch++
         existingSourceRequest=null;existingSourceJobs.toList().forEach {it.cancel()};existingSourceJobs.clear()
+        targetEditController?.documentChanged()
     }
     internal fun finishConnectedNode(token:String,proposed:MapNode?=null):Boolean {
         val draft=connected(token)?.takeIf {!closing && !inkContact && !it.loadingSource && connectedSourceRequest==null} ?: return false
@@ -379,7 +388,7 @@ class MapSession() : ViewModel() {
     }
     internal fun beginConnectedSource(token:String):ConnectedSourceRequest? {
         val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node?.kind==NodeKind.REFERENCE && connectedSourceRequest==null &&
-            existingSourceRequest==null && sourcePickerInstance?.state==null} ?: return null
+            existingSourceRequest==null && sourcePickerInstance?.state==null && targetEditController?.hasPending!=true} ?: return null
         return ConnectedSourceRequest(token=token,epoch=draft.epoch).also {connectedSourceRequest=it}
     }
     internal fun receiveConnectedSource(requestId:String,uri:Uri?):Boolean {
@@ -406,7 +415,7 @@ class MapSession() : ViewModel() {
         val request=connectedSourceRequest?.takeIf {it.id==requestId} ?: return
         if(receiveConnectedSource(requestId,null)) connected(request.token)?.let {connectedDraft=it.copy(problem=ConnectedDraftProblem.SOURCE)}
     }
-    override fun onCleared() {retireConnectedDraft();super.onCleared()}
+    override fun onCleared() {targetEditController?.close();retireConnectedDraft();super.onCleared()}
     var textDraft by mutableStateOf<MapTextDraft?>(null); private set
     var textRestore by mutableStateOf<MapTextRestore?>(null); private set
     var textEditConflict by mutableStateOf(false); private set
@@ -777,7 +786,8 @@ class MapSession() : ViewModel() {
     }
     internal fun beginExistingSource(nodeId:String):String? {
         val doc=document ?: return null
-        if(closing || replacingDocument || existingSourceRequest!=null || connectedSourceRequest!=null || sourcePickerInstance?.state!=null || doc.nodes.none {it.id==nodeId}) return null
+        if(closing || replacingDocument || existingSourceRequest!=null || connectedSourceRequest!=null || sourcePickerInstance?.state!=null ||
+            targetEditController?.hasPending==true || doc.nodes.none {it.id==nodeId}) return null
         return ExistingSourceRequest(epoch=connectedEpoch,documentId=doc.id,nodeId=nodeId).also {existingSourceRequest=it}.id
     }
     private fun sourceCurrent(request:ExistingSourceRequest)=!closing && !replacingDocument && request.epoch==connectedEpoch &&
@@ -809,6 +819,62 @@ class MapSession() : ViewModel() {
     internal fun failExistingSource(requestId:String) {
         val request=existingSourceRequest?.takeIf {it.id==requestId} ?: return
         if(receiveExistingSource(requestId,null) && sourceCurrent(request)) sourceFailed=true
+    }
+    /** Capture on row display, never inside a delayed picker callback. */
+    internal fun captureSourceTargetEdit(nodeId:String,sourceId:String,displayedTarget:MapSourceTarget,
+        mode:SourceTargetEditMode):MapSourceTargetEditTicket? {
+        if(loading || !selectionReady() || sourceTargetEditPickerBusy || targetEditController?.hasPending==true) return null
+        val doc=document ?: return null
+        val node=doc.nodes.firstOrNull {it.id==nodeId && it.fileCardId==null} ?: return null
+        val source=captureSourcePreview(node.id,sourceId)?.takeIf {it.target==displayedTarget} ?: return null
+        val lifetime=nodeLifetimes[nodeId] ?: return null
+        return MapSourceTargetEditTicket(this,doc.id,connectedEpoch,lifetime,source,mode)
+    }
+    /** Transient pen/draft activity is Busy at apply time, not a change to this fixed membership. */
+    internal fun sourceTargetEditCurrent(ticket:MapSourceTargetEditTicket):Boolean {
+        if(ticket.issuer!==this || ticket.graphId!=document?.id || ticket.epoch!=connectedEpoch ||
+            closing || replacingDocument || loading || nodeLifetimes[ticket.nodeId]!==ticket.nodeLifetime) return false
+        if(document?.nodes?.none {it.id==ticket.nodeId && it.fileCardId==null}!=false) return false
+        return currentSourcePreview(ticket.applied ?: ticket.source)!=null
+    }
+    /** Main only. Patches one exact member of the latest node; no reading, native save or suspension. */
+    internal fun applySourceTargetEdit(ticket:MapSourceTargetEditTicket,choice:PreparedSourceTargetChoice):MapSourceTargetEditResult {
+        if(!sourceTargetEditCurrent(ticket)) return MapSourceTargetEditResult.Changed
+        ticket.applied?.let {receipt->
+            // Already accepted work outlives the reader. This branch can acknowledge only that
+            // same target while the application lifetime survives; it cannot make another edit.
+            return if(receipt.target==choice.target) MapSourceTargetEditResult.Applied(false) else MapSourceTargetEditResult.Changed
+        }
+        if(!selectionReady()) return MapSourceTargetEditResult.Busy
+        if(!choice.current()) return MapSourceTargetEditResult.Changed
+        try {
+            choice.target.validate()
+            require(choice.displayName.length<=4096 && choice.rawVersion.isNotBlank() && choice.rawVersion.length<=512)
+            require(choice.lastKnownPage==null || choice.lastKnownPage in 1..com.xnotes.core.model.ReferenceAnchors.MAX_TARGETS)
+        } catch(_:IllegalArgumentException) {return MapSourceTargetEditResult.Invalid}
+        if(ticket.mode==SourceTargetEditMode.RANGE && (choice.target.documentId!=ticket.initialTarget.documentId ||
+                (choice.target.scope==SourceScope.PDF_ORIGINAL)!=(ticket.initialTarget.scope==SourceScope.PDF_ORIGINAL)))
+            return MapSourceTargetEditResult.Invalid
+        val previous=currentSourcePreview(ticket.source) ?: return MapSourceTargetEditResult.Changed
+        if(previous.target==choice.target) {
+            ticket.applied=ticket.source
+            targetEditController?.documentChanged()
+            return MapSourceTargetEditResult.Applied(false)
+        }
+        applyingSourceTargetEdit=true
+        val committed=try {
+            operate {doc->doc.update(ticket.nodeId) {node->node.copy(sources=node.sources.map {source->
+                if(source.id!=ticket.sourceId) source else source.copy(documentId=choice.target.documentId,
+                    scope=choice.target.scope,pageId=choice.target.pageId,region=choice.target.region,originalPdf=choice.target.originalPdf,
+                    fileName=choice.displayName,sourceVersion=choice.rawVersion,observedVersion=null,acceptedPreviewVersion=null,
+                    lastKnownPage=choice.lastKnownPage.takeIf {choice.target.scope in setOf(SourceScope.PAGE,SourceScope.PDF_ORIGINAL)},
+                    status=if(source.lastPreview!=null) SourceStatus.STALE else SourceStatus.UNVERIFIED)
+            })}}
+        } finally {applyingSourceTargetEdit=false}
+        if(!committed) {targetEditController?.documentChanged();return MapSourceTargetEditResult.Invalid}
+        ticket.applied=requireNotNull(captureSourcePreview(ticket.nodeId,ticket.sourceId)).also {check(it.target==choice.target)}
+        targetEditController?.documentChanged()
+        return MapSourceTargetEditResult.Applied(true)
     }
     /** Source controls never replace a node body, and stale lists cannot erase newly attached data. */
     internal fun sourceEditSnapshot(nodeId:String):SourceEditSnapshot? {
