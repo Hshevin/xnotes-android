@@ -31,6 +31,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.exclude
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -407,7 +409,7 @@ private fun EditorScreen(
     // (editor.noteOpen). Every launch starts on backstage.
     var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.HOME) }
     var showShareChooser by remember { mutableStateOf(false) }
-    var guardAction by remember { mutableStateOf<GuardRequest?>(null) }
+    val guardState=remember {NativeGuardState()}
     // The pane an image was picked for, and where a long-press menu asked it to land. Held together
     // so the picker's result lands in the pane that opened it, whatever the focus does meanwhile.
     var pendingInsert by remember { mutableStateOf<PendingInsert?>(null) }
@@ -475,18 +477,26 @@ private fun EditorScreen(
     // A destination callback retains the model request that actually launched it.
     val createPicker=com.xnotes.ui.rememberNativeDestinationPicker()
     fun acceptSaveDestination(picked:SavePickerRequest,uri:Uri?) {
-        if(uri==null) return
+        if(uri==null) {picked.stop(NativeActionStop.CANCELLED);return}
         val request=picked.proof
-        if(!request.applies()) {editor.message=context.getString(R.string.native_open_changed);return}
+        if(!picked.current() || !request.applies()) {editor.message=context.getString(R.string.native_open_changed);picked.stop(NativeActionStop.CHANGED);return}
         scope.launch {
-            val name=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {resolver.takePersistableUriPermission(uri,rwFlags)}
-                displayNameOf(resolver,uri)
-            }
-            if(!request.applies()) {editor.message=context.getString(R.string.native_open_changed);return@launch}
-            request.owner.saveAsToThen(uri.toString(),name) {ok->
-                if(ok && request.afterSaveApplies()) picked.afterSave?.invoke()
-            }
+            try {
+                val name=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {resolver.takePersistableUriPermission(uri,rwFlags)}
+                    displayNameOf(resolver,uri)
+                }
+                if(!picked.current() || !request.applies()) {editor.message=context.getString(R.string.native_open_changed);picked.stop(NativeActionStop.CHANGED);return@launch}
+                request.owner.saveAsToThen(uri.toString(),name) {ok->
+                    when {
+                        !picked.current()->picked.stop(NativeActionStop.CHANGED)
+                        !ok->picked.stop(NativeActionStop.FAILED)
+                        request.afterSaveApplies()->picked.saved()
+                        else->picked.stop(NativeActionStop.CHANGED)
+                    }
+                }
+            } catch(cancelled:java.util.concurrent.CancellationException) {picked.stop(NativeActionStop.CANCELLED);throw cancelled}
+            catch(_:Exception) {picked.stop(NativeActionStop.FAILED)}
         }
     }
 
@@ -713,9 +723,9 @@ private fun EditorScreen(
     }
 
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
-    fun launchSaveAs(target:Editor,afterSave:(()->Unit)?=null) {
-        if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);return}
-        if(target.canvasOpen) {editor.message=context.getString(R.string.err_save_note);return}
+    fun requestSaveAs(target:Editor,afterSave:(()->Unit)?,onStopped:(NativeActionStop)->Unit,stillCurrent:()->Boolean) {
+        if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);onStopped(NativeActionStop.FAILED);return}
+        if(target.canvasOpen) {editor.message=context.getString(R.string.err_save_note);onStopped(NativeActionStop.FAILED);return}
         val owner=target.documentOwner
         val initial=owner.discardForOpen()
         val identity=owner.state.document.identity
@@ -723,15 +733,17 @@ private fun EditorScreen(
         scope.launch {
             // Settle IME/flow drafts and pen previews before fixing the picker request. A later
             // onPause commit must not invalidate the very save action that opened the picker.
-            if(!owner.awaitStableForSave() || !initial.sameModel() || owner.state.document.identity!=identity || owner.currentUri!=path) {
-                editor.message=context.getString(R.string.native_open_changed);return@launch
+            if(!stillCurrent() || !owner.awaitStableForSave() || !stillCurrent() || !initial.sameModel() || owner.state.document.identity!=identity || owner.currentUri!=path) {
+                editor.message=context.getString(R.string.native_open_changed);onStopped(NativeActionStop.CHANGED);return@launch
             }
-            if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);return@launch}
-            val request=SavePickerRequest(owner.discardForOpen(),afterSave)
-            if(!createPicker.launch("${owner.title}.xnote") {uri->acceptSaveDestination(request,uri)})
-                editor.message=context.getString(R.string.err_save_note)
+            if(createPicker.busy) {editor.message=context.getString(R.string.native_save_picker_busy);onStopped(NativeActionStop.FAILED);return@launch}
+            val request=SavePickerRequest(owner.discardForOpen(),afterSave,onStopped,stillCurrent)
+            if(!createPicker.launch("${owner.title}.xnote") {uri->acceptSaveDestination(request,uri)}) {
+                editor.message=context.getString(R.string.err_save_note);request.stop(NativeActionStop.FAILED)
+            }
         }
     }
+    fun launchSaveAs(target:Editor,afterSave:(()->Unit)?=null)=requestSaveAs(target,afterSave,{}, {true})
 
     fun saveOrPrompt() {
         val target = editor.active
@@ -743,19 +755,24 @@ private fun EditorScreen(
     }
 
     // The prompt is about one pane's note, so it asks about — and saves — the pane being acted on.
-    fun guarded(target: Editor = editor.active, onDiscard: (Editor.OpenDiscard) -> Unit = {}, action: () -> Unit) {
+    fun guardOne(target:Editor,onDiscard:(Editor.OpenDiscard)->Unit,onStopped:(NativeActionStop)->Unit,
+        sourceNavigation:Any?,stillCurrent:()->Boolean,action:()->Unit) {
+        if(!stillCurrent()) {onStopped(NativeActionStop.CHANGED);return}
         if (!target.noteOpen) { action(); return }
         if (!target.canvasOpen) { target.commitText(); target.flowText.endSession() }
-        if (target.documentOwner !== target) { guarded(target.documentOwner, onDiscard, action); return }
+        if (target.documentOwner !== target) { guardOne(target.documentOwner,onDiscard,onStopped,sourceNavigation,stillCurrent,action);return }
         when {
             // A canvas keeps its own autosave, and dirty/autosaveUri describe the paged buffer
             // underneath it, so asking about those here would prompt over a note nobody is looking at.
             target.canvasOpen -> action()
             target.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
-            target.dirty -> guardAction = GuardRequest(target, action, onDiscard)
+            target.dirty -> if(guardState.current==null) guardState.current=GuardRequest(target,action,onDiscard,onStopped,sourceNavigation,stillCurrent)
+                else onStopped(NativeActionStop.CHANGED)
             else -> action()
         }
     }
+    fun guarded(target:Editor=editor.active,onDiscard:(Editor.OpenDiscard)->Unit={},action:()->Unit)=
+        guardOne(target,onDiscard,{},null,{true},action)
 
     /** Run [action] once every open pane has settled its unsaved changes, prompting one at a time. */
     fun guardedAll(action: (Set<Editor.OpenDiscard>) -> Unit) {
@@ -769,6 +786,49 @@ private fun EditorScreen(
             else guarded(panes[i], onDiscard = { explicitlyDiscarded.add(it) }) { step(i + 1) }
         }
         step(0)
+    }
+
+    suspend fun guardReference(request:com.xnotes.ui.NativeReferenceRequest,current:()->Boolean):com.xnotes.mindmap.MapSourceGuardResult =
+        kotlinx.coroutines.suspendCancellableCoroutine {waiter->
+            val tag=Any()
+            val discards=mutableSetOf<Editor.OpenDiscard>()
+            fun stopped(reason:NativeActionStop) {
+                if(waiter.isActive) waiter.resumeWith(Result.success(when(reason) {
+                    NativeActionStop.CANCELLED->com.xnotes.mindmap.MapSourceGuardResult.Cancelled
+                    NativeActionStop.FAILED->com.xnotes.mindmap.MapSourceGuardResult.Failed
+                    NativeActionStop.CHANGED->com.xnotes.mindmap.MapSourceGuardResult.Changed
+                }))
+            }
+            fun valid()=waiter.isActive && current() && request.current()
+            fun step(index:Int) {
+                if(!valid()) {stopped(NativeActionStop.CHANGED);return}
+                if(index==request.guardOwners.size) {
+                    waiter.resumeWith(Result.success(com.xnotes.mindmap.MapSourceGuardResult.Ready(discards.toSet())))
+                    return
+                }
+                guardOne(request.guardOwners[index],{discards+=it},::stopped,tag,::valid) {step(index+1)}
+            }
+            waiter.invokeOnCancellation {scope.launch {
+                guardState.current?.takeIf {it.sourceNavigation===tag}?.let {pending->
+                    guardState.current=null;pending.stop(NativeActionStop.CANCELLED)
+                }
+            }}
+            step(0)
+        }
+    val sourceNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference) {opened,live->
+            paneHomes=emptyMap();homeFocus=null;mainMenu=false
+            editor.message=when {
+                opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
+                live->context.getString(R.string.graph_source_live_note)
+                else->null
+            }
+        }
+    }
+    DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
+    LaunchedEffect(sourceNavigator.failure,sourceNavigator.saveFailed,maps.visible) {
+        sourceNavigator.failure?.takeIf {!maps.visible}?.let {editor.message=context.getString(
+            if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else referenceFailureText(it))}
     }
 
     // A settings backup written where the user picks, or read and held for the go-ahead to apply it.
@@ -958,6 +1018,7 @@ private fun EditorScreen(
 
     fun openMap(uri:String,title:String=stemOf(uri)) {
         if(!maps.isHostCurrent(mapBinding)) return
+        sourceNavigator.retire()
         val panes=(listOf(editor)+editor.openPanes).distinct()
         val checks=panes.map {pane->
             val owner=pane.documentOwner;val open=pane.noteOpen;val canvas=pane.canvasOpen
@@ -966,9 +1027,9 @@ private fun EditorScreen(
                 (if(canvas) pane.infinite.document else pane.state.document)===model}
             check
         }
-        val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed
+        val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed;val prompt=guardState.current
         val current={maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
-            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed}
+            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
         maps.open(Uri.parse(uri),title,preparePresentation={
             if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
         },stillCurrent=current)
@@ -1226,14 +1287,32 @@ private fun EditorScreen(
         onOpenMap={uri->openMap(uri.toString())},visible=!maps.visible)
 
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
+        if(maps.isHostCurrent(mapBinding) && maps.current===entry) sourceNavigator.retire()
         if(maps.isHostCurrent(mapBinding) && maps.close(entry)!=null) {
             savedMapUri=null;savedMapTitle=""
             editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
         }
-    }) {
+    },hooks={entry->com.xnotes.mindmap.MapHostHooks(
+        openSource={ticket,bookmark->sourceNavigator.open(entry,ticket,bookmark)},
+        busy={sourceNavigator.busy},cancel={sourceNavigator.cancel()},
+        feedback={if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else sourceNavigator.failure?.let(::referenceFailureText)})}) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
+        bottomBar={if(maps.current?.sourceReturn!=null) androidx.compose.material3.Surface {
+            Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
+                val issue=sourceNavigator.failure
+                if(issue!=null) Text(stringResource(referenceFailureText(issue)),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                else if(sourceNavigator.busy) Text(stringResource(R.string.graph_source_returning),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                else Spacer(Modifier.weight(1f))
+                if(sourceNavigator.busy) androidx.compose.material3.TextButton(onClick={sourceNavigator.cancel()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                    Text(stringResource(R.string.cancel),fontSize=TextSize.body)
+                } else androidx.compose.material3.TextButton(onClick={sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                    Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
+                }
+            }
+        }},
         contentWindowInsets = contentInsets,
     ) { inner ->
         Box(modifier = Modifier.fillMaxSize().padding(inner).consumeWindowInsets(contentInsets)) {
@@ -1526,48 +1605,47 @@ private fun EditorScreen(
             },
         )
     }
-    guardAction?.let { request ->
+    }
+    guardState.current?.takeIf {!maps.visible || it.sourceNavigation!=null && sourceNavigator.busy}?.let { request ->
         val guarded = request.editor
-        val action = request.action
+        fun changed() {editor.message=context.getString(R.string.native_open_changed);request.stop(NativeActionStop.CHANGED)}
+        fun saved() {if(request.current() && request.discard.afterSaveApplies()) request.proceed() else changed()}
         com.xnotes.ui.AlertDialog(
-            onDismissRequest = { guardAction = null },
+            onDismissRequest = {if(guardState.consume(request)) request.stop(NativeActionStop.CANCELLED)},
             title = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes)) },
             text = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes_prompt, guarded.title)) },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
-                    guardAction = null
-                    if(!request.discard.applies()) {editor.message=context.getString(R.string.native_open_changed);return@TextButton}
+                    if(!guardState.consume(request)) return@TextButton
+                    if(!request.current() || !request.discard.applies()) {changed();return@TextButton}
                     val uri = guarded.currentUri
                     if (uri != null) {
                         // Off-thread: what the prompt was guarding runs once the bytes have landed.
                         guarded.saveToThen(uri) {ok->
-                            if(ok && request.discard.afterSaveApplies()) action()
-                            else if(ok) editor.message=context.getString(R.string.native_open_changed)
+                            if(ok) saved() else request.stop(NativeActionStop.FAILED)
                         }
                     } else {
-                        launchSaveAs(guarded) {
-                            if(request.discard.afterSaveApplies()) action()
-                            else editor.message=context.getString(R.string.native_open_changed)
-                        }
+                        requestSaveAs(guarded,::saved,request::stop,request::current)
                     }
                 }) { androidx.compose.material3.Text(stringResource(R.string.save)) }
             },
             dismissButton = {
                 androidx.compose.foundation.layout.Row {
                     androidx.compose.material3.TextButton(onClick = {
-                        guardAction=null
-                        if(request.discard.applies()) {request.onDiscard(request.discard);action()}
-                        else editor.message=context.getString(R.string.native_open_changed)
+                        if(!guardState.consume(request)) return@TextButton
+                        if(request.current() && request.discard.applies()) {request.onDiscard(request.discard);request.proceed()}
+                        else changed()
                     }) {
                         androidx.compose.material3.Text(stringResource(R.string.discard))
                     }
-                    androidx.compose.material3.TextButton(onClick = { guardAction = null }) {
+                    androidx.compose.material3.TextButton(onClick = {if(guardState.consume(request)) request.stop(NativeActionStop.CANCELLED)}) {
                         androidx.compose.material3.Text(stringResource(R.string.cancel))
                     }
                 }
             },
         )
     }
+    if(!maps.visible) {
     exportProgress?.let { p ->
         PdfExportDialog(done = p.done, total = p.total, counting = p.counting, onCancel = {
             exportCancel?.set(true) // abort this export's page loop AND its write stream
@@ -1619,10 +1697,13 @@ private fun EditorScreen(
     }
 }
 
-/** A pending "unsaved changes" prompt: the pane it asks about, and what to run once it's settled. */
-private class SavePickerRequest(val proof:Editor.OpenDiscard,val afterSave:(()->Unit)?)
-private class GuardRequest(val editor:Editor,val action:()->Unit,val onDiscard:(Editor.OpenDiscard)->Unit) {
-    val discard=editor.discardForOpen()
+private fun referenceFailureText(issue:com.xnotes.storage.NativeReferenceIssue)=when(issue) {
+    com.xnotes.storage.NativeReferenceIssue.DELETED->R.string.graph_source_page_deleted
+    com.xnotes.storage.NativeReferenceIssue.DUPLICATE->R.string.graph_source_duplicate
+    com.xnotes.storage.NativeReferenceIssue.BUSY->R.string.graph_source_busy
+    com.xnotes.storage.NativeReferenceIssue.CHANGED->R.string.graph_source_navigation_changed
+    com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED->R.string.graph_source_open_unsupported
+    com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE->R.string.graph_source_open_unavailable
 }
 
 /** A picked image on its way into [editor], at [at] when a long-press chose the spot. */

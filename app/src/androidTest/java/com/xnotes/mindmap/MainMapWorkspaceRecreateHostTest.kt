@@ -55,6 +55,10 @@ class MainMapWorkspaceRecreateHostTest {
 
     @Test fun recreatingTheActualMainRetainsItsMapActorHistoryPresentationAndSourcePanel() {
         val base=runner.targetContext
+        val existing=listOf("session","session-b").flatMap {slot->listOf("document.xnote","session.json","canvas.xcanvas","canvas-session.json").map {File(base.filesDir,"$slot/$it")}}
+        val split=File(base.filesDir,"split-workspace.json")
+        val splitOpen=split.exists() && runCatching {org.json.JSONObject(split.readText()).optBoolean("secondOpen",false)}.getOrDefault(true)
+        assertTrue("Run on an empty instrumentation profile; no existing recovery files are changed",existing.none {it.exists()} && !splitOpen)
         val fixed=MindMapDocument(nodes=listOf(MapNode(id="root",parent=null,text="Recreate topic"),
             MapNode(id="concept",parent="root",text="Before")))
         val file=File.createTempFile("main-map-recreate-",".xmap",base.cacheDir).apply {writeBytes(MapCodec.encode(fixed))}
