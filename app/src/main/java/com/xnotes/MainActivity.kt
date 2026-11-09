@@ -1365,7 +1365,8 @@ private fun EditorScreen(
         },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.close(entry)},
         busy={backlinkNavigator.busy || networkCoordinator.busy},
         cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
-        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)})) {
+        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)},
+        openCanvas=networkCoordinator::openCanvas)) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },

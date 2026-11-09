@@ -42,6 +42,82 @@ class LocalNetworkWorkspaceHostTest {
     private fun scenario(openNative:Boolean=true,block:suspend(Fixture)->Unit)=runParkingScenario {native->val f=Fixture(native)
         try {f.start(openNative);block(f)} finally {f.finish()}
     }
+    @Test fun selectedFilesBecomeAnEditableSavedCanvasAndReturnToTheOriginalNetworkAfterReopening()=scenario {f->
+        val folder=com.xnotes.platform.AppStorageDocumentsProvider.rootDir(f.native.context)
+        val evidence=File(folder,"canvas-network-evidence.xmap")
+        // Like SAF's CreateDocument result: the caller supplies a readable empty destination.
+        val destination=File(folder,"selected-files-canvas.xmap").apply {writeBytes(byteArrayOf())}
+        val originalNative=f.native.source.readBytes()
+        val ids=withContext(Dispatchers.Main) {setOf(f.native.editor.state.document.identity.documentId,
+            f.native.editor.secondary!!.state.document.identity.documentId)}
+        val evidenceDocument=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,
+            sources=ids.mapIndexed {i,id->MapSource(documentId=id,fileName="File $i.xnote")})))
+        evidence.writeBytes(MapCodec.encode(evidenceDocument))
+        withContext(Dispatchers.IO) {f.native.storage.registry.registerMapObserved(evidenceDocument.id,evidence.name,Uri.fromFile(evidence).toString())}
+        val entry=withContext(Dispatchers.Main) {f.networks.admit(f.binding,NetworkQuery.library("Library",
+            listOf(com.xnotes.platform.AppStorageDocumentsProvider.treeUri(f.native.context).toString())))!!}
+        var flow:NetworkToCanvasController?=null
+        try {
+            f.await {!entry.controller.loading && entry.controller.fileChoices.map {it.documentId}.containsAll(ids)}
+            withContext(Dispatchers.Main) {assertTrue(entry.controller.showCollection(ids))}
+            f.await {!entry.controller.loading && entry.controller.browseMode==NetworkBrowseMode.FILES}
+            fun selection():NetworkCanvasSelection {
+                val p=entry.presentation
+                val scene=entry.builder.build(entry.controller.report!!,LocalNetworkLabels("File","Concept","Ink","Reference","References %d","Belongs"))
+                p.reconcile(scene)
+                val attach=p.attach();val size=LocalNetworkGeometry(1000,700,1f)
+                val plan=p.prepareCamera(attach,size)!!
+                assertTrue(p.finishCamera(plan,LocalNetworkCamera(MindMapView.Viewport(.8f,93f,-41f),1000,700,1f)))
+                p.selectNode(NetworkSceneNodeKey.File(ids.first()))
+                return requireNotNull(NetworkCanvasSelection.capture(entry,scene))
+            }
+            withContext(Dispatchers.Main) {
+                flow=NetworkToCanvasController(f.native.context,selection(),f.scope)
+                assertTrue(flow!!.chooseNew(Uri.fromFile(destination)));assertEquals(0L,destination.length())
+                assertTrue(flow!!.confirm())
+            }
+            f.await {flow!!.step==NetworkCanvasStep.ADDED}
+            val imported=withContext(Dispatchers.Main) {
+                val s=flow!!.targetSession!!;val doc=s.document!!
+                assertEquals(MapOrganization.RELATION_CANVAS,doc.organization);assertNull(doc.centralRoot)
+                assertEquals(ids,doc.nodes.map {it.fileCardId}.toSet());assertEquals(2,doc.nodes.size)
+                assertTrue(f.coordinator.openCanvas(entry,flow!!.captureOpen()!!));doc
+            }
+            f.await {!f.coordinator.busy && f.maps.visible}
+            val saved=withContext(Dispatchers.Main) {
+                val s=f.maps.current!!.session;assertEquals(imported,s.document)
+                val nodes=s.document!!.nodes
+                val line=MapRelation(from=nodes[0].id,to=nodes[1].id,kind=RelationKind.DEPENDS_ON,label="Read after this file")
+                assertTrue(s.changeRelation(null,line) is RelationEditResult.Applied)
+                s.undo();assertTrue(s.document!!.relations.isEmpty());s.redo();assertEquals(listOf(line),s.document!!.relations)
+                assertTrue(s.operate {it.translateNodes(setOf(nodes[0].id),63.0,29.0)})
+                s.cancelPendingAutosave();val accepted=s.document!!
+                assertTrue(s.saveAttempt().await() is MapSaveOutcome.Written)
+                assertEquals(accepted,MapCodec.decode(destination.readBytes()))
+                assertTrue(f.coordinator.resume(entry,f.maps.current!!,closeMap=true));accepted
+            }
+            f.await {!f.coordinator.busy && f.networks.visible && f.maps.current==null}
+            f.await {!entry.controller.loading && !entry.controller.filtering &&
+                MapDocuments.observations(f.native.context).none {it.uri==Uri.fromFile(destination)}}
+            withContext(Dispatchers.Main) {
+                assertSame(entry,f.networks.current);assertEquals(ids,entry.controller.centreFiles)
+                assertEquals(MindMapView.Viewport(.8f,93f,-41f),entry.presentation.camera!!.viewport)
+                assertEquals(NetworkSceneNodeKey.File(ids.first()),entry.presentation.selectedNode)
+                flow=NetworkToCanvasController(f.native.context,selection(),f.scope)
+                assertTrue(flow!!.chooseExisting(Uri.fromFile(destination)));assertTrue(flow!!.confirm())
+            }
+            f.await {flow!!.step==NetworkCanvasStep.ADDED}
+            withContext(Dispatchers.Main) {assertEquals(saved,flow!!.targetSession!!.document)
+                assertTrue(f.coordinator.openCanvas(entry,flow!!.captureOpen()!!))}
+            f.await {!f.coordinator.busy && f.maps.visible}
+            withContext(Dispatchers.Main) {
+                assertEquals(saved,f.maps.current!!.session.document)
+                assertTrue(f.coordinator.resume(entry,f.maps.current!!,closeMap=true))
+            }
+            f.await {!f.coordinator.busy && f.networks.visible}
+            assertArrayEquals(originalNative,f.native.source.readBytes());assertEquals(0,f.native.writes.get())
+        } finally {withContext(Dispatchers.Main) {flow?.close()?.join()};evidence.delete();destination.delete()}
+    }
     @Test fun theHomepageCanOpenAndCloseALibraryWithoutAnOpenDocumentOrAnInventedNativeContext()=scenario(openNative=false) {f->
         val model=f.native.editor.state.document
         withContext(Dispatchers.Main) {

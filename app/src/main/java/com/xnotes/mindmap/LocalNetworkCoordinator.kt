@@ -24,6 +24,7 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
     private var active=true
     private var generation=0L
     private var work:Job?=null
+    private var canvasOperation:Any?=null
     private var owner:Any?=null
     private var problem by mutableStateOf<BacklinkProblem?>(null)
     var busy by mutableStateOf(false);private set
@@ -44,6 +45,32 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
         return present(request,{request.current() && !maps.visible && !networks.visible}) {
             networks.admit(binding,request.query)!=null
         }
+    }
+    fun openCanvas(entry:FileNetworkWorkspace.Entry,request:NetworkCanvasOpenRequest):Boolean {
+        if(!hostCurrent() || busy || !networks.current(binding,entry) || !networks.visible || maps.visible || !request.current()) return false
+        val prior=maps.current
+        if(prior!=null && !maps.canHide(prior)) {owner=entry;problem=BacklinkProblem.BUSY;return false}
+        val input=entry.presentation.captureInput() ?: return false
+        val host=captureHost()
+        if(!host()) return false
+        val token=++generation;val operation=Any()
+        owner=entry;problem=null;busy=true;canvasOperation=operation
+        fun current()=hostCurrent() && generation==token && networks.current(binding,entry) && networks.visible &&
+            maps.current===prior && (prior==null || maps.canHide(prior)) && host() && input.current() && request.current()
+        onStarting()
+        val started=maps.open(request.uri,request.title,preparePresentation={
+            val proof=if(current()) editor.awaitHostParking() else null
+            if(proof==null || !current() || !proof.current()) null else ({current() && proof.current()})
+        },stillCurrent=::current,operation=operation,flushNativeOnPresent=false,
+            onPresented={map->networks.parkForMap(binding,entry,map)},onFinished={shown->
+                if(generation==token) {
+                    busy=false;canvasOperation=null
+                    if(shown) onShown() else problem=BacklinkProblem.CHANGED
+                }
+                request.finished(shown)
+            })
+        if(!started) {busy=false;canvasOperation=null;request.finished(false)}
+        return started
     }
     fun resume(entry:FileNetworkWorkspace.Entry,from:MapWorkspace.Entry?=null,closeMap:Boolean=false):Boolean {
         if(!hostCurrent() || busy || networks.visible || !networks.current(binding,entry)) return false
@@ -90,6 +117,6 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
         if(!hostCurrent() || networks.current!==entry || !networks.visible) return false
         cancel();return networks.close(binding,entry)
     }
-    fun cancel() {generation++;work?.cancel();work=null;busy=false;owner=null;problem=null}
+    fun cancel() {generation++;work?.cancel();work=null;canvasOperation?.let {maps.cancelOpen(it)};canvasOperation=null;busy=false;owner=null;problem=null}
     fun dispose() {cancel();active=false}
 }

@@ -123,6 +123,10 @@ class AndroidMainFileNetworkHostTest {
         val nextSource=File(targetFolder,"Network next U.xnote").apply {createNewFile()}
         val nextMap=File(AppStorageDocumentsProvider.rootDir(base),"network-next-${UUID.randomUUID()}.xmap")
         val nextMapUri=DocumentsContract.buildDocumentUriUsingTree(AppStorageDocumentsProvider.treeUri(base),"root/${nextMap.name}")
+        val canvasFile=File(AppStorageDocumentsProvider.rootDir(base),"network-user-canvas-${UUID.randomUUID()}.xmap")
+        val canvasUri=DocumentsContract.buildDocumentUriUsingTree(AppStorageDocumentsProvider.treeUri(base),"root/${canvasFile.name}")
+        val canvasDocument=MindMapDocument(nodes=emptyList(),organization=MapOrganization.RELATION_CANVAS)
+        canvasFile.writeBytes(MapCodec.encode(canvasDocument));val canvasBefore=canvasFile.readBytes()
         val s=seed(source);val t=seed(target);val u=seed(nextSource);assertNotEquals(s.identity.documentId,t.identity.documentId)
         val anchor=MapSource(documentId=s.identity.documentId,fileName=source.name,scope=SourceScope.PAGE,
             pageId=s.pages[0].referenceIdentity.id,lastKnownPage=1,note="The original S membership")
@@ -185,6 +189,7 @@ class AndroidMainFileNetworkHostTest {
                     storage.registry.registerObserved(actualT.header,"xnote",target.name,Uri.fromFile(target).toString())
                     storage.registry.registerObserved(BundleReferenceInfo.inspectStrict(nextSource).header,"xnote",nextSource.name,Uri.fromFile(nextSource).toString())
                     storage.registry.registerMapObserved(nextDocument.id,nextMap.name,nextMapUri.toString())
+                    storage.registry.registerMapObserved(canvasDocument.id,canvasFile.name,canvasUri.toString())
                 }
                 // The source is opened after proving the actual empty-home library entry below.
             }}
@@ -460,10 +465,61 @@ class AndroidMainFileNetworkHostTest {
             }
             assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
             assertArrayEquals(nextSourceBytes,nextSource.readBytes());assertArrayEquals(nextMapBytes,nextMap.readBytes())
+            // D2d1: an internal destination is reachable without a system picker or early actor acquisition.
+            click(host.getString(R.string.network_canvas_add))
+            clickScrolled(canvasFile.name)
+            waitUntil("destination choice has not acquired the canvas") {main {
+                MapDocuments.observations(host).none {it.key==MapSaves.key(canvasUri)}
+            } && visible(host.getString(R.string.network_canvas_target_chosen))}
+            click(host.getString(R.string.cancel))
+            main {assertTrue(networkWorkspace.visible);assertTrue(MapDocuments.observations(host).none {it.key==MapSaves.key(canvasUri)})}
+            assertArrayEquals(canvasBefore,canvasFile.readBytes())
+            click(host.getString(R.string.network_canvas_add))
+            clickScrolled(canvasFile.name)
+            click(host.getString(R.string.network_canvas_confirm))
+            waitUntil("file cards saved while the reader stays in the network") {main {
+                networkWorkspace.visible && !graphWorkspace.visible && MapDocuments.observations(host).any {observation->
+                    observation.key==MapSaves.key(canvasUri) && !observation.loading && !observation.session.saving &&
+                        observation.document?.nodes?.mapNotNull {it.fileCardId}?.toSet()==setOf(t.identity.documentId,u.identity.documentId)
+                }
+            } && visible(host.getString(R.string.network_canvas_added))}
+            click(host.getString(R.string.network_canvas_view))
+            waitUntil("the actual editable relation canvas adopts the same destination actor") {main {
+                graphWorkspace.visible && !networkWorkspace.visible && graphWorkspace.current?.session?.document?.id==canvasDocument.id
+            }}
+            val canvasEntry=main {graphWorkspace.current!!};val canvasSession=main {canvasEntry.session}
+            main {
+                assertEquals(MapOrganization.RELATION_CANVAS,canvasSession.document!!.organization)
+                assertNull(canvasSession.document!!.centralRoot);assertEquals(2,canvasSession.document!!.nodes.size)
+                assertTrue(canvasSession.document!!.nodes.all {it.kind==NodeKind.REFERENCE && it.free && it.sources.size==1})
+                assertTrue(canvasSession.canUndo)
+            }
+            if(main {canvasSession.nodeSelectionMode}) click(host.getString(R.string.graph_node_selection))
+            val cardId=main {canvasSession.document!!.nodes.single {it.fileCardId==t.identity.documentId}.id}
+            val cardPoint=main {val view=graph(host)!!;val point=view.screenPoint(canvasSession.document!!.node(cardId).bounds.center)
+                val at=IntArray(2).also(view::getLocationOnScreen);Pt(at[0]+point.x,at[1]+point.y)}
+            com.xnotes.ui.injectWindowStylus(cardPoint,cardPoint)
+            waitUntil("the real file card is selected") {main {canvasSession.selected==cardId}}
+            click(host.getString(R.string.ink_properties))
+            waitUntil("file card properties preserve its identity role") {visible(host.getString(R.string.graph_file_card_notice))}
+            assertFalse(visible(host.getString(R.string.map_text_node)));assertFalse(visible(host.getString(R.string.map_ink_node)))
+            click(host.getString(R.string.cancel))
+            click(host.getString(R.string.graph_sources))
+            waitUntil("identity source retains remarks, Open and preview controls") {visible(host.getString(R.string.graph_file_card_notice))}
+            assertFalse(visible(host.getString(R.string.graph_add_source)));assertFalse(visible(host.getString(R.string.delete)))
+            click(host.getString(R.string.map_done))
+            click(host.getString(R.string.network_return))
+            waitUntil("return after adding cards restores the same multi-file network") {main {
+                networkWorkspace.visible && networkWorkspace.current===entry && entry.controller.browseMode==NetworkBrowseMode.FILES &&
+                    entry.controller.centreFiles==setOf(t.identity.documentId,u.identity.documentId) && entry.presentation.cameraReady
+            }}
+            main {assertEquals(collectionCenter.x,center(graph(host)!!).x,.02);assertEquals(collectionCenter.y,center(graph(host)!!).y,.02)}
+            assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes());assertArrayEquals(nextSourceBytes,nextSource.readBytes())
+
         } finally {
             // Only this test's pure network, graph URI and two freshly-created native identities may be closed.
             networks?.let {main {it.dispose()}}
-            maps?.let {workspace->join(main {workspace.current?.takeIf {MapSaves.key(it.uri) in setOf(MapSaves.key(mapUri),MapSaves.key(nextMapUri))}?.let(workspace::close)})}
+            maps?.let {workspace->join(main {workspace.current?.takeIf {MapSaves.key(it.uri) in setOf(MapSaves.key(mapUri),MapSaves.key(nextMapUri),MapSaves.key(canvasUri))}?.let(workspace::close)})}
             native?.let {editor->
                 main {val panes=editor.openPanes;if(panes.all {it.visibleDocumentId in ownedIds})
                     editor.goHomeAll(panes.map {it.documentOwner.discardForOpen()}.toSet())}
@@ -471,7 +527,7 @@ class AndroidMainFileNetworkHostTest {
                 assertNotNull(runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {editor.awaitHostParking()}}})
             }
             activity?.let {main {it.finish()};runner.waitForIdleSync()}
-            source.delete();target.delete();nextSource.delete();targetFolder.delete();map.delete();nextMap.delete()
+            source.delete();target.delete();nextSource.delete();targetFolder.delete();map.delete();nextMap.delete();canvasFile.delete()
         }
     }
 }

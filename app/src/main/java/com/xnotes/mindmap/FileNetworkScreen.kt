@@ -24,6 +24,7 @@ internal class FileNetworkHostActions(
     val busy:()->Boolean,
     val cancel:(FileNetworkWorkspace.Entry)->Unit,
     val feedback:(FileNetworkWorkspace.Entry)->BacklinkProblem?,
+    val openCanvas:(FileNetworkWorkspace.Entry,NetworkCanvasOpenRequest)->Boolean={_,_->false},
 )
 
 private data class NetworkOpeningVisual(val report:LocalFileNetworkReport,val scene:LocalNetworkScene)
@@ -64,6 +65,8 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                     Text(stringResource(if(controller.browseMode==NetworkBrowseMode.LOCAL) R.string.network_title else R.string.network_library_title),
                         fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
                     NetworkScopeControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
+                    NetworkToCanvasFlow(entry,scene,enabled=!busy && !controller.loading && !controller.filtering,
+                        openCanvas=actions.openCanvas)
                     NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
                     if(controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
                         if(controller.collapseAll(controls)) presentation.invalidateInput()
