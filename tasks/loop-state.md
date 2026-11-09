@@ -1,15 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，整体仍 active。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，整体仍 active。
 工作树：/Users/kita/.codex/worktrees/mind-map-source-target/xnotes；分支 codex/mind-map-source-target。2026-11-10 按用户“在这个工作树基础上新建工作树继续”，从原工作树 mind-map-original-network 的实际 HEAD 8254f3b751db1a7e15f557c1dd3ea0115ae921ed 新建。28个未提交文件完整复制，逐文件SHA-256、模式和Git差异清单一致，原树保持原样；独立作者再次核对旧树28文件无变化。迁移记录 tmp/worktree-migration-source-target.json，既有失败和已通过证据一并复制。新阶段独立构建与项目缓存为 /private/tmp/xnotes-mind-map-source-target-build、/private/tmp/xnotes-mind-map-source-target-cache。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：来源范围调整与更换（in_progress）
+## 当前阶段：来源范围调整与更换（verified，已本地提交）
 
-8254f3b7起步并复制在途范围编辑；上一goal turn为progress（原文network完整流程、302唯一相关case／Android源码compile、独审与分层本地提交）。9002及旧树41691／31137已终态，不重启旧作业；旧31137实际15项中4处输入失败已保留原始证据。新树54658终态1：生产和单元源码编译通过，28项实际执行、5个真实失败（active pen取消UP／pointerUP、已结束平移的掌触取消／失焦相机、来源失效确认提示），1123个main／unit／资源／构建输入SHA前后全同。原始XML和固定输入存tmp/source-target-review-red-*，已据此修正View和确认提示，待复验；稳定来源面板owner与跨entry选择器接线继续实现，尚未宣称阶段通过。完整14组不缩减。
+新树8254f3b7起步，按用户要求复制28个在途文件，迁移核对与计划提交6052ab36；原original-network树28文件／HEAD最终核对未变。普通概念来源行调整范围／明确换源已实现：实际保存内容可视只读、永久页／Canvas世界矩形／原PDF用户坐标选择，最终重读SHA与身份域→同sourceId最新节点合并→保存冷开→保旧PNG／显式Native刷新→Native或OriginalReader定位→同图返回。文件身份卡不借此换身份；Map来源目前仅可引用整文件，打开仍下一片。
 
-只读核source模型／预览／navigation已支持目标与旧PNG，但来源行无调整入口、旧source-list事务不能安全跨IO单条patch、现页目录无视觉范围选择。新阶段计划docs/movinkpad/source-target-edit-2026-11-10.md：单row寿命票／保并发字段／视觉页与世界矩形／原PDF实际user-space／新源明确重选范围／只读准备和完整确认→保存冷开→预览→实际来源返回；文件卡不变身份。计划独审通过；页启用完成不回滚／旧Editor重开提示及普通只读零写与明确授权写分开均已纳。现按锁定API分工test-first实现；runtime tmp/source-target-edit-runtime.json。
+单来源原子历史保正文／备注／顺序／主要来源／并发新增，取消／noop零历史；目标／成员ABA与finalIO变化拒绝，accepted保存重试只用原receipt。面板纯Runtime owner与composition host token分开，Main与独立Activity配置保留；实际Entry退休退owner，hide/config保留。picker在entry key外保原OS槽；当前host失效read仍可结束busy，旧host拒绝。普通读取零额外native保存；ACTIVATE_PAGES／retain／restore分别明确授权与实写验证，不回滚已完成操作。
+
+54658真实28／5red（1123main/unit/resource/build SHA同）；74511为250／10fail（1200全输入同，Android常量夹具compile错）；2200新增busy真实6／1red（1201输入同，Android SOURCE compile通过）；18032受影响33／4Host取景fail；64506 Host4／2（Canvas及取消完整流程已过，余2为Float ROI和普通class ViewSnapshot对象比较）；69825 Host4全绿。全部原始日志/XML保留；夹具按实际provider路径、Handler虚时、稳定窗口Fit、image采用和数值类型语义修正，不弱化业务断言。
+
+最终整suite替换合并34套252个唯一case，0失败／错误／跳过；1201最终main/unit/Android源码、XML及build输入集合／SHA全同。独立审阅直接重建逐XML并核唯一production后变仅setVisualBusy且已真RED／复验，无剩余Required。证据tmp/source-target-verified-summary.json及各prefix-results/input/log；runtime tmp/source-target-edit-runtime.json。6项新增Android仪器只源码编译未执行；所有构建和作者均终态或冻结。
+
+本地提交：f288afec／8ab29cbb（读取与验证）、2b8c3cb1／6e96fd2c（事务／Controller与验证）、f0e22215（可视选择／配置／picker）、a1628462（冷开与往返）、5da33301（Android源码）。正式记录docs/movinkpad/source-target-edit-2026-11-10.md，README／AGENTS同步，文档提交随后见HEAD。
+
+下一实际流程：Map整文件来源打开→保实际MapDocuments会话和未保存历史→来源书签返回同图；先检查Navigator kind gate、MapWorkspace Entry保存／输入及书签接口，小范围计划独审后实现，不另建图引擎。真正导图双窗格、Canvas侧反向引用、精确权限／移动／回收站／重复身份恢复、完整引用备份、主要预览／目录缩略、同级插入／边缘平移等原14组保留，整体active/complete=false。真实Android/SAF/DocumentsUI、Activity实际重建／杀进程、PDFium像素、MovinkPad Pro14 Android15 ProPen3／掌触／Surface／GPU／性能未运行；无APK／安装／推送／合并／发布。
 
 ## 最近已验证阶段：原文文件网络整合（verified）
 

@@ -1,7 +1,7 @@
 # 来源范围调整与更换（2026-11-10）
 
 用户要求：按完整14组思维导图需求继续实现，从已完成的原文文件网络接入来源范围调整／换源，交付可操作的创建选择、保存重开、预览及实际打开返回。
-状态：in_progress，基线8254f3b7 clean；独立计划审核通过，接口已协商，开始测试与实现。
+状态：已实现并通过34套252项有效相关主机测试、Android测试源码编译及独立逐XML／输入复核；实际平台与目标设备待验。
 本轮边界：仅实现、相关编译／测试、文档及本地提交；不打包APK、安装、推送、合并或发布。2026-11-10 按用户再次明确要求，从 mind-map-original-network 的8254f3b7新建 mind-map-source-target 工作树／codex/mind-map-source-target分支，迁移28个未提交文件逐字节一致，旧树完整保留；独立build/cache均使用source-target专用路径。
 
 ## 已核事实与本阶段结果
@@ -73,3 +73,27 @@ root：计划与独审、visual View／相机/框选数学、GraphSources/Screen
 Android JSON和实际范围输入事件保仪器源码并编译；实际Android/SAF/Compose重建杀进程/PDFium像素/MovinkPad Pro14 Android15 ProPen3/Surface/GPU/性能未运行就明确标记，不用主机测试代替。原14组其余Map来源/真正双窗格/Canvas反向/精确恢复/完整引用备份/主预览/页缩略和剩余图交互继续保留。
 
 独立计划审核source_target_plan_review已通过；两建议已采纳：页启用旧Editor重开／完成不回滚提示，普通只读零写与各自明确授权写分开。非交互自主闭环仅用环境内独立审核，不启动外部模型CLI。
+
+
+## 已实现与验证
+
+主机Host经SourceListEditor／Controller→逐条范围／换源→只读画面和MotionEvent API→最终重读确认→保存冷开→旧PNG保留／Native显式刷新→Native或OriginalPdfReader定位→同导图相机／选择／来源条目已跑通。Note／Canvas保原模型、内容历史和原字节；双脏笔记停放时的原文往返零额外保存。原PDF像素引擎在主机测试中受控替代，不据此宣称PDFium像素或GPU已验。Map整文件可以作为新来源，但其实际打开仍属下一阶段。
+
+来源列表由MapPresentationState保留纯SourceListEditor.Runtime，每次composition只绑定自己的facade token；旧回调失活，重建保同请求／frame／区域／相机，明确关闭或Entry最终退役才取消。独立Activity由ViewModel保presentation。系统picker由Workspace稳定宿主在entry key之外注册，跨图保原占位。已发布Bitmap不手工回收；关闭等待实际engine结束后才放资产与lease。
+
+| 作业 | 实际结果与用途 |
+| --- | --- |
+| 54658 | 新树生产／unit源码编译成功；28项中5个真实缺陷失败，固定1123个main/unit/资源/构建输入前后同SHA：取消pen的UP／pointerUP错误提交、已完成pan的余掌取消／失焦漏结算、失效read确认无CHANGED提示。原始XML及修复前View保留。 |
+| 74511 | 33套250项，10失败，1200个完整输入前后同SHA；前述5项修复已过。Android新夹具常量位置写错，SOURCE编译失败，未当成平台已验。 |
+| 2200 | 6项中仅新增“手势中来源失效仍可收尾busy”真实失败；修复前XML保留。1201输入同SHA，Android SOURCE编译实际通过。 |
+| 18032 | 6套33项，29通过／4个Host取景断言失败，1201输入同SHA。前述busy修复、读取层、配置与Controller全部通过；Android SOURCE继续有效。 |
+| 64506 | Host4中Canvas换源／区域／刷新／返回及cancel/no-op/最终版本拒绝已通过；另2项为Float事件ROI精度和普通ViewSnapshot引用相等的夹具错误，原始XML保留。 |
+| 69825 | Host4全部通过，1201输入前后同SHA；Android SOURCE保持有效。 |
+
+夹具修改有实际调用依据，未删业务断言：页启用的OwnedRecoveryTarget原子写绕过provider计数，改核磁盘SHA／实际字节变化与永久页冷读；finalIO测试改实际外部authority使读取屏障真正命中；Robolectric图片等待推进Main Handler的120ms虚时；待实际窗口稳定后执行真实Fit并采用新图，再发原worldRect输入，保屏内断言；相机逐字段delta0及fitFlags严格比，ROI沿既有0.001数值比较MotionEvent Float误差，不改生产几何或原笔迹。
+
+最终按整suite替换受影响结果，保未变化的旧有效suite，合并为34套252个唯一case，0失败／错误／跳过；不累加重跑。完整逐XML、固定输入和结果在`tmp/source-target-{related,final,navigation-recheck}-*`，合并清单`tmp/source-target-verified-summary.json`，最终1201输入`tmp/source-target-final-inputs-verified.json`。所有已知构建均终态，运行状态`tmp/source-target-edit-runtime.json`。
+
+计划、读取层、事务、输入与picker／配置／busy修复均已独立源码复核；最终逐XML与1201输入的独立复核通过，无剩余Required。真实Compose按钮链路保留在仪器测试源码中，未在主机Host冒充执行。新增6项Android仪器测试仅编译，未实际执行。真实Android／SAF／DocumentsUI、Activity实际旋转和杀进程、PDFium像素、MovinkPad Pro14 Android15 ProPen3／掌触／Surface／GPU／性能仍待验；未打包、安装、推送、合并或发布。
+
+本地提交：f288afec（实际只读来源准备）、8ab29cbb（读取验证）、2b8c3cb1（单来源事务／Controller）、6e96fd2c（事务／取消竞态验证）、f0e22215（可视编辑／稳定宿主）、a1628462（冷开与往返）、5da33301（Android仪器源码）。迁移与计划6052ab36。整体目标仍active，下一实际阶段为Map来源整文件打开与返回；真正双窗格及原14组其余需求不缩减。
