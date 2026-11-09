@@ -14,6 +14,19 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class NativeGuardHandoffHostTest {
+    @Test fun aNewPendingPromptReplacesAndNotifiesTheOldRequestWithoutRunningIt()=runParkingScenario {f->
+        val second=openParkingPanes(f)
+        withContext(Dispatchers.Main) {
+            val slot=NativeGuardState();val stops=mutableListOf<NativeActionStop>();var oldActions=0;var nextActions=0
+            val old=GuardRequest(f.editor,{oldActions++},{},stops::add,null,{true})
+            val next=GuardRequest(second,{nextActions++},{},{},null,{true})
+            slot.current=old;slot.current=next
+            assertEquals(listOf(NativeActionStop.CHANGED),stops)
+            assertFalse(old.current());assertFalse(slot.consume(old));assertSame(next,slot.current)
+            old.proceed();assertEquals(0,oldActions)
+            assertTrue(slot.consume(next));next.proceed();assertEquals(1,nextActions)
+        }
+    }
     @Test fun everyRetiredDialogCallbackLeavesTheNewPromptAndItsCompletionReachable()=runParkingScenario {f->
         val second=openParkingPanes(f)
         withContext(Dispatchers.Main) {

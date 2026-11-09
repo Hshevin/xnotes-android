@@ -786,8 +786,7 @@ private fun EditorScreen(
             // underneath it, so asking about those here would prompt over a note nobody is looking at.
             target.canvasOpen -> action()
             target.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
-            target.dirty -> if(guardState.current==null) guardState.current=GuardRequest(target,action,onDiscard,onStopped,sourceNavigation,stillCurrent)
-                else onStopped(NativeActionStop.CHANGED)
+            target.dirty -> guardState.current=GuardRequest(target,action,onDiscard,onStopped,sourceNavigation,stillCurrent)
             else -> action()
         }
     }
@@ -1707,7 +1706,7 @@ private fun EditorScreen(
         )
     }
     }
-    guardState.current?.takeIf {!graphicsVisible || it.sourceNavigation!=null && sourceNavigator.busy}?.let { request ->
+    guardState.current?.let { request ->
         val guarded = request.editor
         fun changed() {editor.message=context.getString(R.string.native_open_changed);request.stop(NativeActionStop.CHANGED)}
         fun saved() {if(request.current() && request.discard.afterSaveApplies()) request.proceed() else changed()}

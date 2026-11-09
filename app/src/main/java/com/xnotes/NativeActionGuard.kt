@@ -30,7 +30,14 @@ internal class GuardRequest(val editor:Editor,private val action:()->Unit,val on
 
 /** A callback belonging to a retired dialog cannot dismiss a newer pending prompt. */
 internal class NativeGuardState {
-    var current by mutableStateOf<GuardRequest?>(null)
+    private var pending by mutableStateOf<GuardRequest?>(null)
+    var current:GuardRequest?
+        get()=pending
+        set(value) {
+            val previous=pending
+            pending=value
+            if(value!=null && previous!==value) previous?.stop(NativeActionStop.CHANGED)
+        }
     fun consume(expected:GuardRequest):Boolean {
         if(current!==expected) return false
         current=null
