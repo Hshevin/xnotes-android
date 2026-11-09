@@ -788,6 +788,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  "Saving your notes…" dialog so quitting a large note never freezes the UI (ANR). */
     var savingNote by mutableStateOf(false)
         private set
+    var savingSplit by mutableStateOf(false)
+        private set
     /** Flipped by the open dialog's Cancel so a slow open is discarded instead of swapped in. */
     private class NativeOpenRequest {val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)}
     @Volatile private var nativeOpenRequest:NativeOpenRequest?=null
@@ -10975,11 +10977,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** An explicit reusable arrangement; independent of the last-session recovery files. */
     suspend fun saveCurrentSplit(): Boolean {
-        if (savingNote) return false
+        if (savingSplit) return false
         if (!inSplit || openPanes.any { it.stylusInContact }) return false
         if (openPanes.any { it.visibleDocumentUri == null }) {
             say(appContext.getString(R.string.split_save_files_first)); return false
         }
+        savingSplit = true
         try {
             val paths = openPanes.map { it.visibleDocumentUri!! }.sorted()
             val alreadySaved = withContext(Dispatchers.IO) {
@@ -11024,7 +11027,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (ok) { hasSavedSplit = true; persist() }
             say(appContext.getString(if (ok) R.string.split_saved else R.string.err_save_note))
             return ok
-        } finally { savingNote = false }
+        } finally { savingSplit = false }
     }
 
     /** Only fresh single-document splits use the preference; restoring never calls this. */

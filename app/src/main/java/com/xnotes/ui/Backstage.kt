@@ -685,7 +685,7 @@ private fun BackstageMain(
                             }) { Text(stringResource(R.string.delete)) } },
                             dismissButton = { TextButton(enabled = !busy, onClick = { deleting = null }) { Text(stringResource(R.string.cancel)) } })
                     }
-                    val files by produceState<List<java.io.File>?>(null, editor, editor.savingNote, revision) {
+                    val files by produceState<List<java.io.File>?>(null, editor, editor.savingSplit, revision) {
                         value = withContext(Dispatchers.IO) { editor.storedSplitFiles() }
                     }
                     HorizontalDivider(Modifier.padding(vertical = Space.s12), color = palette.border.toComposeColor())
