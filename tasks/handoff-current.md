@@ -1,12 +1,12 @@
 # 思维导图续作检查点（2026-11-10）
 
 用户要求：按完整持续需求逐步实现直到完成；原树不能绑定后，用户明确允许在它基础上新建工作树继续。
-状态：D2d2 与 Canvas 整文件来源完整流程已实现并验证，整体未完成；下一阶段 Canvas 区域来源创建与定位返回。
+状态：D2d2 与 Canvas 整文件来源完整流程已实现并验证，整体未完成；Canvas 区域来源创建与定位返回已实现并验证，含安全副本保存；整体仍未完成。
 本轮边界：实现、相关编译／测试、文档、本地提交；不打包 APK、安装、推送、合并或发布。
 
 ## 工作位置
 
-当前树 `/Users/kita/.codex/worktrees/mind-map-continue/xnotes`，分支 `codex/mind-map-continue`，由原 `codex/mind-map` 的 `63371f5d13ca4d7457249d468c315db59cc69b5c` 创建。当前完整 HEAD／状态和已知作业见忽略的 `tmp/mind-map-continue-runtime.json`，接手须核 Git，不 reset 来凑一致。原树只读保留，勿默默在默认目录写代码。
+当前树 `/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes`，分支 `codex/mind-map-region-continue`，按用户于 2026-11-10 的明确要求从上一续作树 HEAD `4f413d16dfec5aef207da75b922be9e6ab74aed4` 创建，45 个本阶段未提交文件逐一 SHA-256 校验后复制，原树原样保留。迁移清单见忽略的 `tmp/worktree-transfer-2026-11-10.json`，当前作业见 `tmp/mind-map-region-runtime.json`。接手须核 Git，不 reset 来凑一致。两个旧树只读保留，勿默默在默认目录写代码。
 
 先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
 
@@ -33,8 +33,16 @@ D2d1 已交所选文件加入可保存关系画布并返回网络。D2d2 现从�
 
 50322终态1：production编译过，test私有字段夹具编译失败已修；69241终态0：187相关项0失败/错误/跳过，Android源码compile过，1066输入SHA全同。独立复核通过。证据tmp/canvas-source-verified-summary.json、-recheck-inputs.json、-recheck.log；正式记录docs/movinkpad/canvas-source-navigation-2026-11-10.md。真实平台仍未运行。
 
+## Canvas 区域来源阶段
+
+已接实际选区／截图→固定世界 Rect 的 CANVAS_REGION→已有／新图和概念→保存重开／PNG 裁切→实际挂载定位／返回。含 v5 及旧 raw 拒绝、完整来源观察、显式严格原位保存、未保存画布的 typed 新 UUID 副本与同模型安全采用、晚到 C1 dirty、同候选续完及旧选择器隔离。FILE＋region 仍拒绝，源对象不编号、不跟随。独审发现的误入 NOTE 另存及 pending 定位卸载重放已修。
+
+78922为251中250过、Android源码编译过、1112输入SHA全同；唯一Main轮询夹具超时仅修测试线程，81852单项复验过，逐case替换有效合并251项全绿、0失败/错误/跳过。独立实现／夹具／证据复核通过。详见 docs/movinkpad/canvas-region-sources-2026-11-10.md；tmp/canvas-region-verified-summary.json 与 -recheck-inputs.json。无运行构建。真实平台／设备仍未运行。
+
 ## 下一实际动作
 
-继续接 Canvas 区域来源创建→保存重开→预览裁切／实际临时定位→返回原图。现 `FILE + region` 被模型禁止，本片整文件流程不放宽，需明确持久范围表示与兼容，不能只放宽 Navigator 参数。区域只是世界坐标提示、不恢复对象编号、不改原件。先核当前相关接口和有效证据，完成一个真正可操作阶段后验证、本地提交，再继续。
+继续分页文档的区域选择／套索与截图来源入口，复用永久页身份、共用挑图导入／失败重试及已具备的 PAGE＋region 表示。先只读核实际分页菜单／捕获坐标和原件／批注语义，定可验收小阶段并独审，再实现真实创建→保存重开→预览／定位／返回；不得把区域绑定到对象编号或页序号。其余原完整需求继续，不重复未变有效测试或先迁移整套 native4。
 
 仍缺可选同图出现／失效检查、分页区域创建、导图来源打开与真正导图双窗格、权限/身份/移动/回收站精确恢复、独立副本和完整引用文件备份、主要预览/页目录缩略图、同级插入/边缘平移和实际平台验收。整体保持 active，阶段完成不是任务完成。
+
+本地提交：`60dfacfa`（格式／预览／完整读取）、`c711b11b`（实际入口／保存／副本采用／定位返回）、`8c787750`（主机与Android事件测试源码）。

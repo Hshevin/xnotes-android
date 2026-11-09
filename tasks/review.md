@@ -1,3 +1,9 @@
+## Canvas 固定区域来源（2026-11-10）
+
+独立计划、copy安全采用补充合同、实现和证据复核完成。Required两个：未保存Canvas误入NOTE专用SaveAs、已入host pending定位跨卸载复活，均以实际专用picker／typed copy采用和enteredHost退休修复；原Locator新增Window case真实RED保留。完整读取观察、严格expected保存、C1与identity revision换算、旧v1—4 raw门禁、历史EMPTY图、固定裁切与明确Canvas kind、retained同候选／取消只保copy均静态及相关Host验证闭合。
+
+78922实际251项250过1夹具超时，Android源码编译过，1112输入SHA前后相同。唯一fixture Main delay不能被停车夹具未来时钟推进，改在worker轮询，全部PNG持久化／源字节断言不变；81852单case绿，独审核XML与两输入清单仅该测试变化、最终1112全同，可逐case替换保其余250，最终251项全绿。证据tmp/canvas-region-verified-summary.json。未运行真实Compose重组／系统picker／SAF／设备／Surface／GPU，未打包／安装／推送／合并／发布；不据此关闭整体需求。
+
 ## D2b 可操作展开流程（2026-11-09）
 
 按用户纠偏只在阶段边界复核新合同及本次展开差异，不重审未变Native/存储。review_d2_filters快速计划审核通过；实现Required仅一项：已blocked前序仍可作桥/打开。现Expansion不经受阻证据激活，Request.current也拒path.blocked，pure回归已通过。SOURCE/OWNER不伪造S，现有Navigator与actor双成员消费者复用。
