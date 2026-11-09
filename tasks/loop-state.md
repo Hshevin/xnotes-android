@@ -1,21 +1,25 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。反向引用阶段已verified（3812全量）；本轮D1局部网络基础层verified（3834全量与本地组件提交），产品入口／往返仍in_progress，整体未完成。
+目标：按原需求继续实现，active，overall complete=false。D1当前文件局部网络源码／主机回归与独审已verified（3854全量）；真实平台／目标设备未运行，完整D及其他原需求仍未完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
 
-## 当前阶段：D1 局部网络（in_progress，基础层verified）
+## 当前阶段：D1 局部网络（verified：源码／主机与 Android 源码编译，整体未完成）
 
-基线20fdf40e clean。基础层本地提交946664af（Model/Assembler/Scene/Domain4）、af66ffa5（Library/Controller/Data5）；d906024d（只读View/13host回归/8Android源码及阶段记录）。本轮progress：已完成纯NetworkQuery／完整概念Source投影、全局250nodes/750实际边/5000成员预算、稳定只读Scene adapter、Library共享同锁observe pipeline、app-only Controller C1 overlay、MindMapView显式readonly导航及输入/取消/Back隔离。实际产品入口／双成员Access-Focus／Workspace-VM／Main纯停车与前台raw gate／网络返回尚未接，D1及完整D均未完成，不宣称可在UI使用。正式规格docs/movinkpad/file-local-network-2026-11-09.md，精确计划/API在tmp/file-network-stage-spec.txt（含独审A–C）、network-data-api.txt、network-readonly-view-api.txt。
+工作区在 ad4f4d9a 后完成真实 Sidebar → 局部网络 → 概念证据／具体 co-source T → 同一图 actor → 来源定位／返回图 → 原网络 S 的接线。基础层旧提交946664af／af66ffa5／d906024d仍保留。新本地提交33aabf5c（共享双成员访问与初始scope拒写保护）、698ce34c（纯数值相机／输入能力／原生Canvas）、96bfc049（实际Main入口／往返／生命周期与全部消费者测试）。本阶段记录docs/movinkpad/file-local-network-2026-11-09.md及随后文档提交。整体目标active，不标complete。
 
-基础层最终84411终态0：360套3834项，fail/error/skip全0，Android源码compile绿；tmp/file-network-foundation-final-full.log/-summary.json。15 frozen app/src输入摘要在-final-inputs.json，运行后全部一致。新22方法=Domain4/Data5/ReadonlyHost13（8shared+2timeout+3directActivityBack），Android同构8只compile已登记。4037是缺API预期编译红；69608相关318/317，唯一pinch是ScaleDetector首次跨阈仅初始化跨度，补真实后续MOVE保1.1断言无产品改动。42042真实10/3 Cancel/Escape红，47490真实13/3 Back红，产品最窄修后full覆盖。DirectActivity Back不替代现代Android15系统返回。review_network_plan独立代码/证据审核闭合，基础层无Required；基础层代码在提交前全部freeze；目前已开始下一片双成员Access tests，见下段。当前无活Gradle/exec。
+最终24659终态0：364套3854项，fail/error/skip全0；Android测试源码compile绿。tmp/file-network-integration-final-full.log／-summary.json／-inputs.json；1048个冻结app/src输入运行后全部相同。全量后仅加AndroidMainFileNetworkHostTest及Runner登记，16050单独Androidcompile终态0（tmp/file-network-main-android-source-compile.log），host/production未改；-main-android-inputs.json记录最新源码。新20主机方法=Core4/Presentation4/Workspace7/Nav3/MainRaw2，均被full覆盖。Android新增1个实际Main长场景仅源码编译，未运行；不宣称实际Main配置重建通过。
 
-下一条继续D1真实闭环，不另起native4：Source代理已将MapNetworkAccessTest.kt 3真实双成员proof/ABA/Scope方法正式加入，Library test fixture只加beforeOpenRead测试hook。30774已terminal1，为缺MapNetworkAccessResult/acquireNetwork/captureNetworkFocus等预期编译红，日志tmp/file-network-dual-focus-api-red.log（没有行为运行）。Root已授权source_loop_audit正式实现共享Access单acquire+MapSession networkAnchor ticket/current双proof，旧Backlink API不放宽；生产正在该代理任务中，等其freeze再统一编译，不能把基础层3834绿冒作新片验证。精确API/草稿在tmp/network-access-api.txt与tmp/MapNetworkAccessTest.kt。Root实现纯FileNetworkWorkspace/VM与composition Coordinator、LocalNetworkPresentation/InputTicket及native readonly Canvas宿主、Sidebar入口/解释UI、Main图形前台gate、MapWorkspace.flushNativeOnPresent=false网络展示副作用隔离、源T返回图保原flag、返回网络相机/选择。初始NativeContext仅入场guard，成功后Query/Controller独立中心S，不持旧Editor/View/Activity；网络→图可focus co-source T，必须原anchorS+targetT双票，IO中新readonly DOWN永久退本次动作，SourceStatus只是最后记录。
+已接纯FileNetworkWorkspace/VM、composition Coordinator、新native停车、Sidebar入口/解释UI、原生readonly Canvas与单调input/layout票、Main图形前台raw gate、网络图false-flush、源T返回图保flag及返回网络。初始NativeContext仅入场，Query/Controller独立保中心S；VM不保旧Editor/View/Activity。Access单acquire且S/T原会员双proof，final合actual网络输入票/nativeproof；scope拒写保护actual canonical actor，取消pending debounce/旧release而不取消已接受IO。close/replacement/dispose清parking closure，普通backlink成功退旧return，show回network清graphReturn；普通hide保actor/脏图，未确认draft拒切换。
 
-D1独审3Required已在计划A–C定稿：1网络跳图避免Main maps.visible effect无条件editor.persist强制flush，普通Map打开默认原行为；2final核实际View token+monotonic inputSerial+idle而非只native parking；3精确计Content+Belongs边，不以成员数代替，100concept×7引用=800edges只能保93完整concept/744edges。实现Main/Host部分后仍需独审与行为/Android源码、full验证。
+独立计划/接口/代码及证据审核review_network_plan已闭合，无剩余Required。实行为红23365（4/1，初次scope veto旧debounce写日志）已修且full覆盖；30201（27/26）唯一Nav NPE为夹具首Window layout尚未稳定即签票，更正为稳定尺寸后同一Main签票/启动，保原DOWN/UP退票断言，不改产品；59922相关30/0及Androidcompile绿后再加replacement被full覆盖。
 
-协作：Root统一全部Gradle/提交；source_loop_audit基础data正式freeze，现负责双Access/Focus及3tests（已授权生产，须等freeze）；cancel_event_tests View/helper正式freeze，正在仅tmp准备纯LocalNetworkPresentation/InputTicket/Canvas宿主API与3–5实际View tests草稿，未授权formal；review_network_plan新fresh-context独审（旧review_input_plan已completed），不派生agent、不build。没有用户待答或外部阻塞。未打包/安装/推送/合并/发布；目标设备/真实Android/SAF/IME/PDFium/Surface/GPU未运行。原完整D筛选/全库/手工关联/可选同图/逐层展开/检查失效/加入关系画布，以及C/A2/恢复/备份剩余全保留。
+UI复核修正：全部动态counts/partial/limit/busy/error为overlay不改Canvas几何；Open同步pin所呈现report/scene，controller继续真实LOADING不回退disk，busy期间禁止新open且明确提示旧图暂保；held时完全不build未展示报告以保positions；Cancel/失败读最新并清消失选择，不自动选中心。实际新DOWN和S/T会员寿命失效仍退操作。Android长场景用真实content URI／canonical锁制造stored own LOADING，覆盖pin/取消、两concept增量位置与fresh排序反例及T第二页→图→原网络S；T登记基于实际strict header。该场景已独审/编译，未执行。
+
+所有作者与正式production/tests冻结，无运行Gradle/exec。Root统一Gradle/提交；source_loop_audit负责Core/3Nav host及Android实际Main场景，cancel_event_tests负责Canvas/Presentation/Main raw，review_network_plan只读独审；completed需followup_task。无待用户回答/外部阻塞。未打包/安装/推送/合并/发布。真实Android/SAF/IME/PDFium/配置重建和杀进程/MovinkPad Pro14 Android15 ProPen3/掌触/Surface/GPU/大图性能未运行。
+
+下一条立即按原计划推进D后续：在已授权资料范围增加文件夹/类型/指定集合筛选与逐层展开，保持内容引用／显式用户关联／可选同图出现分离；全库、失效检查、加入手工关系画布继续。先定可验收小片/独立审核，再真正实现，不重做已绿D1或native4全量迁移。区域/Canvas来源入口和打开、真正Map双窗格、精确权限/身份/移动/回收站恢复、独立副本/完整备份、主要预览/目录缩略图、无中心/同级插入/边缘平移等原需求全部保留。用户问“完工了吗”已明确答未全部完成，不视为暂停。
 
 ## 最新阶段：来源侧栏反向引用（verified）
 
