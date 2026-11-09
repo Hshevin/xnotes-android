@@ -124,4 +124,5 @@
     <string name="graph_ref_source_changed">页面或来源已变化，或暂时无法读取。请重试；必要时重新打开笔记，再在所需页面引用。</string>
     <string name="graph_ref_retry_source">重新核实此页</string>
     <string name="graph_ref_target_changed">目标导图已变化或不可用。请重新选择，或打开导图核实；当前阅读内容保持不变。</string>
+    <string name="graph_host_import_notice">有文件等待导入，请关闭当前导图后继续。</string>
 </resources>

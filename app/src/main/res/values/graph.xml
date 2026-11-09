@@ -124,4 +124,5 @@
     <string name="graph_ref_source_changed">The page or source changed, or cannot be read now. Retry; if needed, reopen the note and reference the page again.</string>
     <string name="graph_ref_retry_source">Check the page again</string>
     <string name="graph_ref_target_changed">The target map changed or is unavailable. Choose it again or open it to review. Reading remains unchanged.</string>
+    <string name="graph_host_import_notice">An import is waiting. Close this map to continue.</string>
 </resources>

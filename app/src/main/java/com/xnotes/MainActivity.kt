@@ -59,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -159,11 +160,18 @@ class MainActivity : ComponentActivity() {
     // cutout); this activity just applies it to the window. Fullscreen draws edge to edge and lets
     // the swipe-in transient bars overlay (no resize), non-fullscreen insets under the bars.
     private var editor: Editor? = null
+    internal var mapWorkspace:com.xnotes.mindmap.MapWorkspace?=null
+    internal val documentEditor:Editor? get()=editor
+    internal val documentMaps:com.xnotes.mindmap.MapWorkspace by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].workspace
+    }
     // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingImport by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mapWorkspace=documentMaps
         com.xnotes.platform.FontCatalog.init(this)
         com.xnotes.platform.TemplateLibrary.init(this)
         com.xnotes.ui.AudioPlayback.init(this)
@@ -220,6 +228,7 @@ class MainActivity : ComponentActivity() {
     var cancelPenRecording: (() -> Unit)? = null
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if(mapWorkspace?.visible==true) return super.dispatchKeyEvent(event)
         if (penKeyRecorder?.invoke(event) == true) return true
         val workspace = editor
         // Release every pane: focus can have moved since the original press.
@@ -243,7 +252,7 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val workspace = editor
-        when (workspaceFourFingerTap.track(ev, workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
+        when (workspaceFourFingerTap.track(ev, mapWorkspace?.visible!=true && workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
             com.xnotes.pen.FourFingerTap.Result.CAPTURE -> {
                 val cancel = MotionEvent.obtain(ev)
                 cancel.action = MotionEvent.ACTION_CANCEL
@@ -257,6 +266,7 @@ class MainActivity : ComponentActivity() {
             com.xnotes.pen.FourFingerTap.Result.CONSUME -> return true
             com.xnotes.pen.FourFingerTap.Result.PASS -> Unit
         }
+        if(mapWorkspace?.visible==true) return super.dispatchTouchEvent(ev)
         StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
@@ -308,6 +318,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
+        mapWorkspace?.persist()
         editor?.persist()
     }
 
@@ -348,8 +359,36 @@ private fun EditorScreen(
     onImportConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mapActivity=context as? MainActivity
+    val maps=mapActivity?.documentMaps ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.MapWorkspace(context,scope)}
+    val mapBinding=remember(maps) {Any()}
+    var savedMapUri by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    var savedMapTitle by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("")}
+    val focusManager=androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    DisposableEffect(maps,mapActivity,mapBinding) {
+        maps.bindHost(mapBinding)
+        mapActivity?.mapWorkspace=maps
+        onDispose {
+            maps.unbindHost(mapBinding)
+            if(mapActivity==null) maps.dispose()
+        }
+    }
+    SideEffect {maps.current?.let {savedMapUri=it.uri.toString();savedMapTitle=it.title}}
+    LaunchedEffect(maps.visible) {if(maps.visible) {
+        mapActivity?.cancelPenRecording?.invoke()
+        editor.openPanes.forEach {it.resetPenButtons()}
+        StylusButtonLatch.releaseKey()
+        if(maps.current?.session?.textDraft==null) {focusManager.clearFocus();keyboard?.hide()}
+        editor.persist()
+    }}
+    LaunchedEffect(maps.failure,maps.visible) {maps.failure?.takeIf {!maps.visible}?.let {
+        editor.message=context.getString(if(it==com.xnotes.mindmap.MapWorkspaceFailure.CHANGED) R.string.native_open_changed else R.string.map_open_error)
+        maps.clearFailure()
+    }}
     val recoveryPreview=remember(editor) {com.xnotes.ui.RecoveryPreviewController(context.applicationContext)}
-    com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
+    if(!maps.visible) com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
     val snackbar = remember { SnackbarHostState() }
     // The LaTeX renderer resolves its fonts through the composition, so this is the
     // only place it can be built; the flow reaches it through MathRendering after.
@@ -395,12 +434,6 @@ private fun EditorScreen(
     var exportCancel by remember { mutableStateOf<java.util.concurrent.atomic.AtomicBoolean?>(null) }
     // The pane whose page indices await a SAF "Save as" destination (side-panel page export).
     var pendingExportPages by remember { mutableStateOf<PendingPages?>(null) }
-    val scope = rememberCoroutineScope()
-    val mindMapLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val uri = result.data?.data?.toString()
-        editor.refreshStoredFile(uri)
-        editor.secondary?.refreshStoredFile(uri)
-    }
     val storageProblemPane = listOfNotNull(editor, editor.secondary).firstOrNull { it.storageProblemUri != null }
     var relinkPane by remember { mutableStateOf<com.xnotes.ui.Editor?>(null) }
     var relinking by remember { mutableStateOf(false) }
@@ -408,7 +441,7 @@ private fun EditorScreen(
         val pane = relinkPane; relinkPane = null
         if (uri != null && pane != null) { relinking = true; scope.launch { try { pane.relinkMissingPdf(uri.toString()) } finally { relinking = false } } }
     }
-    storageProblemPane?.let { pane ->
+    storageProblemPane?.takeIf {!maps.visible}?.let { pane ->
         var working by remember(pane) { mutableStateOf(false) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { if (!working && !relinking) pane.storageProblemUri = null },
@@ -923,6 +956,25 @@ private fun EditorScreen(
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
+    fun openMap(uri:String,title:String=stemOf(uri)) {
+        if(!maps.isHostCurrent(mapBinding)) return
+        val panes=(listOf(editor)+editor.openPanes).distinct()
+        val checks=panes.map {pane->
+            val owner=pane.documentOwner;val open=pane.noteOpen;val canvas=pane.canvasOpen
+            val model:Any=if(canvas) pane.infinite.document else pane.state.document
+            val check:()->Boolean={pane.documentOwner===owner && pane.noteOpen==open && pane.canvasOpen==canvas &&
+                (if(canvas) pane.infinite.document else pane.state.document)===model}
+            check
+        }
+        val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed
+        val current={maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
+            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed}
+        maps.open(Uri.parse(uri),title,preparePresentation={
+            if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
+        },stillCurrent=current)
+    }
+    LaunchedEffect(Unit) {if(maps.current==null) savedMapUri?.let {openMap(it,savedMapTitle)}}
+
     // Keep the explorer source with its picker request; opening a destination is a storage decision.
     fun launchStoredCopy(source: String) {
         if (createPicker.busy) {
@@ -1147,7 +1199,8 @@ private fun EditorScreen(
     // and land on the backstage so its name dialog appears, exactly like the in-app "Import PDF"
     // button. With no folder chosen yet, fall back to App storage so the explorer renders and the
     // note autosaves. A markdown file becomes a new note whose text it is.
-    LaunchedEffect(importUri) {
+    LaunchedEffect(importUri,maps.visible) {
+        if(maps.visible) return@LaunchedEffect
         val src = importUri ?: return@LaunchedEffect
         onImportConsumed() // consume once; the body has no suspend point so it runs to completion
         val name = displayNameOf(resolver, src)
@@ -1170,8 +1223,14 @@ private fun EditorScreen(
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
     com.xnotes.mindmap.PageToMapFlowHost(editor,
         onSave={target->launchSaveAs(target)},
-        onOpenMap={uri->mindMapLauncher.launch(com.xnotes.mindmap.MindMapActivity.intent(context,uri.toString(),stemOf(uri.toString())))})
+        onOpenMap={uri->openMap(uri.toString())},visible=!maps.visible)
 
+    com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
+        if(maps.isHostCurrent(mapBinding) && maps.close(entry)!=null) {
+            savedMapUri=null;savedMapTitle=""
+            editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
+        }
+    }) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
@@ -1200,7 +1259,7 @@ private fun EditorScreen(
                 onImportPdf = { importPdfPane = target; importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri ->
                     if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) {
-                        mindMapLauncher.launch(com.xnotes.mindmap.MindMapActivity.intent(context, uri, stemOf(uri)))
+                        openMap(uri)
                     } else if (target == null) guardedAll { discarded -> openTreeFile(uri, discarded) }
                     else guarded(target) {
                         val toolsFrom = editor.active
@@ -1409,6 +1468,20 @@ private fun EditorScreen(
 
         }
     }
+    }
+    val latestImport by androidx.compose.runtime.rememberUpdatedState(importUri)
+    if(maps.visible && importUri!=null) {
+        val expectedImport=importUri
+        Box(Modifier.fillMaxSize()) {
+            androidx.compose.material3.Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
+                Row(Modifier.padding(Space.s8),verticalAlignment=Alignment.CenterVertically) {
+                    Text(stringResource(R.string.graph_host_import_notice),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                    com.xnotes.mindmap.MapButton(R.string.cancel) {if(latestImport==expectedImport) onImportConsumed()}
+                }
+            }
+        }
+    }
+    if(!maps.visible) {
     if (showShareChooser) {
         val shareUri = pendingShareUri
         // Remembered because resolving the kind is a SAF query, and this is composition.
@@ -1543,6 +1616,7 @@ private fun EditorScreen(
     com.xnotes.ui.AiChatHost(if (mainMenu) emptySet() else editor.openPanes
         .filter { it.noteOpen && it.pane !in paneHomes }
         .map { it.visibleDocumentId.ifBlank { it.visibleDocumentUri ?: if (it.canvasOpen) it.infinite.document.title else it.state.document.title } }.toSet())
+    }
 }
 
 /** A pending "unsaved changes" prompt: the pane it asks about, and what to run once it's settled. */

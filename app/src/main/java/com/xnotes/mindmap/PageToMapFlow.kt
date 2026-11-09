@@ -19,7 +19,7 @@ import com.xnotes.ui.theme.*
 
 /** Pickers belong to the reading host, so a retired page cannot clear/rebind an old system result. */
 @Composable
-internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri)->Unit) {
+internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri)->Unit,visible:Boolean=true) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val request=editor.openPanes.firstNotNullOfOrNull {it.pageReferenceRequest}
@@ -44,7 +44,7 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
     SideEffect {
         controller?.takeIf {!it.request.pane.pageReferenceCurrent(it.request)}?.close()
     }
-    controller?.let {flow->
+    controller?.takeIf {visible}?.let {flow->
         val openUri=flow.targetUri;val openContext=flow.targetContext
         PageToMapDialog(flow,pickerRequest!=null,
             choose={if(pickerRequest==null && flow.request.pane.pageReferenceCurrent(flow.request)) {
