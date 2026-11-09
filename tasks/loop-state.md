@@ -1,25 +1,20 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。D2d1网络→可保存无中心关系画布完整链已verified（本阶段406相关与Android源码编译）；真实平台未运行，手工关联投影D2d2及其他原需求仍缺。
-工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
-授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
-规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified；本地提交锚点见 tmp/mind-map-continue-runtime.json。
+工作树：/Users/kita/.codex/worktrees/mind-map-continue/xnotes；分支 codex/mind-map-continue；起点 63371f5d13ca4d7457249d468c315db59cc69b5c，原树 clean、原分支未修改。
+授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
+需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 本阶段后必须执行的用户交接指令（2026-11-10）
+## 当前阶段 D2d2：显式文件关联的实际探索与编辑流程
 
-用户明确要求：在当前实际功能闭环通过验证/保存/必要本地提交后，自动写精简交接文档并创建全新对话，model=gpt-6.1-sol、thinking=ultra，复用本工作树，不fork长历史、不新建工作树、不切分支/合并。先交付当前流程再交接，不等全目标完成。新对话初始只交接入口/完整需求入口/下一动作，先核目录/分支/HEAD再写；旧对话交接后停止代码编辑及旧自动循环（原目标由新对话继续，不标complete）。若工具无法绑定该既有树须明确报告，不默默用默认目录。
-
-已仅发现工具/读取未创建：create_thread可project(local默认目录)或worktree(新建)，无直接existing path字段；已有项目id896cafc1-9077-4c35-abe7-77922745163a默认/Users/kita/Documents/ChatGPT/笔记/xnotes。list_artifacts本旧对话有managed worktree附件01a1b0d5-2a59-72f1-a883-2ae562b6d606，root=/Users/kita/.codex/worktrees/mind-map/xnotes。attach_worktree(path)可在调用新对话绑定既有managed树但不能无关owner；需新对话先调用并核验，失败不写默认目录。不能用handoff_thread冒充新上下文。创建必须在本阶段收尾之后，新旧不同时写。
-
-## 最新恢复点：D2d1 verified／源码已提交，准备用户要求的 fresh 交接
-
-完整操作已接且实际主机验证：网络FILES选文件→新／旧关系画布→手工线/undo-redo/移动→save→关闭至旧actor退役→已有图cold重开→同网络范围/相机/选择；native源bytes不变写0。cf0391d7（core/条件v4/真空canvas/显式文件角色/批量历史）、b7880534（确认发布/nonce/picker/内部目标列表）、0850b157（Main/Coordinator同actor与返回）已本地提交。正式阶段记录docs/movinkpad/network-to-relation-canvas-2026-11-10.md；精简交接入口tasks/handoff-current.md，完整持续范围docs/movinkpad/mind-map-requirements-current.md，不复制本长历史进入fresh上下文。
-
-25158终态1：405中403绿+Androidcompile绿；Host证据图漏真实fileURI登记、Consumer finally Undo后误断clean，均修夹具原断言保留。阶段复核Role票逐node精确UUID/life/history、SAF systemSave最终确认（先固定candidate，结果同nonce直接publish，无二次Confirm）、取消前零acquire、Retained/冲突重存均闭合。41460终态0：16受改case绿+Androidcompile绿，替换15加1，合并406/0fail-error-skip，390未受改证据不重跑。1076 frozen input SHA前后同；tmp/network-to-canvas-verified-summary.json与两轮log/summary/inputs有逐case证据。作者全freeze/completed，无运行构建/测试handle，Reviewer最终通过。没有APK/安装/推送/合并/发布。
-
-当前只文档/交接收尾。用户明确新线程6.1sol/ultra接同树，不新建worktree、不切main、旧循环交接后停。交接前实际HEAD及clean/terminal锚会写tmp/mind-map-handoff-runtime.json；新thread首调attach_worktree并核路径/branch/HEAD，若owner限制失败不得写默认目录，须明确报告工具限制。旧目标不标complete，交接后按用户停旧循环请求暂停旧goal，由新thread延续完整目标。
-
-下一D2d2：明确fileCard-card MapRelation独立证据→自动网络与来源侧用户关联组→真实关系编辑/返回，复用原Reader/actor/导航，不伪source、不从普通concept多来源推依赖。可选共现/失效检查、区域/Canvas/sourceOpen、Map双pane、精确恢复/备份/预览/同级/边缘平移等全部原需求保留，真实Android/SAF/MovinkPad/ProPen3/GPU未运行。
+输入：D2d1 已提交的 fileCardId 卡片和 MapRelation、同次 MapBacklinkLibrary 实际观察及 live overlay。
+输出：独立手工关联证据→局部/多文件/全库网络与来源侧用户关联组→打开具体原画布关系→编辑/保存/返回。不得伪造 MapSource、不从概念多来源推依赖。
+计划独立审阅已完成（d2d2_plan_review）：采纳同次扫描bundle、独立关系票与双端寿命、双折叠分支临时展开、跨图重复线聚合、端点过滤与解释上下文、有效证据展开传播、编辑返回后拒绝旧disk投影。其余旧保存迁移无需重审。
+实现分工：relation_evidence（扫描/模型）、relation_navigation（actor票/聚焦/导航）、relation_network（网络/过滤/展开/场景）；主代理接来源侧与Main/UI、验证和本地提交。均同树编辑且文件归属分离，原作者已停止。
+验证：45869编译通过、unit夹具编译错；72986为153项152过1夹具失败；93077为108项107过1真实观察缺陷（conflict不在snapshotFlow上游）已修；4017终态0，81受影响定向通过。按逐suite替换合并159项，0失败/错误/跳过，1063最终输入SHA全同；Android源码编译通过。全部日志/逐case/input SHA见tmp/file-relations-{related,recheck,conflict,verified}-summary.json及同名日志。两个折叠分支聚焦和真实Host的来源/网络往返保存删除、原native bytes/零写均实际验证。独立阶段审核与三必修+新增冲突观察复核通过。构建输出 /private/tmp/xnotes-mind-map-continue-build；project cache /private/tmp/xnotes-mind-map-continue-cache。
+未运行：真实 Android 仪器/SAF、重建/杀进程、MovinkPad Pro 14/Android 15/Pro Pen 3、Surface/GPU/性能。
+下一实际阶段：Canvas具体来源打开与返回；先核现有Editor参考打开/停车/采用接口，接实际单文档Canvas路径，不回头以整套native4迁移为前置。relation_evidence正在只读查最小入口，无实现改动。
+其余原需求持续保留，见需求清单和交接文件，不将本阶段或交接视为全目标完成。
 
 ## 最新恢复点：D2c 全库与多文件网络（verified，已本地提交）
 

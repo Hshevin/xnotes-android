@@ -75,7 +75,7 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
         report?.let {
             Text(stringResource(R.string.graph_backlinks_checked,it.checkedMaps),fontSize=TextSize.caption)
             if(!it.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
-            if(it.rows.isEmpty() && !controller.loading) Text(stringResource(if(it.complete) R.string.graph_backlinks_empty_complete else R.string.graph_backlinks_empty_partial),fontSize=TextSize.body)
+            if(it.rows.isEmpty() && it.fileRelations.isEmpty() && !controller.loading) Text(stringResource(if(it.complete) R.string.graph_backlinks_empty_complete else R.string.graph_backlinks_empty_partial),fontSize=TextSize.body)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
             report?.issues?.forEachIndexed {index,issue->item("issue:$index") {
@@ -86,6 +86,21 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
             }}
             report?.takeIf {it.omittedIssues>0}?.let {item("omitted") {Text(stringResource(R.string.graph_backlinks_omitted_issues,it.omittedIssues),fontSize=TextSize.caption)}}
             report?.takeIf {it.excludedMaps>0}?.let {item("excluded") {Text(stringResource(R.string.graph_backlinks_excluded_maps,it.excludedMaps),fontSize=TextSize.caption)}}
+            val manual=report?.fileRelations.orEmpty()
+            if(manual.isNotEmpty()) {
+                item("manual:heading") {
+                    Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
+                        Text(stringResource(R.string.file_relation_group),fontSize=TextSize.title,fontWeight=FontWeight.SemiBold)
+                        Text(stringResource(R.string.file_relation_notice),fontSize=TextSize.caption)
+                        Text(stringResource(R.string.file_relation_return_notice),fontSize=TextSize.caption)
+                    }
+                }
+                items(manual,key={"manual:"+it.key.stableKey}) {row->
+                    com.xnotes.mindmap.FileRelationEvidenceRow(row,enabled=!busy && !controller.loading && hooks?.openRelation!=null) {
+                        controller.captureOpenRelation(row)?.let {hooks?.openRelation?.invoke(it)}
+                    }
+                }
+            }
             val groups=report?.rows.orEmpty().groupBy {row->when {
                 row.target.scope==SourceScope.FILE->BacklinkGroup.WHOLE_FILE
                 context.pageId!=null && row.target.pageId==context.pageId->BacklinkGroup.CURRENT_PAGE

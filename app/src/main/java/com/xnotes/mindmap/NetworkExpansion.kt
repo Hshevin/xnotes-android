@@ -5,30 +5,37 @@ import java.util.UUID
 
 internal enum class NetworkOriginKind { SOURCE,OWNER }
 /** A local origin and the last-observed route to it; no native owner or extra graph lease. */
-internal class NetworkConceptOrigin(val fileId:String,val kind:NetworkOriginKind,val depth:Int,path:List<MapBacklinkRow> = emptyList()) {
+internal class NetworkConceptOrigin(val fileId:String,val kind:NetworkOriginKind,val depth:Int,path:List<MapBacklinkRow> = emptyList(),
+    relationPath:List<MapFileRelationRow> = emptyList()) {
     val path:List<MapBacklinkRow> = Collections.unmodifiableList(path.toList())
-    init {require(canonical(fileId) && depth in 1..251 && path.size<=500)}
+    val relationPath:List<MapFileRelationRow> = Collections.unmodifiableList(relationPath.toList())
+    init {require(canonical(fileId) && depth in 1..251 && path.size<=500 && relationPath.size<=250)}
     internal fun accepts(p:NetworkConceptProjection)=when(kind) {
         NetworkOriginKind.SOURCE->p.members.any {it.target.documentId==fileId}
         NetworkOriginKind.OWNER->p.key.graphId==fileId && p.location.graphId==fileId
     }
     private companion object {fun canonical(id:String)=runCatching {UUID.fromString(id).toString()==id}.getOrDefault(false)}
 }
-internal data class NetworkExpansionResult(val concepts:List<NetworkConceptProjection>,val origins:Map<NetworkConceptKey,NetworkConceptOrigin>)
+internal data class NetworkExpansionResult(val concepts:List<NetworkConceptProjection>,val origins:Map<NetworkConceptKey,NetworkConceptOrigin>,
+    val fileRelations:List<MapFileRelationRow> = emptyList(),val relationOrigins:Map<FileRelationKey,NetworkFileRelationOrigin> = emptyMap())
 
 /** File-concept traversal follows real content/ownership edges, activating only explicit expansions. */
 internal object NetworkExpansion {
-    private data class Route(val depth:Int,val rows:List<MapBacklinkRow>)
-    fun select(focusId:String,expanded:Set<String>,projections:List<NetworkConceptProjection>):NetworkExpansionResult =
-        selectRoots(setOf(focusId),expanded,projections,includeOwnedRoots=false)
+    private data class Route(val depth:Int,val rows:List<MapBacklinkRow>,val relations:List<MapFileRelationRow> = emptyList())
+    fun select(focusId:String,expanded:Set<String>,projections:List<NetworkConceptProjection>,
+        fileRelations:List<MapFileRelationRow> = emptyList()):NetworkExpansionResult =
+        selectRoots(setOf(focusId),expanded,projections,includeOwnedRoots=false,fileRelations=fileRelations)
     fun selectRoots(roots:Set<String>,expanded:Set<String>,projections:List<NetworkConceptProjection>,
-        includeOwnedRoots:Boolean=true):NetworkExpansionResult {
+        includeOwnedRoots:Boolean=true,fileRelations:List<MapFileRelationRow> = emptyList()):NetworkExpansionResult {
         require(roots.size<=250 && expanded.size<=250)
         val active=roots.sorted().associateWithTo(linkedMapOf()) {Route(0,emptyList())}
         val queue=ArrayDeque<String>().apply {addAll(active.keys)}
         val found=linkedMapOf<NetworkConceptKey,NetworkConceptProjection>()
         val origins=linkedMapOf<NetworkConceptKey,NetworkConceptOrigin>()
         val ordered=projections.sortedBy {it.key.stableKey}
+        val foundRelations=linkedMapOf<FileRelationKey,MapFileRelationRow>()
+        val relationOrigins=linkedMapOf<FileRelationKey,NetworkFileRelationOrigin>()
+        val orderedRelations=fileRelations.sortedBy {it.key.stableKey}
         fun activate(file:String,route:Route) {
             if(file in expanded && file !in active && route.depth<=250) {active[file]=route;queue.add(file)}
         }
@@ -42,16 +49,25 @@ internal object NetworkExpansion {
                     else->continue}
                 if(p.members.isEmpty()) continue
                 found[p.key]=p
-                origins[p.key]=NetworkConceptOrigin(file,kind,route.depth+1,route.rows)
+                origins[p.key]=NetworkConceptOrigin(file,kind,route.depth+1,route.rows,route.relations)
                 // Bad decoded identity rows remain visible to the assembler's existing diagnostics,
                 // but cannot become a bridge to otherwise unreachable files.
                 if(!valid(p)) continue
                 val prefix=route.rows+listOfNotNull(anchor)
-                for(member in p.members) activate(member.target.documentId,Route(route.depth+1,prefix+member))
-                activate(p.key.graphId,Route(route.depth+1,prefix))
+                for(member in p.members) activate(member.target.documentId,Route(route.depth+1,prefix+member,route.relations))
+                activate(p.key.graphId,Route(route.depth+1,prefix,route.relations))
+            }
+            // Only explicit file-card endpoints connect files. Owning a relation graph is not an edge.
+            for(row in orderedRelations) {
+                if(row.key in foundRelations || file !in row.fileIds) continue
+                foundRelations[row.key]=row
+                relationOrigins[row.key]=NetworkFileRelationOrigin(file,route.depth+1,route.rows,route.relations)
+                if(!row.networkUsable()) continue
+                for(endpoint in row.fileIds) activate(endpoint,Route(route.depth+1,route.rows,route.relations+row))
             }
         }
-        return NetworkExpansionResult(Collections.unmodifiableList(found.values.toList()),Collections.unmodifiableMap(origins))
+        return NetworkExpansionResult(Collections.unmodifiableList(found.values.toList()),Collections.unmodifiableMap(origins),
+            Collections.unmodifiableList(foundRelations.values.toList()),Collections.unmodifiableMap(relationOrigins))
     }
     private fun valid(p:NetworkConceptProjection)=
         runCatching {UUID.fromString(p.key.graphId).toString()==p.key.graphId}.getOrDefault(false) &&

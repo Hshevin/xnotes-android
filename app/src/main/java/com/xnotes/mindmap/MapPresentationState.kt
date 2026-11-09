@@ -22,6 +22,7 @@ class MapPresentationState internal constructor() {
     internal var restoreVersion by mutableStateOf(0L);private set
     internal var sourceFocus by mutableStateOf<MapSourcePanelFocus?>(null);private set
     internal var pendingBacklinkFocus by mutableStateOf<MapBacklinkFocusTicket?>(null);private set
+    internal var pendingFileRelationFocus by mutableStateOf<MapFileRelationFocusTicket?>(null);private set
     private var pendingSelectionSerial=-1L
 
     internal fun synchronize(session:MapSession) {
@@ -74,13 +75,22 @@ class MapPresentationState internal constructor() {
     internal fun requestBacklinkFocus(session:MapSession,ticket:MapBacklinkFocusTicket):Boolean {
         synchronize(session)
         if(!visible || !session.backlinkFocusCurrent(ticket) || session.selected!=ticket.nodeId || session.nodeSelectionMode) return false
-        pendingBacklinkFocus=ticket;pendingSelectionSerial=session.selectionSerial
+        pendingFileRelationFocus=null;pendingBacklinkFocus=ticket;pendingSelectionSerial=session.selectionSerial
         sourcesFor=null;sourceFocus=null;protectedCamera=false
         return true
     }
-    internal fun cancelPendingBacklinkFocus() {pendingBacklinkFocus=null;pendingSelectionSerial=-1L}
+    internal fun requestFileRelationFocus(session:MapSession,ticket:MapFileRelationFocusTicket):Boolean {
+        synchronize(session)
+        if(!visible || !session.fileRelationFocusCurrent(ticket) || session.selectedRelation!=ticket.relationId ||
+            session.selectedNodes.isNotEmpty() || session.nodeSelectionMode) return false
+        pendingBacklinkFocus=null;pendingFileRelationFocus=ticket;pendingSelectionSerial=session.selectionSerial
+        sourcesFor=null;sourceFocus=null;protectedCamera=false
+        return true
+    }
+    internal fun cancelPendingBacklinkFocus() {pendingBacklinkFocus=null;pendingFileRelationFocus=null;pendingSelectionSerial=-1L}
     /** Only the stable, visible host consumes this once; a fresh graph contact cancels it first. */
     internal fun applyPendingBacklinkFocus(session:MapSession,view:MindMapView,imeBottom:Int=0,cameraReady:Boolean=true):Boolean {
+        pendingFileRelationFocus?.let {return applyPendingFileRelationFocus(session,view,it,imeBottom,cameraReady)}
         val ticket=pendingBacklinkFocus ?: return false
         if(!visible || !current(session,view)) {cancelPendingBacklinkFocus();return false}
         if(!session.backlinkFocusCurrent(ticket,requireReady=false) || session.selectionSerial!=pendingSelectionSerial ||
@@ -94,6 +104,21 @@ class MapPresentationState internal constructor() {
             if(!showSources(session,view,ticket.nodeId,imeBottom,cameraReady)) return false
             sourceFocus=MapSourcePanelFocus(requireNotNull(ticket.source))
         }
+        return true
+    }
+    private fun applyPendingFileRelationFocus(session:MapSession,view:MindMapView,ticket:MapFileRelationFocusTicket,
+        imeBottom:Int,cameraReady:Boolean):Boolean {
+        if(!visible || !current(session,view) || !session.fileRelationFocusCurrent(ticket,requireReady=false) ||
+            session.selectionSerial!=pendingSelectionSerial || session.selectedRelation!=ticket.relationId ||
+            session.selectedNodes.isNotEmpty() || session.nodeSelectionMode || session.hasUnconfirmedContent) {
+            cancelPendingBacklinkFocus();return false
+        }
+        if(!cameraReady || !ordinary(session,imeBottom) || !session.fileRelationFocusCurrent(ticket) ||
+            view.width<=0 || view.height<=0) return false
+        // Requiring both visible endpoints prevents a stale AndroidView update from consuming the camera.
+        if(!view.centerOnRelation(ticket.relationId)) return false
+        if(!capture(session,view,imeBottom)) return false
+        cancelPendingBacklinkFocus()
         return true
     }
     private fun graphCurrent(session:MapSession)=owner===session && documentId!=null && documentId==session.document?.id && epoch==session.interactionEpoch

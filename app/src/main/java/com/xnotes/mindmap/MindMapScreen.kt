@@ -140,7 +140,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             }
         }
         LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token,presentationState.restoreVersion,
-            presentationState.pendingBacklinkFocus,session.selectedNodes,session.nodeSelectionMode,session.selectedRelation) {
+            presentationState.pendingBacklinkFocus,presentationState.pendingFileRelationFocus,session.selectedNodes,session.nodeSelectionMode,session.selectedRelation) {
             val graph=view ?: return@LaunchedEffect
             if(textDraft!=null || textRestore!=null) {
                 // Text transactions own their pre-edit camera and their existing restoration path.

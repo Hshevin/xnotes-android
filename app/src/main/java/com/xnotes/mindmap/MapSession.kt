@@ -54,6 +54,10 @@ class MapSession() : ViewModel() {
     private data class SourceLife(val nodeId:String,val target:MapSourceTarget,val token:Any=Any())
     private val sourceLifetimes=mutableMapOf<String,SourceLife>()
     private val nodeLifetimes=mutableMapOf<String,Any>()
+    private data class FileCardLife(val fileId:String,val nodeLifetime:Any,val token:Any=Any())
+    private data class FileRelationLife(val relation:MapRelation,val fromLifetime:Any,val toLifetime:Any,val token:Any=Any())
+    private val fileCardLifetimes=mutableMapOf<String,FileCardLife>()
+    private val fileRelationLifetimes=mutableMapOf<String,FileRelationLife>()
     private val appliedBacklinkRemovals=java.util.Collections.newSetFromMap(java.util.WeakHashMap<MapBacklinkRemovalTicket,Boolean>())
     private var previewController:MapSourcePreviewController?=null
     internal val sourcePreviews:MapSourcePreviewController get()=previewController ?:
@@ -62,6 +66,23 @@ class MapSession() : ViewModel() {
         val nodes=document?.nodes.orEmpty()
         nodeLifetimes.keys.retainAll(nodes.mapTo(hashSetOf()) {it.id})
         nodes.forEach {nodeLifetimes.getOrPut(it.id) {Any()}}
+        val cards=nodes.filter {it.fileCardId!=null}
+        fileCardLifetimes.keys.retainAll(cards.mapTo(hashSetOf()) {it.id})
+        cards.forEach {node->
+            val previous=fileCardLifetimes[node.id]
+            val nodeLifetime=requireNotNull(nodeLifetimes[node.id])
+            if(previous==null || previous.fileId!=node.fileCardId || previous.nodeLifetime!==nodeLifetime)
+                fileCardLifetimes[node.id]=FileCardLife(requireNotNull(node.fileCardId),nodeLifetime)
+        }
+        val relations=document?.relations.orEmpty().filter {it.from in fileCardLifetimes && it.to in fileCardLifetimes}
+        fileRelationLifetimes.keys.retainAll(relations.mapTo(hashSetOf()) {it.id})
+        relations.forEach {relation->
+            val from=requireNotNull(fileCardLifetimes[relation.from]).token
+            val to=requireNotNull(fileCardLifetimes[relation.to]).token
+            val previous=fileRelationLifetimes[relation.id]
+            if(previous==null || previous.relation!=relation || previous.fromLifetime!==from || previous.toLifetime!==to)
+                fileRelationLifetimes[relation.id]=FileRelationLife(relation,from,to)
+        }
         val present=hashSetOf<String>()
         document?.nodes?.forEach {node->node.sources.forEach {source->
             present.add(source.id)
@@ -75,6 +96,36 @@ class MapSession() : ViewModel() {
             }
         }
         previewController?.documentChanged()
+    }
+    internal fun captureFileRelationMembership(relationId:String,entryCurrent:()->Boolean):MapFileRelationMembership? {
+        if(closing || replacingDocument || loading || !entryCurrent()) return null
+        val doc=document ?: return null
+        val life=fileRelationLifetimes[relationId] ?: return null
+        val relation=doc.relations.firstOrNull {it.id==relationId && it==life.relation} ?: return null
+        val from=fileCardLifetimes[relation.from] ?: return null
+        val to=fileCardLifetimes[relation.to] ?: return null
+        return MapFileRelationMembership(this,doc.id,connectedEpoch,fileCardsHistoryEpoch,relation,from.fileId,to.fileId,
+            life.token,from.token,to.token,entryCurrent)
+    }
+    internal fun fileRelationMembershipCurrent(ticket:MapFileRelationMembership):Boolean {
+        if(ticket.issuer!==this || ticket.documentId!=document?.id || ticket.epoch!=connectedEpoch ||
+            ticket.historyEpoch!=fileCardsHistoryEpoch || closing || replacingDocument || loading) return false
+        val relation=ticket.relation
+        val life=fileRelationLifetimes[relation.id] ?: return false
+        return life.token===ticket.relationLifetime && life.relation==relation &&
+            fileCardLifetimes[relation.from]?.let {it.token===ticket.fromLifetime && it.fileId==ticket.fromFileId}==true &&
+            fileCardLifetimes[relation.to]?.let {it.token===ticket.toLifetime && it.fileId==ticket.toFileId}==true &&
+            document?.relations?.any {it==relation}==true
+    }
+    internal fun captureFileRelationFocus(graphId:String,relation:MapRelation,fromFileId:String,toFileId:String,
+        membership:MapFileRelationMembership):MapFileRelationFocusTicket? =
+        if(selectionReady() && membership.current(this,graphId,relation,fromFileId,toFileId)) MapFileRelationFocusTicket(membership) else null
+    internal fun fileRelationFocusCurrent(ticket:MapFileRelationFocusTicket,requireReady:Boolean=true):Boolean =
+        (!requireReady || selectionReady()) && ticket.membership.issuer===this && ticket.membership.current()
+    internal fun applyFileRelationFocus(ticket:MapFileRelationFocusTicket):Boolean {
+        if(!fileRelationFocusCurrent(ticket) || !setNodeSelectionMode(false)) return false
+        setNavigationRevealTargets(setOf(ticket.from,ticket.to))
+        return selectRelation(ticket.relationId)
     }
     internal fun captureSourcePreview(nodeId:String,sourceId:String):MapSourcePreviewTicket? {
         if(closing || replacingDocument) return null
@@ -173,24 +224,29 @@ class MapSession() : ViewModel() {
 
     /** Navigation unfolds the existing geometry, without changing the stored document or history. */
     internal var navigationRevealTarget by mutableStateOf<String?>(null);private set
+    private var navigationRevealTargets:Set<String> = emptySet()
     internal var navigationExpandedAncestors by mutableStateOf<Set<String>>(emptySet());private set
     internal var visibilityRevision by mutableStateOf(0L);private set
     internal fun effectiveVisible():List<MapNode> = document?.visible(navigationExpandedAncestors).orEmpty()
     internal fun isEffectivelyCollapsed(id:String):Boolean = document?.nodes?.firstOrNull {it.id==id}?.collapsed==true &&
         id !in navigationExpandedAncestors
-    private fun setNavigationReveal(target:String?) {
-        val before=navigationRevealTarget
-        navigationRevealTarget=target
-        if(!reconcileNavigationReveal() && before!=navigationRevealTarget) visibilityRevision++
+    private fun setNavigationReveal(target:String?)=setNavigationRevealTargets(target?.let(::setOf) ?: emptySet())
+    private fun setNavigationRevealTargets(targets:Set<String>) {
+        val before=navigationRevealTargets
+        navigationRevealTargets=targets.toSet()
+        navigationRevealTarget=targets.singleOrNull()
+        if(!reconcileNavigationReveal() && before!=navigationRevealTargets) visibilityRevision++
     }
     private fun reconcileNavigationReveal():Boolean {
         val byId=document?.nodes.orEmpty().associateBy {it.id}
-        val target=navigationRevealTarget?.takeIf {it in byId}
+        val targets=navigationRevealTargets.filterTo(linkedSetOf()) {it in byId}
         val ancestors=linkedSetOf<String>()
-        var parent=target?.let {byId[it]?.parent}
-        while(parent!=null && ancestors.add(parent)) parent=byId[parent]?.parent
-        val changed=navigationRevealTarget!=target || navigationExpandedAncestors!=ancestors
-        navigationRevealTarget=target
+        targets.forEach {target->
+            var parent=byId[target]?.parent
+            while(parent!=null && ancestors.add(parent)) parent=byId[parent]?.parent
+        }
+        val changed=navigationRevealTargets!=targets || navigationExpandedAncestors!=ancestors
+        navigationRevealTargets=targets;navigationRevealTarget=targets.singleOrNull()
         if(changed) {navigationExpandedAncestors=ancestors;visibilityRevision++}
         return changed
     }
@@ -198,12 +254,12 @@ class MapSession() : ViewModel() {
         if(!selectionReady()) return false
         val node=document?.nodes?.firstOrNull {it.id==id} ?: return false
         if(document?.children(id).isNullOrEmpty()) return false
-        val priorTarget=navigationRevealTarget
+        val priorTargets=navigationRevealTargets
         if(node.collapsed && id in navigationExpandedAncestors) {setNavigationReveal(id);return true}
         if(!node.collapsed && id in navigationExpandedAncestors) setNavigationReveal(id)
         val accepted=try {operate {MapLayout.arrange(it.update(id) {n->n.copy(collapsed=!n.collapsed)})}}
             catch(_:IllegalArgumentException) {limitError=true;false}
-        if(!accepted) setNavigationReveal(priorTarget)
+        if(!accepted) setNavigationRevealTargets(priorTargets)
         return accepted
     }
     /** Prepare every history frame off Main; retry a changed history with the same rendered values. */
@@ -296,7 +352,7 @@ class MapSession() : ViewModel() {
     private fun retireConnectedDraft() {
         setNavigationReveal(null)
         appliedBacklinkRemovals.forEach {it.applied=false};appliedBacklinkRemovals.clear()
-        previewController?.retireAll();sourceLifetimes.clear();nodeLifetimes.clear()
+        previewController?.retireAll();sourceLifetimes.clear();nodeLifetimes.clear();fileCardLifetimes.clear();fileRelationLifetimes.clear()
         sourcePickerInstance?.retire()
         selectedRelation=null
         nodeSelectionMode=false

@@ -31,6 +31,9 @@ internal data class NetworkFolderListing(val folders:List<NetworkFolder>,val pro
 internal data class NetworkFilterResult(val concepts:List<NetworkConceptProjection>,val matched:Set<String>,val unknown:Set<String>,
     val filteredConcepts:Int)
 
+internal data class NetworkRelationFilterResult(val rows:List<MapFileRelationRow>,val matched:Set<String>,val unknown:Set<String>,
+    val filteredRelations:Int)
+
 /** Conditions apply to the same real source; membership payloads remain untouched. */
 internal object NetworkFilterSelector {
     private enum class Match { YES,NO,UNKNOWN }
@@ -54,6 +57,14 @@ internal object NetworkFilterSelector {
         val kept=projections.filter {p->p.members.any {matches[it.target.documentId]==Match.YES}}
         return NetworkFilterResult(kept,Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.toSet()),
             Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.toSet()),projections.size-kept.size)
+    }
+    fun selectRelations(rows:List<MapFileRelationRow>,filter:NetworkFilter,
+        facts:NetworkFileFacts=NetworkFileFacts(emptyMap())):NetworkRelationFilterResult {
+        val ids=rows.flatMapTo(linkedSetOf()) {it.fileIds}
+        val matches=ids.associateWith {match(it,filter,facts)}
+        val kept=rows.filter {row->row.fileIds.any {matches[it]==Match.YES}}
+        return NetworkRelationFilterResult(kept,Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.toSet()),
+            Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.toSet()),rows.size-kept.size)
     }
     fun selectFiles(ids:Set<String>,filter:NetworkFilter,facts:NetworkFileFacts=NetworkFileFacts(emptyMap())):Pair<Set<String>,Set<String>> {
         val matches=ids.associateWith {match(it,filter,facts)}

@@ -33,7 +33,7 @@ internal data class MapBacklinkRow internal constructor(
 }
 internal data class BacklinkIssue(val problem:BacklinkProblem,val displayName:String?=null)
 internal data class BacklinkReport(val rows:List<MapBacklinkRow>,val issues:List<BacklinkIssue>,val checkedMaps:Int,
-    val complete:Boolean,val omittedIssues:Int=0,val excludedMaps:Int=0)
+    val complete:Boolean,val omittedIssues:Int=0,val excludedMaps:Int=0,val fileRelations:List<MapFileRelationRow> = emptyList())
 
 /** Source-panel request capability. Closing or changing that panel retires an unfinished handoff. */
 internal class MapBacklinkOpenRequest private constructor(
@@ -55,6 +55,7 @@ class BacklinkHostHooks internal constructor(
     internal val canCancel:(NativeBacklinkContext)->Boolean={false},
     internal val problem:(NativeBacklinkContext)->BacklinkProblem?={null},
     internal val openNetwork:((LocalNetworkLaunchRequest)->Boolean)?=null,
+    internal val openRelation:((FileRelationOpenRequest)->Boolean)?=null,
 )
 
 internal sealed interface BacklinkRemovalState {

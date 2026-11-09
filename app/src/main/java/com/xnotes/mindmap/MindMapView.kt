@@ -231,6 +231,24 @@ class MindMapView(context: Context) : View(context) {
             invalidate();onViewportChanged()
         }
     }
+    /** Frame the actual selected edge's two cards, without choosing a surrogate node. */
+    internal fun centerOnRelation(id:String):Boolean {
+        if(width<=0 || height<=0 || inkInput.active || connectionPen || !relationVisible(id)) return false
+        val relation=document.relations.firstOrNull {it.id==id} ?: return false
+        val bounds=document.node(relation.from).bounds.union(document.node(relation.to).bounds)
+        val density=resources.displayMetrics.density
+        val inset=Space.s24.value*density
+        val availableWidth=(width-inset*2).coerceAtLeast(1f)
+        val availableHeight=(height-inset*2).coerceAtLeast(1f)
+        val fitting=minOf(availableWidth/bounds.w,availableHeight/bounds.h).toFloat()/density
+        if(!fitting.isFinite() || fitting<=0) return false
+        discardCapturedGesture()
+        zoom=minOf(zoom,fitting)
+        panX=width/2f-bounds.centerX.toFloat()*scale
+        panY=height/2f-bounds.centerY.toFloat()*scale
+        initialized=true;invalidate();onViewportChanged()
+        return true
+    }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         if((readOnlyNavigation || navigationDrain) && keyCode==android.view.KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode,event)
         if(readOnlyNavigation) {

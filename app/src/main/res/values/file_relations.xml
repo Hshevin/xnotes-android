@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="file_relation_group">User associations</string>
+    <string name="file_relation_open">Edit in original canvas</string>
+    <string name="file_relation_notice">These lines were drawn explicitly between file cards. They are separate from content references.</string>
+    <string name="file_relation_direction">%1$s → %2$s</string>
+    <string name="file_relation_undirected">%1$s ↔ %2$s</string>
+    <string name="file_relation_count">User association · %1$d records</string>
+    <string name="file_relation_from_canvas">Canvas: %1$s</string>
+    <string name="file_relation_empty_refs">No displayed content references</string>
+    <string name="file_relation_return_notice">Close the canvas to return to this file.</string>
+    <string name="file_relation_filter_summary">Filter active · %1$d associations excluded</string>
+</resources>

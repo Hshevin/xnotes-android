@@ -27,9 +27,10 @@ internal data class LocalNetworkBudget(val read:BacklinkBudget=BacklinkBudget(),
 }
 internal data class NetworkConceptProjection(val key:NetworkConceptKey,val location:BacklinkLocation,
     val title:String,val kind:NodeKind,val members:List<MapBacklinkRow>)
-internal data class NetworkProjection(val concepts:List<NetworkConceptProjection>,val limited:Boolean=false)
+internal data class NetworkProjection(val concepts:List<NetworkConceptProjection>,val limited:Boolean=false,
+    val fileRelations:List<MapFileRelationRow> = emptyList())
 internal data class NetworkStoredGraph(val candidate:BacklinkCandidate,val graphId:String?,val concepts:List<NetworkConceptProjection>,
-    val keys:Set<String> = emptySet(),val problem:BacklinkProblem?=null)
+    val keys:Set<String> = emptySet(),val problem:BacklinkProblem?=null,val fileRelations:List<MapFileRelationRow> = emptyList())
 internal data class NetworkLibraryScan(val candidates:List<BacklinkCandidate>,val graphs:List<NetworkStoredGraph>,
     val issues:List<BacklinkIssue>,val omittedIssues:Int,val excludedMaps:Int,val reservedIds:Map<String,BacklinkProblem>,
     val limited:Boolean,val liveBlocked:Map<String,BacklinkProblem> = emptyMap())
@@ -49,17 +50,24 @@ internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:
     val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false,
     val filterActive:Boolean=false,val matchedFiles:Set<String> = emptySet(),val unknownFilterFiles:Set<String> = emptySet(),
     val filteredConcepts:Int=0,val contextConcepts:Set<NetworkConceptKey> = emptySet(),
-    val browseMode:NetworkBrowseMode=NetworkBrowseMode.LOCAL,val centreFiles:Set<String> = emptySet())
+    val browseMode:NetworkBrowseMode=NetworkBrowseMode.LOCAL,val centreFiles:Set<String> = emptySet(),
+    val fileRelations:List<MapFileRelationRow> = emptyList(),val contextFileRelations:Set<FileRelationKey> = emptySet(),
+    val filteredFileRelations:Int=0) {
+    val aggregatedFileRelations:List<LocalNetworkFileRelation> get()=fileRelations.groupBy(NetworkFileRelationKey::of)
+        .map {LocalNetworkFileRelation(it.key,it.value)}
+}
 
 /** A graph explanation proves both its connection to the focus and the specific source to inspect. */
 internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,val anchor:MapBacklinkRow,
-    val target:MapBacklinkRow,val owner:Any,private val valid:()->Boolean,private val origin:NetworkConceptOrigin?=null) {
-    fun current():Boolean=coherent(query,anchor,target,origin) && valid() && (origin?.path.orEmpty()+listOf(anchor,target)).all {row->
+    val target:MapBacklinkRow,val owner:Any,private val valid:()->Boolean,private val origin:NetworkConceptOrigin?=null,private val storedPath:NetworkStoredPathGuard?=null) {
+    fun current():Boolean=coherent(query,anchor,target,origin) && valid() && storedPath?.current()!=false && origin?.relationPath.orEmpty().all {it.networkUsable()} &&
+        (origin?.path.orEmpty()+listOf(anchor,target)).all {row->
         row.blocked==null && row.membership?.let {it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)}!=false
     }
+    internal fun targetAcquired(session:MapSession)=storedPath?.targetAcquired(session) ?: true
     /** A view/host may only narrow an existing request; it cannot reissue either source membership. */
     fun withPresentationGuard(guard:()->Boolean):MapNetworkOpenRequest? =
-        MapNetworkOpenRequest(query,anchor,target,owner,{current() && guard()},origin).takeIf {it.current()}
+        MapNetworkOpenRequest(query,anchor,target,owner,{current() && guard()},origin,storedPath).takeIf {it.current()}
     companion object {
         private fun coherent(query:NetworkQuery,anchor:MapBacklinkRow,target:MapBacklinkRow,origin:NetworkConceptOrigin?):Boolean {
             val local=when(origin?.kind) {
@@ -78,7 +86,7 @@ internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,
             valid:()->Boolean):MapNetworkOpenRequest? =
             MapNetworkOpenRequest(query,anchor,target,owner,valid).takeIf {it.current()}
         internal fun captureExpanded(query:NetworkQuery,origin:NetworkConceptOrigin,anchor:MapBacklinkRow,target:MapBacklinkRow,
-            owner:Any,valid:()->Boolean):MapNetworkOpenRequest? =
-            MapNetworkOpenRequest(query,anchor,target,owner,valid,origin).takeIf {it.current()}
+            owner:Any,storedPath:NetworkStoredPathGuard?=null,valid:()->Boolean):MapNetworkOpenRequest? =
+            MapNetworkOpenRequest(query,anchor,target,owner,valid,origin,storedPath).takeIf {it.current()}
     }
 }

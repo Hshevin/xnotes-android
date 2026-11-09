@@ -55,7 +55,10 @@ internal class MapDocumentObservation internal constructor(
     val replacing=session.replacingDocument
     val knownAliases=session.recoveryKeys
     val discoveryFailed=session.discoveryFailed
+    val conflict=session.conflict
     fun current()=entryCurrent() && session.interactionEpoch==epoch && session.document===document
+    fun captureFileRelation(relationId:String):MapFileRelationMembership? =
+        if(current()) session.captureFileRelationMembership(relationId,entryCurrent) else null
     fun captureMembership(nodeId:String,sourceId:String,target:MapSourceTarget):MapBacklinkMembership? {
         if(!current()) return null
         val doc=document ?: return null
@@ -77,7 +80,12 @@ internal object MapDocuments {
     }
     private val entries=mutableMapOf<String,Entry>()
     private var inventorySerial by mutableStateOf(0L)
+    private val positionSerial=mutableMapOf<String,Long>()
+    private fun inventoryChanged(key:String) {inventorySerial++;positionSerial[key]=inventorySerial}
     @MainThread fun observationVersion():Long=inventorySerial
+    /** Includes retired actors, so absent → live → absent cannot revive a stored path. */
+    @MainThread fun observationVersion(context:Context,locationKey:String):Long =
+        positionSerial[context.applicationContext.noBackupFilesDir.canonicalPath+"|"+locationKey] ?: 0L
     private fun key(context:Context,uri:Uri)=context.noBackupFilesDir.canonicalPath+"|"+MapSaves.key(uri)
     private fun lease(entry:Entry):MapDocumentLease {
         entry.references++;entry.generation++
@@ -108,10 +116,10 @@ internal object MapDocuments {
         var entry=entries[key]
         // An unsuccessful, empty first open has no draft to preserve. A fresh permission grant can retry it.
         if(entry!=null && !entry.creating && !entry.session.loading && entry.session.loadFailed && entry.session.document==null) {
-            entries.remove(key);inventorySerial++;entry.retired=true;entry.store.clear();entry=null
+            entries.remove(key);inventoryChanged(key);entry.retired=true;entry.store.clear();entry=null
         }
         if(entry==null) {
-            entry=Entry(key,app,uri);entries[key]=entry;inventorySerial++
+            entry=Entry(key,app,uri);entries[key]=entry;inventoryChanged(key)
             entry.session.open(app,uri,knownAliases)
         }
         return lease(entry)
@@ -122,7 +130,7 @@ internal object MapDocuments {
         val entry=try {withContext(Dispatchers.Main.immediate) {
             val app=context.applicationContext;val key=key(app,uri)
             if(entries.containsKey(key)) null else Entry(key,app,uri).also {
-                it.creating=true;entries[key]=it;inventorySerial++;reservedEntry=it;reservation=lease(it)
+                it.creating=true;entries[key]=it;inventoryChanged(key);reservedEntry=it;reservation=lease(it)
             }
         }} catch(error:java.util.concurrent.CancellationException) {
             withContext(NonCancellable+Dispatchers.Main.immediate) {
@@ -183,7 +191,7 @@ internal object MapDocuments {
                 if(session.hasUnconfirmedContent || (session.dirty && !session.recoverySafe)) return@launch
             }
             if(entries[entry.key]!==entry || entry.references!=0 || entry.generation!=generation) return@launch
-            entries.remove(entry.key);inventorySerial++;entry.retired=true
+            entries.remove(entry.key);inventoryChanged(entry.key);entry.retired=true
             val children=session.viewModelScope.coroutineContext[Job]
             entry.store.clear()
             children?.join()

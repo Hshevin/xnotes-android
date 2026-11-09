@@ -85,7 +85,8 @@ internal class MapBacklinkController(
                     if(querying) startScan() else {
                         // Never resurrect a disk projection captured before the last live actor retired.
                         stored=null
-                        report=report?.let {old->old.copy(rows=old.rows.map {it.copy(blocked=BacklinkProblem.CHANGED)},complete=false)}
+                        report=report?.let {old->old.copy(rows=old.rows.map {it.copy(blocked=BacklinkProblem.CHANGED)},
+                            fileRelations=old.fileRelations.map {it.copy(blocked=BacklinkProblem.CHANGED)},complete=false)}
                     }
                 } else if(stored!=null) publish(live)
             }
@@ -119,6 +120,7 @@ internal class MapBacklinkController(
         val candidates=scan.candidates.associateBy {it.key}
         val actors=live.associateBy {it.key}
         val rows=mutableListOf<MapBacklinkRow>()
+        val relations=mutableListOf<MapFileRelationRow>()
         val issues=scan.issues.toMutableList()
         val identities=linkedMapOf<String,String>()
         var limited=scan.limited
@@ -127,6 +129,7 @@ internal class MapBacklinkController(
         for(graph in scan.graphs) if(graph.candidate.key !in actors) {
             graph.graphId?.let {identities[graph.candidate.key]=it;checked++}
             rows+=graph.rows
+            relations+=graph.fileRelations.map {row->scan.reservedIds[row.location.graphId]?.let {row.copy(blocked=it)} ?: row}
         }
         for(observation in live) {
             val candidate=candidates[observation.key]
@@ -147,19 +150,28 @@ internal class MapBacklinkController(
             if(observation.discoveryFailed) issues+=BacklinkIssue(BacklinkProblem.UNAVAILABLE,candidate?.name)
             val location=BacklinkLocation(observation.uri,candidate?.aliases ?: setOf(observation.uri.toString()),
                 observation.key,doc.id,candidate?.name ?: observation.uri.lastPathSegment.orEmpty().take(BacklinkBudget.LABEL_CHARS))
-            rows+=reader.project(doc,source.documentId,location,BacklinkOrigin.LIVE,observation.session.conflict,blocked) {node,id,target->
+            rows+=reader.project(doc,source.documentId,location,BacklinkOrigin.LIVE,observation.conflict,blocked) {node,id,target->
                 observation.captureMembership(node,id,target)
             }.map {row->if(row.membership==null && row.blocked==null) row.copy(blocked=BacklinkProblem.CHANGED) else row}
+            val relationProjection=reader.projectFileRelations(doc,location,BacklinkOrigin.LIVE,observation.conflict,blocked,
+                membership={observation.captureFileRelation(it)},maxEvidence=budget.maxRows,fileIds=setOf(source.documentId))
+            relations+=relationProjection.rows.filter {source.documentId in it.fileIds}.map {row->
+                if(row.membership==null && row.blocked==null) row.copy(blocked=BacklinkProblem.CHANGED) else row
+            }
+            if(relationProjection.limited) limited=true
         }
         val duplicates=identities.entries.groupBy {it.value}.filterValues {it.size>1}.keys
         val projected=rows.map {row->if(row.location.graphId in duplicates) row.copy(blocked=BacklinkProblem.DUPLICATE) else row}
         duplicates.forEach {issues+=BacklinkIssue(BacklinkProblem.DUPLICATE)}
         if(projected.size>budget.maxRows || reader.projectionLimited) {limited=true;issues+=BacklinkIssue(BacklinkProblem.LIMIT)}
+        val relationRows=relations.map {row->if(row.location.graphId in duplicates) row.copy(blocked=BacklinkProblem.DUPLICATE) else row}
+        if(projected.size+relationRows.size>budget.maxRows) {limited=true;issues+=BacklinkIssue(BacklinkProblem.LIMIT)}
         val visible=projected.take(budget.maxRows)
+        val visibleRelations=relationRows.take((budget.maxRows-visible.size).coerceAtLeast(0))
         val finalIssues=issues.distinct()
         report=BacklinkReport(visible,finalIssues.take(budget.maxIssues),checked,
             !limited && finalIssues.isEmpty() && scan.omittedIssues==0,
-            scan.omittedIssues+(finalIssues.size-budget.maxIssues).coerceAtLeast(0),scan.excludedMaps)
+            scan.omittedIssues+(finalIssues.size-budget.maxIssues).coerceAtLeast(0),scan.excludedMaps,fileRelations=visibleRelations)
         updatePreviews()
     }
     fun cancel() {
@@ -179,6 +191,14 @@ internal class MapBacklinkController(
         // An accepted stored action may itself create the actor and cause a live overlay; that is not a new request.
         return MapBacklinkOpenRequest.capture(source,row,{current() && actionGeneration==generation &&
             (row.membership?.let {it.current(it.issuer,row.location.graphId,row.nodeId,row.sourceId,row.target)}!=false)})
+    }
+    fun captureOpenRelation(row:MapFileRelationRow):FileRelationOpenRequest? {
+        if(row.conflict) {problem=BacklinkProblem.RECOVERY_CONFLICT;return null}
+        if(!current() || loading || row.blocked!=null || report?.fileRelations?.any {it===row}!=true) {
+            problem=BacklinkProblem.CHANGED;return null
+        }
+        val generation=actionGeneration
+        return FileRelationOpenRequest.capture(row,source.libraryRoots,source) {current() && actionGeneration==generation}
     }
     fun captureNetwork(title:String):LocalNetworkLaunchRequest? {
         if(!current()) return null

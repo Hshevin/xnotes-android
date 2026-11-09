@@ -857,14 +857,19 @@ private fun EditorScreen(
         return {maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
             paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
     }
+    val fileRelationNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapFileRelationNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
+            onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
+    }
+    DisposableEffect(fileRelationNavigator) {onDispose {fileRelationNavigator.dispose()}}
     val backlinkNavigator=remember(editor,maps,mapBinding,scope) {
         com.xnotes.mindmap.MapBacklinkNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
-            onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
+            onStarting={fileRelationNavigator.cancel();sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
     }
     DisposableEffect(backlinkNavigator) {onDispose {backlinkNavigator.dispose()}}
     val networkCoordinator=remember(editor,maps,networks,mapBinding,scope) {
         com.xnotes.mindmap.LocalNetworkCoordinator(editor,maps,networks,mapBinding,scope,captureHost=::captureMapHost,
-            onStarting={backlinkNavigator.cancel();sourceNavigator.cancel()},onShown={
+            onStarting={backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.cancel()},onShown={
                 sourceNavigator.retire()
                 if(maps.current==null) {savedMapUri=null;savedMapTitle=""}
             })
@@ -876,12 +881,18 @@ private fun EditorScreen(
     LaunchedEffect(networks.current,networks.resumeRequested,mapBinding) {
         networks.current?.takeIf {networks.resumeRequested && !maps.visible}?.let {networkCoordinator.resume(it)}
     }
-    val backlinkHooks=remember(backlinkNavigator,networkCoordinator) {com.xnotes.mindmap.BacklinkHostHooks(
-        open=backlinkNavigator::open,busy={backlinkNavigator.busy || networkCoordinator.busy},
-        cancel={ctx->if(backlinkNavigator.canCancel(ctx)) backlinkNavigator.cancel(ctx) else networkCoordinator.cancel(ctx)},
-        canCancel={ctx->backlinkNavigator.canCancel(ctx) || networkCoordinator.canCancel(ctx)},
-        problem={ctx->backlinkNavigator.failureFor(ctx) ?: networkCoordinator.failureFor(ctx)},
-        openNetwork=networkCoordinator::open)}
+    val backlinkHooks=remember(backlinkNavigator,fileRelationNavigator,networkCoordinator) {com.xnotes.mindmap.BacklinkHostHooks(
+        open={request->!fileRelationNavigator.busy && backlinkNavigator.open(request)},
+        busy={backlinkNavigator.busy || fileRelationNavigator.busy || networkCoordinator.busy},
+        cancel={ctx->when {
+            backlinkNavigator.canCancel(ctx)->backlinkNavigator.cancel(ctx)
+            fileRelationNavigator.canCancel(ctx)->fileRelationNavigator.cancel(ctx)
+            else->networkCoordinator.cancel(ctx)
+        }},
+        canCancel={ctx->backlinkNavigator.canCancel(ctx) || fileRelationNavigator.canCancel(ctx) || networkCoordinator.canCancel(ctx)},
+        problem={ctx->backlinkNavigator.failureFor(ctx) ?: fileRelationNavigator.failureFor(ctx) ?: networkCoordinator.failureFor(ctx)},
+        openNetwork=networkCoordinator::open,
+        openRelation={request->!backlinkNavigator.busy && !networkCoordinator.busy && fileRelationNavigator.open(request)})}
     LaunchedEffect(sourceNavigator.failure,sourceNavigator.saveFailed,maps.visible) {
         sourceNavigator.failure?.takeIf {!maps.visible}?.let {editor.message=context.getString(
             if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else referenceFailureText(it))}
@@ -1074,7 +1085,7 @@ private fun EditorScreen(
 
     fun openMap(uri:String,title:String=stemOf(uri)) {
         if(!maps.isHostCurrent(mapBinding)) return
-        networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();sourceNavigator.retire()
+        networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
         val current=captureMapHost()
         maps.open(Uri.parse(uri),title,preparePresentation={
             if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
@@ -1335,7 +1346,7 @@ private fun EditorScreen(
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
         val back=networks.returnEntry(entry)
         if(maps.isHostCurrent(mapBinding) && maps.current===entry) {
-            backlinkNavigator.cancel();sourceNavigator.retire()
+            backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
             if(back!=null) networkCoordinator.resume(back,entry,closeMap=true)
             else if(maps.close(entry)!=null) {
                 savedMapUri=null;savedMapTitle=""
@@ -1362,11 +1373,22 @@ private fun EditorScreen(
                 }
                 guarded!=null && backlinkNavigator.openNetwork(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
             }
-        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.close(entry)},
-        busy={backlinkNavigator.busy || networkCoordinator.busy},
-        cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
-        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)},
-        openCanvas=networkCoordinator::openCanvas)) {
+        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.close(entry)},
+        busy={backlinkNavigator.busy || fileRelationNavigator.busy || networkCoordinator.busy},
+        cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
+        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner)
+            ?: fileRelationNavigator.failureFor(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)},
+        openCanvas=networkCoordinator::openCanvas,
+        openRelation={entry,row->
+            if(!networks.current(mapBinding,entry) || !networks.visible || backlinkNavigator.busy || networkCoordinator.busy) false else {
+                val input=entry.presentation.captureInput()
+                val request=entry.controller.captureRelation(row)
+                val guarded=if(input==null) null else request?.withPresentationGuard {
+                    input.current() && networks.current(mapBinding,entry) && networks.visible
+                }
+                guarded!=null && fileRelationNavigator.open(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
+            }
+        })) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },

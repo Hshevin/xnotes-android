@@ -13,7 +13,7 @@ internal suspend fun acquireNetwork(app:Context,request:MapNetworkOpenRequest,va
     roots:List<String> = request.query.roots):MapNetworkAccessResult {
     fun current()=request.current() && valid()
     if(!current()) return MapNetworkAccessResult.Failed(BacklinkProblem.CHANGED)
-    return when(val result=acquireBacklinkMembers(app,listOf(request.anchor,request.target),::current,roots)) {
+    return when(val result=acquireBacklinkMembers(app,listOf(request.anchor,request.target),::current,roots,targetAcquired=request::targetAcquired)) {
         is BacklinkMembersAccessResult.Ready->MapNetworkAccessResult.Ready(result.lease,result.memberships[0],result.memberships[1])
         is BacklinkMembersAccessResult.Failed->MapNetworkAccessResult.Failed(result.problem)
     }
