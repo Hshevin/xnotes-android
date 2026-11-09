@@ -90,6 +90,18 @@ internal object MapDocuments {
             MapDocumentObservation(entry) {entries[entry.key]===entry && !entry.retired}
         }
     }
+    /** A fresh scope veto may retain an existing actor without acquiring or creating one. */
+    @MainThread internal fun preserveCanonicalActor(context:Context,uri:Uri,expectedGraphId:String,
+        expectedLiveSession:MapSession?=null):Boolean {
+        val entry=entries[key(context.applicationContext,uri)] ?: return false
+        if(entry.retired || entry.session.document?.id!=expectedGraphId ||
+            expectedLiveSession!=null && entry.session!==expectedLiveSession) return false
+        entry.retainDirty=true
+        // An accepted save can finish, but an older queued release must not retire the retained actor.
+        entry.generation++
+        entry.session.cancelPendingAutosave()
+        return true
+    }
     @MainThread fun acquire(context:Context,uri:Uri,knownAliases:Set<String> = emptySet()):MapDocumentLease {
         val app=context.applicationContext
         val key=key(app,uri)

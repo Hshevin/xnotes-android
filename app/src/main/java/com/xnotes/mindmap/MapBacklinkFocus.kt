@@ -16,6 +16,7 @@ internal class MapBacklinkFocusTicket internal constructor(
     internal val source:MapSourceNavigationTicket?,
     internal val membership:MapBacklinkMembership?=null,
     internal val removal:MapBacklinkRemovalTicket?=null,
+    internal val networkAnchor:MapBacklinkMembership?=null,
 ) {
     val nodeId get()=source?.nodeId ?: requireNotNull(removal).nodeId
     val sourceId get()=source?.sourceId ?: requireNotNull(removal).sourceId

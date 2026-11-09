@@ -52,6 +52,7 @@ class MapBacklinkLibraryTest {
         val original=AppStorageDocumentsProvider()
         val reads=AtomicInteger();val writes=AtomicInteger();val treeQueries=AtomicInteger();val deletes=AtomicInteger()
         var beforeChildren:((CancellationSignal?)->Unit)?=null
+        var beforeOpenRead:(()->Unit)?=null
         val bridge=object:ContentProvider() {
             override fun onCreate()=true
             override fun query(uri:Uri,projection:Array<out String>?,selection:String?,args:Array<out String>?,sort:String?)=query(uri,projection,selection,args,sort,null)
@@ -65,7 +66,7 @@ class MapBacklinkLibraryTest {
                 } else if(opaqueRoot && id=="opaque-root") null else original.queryDocument(id,columns)
             }
             override fun openFile(uri:Uri,mode:String):ParcelFileDescriptor {
-                if('w' in mode) writes.incrementAndGet() else reads.incrementAndGet()
+                if('w' in mode) writes.incrementAndGet() else {beforeOpenRead?.invoke();reads.incrementAndGet()}
                 return original.openDocument(DocumentsContract.getDocumentId(uri),mode,null)
             }
             override fun getType(uri:Uri)=original.getDocumentType(DocumentsContract.getDocumentId(uri))
@@ -107,6 +108,7 @@ class MapBacklinkLibraryTest {
             try {withTimeout(20000L) {block(f)}} catch(error:Throwable) {failure=error}
             finally {withContext(NonCancellable) {
                 f.beforeChildren=null
+                f.beforeOpenRead=null
                 val released=withContext(Dispatchers.Main) {f.leases.map {it.close()}}
                 released.forEach {it.join()}
                 for(editor in f.editors) {
@@ -122,7 +124,7 @@ class MapBacklinkLibraryTest {
                 androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications();shadowOf(Looper.getMainLooper()).idle();Thread.yield()
             }
             assertTrue("Actual library observation did not settle",job.isCompleted);failure?.let {throw it}
-        } finally {f.beforeChildren=null;scope.cancel();if(job.isCompleted) root.deleteRecursively();field.set(null,previous)}
+        } finally {f.beforeChildren=null;f.beforeOpenRead=null;scope.cancel();if(job.isCompleted) root.deleteRecursively();field.set(null,previous)}
     }
     private val source=UUID.randomUUID().toString()
     private fun document(count:Int=1,note:String=""):MindMapDocument=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="Concept",

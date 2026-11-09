@@ -123,10 +123,20 @@ class MapSession() : ViewModel() {
         val source=captureSourceNavigation(nodeId,sourceId,target) ?: return null
         return MapBacklinkFocusTicket(source,membership)
     }
+    internal fun captureNetworkFocus(graphId:String,nodeId:String,sourceId:String,target:MapSourceTarget,
+        anchorMembership:MapBacklinkMembership,targetMembership:MapBacklinkMembership):MapBacklinkFocusTicket? {
+        val anchor=anchorMembership.source
+        if(!anchorMembership.current(this,graphId,nodeId,anchor.sourceId,anchor.target) ||
+            !targetMembership.current(this,graphId,nodeId,sourceId,target)) return null
+        val focused=captureBacklinkFocus(graphId,nodeId,sourceId,target,targetMembership) ?: return null
+        return MapBacklinkFocusTicket(focused.source,targetMembership,networkAnchor=anchorMembership)
+    }
     internal fun backlinkFocusCurrent(ticket:MapBacklinkFocusTicket,requireReady:Boolean=true):Boolean {
         val source=ticket.source ?: return (!requireReady || selectionReady()) && backlinkRemovalAppliedCurrent(requireNotNull(ticket.removal))
         return (!requireReady || selectionReady()) && currentSourceNavigation(source)!=null &&
-            (ticket.membership?.current(this,source.documentId,source.nodeId,source.sourceId,source.target)!=false)
+            (ticket.membership?.current(this,source.documentId,source.nodeId,source.sourceId,source.target)!=false) &&
+            (ticket.networkAnchor?.let {anchor->anchor.current(this,source.documentId,source.nodeId,
+                anchor.source.sourceId,anchor.source.target)}!=false)
     }
     internal fun applyBacklinkFocus(ticket:MapBacklinkFocusTicket):Boolean {
         if(!backlinkFocusCurrent(ticket)) return false
