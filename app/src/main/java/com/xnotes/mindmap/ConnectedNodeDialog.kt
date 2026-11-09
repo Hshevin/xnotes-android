@@ -39,7 +39,7 @@ internal fun ConnectedNodeDialog(session:MapSession,draft:ConnectedNodeDraft,pic
                 OutlinedTextField(node.text,{value->if(alive.get()) session.editConnectedNode(draft.token,node.copy(text=value))},
                     label={Text(stringResource(R.string.graph_display_title),fontSize=TextSize.body)},
                     textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.bodyLarge),modifier=Modifier.fillMaxWidth())
-                node.sources.forEach {Text(it.fileName,fontSize=TextSize.title)}
+                node.sources.forEach {Text(it.fileName,fontSize=TextSize.title);Text(sourceScopeLabel(it),fontSize=TextSize.caption)}
                 Text(stringResource(R.string.graph_reference_file_notice),fontSize=TextSize.body)
                 if(draft.loadingSource) Text(stringResource(R.string.graph_source_loading),fontSize=TextSize.body)
                 MapButton(R.string.graph_add_source,enabled=!draft.loadingSource && !pickerBusy) {if(alive.get()) chooseSource()}

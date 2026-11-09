@@ -75,6 +75,14 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         ReferenceContract.verifyObserved(expectationAt(uri),expectationForId(id),header)
         register(db,id,kind,name,uri,header.anchors!=null)
     }
+    /** JSON map observations cannot reclassify a known native identity or erase its page contract. */
+    internal fun registerMapObserved(id:String,name:String,uri:String) = transaction {db->
+        val at=expectationAt(uri);val byId=expectationForId(id)
+        val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+        if(at!=null && at.documentId!=id || at?.requiresPages==true || byId.requiresPages || known!=null && known!="xmap")
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        register(db,id,"xmap",name,uri,false)
+    }
     /** One query freezes location identity and its monotonic contract together, including unavailable rows. */
     fun expectationAt(uri:String):ReferenceExpectation? = readableDatabase.rawQuery(
         "SELECT l.document_id,p.document_id IS NOT NULL FROM locations l LEFT JOIN page_reference_contracts p ON p.document_id=l.document_id WHERE l.location_key=?",

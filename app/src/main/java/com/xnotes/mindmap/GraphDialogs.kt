@@ -128,7 +128,7 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
     }},dismissButton={MapButton(R.string.cancel,onClick=::dismiss)})
 }
 @Composable
-internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,close:()->Unit) {
+internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,close:()->Unit) {
     val node=snapshot.node
     val alive=remember(editor) {java.util.concurrent.atomic.AtomicBoolean(true)}
     DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
@@ -141,6 +141,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
             items(node.sources.size,key={node.sources[it].id}) { index ->
                 val s=node.sources[index]
                 Text(s.fileName,fontSize=TextSize.title)
+                Text(sourceScopeLabel(s),fontSize=TextSize.caption)
                 Text(stringResource(when(s.status) {
                     SourceStatus.UNVERIFIED->R.string.graph_status_unverified
                     SourceStatus.CURRENT->R.string.graph_status_current
@@ -166,5 +167,52 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 HorizontalDivider()
             }
         }
-    },confirmButton={MapButton(R.string.graph_add_source){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
+    },confirmButton={MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
+}
+
+@Composable
+internal fun sourceScopeLabel(source:MapSource)=if(source.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
+    else stringResource(R.string.graph_source_page_identity,source.pageId.orEmpty().take(8))
+
+/** A text-only actual page directory; rows never decode or read their source independently. */
+@Composable
+internal fun GraphSourceChoiceDialog(choice:MapSourceChoice,controller:MapSourcePickerController) {
+    var confirming by remember(choice.requestId) {mutableStateOf<MapSourceChoice?>(null)}
+    CompositionLocalProvider(LocalInkBusy provides false) {
+        val consent=confirming
+        if(consent!=null) {
+            AlertDialog(onDismissRequest={confirming=null},title={Text(stringResource(R.string.graph_source_enable_pages),fontSize=TextSize.heading)},
+                text={Text(stringResource(R.string.graph_source_enable_notice),fontSize=TextSize.body)},
+                confirmButton={MapButton(R.string.graph_source_enable_confirm) {controller.activatePages(consent);confirming=null}},
+                dismissButton={MapButton(R.string.cancel) {confirming=null}})
+        } else AlertDialog(onDismissRequest={controller.cancel(choice)},title={Text(stringResource(R.string.graph_source_choose),fontSize=TextSize.heading)},
+            text={LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                choice.offer?.let {offer->item {Text(offer.name,fontSize=TextSize.title)}}
+                if(choice.busy) item {Text(stringResource(R.string.graph_source_loading),fontSize=TextSize.body)}
+                if(choice.problem!=null) item {Text(stringResource(when(choice.problem) {
+                    MapSourceChoiceProblem.READ->R.string.graph_source_error
+                    MapSourceChoiceProblem.CHANGED->R.string.graph_source_choice_changed
+                    MapSourceChoiceProblem.ACTIVATION->R.string.graph_source_activation_failed
+                }),fontSize=TextSize.body)}
+                if(choice.canResume) item {MapButton(R.string.graph_source_complete_activation,enabled=!choice.busy) {controller.completeActivation(choice)}}
+                choice.offer?.let {offer->
+                    item {MapButton(R.string.graph_source_whole_file,enabled=!choice.busy) {controller.chooseFile(choice)}}
+                    when(val pages=offer.catalog?.pages) {
+                        com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.NeedsActivation -> item {
+                            MapButton(R.string.graph_source_enable_pages,enabled=!choice.busy) {confirming=choice}
+                        }
+                        is com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.Available -> {
+                            item {Text(stringResource(R.string.graph_source_page_directory),fontSize=TextSize.body)}
+                            items(pages.orderedIds.size,key={pages.orderedIds[it]}) {index->
+                                TextButton(onClick={controller.choosePage(choice,pages.orderedIds[index])},enabled=!choice.busy,
+                                    modifier=Modifier.fillMaxWidth().heightIn(min=MinTouchTarget)) {
+                                    Text(stringResource(R.string.graph_source_page_number,index+1),fontSize=TextSize.body)
+                                }
+                            }
+                        }
+                        else -> Unit // Canvas/map sources deliberately offer the whole document only.
+                    }
+                }
+            }},confirmButton={},dismissButton={MapButton(R.string.cancel) {controller.cancel(choice)}})
+    }
 }

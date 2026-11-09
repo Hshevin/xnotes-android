@@ -24,7 +24,7 @@
     <string name="graph_invalid">Duplicate or invalid relationship; existing data kept.</string>
     <string name="graph_sources">Sources</string>
     <string name="graph_sources_count">Sources %1$d</string>
-    <string name="graph_sources_notice">File references only in this stage. Previews, location ranges and source navigation are not connected yet. References do not include source files in backups.</string>
+    <string name="graph_sources_notice">Choose a whole file or a permanent page reference. Page thumbnails and source navigation are still pending. Map backups do not include source files.</string>
     <string name="graph_note">Source note</string>
     <string name="graph_primary">Main preview source</string>
     <string name="graph_up">Up</string>
@@ -71,7 +71,18 @@
     <string name="graph_create_connected_notice">Create a free node here, with an undirected relationship to %1$s.</string>
     <string name="graph_connected_changed">The starting node or document changed. Cancel and start a new connection.</string>
     <string name="graph_display_title">Display title</string>
-    <string name="graph_reference_file_notice">This references the whole file. Referenced files are not included in map backups.</string>
+    <string name="graph_reference_file_notice">Reference a file or a page. Map backups do not include the original files.</string>
     <string name="graph_source_loading">Checking source…</string>
     <string name="graph_sources_changed">Sources changed, or the document limit was reached. Review the list and retry.</string>
+    <string name="graph_source_choose">Choose reference</string>
+    <string name="graph_source_whole_file">Whole file</string>
+    <string name="graph_source_page_identity">Page reference · %1$s</string>
+    <string name="graph_source_page_number">Page %1$d</string>
+    <string name="graph_source_page_directory">Choose a page from the current file. Thumbnails are not available yet.</string>
+    <string name="graph_source_enable_pages">Enable page references</string>
+    <string name="graph_source_enable_notice">This writes permanent page IDs to the selected source file. Original handwriting and PDF bytes are preserved. Existing editors may need to reopen the file. Continue?</string>
+    <string name="graph_source_enable_confirm">Enable and save page IDs</string>
+    <string name="graph_source_complete_activation">Continue page enabling</string>
+    <string name="graph_source_choice_changed">The source or graph changed. Cancel and choose the source again; no reference was added.</string>
+    <string name="graph_source_activation_failed">Page enabling could not be completed. The source may already contain the written version; retained recovery data is kept. Continue explicitly, or cancel and choose the source again.</string>
 </resources>

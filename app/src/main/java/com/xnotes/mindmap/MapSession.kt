@@ -48,6 +48,37 @@ class MapSession() : ViewModel() {
     private data class ExistingSourceRequest(val id:String=java.util.UUID.randomUUID().toString(),val epoch:Long,val documentId:String,val nodeId:String)
     private var existingSourceRequest:ExistingSourceRequest?=null
     private val existingSourceJobs=mutableSetOf<Job>()
+    private var sourcePickerInstance:MapSourcePickerController?=null
+    internal val sourcePicker:MapSourcePickerController get()=sourcePickerInstance ?: MapSourcePickerController(app,viewModelScope,
+        ::sourceRequestCurrent,::acceptSourceChoice,::cancelSourceRequest,{inkContact}).also {sourcePickerInstance=it}
+    private fun sourceRequestCurrent(id:String):Boolean {
+        existingSourceRequest?.takeIf {it.id==id}?.let {return sourceCurrent(it)}
+        val request=connectedSourceRequest?.takeIf {it.id==id} ?: return false
+        return !closing && !replacingDocument && connected(request.token)?.let {it.epoch==request.epoch && it.node?.kind==NodeKind.REFERENCE &&
+            document?.nodes?.any {node->node.id==it.from}==true}==true
+    }
+    private fun retireInvalidSourceRequests() {
+        listOfNotNull(existingSourceRequest?.id,connectedSourceRequest?.id).forEach {if(!sourceRequestCurrent(it)) cancelSourceRequest(it)}
+    }
+    internal fun cancelSourceRequest(id:String) {
+        sourcePickerInstance?.retireRequest(id)
+        if(existingSourceRequest?.id==id) existingSourceRequest=null
+        if(connectedSourceRequest?.id==id) connectedSourceRequest=null
+    }
+    private fun acceptSourceChoice(id:String,source:MapSource):Boolean {
+        if(inkContact || !sourceRequestCurrent(id)) return false
+        source.validate()
+        existingSourceRequest?.takeIf {it.id==id}?.let {request->
+            val applied=operate {it.update(request.nodeId) {node->node.copy(sources=node.sources+source)}}
+            if(applied) {existingSourceRequest=null;sourceFailed=false};return applied
+        }
+        val request=connectedSourceRequest?.takeIf {it.id==id} ?: return false
+        val draft=connected(request.token) ?: return false;val node=draft.node ?: return false
+        val next=node.copy(sources=node.sources+source,primarySource=node.primarySource ?: source.id)
+        if(document?.connectNewNode(draft.from,next) !is ConnectedNodeResult.Applied) return false
+        connectedDraft=draft.copy(node=next,problem=null)
+        connectedSourceRequest=null;return true
+    }
     internal fun beginConnectedNode(from:String,center:com.xnotes.core.geometry.Pt):Boolean {
         if(closing || replacingDocument || inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null) return false
         val doc=document ?: return false
@@ -72,14 +103,16 @@ class MapSession() : ViewModel() {
         val next=node.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height)
         return try {
             MindMapDocument(nodes=listOf(next.copy(parent=null,free=false))).validate()
-            connectedDraft=draft.copy(node=next,problem=null);true
+            connectedDraft=draft.copy(node=next,problem=null);retireInvalidSourceRequests();true
         } catch(_:IllegalArgumentException) {connectedDraft=draft.copy(problem=ConnectedDraftProblem.LIMIT);false}
     }
     internal fun cancelConnectedNode(token:String) {
         if(connectedDraft?.token!=token) return
+        connectedSourceRequest?.let {sourcePickerInstance?.retireRequest(it.id)}
         connectedImport?.cancel();connectedImport=null;connectedImportId=null;connectedSourceRequest=null;connectedDraft=null
     }
     private fun retireConnectedDraft() {
+        sourcePickerInstance?.retire()
         selectedRelation=null
         nodeSelectionMode=false
         replaceNodeSelection(emptySet())
@@ -102,7 +135,8 @@ class MapSession() : ViewModel() {
         return false
     }
     internal fun beginConnectedSource(token:String):ConnectedSourceRequest? {
-        val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node?.kind==NodeKind.REFERENCE && connectedSourceRequest==null} ?: return null
+        val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node?.kind==NodeKind.REFERENCE && connectedSourceRequest==null &&
+            existingSourceRequest==null && sourcePickerInstance?.state==null} ?: return null
         return ConnectedSourceRequest(token=token,epoch=draft.epoch).also {connectedSourceRequest=it}
     }
     internal fun receiveConnectedSource(requestId:String,uri:Uri?):Boolean {
@@ -312,6 +346,7 @@ class MapSession() : ViewModel() {
     private fun publish(h: MapHistory) {
         limitError=false
         document = h.document
+        retireInvalidSourceRequests()
         val visible=h.document.visible().mapTo(hashSetOf()) {it.id}
         if(h.document.relations.none {it.id==selectedRelation && it.from in visible && it.to in visible}) selectedRelation=null
         if(selectedRelation!=null) replaceNodeSelection(emptySet())
@@ -349,7 +384,7 @@ class MapSession() : ViewModel() {
     }
     internal fun beginExistingSource(nodeId:String):String? {
         val doc=document ?: return null
-        if(closing || replacingDocument || existingSourceRequest!=null || doc.nodes.none {it.id==nodeId}) return null
+        if(closing || replacingDocument || existingSourceRequest!=null || connectedSourceRequest!=null || sourcePickerInstance?.state!=null || doc.nodes.none {it.id==nodeId}) return null
         return ExistingSourceRequest(epoch=connectedEpoch,documentId=doc.id,nodeId=nodeId).also {existingSourceRequest=it}.id
     }
     private fun sourceCurrent(request:ExistingSourceRequest)=!closing && !replacingDocument && request.epoch==connectedEpoch &&

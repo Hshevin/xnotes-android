@@ -37,6 +37,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
       CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
         var sourcesFor by remember { mutableStateOf<String?>(null) }
         var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+        var activeExistingSource by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+        val sourceController=session.sourcePicker
         val graphEpoch=session.interactionEpoch
         var graphTools by remember(graphEpoch) { mutableStateOf(false) }
         var pendingRelation by remember(graphEpoch) {mutableStateOf<MapRelation?>(null)}
@@ -45,14 +47,17 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
         var connectedPickerId by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
         val connectedSourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
             val request=connectedPickerId;connectedPickerId=null
-            if(request!=null) session.receiveConnectedSource(request,uri)
+            if(request!=null) sourceController.receive(request,uri)
         }
         var addFree by remember { mutableStateOf(false) }
         var layoutMenu by remember { mutableStateOf(false) }
         var proposed by remember { mutableStateOf<MindMapDocument?>(null) }
         val sourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             val request=pendingSourceRequest;pendingSourceRequest=null
-            if(request!=null) session.receiveExistingSource(request,uri)
+            if(request!=null) {activeExistingSource=request;sourceController.receive(request,uri)}
+        }
+        LaunchedEffect(sourceController.state,pendingSourceRequest) {
+            if(sourceController.state==null && pendingSourceRequest==null) activeExistingSource=null
         }
         var view by remember { mutableStateOf<MindMapView?>(null) }
         var viewRevision by remember { mutableIntStateOf(0) }
@@ -115,7 +120,8 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
             session.completeTextRestore(restore.token)
         }
         BackHandler {
-            if(session.connectedDraft!=null) session.cancelConnectedNode(session.connectedDraft!!.token)
+            if(sourceController.state!=null) sourceController.cancel(sourceController.state!!)
+            else if(session.connectedDraft!=null) session.cancelConnectedNode(session.connectedDraft!!.token)
             else if(session.textDraft!=null) endText(false)
             else if(session.textRestore!=null) Unit
             else if(editing!=null) editing=null
@@ -318,8 +324,13 @@ fun MindMapScreen(session: MapSession, title: String, onClose: () -> Unit) {
                     try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
                     catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
                 }
-            }) { sourcesFor=null }
+            },addEnabled=pendingSourceRequest==null && sourceController.state==null) {
+                listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
+                // Keep the system launch occupied until ITS result consumes the old ticket.
+                activeExistingSource=null;sourcesFor=null
+            }
         } }
+        sourceController.state?.let {GraphSourceChoiceDialog(it,sourceController)}
         if (discardingRecovery) AlertDialog(onDismissRequest = { discardingRecovery = false },
             title = { Text(stringResource(R.string.map_conflict_use_file), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.map_conflict_use_file_confirm), fontSize = TextSize.body) },

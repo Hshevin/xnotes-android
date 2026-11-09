@@ -24,7 +24,7 @@
     <string name="graph_invalid">关系重复或无效，已有数据保持不变。</string>
     <string name="graph_sources">来源</string>
     <string name="graph_sources_count">来源 %1$d</string>
-    <string name="graph_sources_notice">本阶段仅支持整文件引用，尚未接入预览、位置范围和来源跳转。引用不会把源文件包含在备份中。</string>
+    <string name="graph_sources_notice">可引用整份文件或具有永久编号的页面。页面缩略图与来源跳转仍待接入。导图备份不包含原文件。</string>
     <string name="graph_note">来源备注</string>
     <string name="graph_primary">主要预览来源</string>
     <string name="graph_up">上移</string>
@@ -71,7 +71,18 @@
     <string name="graph_create_connected_notice">在此处新建自由节点，与%1$s建立无方向关联。</string>
     <string name="graph_connected_changed">起始节点或文档已变化，请取消后重新连接。</string>
     <string name="graph_display_title">显示标题</string>
-    <string name="graph_reference_file_notice">引用整份文件。导图备份不包含引用的原文件。</string>
+    <string name="graph_reference_file_notice">可引用文件或页面。导图备份不包含引用的原文件。</string>
     <string name="graph_source_loading">正在核实来源…</string>
     <string name="graph_sources_changed">来源已变化或已达到文档限制，请检查列表后重试。</string>
+    <string name="graph_source_choose">选择引用范围</string>
+    <string name="graph_source_whole_file">整份文件</string>
+    <string name="graph_source_page_identity">页面引用 · %1$s</string>
+    <string name="graph_source_page_number">第 %1$d 页</string>
+    <string name="graph_source_page_directory">从当前文件选择页面，缩略图尚未接入。</string>
+    <string name="graph_source_enable_pages">启用页面引用</string>
+    <string name="graph_source_enable_notice">这会把永久页编号写入所选来源文件，保留原笔迹与 PDF 的原始字节。已打开该文件的编辑器可能需要重新打开。是否继续？</string>
+    <string name="graph_source_enable_confirm">启用并保存页编号</string>
+    <string name="graph_source_complete_activation">继续启用页面引用</string>
+    <string name="graph_source_choice_changed">来源或导图已变化。请取消并重新选择来源，本次未添加引用。</string>
+    <string name="graph_source_activation_failed">未能完成页面启用。来源可能已包含写入版本，恢复资料将保留。请明确继续，或取消后重新选择来源。</string>
 </resources>

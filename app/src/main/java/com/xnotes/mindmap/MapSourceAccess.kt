@@ -5,24 +5,87 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.storage.NotebookStorage
+import com.xnotes.storage.NativeSourceSnapshot
+import com.xnotes.storage.ReferenceContractViolation
+import com.xnotes.storage.StorageMsg
+import com.xnotes.format.BundleHeader
 
-/** Read identity only: choosing a source must never migrate or rewrite the source file. IO only. */
+/** Frozen display data only. Final selection and activation re-open the actual source. */
+internal class MapSourceOffer private constructor(val uri:Uri,val kind:DocumentKind,val name:String,
+    val fileSource:MapSource,val catalog:NativeSourceSnapshot.ReferenceCatalog?) {
+    companion object {
+        internal fun observed(uri:Uri,kind:DocumentKind,name:String,source:MapSource,catalog:NativeSourceSnapshot.ReferenceCatalog?)=
+            MapSourceOffer(uri,kind,name,source,catalog)
+    }
+}
+
+/** Actual read-only observations; only the separately confirmed activation method may write. IO only. */
 internal object MapSourceAccess {
-    fun inspect(context: Context, uri: Uri,checkActive:()->Unit={}): MapSource {
-        checkActive()
-        val name=context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: uri.lastPathSegment.orEmpty()
-        val kind=DocumentKind.ofName(name)
+    private fun name(context:Context,uri:Uri)=context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)
+        ?.use {if(it.moveToFirst()) it.getString(0) else null} ?: uri.lastPathSegment.orEmpty()
+    private fun rememberPermission(context:Context,uri:Uri,write:Boolean=false) {
+        val read=android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val flags=read or if(write) android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
+        runCatching {context.contentResolver.takePersistableUriPermission(uri,flags)}
+            .onFailure {if(write) runCatching {context.contentResolver.takePersistableUriPermission(uri,read)}}
+    }
+    private fun unique(storage:NotebookStorage,id:String) {require(storage.registry.locations(id).size==1)}
+    fun offer(context:Context,uri:Uri,checkActive:()->Unit={}):MapSourceOffer {
+        checkActive();val name=name(context,uri);val kind=requireNotNull(DocumentKind.ofName(name))
+        val storage=NotebookStorage.get(context);rememberPermission(context,uri)
+        return when(kind) {
+            DocumentKind.NOTE,DocumentKind.CANVAS -> storage.openSource(uri.toString(),kind,checkActive).use {source->
+                val catalog=source.referenceCatalog()
+                val header=BundleHeader.read(source.file) {checkActive();false}
+                checkActive();storage.registry.registerObserved(header,kind.extension,name,uri.toString())
+                unique(storage,catalog.documentId)
+                MapSourceOffer.observed(uri,kind,name,MapSource(documentId=catalog.documentId,fileName=name,sourceVersion=catalog.sha256),catalog)
+            }
+            DocumentKind.MIND_MAP -> {
+                val bytes=MapFiles.target(context,uri,checkActive).read();val doc=MapCodec.decode(bytes);checkActive()
+                storage.registry.registerMapObserved(doc.id,name,uri.toString());unique(storage,doc.id)
+                val sha=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}
+                MapSourceOffer.observed(uri,kind,name,MapSource(documentId=doc.id,fileName=name,sourceVersion=sha),null)
+            }
+            DocumentKind.SPLIT -> error("Unsupported source kind")
+        }.also {checkActive()}
+    }
+    private fun same(expected:MapSourceOffer,actual:MapSourceOffer) {
+        if(expected.kind!=actual.kind || expected.fileSource.documentId!=actual.fileSource.documentId)
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+        if(expected.catalog?.locationKey!=actual.catalog?.locationKey || expected.fileSource.sourceVersion!=actual.fileSource.sourceVersion)
+            throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+    }
+    /** Called only after explicit consent; the writable version comes from this actual holder. */
+    fun activatePages(context:Context,expected:MapSourceOffer,checkActive:()->Unit={}):MapSourceOffer {
+        val prior=requireNotNull(expected.catalog)
+        require(expected.kind==DocumentKind.NOTE && prior.pages==NativeSourceSnapshot.ReferenceCatalog.Pages.NeedsActivation)
+        checkActive();rememberPermission(context,expected.uri,write=true)
         val storage=NotebookStorage.get(context)
-        val id=when(kind) {
-            DocumentKind.MIND_MAP -> MapFiles.read(context,uri.toString()).id
-            DocumentKind.NOTE,DocumentKind.CANVAS -> requireNotNull(storage.identity(uri.toString(),checkActive)).documentId
-            else -> error("Unsupported or unregistered source")
+        val catalog=storage.openSource(expected.uri.toString(),expected.kind,checkActive).use {source->
+            val current=source.referenceCatalog()
+            if(current.documentId!=prior.documentId || current.locationKey!=prior.locationKey || current.sha256!=prior.sha256)
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED)
+            storage.activatePages(expected.uri.toString(),source.version,expected.name,checkActive)
         }
-        checkActive()
-        val source=MapSource(documentId=id,fileName=name).also { it.validate() }
-        runCatching { context.contentResolver.takePersistableUriPermission(uri,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        storage.registry.register(id,requireNotNull(kind).extension,name,uri.toString())
-        require(storage.registry.locations(id).size==1)
-        return source
+        unique(storage,catalog.documentId);checkActive()
+        return MapSourceOffer.observed(expected.uri,expected.kind,expected.name,expected.fileSource.copy(sourceVersion=catalog.sha256),catalog)
+    }
+    fun completeActivation(context:Context,uri:Uri,checkActive:()->Unit={}):MapSourceOffer {
+        checkActive();rememberPermission(context,uri,write=true)
+        val name=name(context,uri);val storage=NotebookStorage.get(context)
+        val catalog=storage.completePageActivation(uri.toString(),name,checkActive)
+        unique(storage,catalog.documentId);checkActive()
+        return MapSourceOffer.observed(uri,DocumentKind.NOTE,name,MapSource(documentId=catalog.documentId,fileName=name,sourceVersion=catalog.sha256),catalog)
+    }
+    /** Run after pen release; never turn an ordinal into a different page's permanent identity. */
+    fun select(context:Context,expected:MapSourceOffer,pageId:String?,checkActive:()->Unit={}):MapSource {
+        if(pageId!=null) require((expected.catalog?.pages as? NativeSourceSnapshot.ReferenceCatalog.Pages.Available)?.ids?.contains(pageId)==true)
+        val actual=offer(context,expected.uri,checkActive);same(expected,actual)
+        if(pageId!=null) require((actual.catalog?.pages as? NativeSourceSnapshot.ReferenceCatalog.Pages.Available)?.ids?.contains(pageId)==true)
+        return actual.fileSource.copy(id=expected.fileSource.id,scope=if(pageId==null) SourceScope.FILE else SourceScope.PAGE,pageId=pageId).also {it.validate();checkActive()}
+    }
+    fun inspect(context: Context, uri: Uri,checkActive:()->Unit={}): MapSource {
+        return offer(context,uri,checkActive).fileSource
     }
 }
