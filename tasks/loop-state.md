@@ -1,9 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。D2b逐层展开/折叠/下一层条目打开与原网络返回源码已verified（本阶段80相关与Android源码编译）；真实平台未运行，多中心/全库等及其他原需求仍缺。
+目标：按原需求继续实现，active，overall complete=false。D2c全库/多文件中心与首页入口源码已verified（本阶段89相关与Android源码编译）；真实平台未运行，手工关联/加入可保存关系画布等及其他原需求仍缺。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 最新恢复点：D2c 全库与多文件网络（verified，已本地提交）
+
+上一goal turn仅状态问答，no progress；本轮直接实现已审核D2c完整路径，不重做全仓审计或未变全量。基线16c98dc8 clean。首页/主菜单（含Rail）→无native文档进入全库→真实多中心选择→保filter/camera→具体来源进图/沿原来源往返→同网络；Local侧栏仍保留。
+
+Query无localFocus的内部key不授native/File身份；FILES同次read先roots/owned/expanded匹配再计direct/deeper预算；LIBRARY全量有界、孤立登记只占余量，Registry只SELECT。新模式实际graph核native kind/永久页契约（含tombstone），同canonical位置已读另一UUID时旧登记也IDENTITY/exclude choices，不改登记/原件。Scope改变退旧票/草稿且保filter/camera；Library隐藏逐层按钮，原有源/owner导航复用。规格docs/movinkpad/file-network-overview-2026-11-09.md。
+
+验证：23405终态1，生产compile完成，Android新增常量拼写错误导致unit task未执行；只修API位置。77467终态1：89相关88绿、Android源码compile成功；唯一旧wait .single()抢读合法暂空live report，Source/Reviewer均核夹具，Root仅await改singleOrNull且后续精确断言不变。75007终态0，仅该1case重跑通过；不重跑未变88。合并89项0fail/error/skip，tmp/network-overview-recheck.log/-summary.json、-wait-recheck.log、-verified-summary.json；77467前后1066源码hash均同，之后仅wait fixture变，final-inputs.json与单case后全部同SHA。新增15方法=Domain3/Data7/SceneView3/Host2。Android Main真实首页/Library/Cancel/多文件T-U/具体U/同scope与camera返回只compile，实际未运行。
+
+review_d2_filters已核阶段差异、唯一Required同位置身份窄修与真实回归、单case夹具调整和89合并证据，Required全闭合可本地提交。作者全formal freeze/completed，无运行Gradle/exec作业；Root已本地提交a257f42c（数据/投影）和80d049c3（首页/界面/往返），文档检查点另存。无用户待答/外部阻塞。无APK/安装/推送/合并/发布。
+
+下一真实流程：显式文件关联及将所选文件加入可保存关系画布，沿既有MapSession/多来源/普通线/保存，不先建另一套网络引擎或持久全库索引；然后可选同图出现/失效检查。原区域/Canvas引用与打开、真正Map双窗格、权限/身份/移动/回收站恢复、独立副本/备份、主要预览/页缩略、无中心/同级插入/边缘平移等完整范围保留，整体active而非只待真机。
+
+只待平台/硬件的已有阶段单列：真实Android/SAF/DocumentsUI、配置重建和杀进程、MovinkPad Pro14/Android15/ProPen3/掌触/Surface/GPU/性能未运行，不以JVM或源码compile替代。
 
 ## 最新恢复点：D2b 可操作流程已保存，下一多中心／全库与手工关系画布
 
