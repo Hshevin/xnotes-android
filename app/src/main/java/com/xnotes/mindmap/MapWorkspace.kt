@@ -55,6 +55,21 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     private val acceptedOpens=mutableSetOf<Job>()
     private var hostBinding:Any?=null
     private var disposal:Job?=null
+    private val visited=linkedMapOf<String,Entry>()
+    private var sourceFrames by mutableStateOf<List<MapSourceNavigationFrame>>(emptyList())
+    private val releases=mutableSetOf<Job>()
+    internal val sourceNavigationGeneration:Long get()=generation
+    internal val sourceReturnToken:Any? get()=sourceFrames.lastOrNull()?.token
+    val canReturnSource:Boolean get()=active && visible && sourceFrames.lastOrNull()?.destination===current
+    val sourceParentTitle:String? get()=sourceFrames.lastOrNull()?.origin?.title
+    private fun ownedEntries()=(visited.values+listOfNotNull(current)).distinctBy {it.lease}
+    private fun trackRelease(job:Job):Job {
+        releases+=job;job.invokeOnCompletion {releases-=job};return job
+    }
+    private fun retire(entries:List<Entry>,preserveRecoveryFor:Entry?=null):List<Job> = entries.distinctBy {it.lease}.map {entry->
+        entry.presentation.closeSources();entry.presentation.visible=false;entry.parkingCheck={false}
+        trackRelease(if(entry===preserveRecoveryFor) entry.lease.closeUnadoptedSource() else entry.lease.close())
+    }
     var current by mutableStateOf<Entry?>(null);private set
     var visible by mutableStateOf(false);private set
     var opening by mutableStateOf(false);private set
@@ -84,11 +99,17 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                     if(active && generation==request) failure=MapWorkspaceFailure.CHANGED
                     return@launch
                 }
+                if(reused==null && visible && prior!=null && current===prior && prior.session.document!=null && !prior.session.canParkSourceNavigation) {
+                    failure=MapWorkspaceFailure.CHANGED;return@launch
+                }
                 val next=reused ?: Entry(lease.uri,title,lease)
+                val replaced=if(reused==null) ownedEntries() else emptyList()
+                if(reused==null) {visited.clear();sourceFrames=emptyList()}
+                visited[MapSaves.key(next.uri)]=next
                 next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent;next.skipNativePersistOnPresent=false
                 next.presentation.visible=true
                 current=next;visible=true;adopted=true
-                if(prior!=null && prior!==next) {prior.presentation.closeSources();prior.presentation.visible=false;prior.parkingCheck={false};prior.lease.close()}
+                retire(replaced)
                 onPresented(next)
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
@@ -103,6 +124,50 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         pending.start()
         return true
     }
+    /** A successful synchronous handoff consumes incoming; every failure leaves it to its holder. */
+    internal fun pushSource(origin:Entry,incoming:MapDocumentLease,title:String,bookmark:MapSourceReturnBookmark,
+        departure:MapPresentationDeparture,parkingCheck:()->Boolean):SourcePushResult {
+        if(!active || !visible || current!==origin || !origin.lease.alive || !incoming.alive ||
+            origin.session.currentSourceNavigation(bookmark.source)==null || !departure.current(origin.presentation,origin.session) ||
+            bookmark.source.target.scope!=SourceScope.FILE || incoming.session.document?.id!=bookmark.source.target.documentId)
+            return SourcePushResult.CHANGED
+        if(opening || !origin.session.canParkSourceNavigation || !incoming.session.canParkSourceNavigation) return SourcePushResult.BUSY
+        val key=MapSaves.key(incoming.uri)
+        val pooled=visited[key]
+        if(pooled!=null && (!pooled.lease.alive || pooled.session!==incoming.session)) return SourcePushResult.CHANGED
+        val self=key==MapSaves.key(origin.uri)
+        if(self && incoming.session!==origin.session) return SourcePushResult.CHANGED
+        if(!self && (sourceFrames.size>=64 || pooled==null && visited.size>=16)) return SourcePushResult.LIMIT
+        if(!parkingCheck()) return SourcePushResult.CHANGED
+        cancelOpen()
+        if(self) {
+            origin.presentation.closeSources();origin.parkingCheck=parkingCheck;origin.skipNativePersistOnPresent=true
+            if(incoming!==origin.lease) trackRelease(incoming.closeUnadoptedSource())
+            return SourcePushResult.SELF
+        }
+        val next=pooled ?: Entry(incoming.uri,title,incoming).also {it.flushNativeOnPresent=false}
+        visited[MapSaves.key(origin.uri)]=origin;visited[key]=next
+        sourceFrames=sourceFrames+MapSourceNavigationFrame(origin,next,bookmark,departure)
+        origin.presentation.parkSourcePanel();origin.presentation.visible=false;origin.parkingCheck={false}
+        next.parkingCheck=parkingCheck;next.skipNativePersistOnPresent=true;next.presentation.visible=true
+        current=next;visible=true
+        if(incoming!==next.lease) trackRelease(incoming.closeUnadoptedSource())
+        return SourcePushResult.APPLIED
+    }
+    /** Returning parks both actual map actors; it never closes one or forces a save. */
+    internal fun returnSource(expected:Entry,parkingCheck:()->Boolean):Boolean {
+        val frame=sourceFrames.lastOrNull() ?: return false
+        val origin=frame.origin
+        if(!active || !visible || current!==expected || frame.destination!==expected || !expected.lease.alive || !origin.lease.alive ||
+            visited[MapSaves.key(origin.uri)]!==origin || !expected.session.canParkSourceNavigation || !origin.session.canParkSourceNavigation ||
+            !parkingCheck()) return false
+        cancelOpen();sourceFrames=sourceFrames.dropLast(1)
+        expected.presentation.parkSourcePanel();expected.presentation.visible=false;expected.parkingCheck={false}
+        origin.parkingCheck=parkingCheck;origin.skipNativePersistOnPresent=true;origin.presentation.visible=true
+        current=origin;visible=true
+        origin.presentation.applySourceReturn(origin.session,frame.bookmark,frame.departure)
+        return true
+    }
     fun clearFailure() {failure=null}
     fun cancelOpen() {generation++;val pending=work;work=null;openOperation=null;pending?.cancel();opening=false;failure=null}
     internal fun cancelOpen(operation:Any):Boolean {
@@ -111,12 +176,12 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     }
     fun bindHost(binding:Any) {
         if(hostBinding===binding) return
-        cancelOpen();current?.parkingCheck={false};hostBinding=binding
+        cancelOpen();ownedEntries().forEach {it.parkingCheck={false}};hostBinding=binding
     }
     fun isHostCurrent(binding:Any)=active && hostBinding===binding
     fun unbindHost(binding:Any):Boolean {
         if(hostBinding!==binding) return false
-        cancelOpen();current?.parkingCheck={false};hostBinding=null;return true
+        cancelOpen();ownedEntries().forEach {it.parkingCheck={false}};hostBinding=null;return true
     }
     internal fun canHide(expected:Entry)=active && current===expected && expected.lease.alive &&
         !expected.session.hasUnconfirmedContent && !expected.session.closing && !expected.session.replacingDocument
@@ -130,20 +195,24 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(!visible && !expected.parkingCheck()) {failure=MapWorkspaceFailure.CHANGED;return false}
         cancelOpen();expected.presentation.visible=true;visible=true;return true
     }
-    fun close(expected:Entry):Job? {
+    fun close(expected:Entry,preserveRecovery:Boolean=false):Job? {
         if(!active || current!==expected) return null
-        cancelOpen();current=null;visible=false;expected.presentation.closeSources();expected.presentation.visible=false;expected.parkingCheck={false}
-        return expected.lease.close()
+        if(preserveRecovery && !expected.lease.hasOtherOwners &&
+            (!expected.session.recoverySafe || !expected.session.canParkSourceNavigation)) return null
+        val pending=acceptedOpens.toList();cancelOpen()
+        val entries=ownedEntries();visited.clear();sourceFrames=emptyList();current=null;visible=false
+        val released=retire(entries,expected.takeIf {preserveRecovery})+releases.toList()
+        return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released.distinct().forEach {it.join()}}
     }
-    fun persist() {current?.takeIf {it.lease.alive && it.session.dirty}?.session?.save()}
+    fun persist() {ownedEntries().filter {it.lease.alive}.map {it.session}.distinct().filter {it.dirty}.forEach {it.save()}}
     fun dispose():Job {
         disposal?.let {return it}
         active=false;generation++;opening=false
         hostBinding=null
         val pending=acceptedOpens.toList();work=null;pending.forEach {it.cancel()}
-        val entry=current;current=null;visible=false;entry?.presentation?.closeSources();entry?.presentation?.visible=false;entry?.parkingCheck={false}
-        val released=entry?.lease?.close()
-        return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released?.join()}.also {disposal=it}
+        val entries=ownedEntries();visited.clear();sourceFrames=emptyList();current=null;visible=false
+        val released=retire(entries)+releases.toList()
+        return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released.distinct().forEach {it.join()}}.also {disposal=it}
     }
 }
 

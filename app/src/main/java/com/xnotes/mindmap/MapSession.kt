@@ -565,6 +565,9 @@ class MapSession() : ViewModel() {
     private var saveTail:Deferred<MapSaveOutcome>?=null
     private var acceptedSaves=0
     internal val hasUnconfirmedContent get()=inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null
+    /** Map-to-map parking observes runtime drafts; it never settles or retires another owner. */
+    internal val canParkSourceNavigation get()=!loading && !loadFailed && document!=null && !closing && !replacingDocument &&
+        !hasUnconfirmedContent && !sourceTargetEditPickerBusy && targetEditController?.active!=true
     val recoverySafe get() = ::store.isInitialized && store.journalReady && durableRevision == revision
 
     fun open(context: Context, uri: Uri, knownAliases:Set<String> = emptySet()) {

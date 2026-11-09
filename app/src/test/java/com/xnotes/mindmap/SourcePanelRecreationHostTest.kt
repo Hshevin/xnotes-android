@@ -180,6 +180,7 @@ class SourcePanelRecreationHostTest {
         assertEquals(0,f.base.writes.get())
     }
     @Test fun actualEntryCloseReplacementAndDisposalRetireItsPanelEvenWhileAnotherLeaseKeepsTheSessionAlive()=scenario {f->
+        val sourceBytes=f.file.readBytes()
         for(action in listOf("close","replace","dispose")) {
             val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
             val workspace=MapWorkspace(f.base.context,scope)
@@ -193,25 +194,44 @@ class SourcePanelRecreationHostTest {
                     assertTrue(entry.presentation.showSources(f.session,f.map,"concept"))
                     entry.presentation.bindSourceEditor(f.session,f.session.sourceEditSnapshot("concept")!!)
                 }
+                val oldTicket=withContext(Dispatchers.Main) {
+                    owner.captureTargetEdit(f.source.id,f.source.target,SourceTargetEditMode.REPLACE)!!
+                }
+                val model=f.session.document;val epoch=f.session.interactionEpoch
                 f.begin(owner)
                 when(action) {
                     "close"->withContext(Dispatchers.Main) {workspace.close(entry)}?.join()
                     "replace"->{
                         val other=withContext(Dispatchers.IO) {f.base.graph("replacement.xmap",MindMapDocument(nodes=listOf(MapNode(id="other",parent=null))))}
-                        withContext(Dispatchers.Main) {assertTrue(workspace.open(f.base.uri(other),"Replacement"))}
+                        val pending=withContext(Dispatchers.Main) {f.controller.state!!}
+                        withContext(Dispatchers.Main) {assertTrue(workspace.open(f.base.uri(other),"Blocked replacement"))}
+                        f.await {!workspace.opening}
+                        withContext(Dispatchers.Main) {
+                            assertSame(entry,workspace.current);assertTrue(workspace.visible)
+                            assertEquals(MapWorkspaceFailure.CHANGED,workspace.failure)
+                            assertEquals(pending.id,f.controller.state!!.id);assertSame(pending.frame,f.controller.state!!.frame)
+                            assertEquals(pending.region,f.controller.state!!.region);assertEquals(pending.camera,f.controller.state!!.camera)
+                            assertTrue(entry.lease.alive);assertTrue(f.base.leases.single().alive);assertSame(model,f.session.document)
+                            assertTrue(owner.targetEditCurrent(oldTicket))
+                            assertTrue(f.controller.cancel(pending.id)) // Explicitly abandon this runtime draft before replacement.
+                            assertNull(f.controller.state)
+                            assertTrue(workspace.open(f.base.uri(other),"Replacement retry"))
+                        }
                         f.await {workspace.visible && !workspace.opening && workspace.current!==entry}
                     }
                     else->withContext(Dispatchers.Main) {workspace.dispose()}.join()
                 }
                 withContext(Dispatchers.Main) {
                     assertTrue("The independent lease still owns the actual session",f.base.leases.single().alive)
-                    assertNotNull(f.session.document);assertNull(f.controller.state)
+                    assertSame(model,f.session.document);assertEquals(epoch,f.session.interactionEpoch);assertNull(f.controller.state)
                     assertNull(owner.captureTargetEdit(f.source.id,f.source.target,SourceTargetEditMode.REPLACE))
+                    assertFalse(owner.startTargetEdit(oldTicket));assertFalse(owner.note(f.source.id,"Late retired host note"))
                     owner.detach();owner.close();assertFalse(f.session.canUndo)
+                    assertEquals("Body",f.session.document!!.node("concept").text)
                 }
             } finally {withContext(Dispatchers.Main) {workspace.dispose()}.join();scope.cancel()}
         }
-        assertEquals(0,f.base.writes.get())
+        assertArrayEquals(sourceBytes,f.file.readBytes());assertEquals(0,f.base.writes.get())
     }
     @Test fun explicitlyClosingThePanelInTheDetachedGapRetiresTheStableOwnerAndCannotReviveOnRebind()=scenario {f->
         val first=withContext(Dispatchers.Main) {f.bind()};f.begin(first)

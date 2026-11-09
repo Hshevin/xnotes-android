@@ -25,8 +25,7 @@ class MapPresentationState internal constructor() {
     }
     private var epoch=-1L
     private var documentId:String?=null
-    private data class Camera(val viewport:MindMapView.Viewport,val width:Int,val height:Int,val density:Float)
-    private var camera:Camera?=null
+    private var camera:MapPresentationCamera?=null
     private var restoredView=WeakReference<MindMapView>(null)
     private var protectedCamera=false
     internal var restoreVersion by mutableStateOf(0L);private set
@@ -56,7 +55,7 @@ class MapPresentationState internal constructor() {
         val viewport=view.viewport()
         if(!density.isFinite() || density<=0 || !viewport.zoom.isFinite() || viewport.zoom<=0 ||
             !viewport.panX.isFinite() || !viewport.panY.isFinite()) return false
-        camera=Camera(viewport,view.width,view.height,density)
+        camera=MapPresentationCamera(viewport,view.width,view.height,density)
         return true
     }
     /** The caller waits for IME and actual layout stability. Each attached View restores once. */
@@ -149,6 +148,19 @@ class MapPresentationState internal constructor() {
         } else {retireSourceEditor();sourcesFor=null;sourceFocus=null}
         requestCameraRestore()
         return true
+    }
+    /** Headless hosts may capture a valid departure before they have any camera. */
+    internal fun captureSourceDeparture(session:MapSession):MapPresentationDeparture {
+        synchronize(session)
+        return MapPresentationDeparture(this,session,session.document?.id,session.interactionEpoch,camera?.copy())
+    }
+    /** A stale source may still return to its owner, but cannot restore its former selection. */
+    internal fun applySourceReturn(session:MapSession,bookmark:MapSourceReturnBookmark,departure:MapPresentationDeparture):Boolean {
+        synchronize(session)
+        if(!departure.current(this,session)) {closeSources();return false}
+        camera=departure.camera
+        if(session.currentSourceNavigation(bookmark.source)==null) {closeSources();return false}
+        return applySourceReturn(session,bookmark)
     }
     internal fun consumeSourceFocus(token:Any) {if(sourceFocus?.token===token) sourceFocus=null}
 }
