@@ -1,4 +1,4 @@
-2026-11-10 D2d1 已接完整网络→关系画布→手工线/撤销重做→保存关闭重开→原网络，406相关验证及Android源码编译通过，真实平台未运行。下一D2d2将显式卡片关联接自动网络及来源侧手工组；先按用户要求在本阶段提交后换全新6.1sol/ultra对话复用同树，完整范围不缩减。见docs/movinkpad/network-to-relation-canvas-2026-11-10.md。
+2026-11-10 续作工作树codex/mind-map-original-network：原文网络整合及完整卡片/Reader往返已实现，302项相关主机测试及Android源码编译通过；独立证据复核通过。下一来源范围调整/换源，原完整14组不缩减；仅实现/验证/文档/本地提交。见docs/movinkpad/original-pdf-network-2026-11-10.md。
 
 2026-11-09 D2c：无文档首页→全库→指定多文件中心→筛选／具体来源打开→同网络返回已实现，89相关用例及Android测试源码编译通过，真实平台未运行。继续显式用户关联和将文件加入可保存关系画布；其他原需求保留。见docs/movinkpad/file-network-overview-2026-11-09.md。
 
@@ -555,3 +555,9 @@ Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Su
 ### 独立原 PDF 原文（2026-11-10，verified）
 
 整页与区域同mode选择，actual PDF geometry/DPI/Rooms固定映射；独立catalog随机文档/页UUID与资源保护同SQLite事务、tombstone/严格同SHA恢复/v6投影。原文预览、专用只读reader/同图返回与原件库实际管理已接，首次开图及返回不额外保存脏Note。185相关主机测试、Android测试源码编译及独立复核通过，真实平台/像素/硬件未运行；见original-pdf-sources-2026-11-10.md。下一原文在网络格式/状态中的只读整合，范围调整/换源与完整引用备份等完整要求仍保留，整体active。
+
+### 原 PDF 文件网络与卡片（2026-11-10，verified）
+
+默认／格式／目录网络显示独立原文身份和删除／缺失状态，保具体证据／概念／PNG；原件库域不借Note目录，独立orphan在真实关系后限额显示。canonical首页锚整原件卡→新／已有关系画布→显式线／保存冷开／实际Reader／同图与同网络返回已接；接受后的retained／save重试固定同receipt，不重新追加。只读metadata、epoch START/END和跨域无fallback守实际边界。
+
+55套302唯一主机项全过，Android测试源码编译通过，1174输入前后SHA同，计划与实现独审通过；独立证据复核通过。真实Android/SAF/PDFium像素/Surface/GPU/设备未运行，不打包/安装/推送/合并/发布。下一来源范围调整／换源、Map来源／双窗格、Canvas反向、精确恢复与完整引用备份及原14组继续。

@@ -1,10 +1,10 @@
 # 原 PDF 在文件关系网络中的身份与状态（2026-11-10）
 
 用户要求：在当前工作树基础上新建工作树，继续按完整思维导图需求自主实现、验证和本地提交。
-状态：实现中；计划已独立审核，首次生产源码编译通过，相关行为测试与实现独审尚未完成。
+状态：源码已实现；55套302项相关主机测试、Android测试源码编译及实现独审通过，独立证据复核通过；实际平台／目标设备待验收。
 本轮边界：仅源码、相关编译／测试、文档、本地提交；不打包、安装、推送、合并或发布。
 
-状态：in_progress，完整计划已独立审核；聚合输入上界／真实 GC 墓碑、已接受创建续接、实际 no-fallback、冷库只读四项 Required 及跨域 epoch 约束均纳入。基线 `64fec417` clean；上一 goal turn 为 progress：原文创建／原件库／只读阅读往返已实现、185 相关测试及 Android 源码编译／独审通过，并本地提交。全部已知构建终态，不重复启动旧作业。
+完整计划已独立审核；聚合输入上界／真实 GC 墓碑、已接受创建续接、实际 no-fallback、冷库只读四项 Required 及跨域 epoch 约束均纳入。基线 `64fec417` clean；上一 goal turn 为 progress：原文创建／原件库／只读阅读往返已实现、185 相关测试及 Android 源码编译／独审通过，并本地提交。全部已知构建终态，不重复启动旧作业。
 
 范围：持续需求第 7—13 组的原文网络衔接，原完整 14 组不缩减。本轮仍仅实现、相关编译与测试、文档、本地提交；不打包、安装、推送、合并或发布。按2026-11-10最新要求，从原工作树64fec417新建codex/mind-map-original-network，带入38个未提交文件并逐字节核对，原树完整保留；使用新树独立构建／项目缓存。
 
@@ -41,7 +41,7 @@ NetworkFileFactsReader 同时接 ids 与 exact MapSourceTarget，输出文件类
 
 Controller 默认也读取原文事实，不沿原先无筛选的 emptyFacts 快路漏检；完整 targets 不先按指定文件筛掉，以保混合概念上下文诊断。filter selector 对 known kind 的可用性不混作 UNKNOWN；目录事实未知不得冒充 OUTSIDE，明确原件库域则 OUTSIDE。
 
-metadata 从调用开始捕获 canonical DB 共享 network epoch，IO／provider／stat 后及 Main 最终采用均核同票。catalog mutation START 立即退旧票／旧动作，END 通知重投影；不能等异步通知到 Main 才使旧请求失效。独立的 NetworkEpoch(version,busyCount)／只读 StateFlow 不改变旧 Observation／Candidate 的写入与恢复证明。Catalog.mutate 和 Access.relink **完整资源 IO** 各用内部 token bracket，失败也 finally END；不能将原 beginRelink 的瞬时检查当作实际修复 END，nested busy 不能提前清零。busy 期间不签新 metadata batch。只读 observer 不保 Activity／View／Editor。catalog delete→restore ABA、失败回滚或 relink 都不能复活旧 batch。captureFocus／relation／集合／加卡片快照的原有效性闭包纳 batch.current，不只依赖 actionGeneration。关闭／取消退休 metadata work 与 observer。
+metadata 从调用开始捕获 canonical DB 共享 network epoch，IO／provider／stat 后及 Main 最终采用均核同票。catalog mutation START 立即退旧票／旧动作，END 通知重投影；不能等异步通知到 Main 才使旧请求失效。独立的 NetworkEpoch(version,busyCount)／只读 StateFlow 不改变旧 Observation／Candidate 的写入与恢复证明。Catalog.mutate 和 Access.relink **完整资源 IO** 各用内部 token bracket，失败也 finally END；不能将原 beginRelink 的瞬时检查当作实际修复 END，nested busy 不能提前清零。busy 期间不签新 metadata batch。只读 observer 不保 Activity／View／Editor。catalog delete→restore ABA、失败回滚或 relink 都不能复活旧 batch。captureFocus／relation／集合／加卡片快照的原有效性闭包纳 batch.current，不只依赖 actionGeneration。关闭／取消退休 metadata work 与 observer。 加卡片冻结整文件目标，专用captureFileCardMetadataGuard保原facts.current及控制代次／生命周期，只允许无关目标actor导致publishedFacts对象重投影；普通captureMetadataGuard仍要求原published对象。实际append前继续核旧选择与原catalog票，成功后才转固定receipt，不能提早免除目录变化。
 
 native 身份首次出现且同 UUID 已有 raw Original 占位时也要退票。检查在实际写事务内覆盖 xnote/xcanvas/xmap；START 在身份 INSERT 前，token 由最外层事务在实际 commit／rollback 后 END，嵌套不得早结束。NetworkEpoch 锁内只改内存，不取 SQL／catalog／resource 锁。普通已有图 acquire/register 不改变此 epoch，避免合法网络打开因自己登记旧图而失效。须测慢 metadata 中新增碰撞、失败回滚旧票不复活，以及完整 relink／并发 nested busy 不提前归零。
 
@@ -65,3 +65,25 @@ MindMapDocument／addFileCards／MapSession receipt／NetworkToCanvas matching �
 必须验证：默认及格式／目录筛选、Note 与同 SHA 原文不混身份、混合概念好坏成员、retained orphan／预算、deleted／GC 后缺失／坏 SQL／未来记录／页映射／native UUID 碰撞、START／END／IO 慢回调／ABA、只读扫描零 PDF body／engine／lease／写入；新旧关系画布的混合卡一次撤销、同 UUID 异 target 冲突、显式线投影、保存失败仅重存、v6 冷重开与真正打开返回；保 PNG／脏 native／原 PDF 字节。
 
 沿用相关回归，不重跑未变全套。真实 Android JSON／事件边界保仪器源码并编译；未经实际运行，Android／DocumentsUI／SAF／Compose 重建、PDFium 像素／MovinkPad Pro14 Android15 ProPen3／Surface／GPU／性能都不能宣称通过。原文范围调整／换源、完整引用备份、导图来源／双窗格和其余完整需求仍待后续阶段。
+
+## 实际验证与独立复核
+
+本阶段交付完整流程：默认／格式／目录网络→原文来源与状态→所属图→只读原文→同图与同网络；以及原文／普通文件选择→新／已有关系画布→一次追加／显式线→保存冷解码／真正Reader返回。主机使用实际actor、读写管线、View相机与Main停车消费者；PDF解析／像素用注入engine，不冒充PDFium或设备验证。
+
+| 执行 | 实际结果与边界 |
+| --- | --- |
+| 11117 | 新树首次生产编译成功，51s；677个main／构建输入前后SHA一致，仅初步接口证据。 |
+| 3762 | Android测试源码编译成功；unit新Host遗漏await helper导致编译失败，未运行case。保留原日志，不称红测试。 |
+| 56993 | 仅补Host等待helper后，旧UUID校验的首／后页NUL两case 2/2真实失败（期望CORRUPT、实际VALID）。本次1172个输入前后SHA一致；其清单与3762相差这一个fixture文件，不称两份清单彼此一致。 |
+| 5376 | 首次完整相关55套301项，7失败、0错误／跳过；1174个输入前后SHA一致，Android源码编译过。两个目标预算与真实卡选择自身acquire三项真红；其余四项按生产契约修新fixture，原XML保留。 |
+| 9002 | 修复后55套302唯一项，0失败／错误／跳过，28s；Android测试源码编译成功，1174个Kotlin／Java／XML／构建输入前后SHA一致。没有合并旧轮结果冒充本轮通过。 |
+
+独审Required已逐项处理：SQL UUID的NUL截断、巨型原始TEXT进入CursorWindow、短NUL标题原契约、合法direct／deeper各5000目标的合并上限、真实卡选择被自身打开目标重投影退票。聚合仍限制输入，坏值SQL返回NULL而非截断；合法4096中文标题保留。卡选择只去published对象等号，原metadata票及所有输入控制仍在；旧引用导航不放松。
+
+四个fixture失败均有独立源码依据：sourceId换新须同步合法primarySource；closeSources后须按真实Main先restore再capture用户相机，离开前以新View正对照核固定期望；普通native保留原策略，先实际保存将退出的secondary后建立baseline，随后核primary历史／dirty与零额外写。原文专用双脏Note／Canvas往返仍严格零native写，未改history、相机或普通native保存生产代码。
+
+原始证据在新树忽略目录tmp/original-network-{nul-red-summary.json,nul-red-results/,nul-red-recheck.log,first-summary.json,first-results/,first.log,final-summary.json,final-results/,final.log}及各inputs.json。运行状态tmp/original-pdf-network-runtime.json；全部构建均终态。两位独立实现审核已结案，最终XML／输入证据经独立重新计数与哈希复核一致；首轮7项全部转绿且无删case，只新增短NUL标题一项。
+
+未运行：实际Android事件／DocumentsUI／SAF／配置重建与杀进程、PDFium像素、MovinkPad Pro14 Android15 ProPen3／掌触／Surface／GPU／性能。Android新增JSON、SQLite／CursorWindow与实际筛选入口回归仅源码编译。完整引用备份、来源范围调整／换源、Map来源／双窗格、Canvas反向引用及原14组其他项目仍未完成；本阶段不是全目标完成。
+
+本地提交：`58a186fe`（只读metadata／epoch／存储回归）、`786b6449`（精确原文卡／实际打开保护）、`45a41073`（网络／筛选／状态／界面）、`a7ea3272`（网络及预算回归）、`e6ad6edb`（真实卡片／Reader往返），迁移计划 `c604362e`；文档提交见本分支HEAD。没有打包、安装、推送、合并或发布。

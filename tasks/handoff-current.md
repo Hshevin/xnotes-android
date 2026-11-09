@@ -1,12 +1,12 @@
 # 思维导图续作检查点（2026-11-10）
 
 用户要求：按完整持续需求逐步实现直到完成；原树不能绑定后，用户明确允许在它基础上新建工作树继续。
-状态：D2d2、Canvas整文件／区域、分页区域及原PDF独立原文创建往返均已实现／主机验证；整体未完成，下一原文在网络中的格式／状态整合。
+状态：D2d2、Canvas整文件／区域、分页区域及原PDF独立原文创建往返均已实现／主机验证；原文网络格式／状态与卡片流程亦已主机验证，独立证据复核通过并本地提交；整体未完成。
 本轮边界：实现、相关编译／测试、文档、本地提交；不打包 APK、安装、推送、合并或发布。
 
 ## 工作位置
 
-当前树 `/Users/kita/.codex/worktrees/mind-map-original-pdf/xnotes`，分支 `codex/mind-map-original-pdf`，按用户于 2026-11-10 的明确要求从 `/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes` 实际 HEAD `579e5f54a25579ca8dfb5465f8a80e1a24c52272` 创建。原树未提交的 `tasks/loop-state.md` 与 `docs/movinkpad/original-pdf-sources-2026-11-10.md` 已逐字节核对复制，原树原样保留。迁移清单 `tmp/original-pdf-worktree-copy.json`；新阶段专用 `tmp/build-mind-map-original-pdf.gradle`、独立构建目录 `/private/tmp/xnotes-mind-map-original-pdf-build` 及 Gradle 项目缓存 `/private/tmp/xnotes-mind-map-original-pdf-cache`。旧阶段有效证据仍在原树的忽略目录，不冒充新阶段验证。所有后续作者和构建须明确使用新树绝对路径。
+当前树 `/Users/kita/.codex/worktrees/mind-map-original-network/xnotes`，分支 `codex/mind-map-original-network`，再次按用户于2026-11-10明确要求，从原工作树 `mind-map-original-pdf/xnotes` 的实际HEAD `64fec4179beecbc838650f2b570ed36a9025ddc0` 新建。38个未提交文件逐文件SHA与Git差异清单核对复制，原树保持原样；迁移记录 `tmp/original-network-worktree-copy.json`。本地迁移／计划提交 `c604362e`。独立构建 `/private/tmp/xnotes-mind-map-original-network-build`、项目缓存 `/private/tmp/xnotes-mind-map-original-network-cache`，初始化脚本 `tmp/build-mind-map-original-network.gradle`。旧阶段证据已复制保留；不把旧验证当本阶段结果。全部作者／构建须用新树绝对路径。
 
 先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
 
@@ -51,10 +51,16 @@ D2d1 已交所选文件加入可保存关系画布并返回网络。D2d2 现从�
 
 独审Required均修并回归：IO-return prompt取消归属、SQL type/range截断、own精确pin保护、批坏frame隔离/late raster回收、旧reader宿主退休、合并pan/pinch锚点、真实Main默认flush路径。45983旧行为两取消例真实失败，fixed同例最终绿；85330首轮180/2失败仅两个独立确认夹具，保原XML。最终34437终态0/33s，31套185唯一case，0失败/错误/跳过，Android源码compile过，1158输入SHA全同；独立实现与证据结案通过。日志/XML/input/summary见tmp/original-pdf-*，runtime中所有作业终态、作者冻结。真实Android/PDFium像素/SAF/重建杀进程/MovinkPad Pro14 Android15 ProPen3/Surface/GPU/性能未运行。
 
+## 原文网络整合（verified）
+
+原文metadata/type/availability、默认／格式／目录筛选与状态观察、独立orphan、canonical首页整原件卡/v6、真实network→图→reader→图／同network、new/existing卡／retained/save重试已接。只读SQL边界有界、原件不read/hash/lease，坏资料不修／不清pin；native同UUID拒fallback。卡片专用原metadata票不被自身目标acquire重投影误退，仍拒实际catalog变化；旧导航严格票保持。
+
+两位独立实现审核结案。56993页NUL旧行为2/2真红；5376首次301/7失败原证据保存，三真缺陷与四fixture按实际生产契约修；9002终态0/28s，55套302唯一项、0失败/错误/跳过，Android测试源码compile过，1174输入前后SHA全同。最终独立XML／输入证据复核通过，已分层本地提交58a186fe／786b6449／45a41073／a7ea3272／e6ad6edb；文档见HEAD。详见docs/movinkpad/original-pdf-network-2026-11-10.md和tmp/original-network-final-summary.json；无运行构建，源码已全冻。
+
 ## 下一实际动作
 
-继续原文身份在文件网络格式/状态中的只读整合：先核NetworkFileFactsReader与NetworkFileKind/过滤、catalog轻量身份观察及来源行，不把原文归到Note、不按文件名猜；实际PDF内容保持不读取。独立审核一个完整可操作阶段后实现、相关验证、本地提交。
+继续来源范围调整／换源与具体目标重核：先读最新SourceListEditor/来源选择、MapSourceTarget和原文projection合同，写完整可操作阶段并独审。保原正文／来源ID与历史PNG语义，不按旧页序号改指；实现→保存冷开→预览→实际打开返回一并验收。
 
-仍缺可选同图出现／失效检查、来源范围调整/换源、导图来源打开与真正导图双窗格、Canvas侧反向引用、权限/身份/移动/回收站精确恢复、独立副本和完整引用文件备份、主要预览/页目录缩略图、同级插入/边缘平移和实际平台验收。原14组不缩减，整体active；阶段完成不是任务完成。
+仍缺可选同图出现／失效检查、导图来源打开与真正导图双窗格、Canvas侧反向引用、权限/身份/移动/回收站精确恢复、独立副本和完整引用文件备份、主要预览/页目录缩略图、同级插入/边缘平移和实际平台验收。原14组不缩减，整体active；阶段完成不是任务完成。
 
-历史Canvas/分页本地提交和证据保留在上文阶段及对应记录，旧树不写入、不清理、不合并。源码/测试/文档只在新树继续。
+历史提交和证据在上文及对应记录保留。旧树不写入、不清理、不合并；所有后续开发仅在新树继续。
