@@ -57,13 +57,21 @@ object MapFiles {
         checkActive()
         return MapStore(File(context.noBackupFilesDir,"mind-map-recovery"),key,target,aliases)
     }
-    internal suspend fun create(context:Context,uri:Uri,doc:MindMapDocument,providedTarget:MapTarget?=null,checkActive:()->Unit={}) =
+    internal data class CreationAttempt(val retained:Boolean,val cause:Throwable?=null)
+    internal suspend fun createAttempt(context:Context,uri:Uri,doc:MindMapDocument,providedTarget:MapTarget?=null,checkActive:()->Unit={}):CreationAttempt =
         withContext(Dispatchers.IO) {
             val coroutine=currentCoroutineContext();val check={coroutine.ensureActive();checkActive()}
             MapSaves.lockFor(uri).withLock {
-                check();store(context,uri,providedTarget ?: target(context,uri,check),check).create(doc,check)
+                check()
+                val owned=store(context,uri,providedTarget ?: target(context,uri,check),check)
+                try {owned.create(doc,check);CreationAttempt(false)}
+                catch(error:java.util.concurrent.CancellationException) {throw error}
+                catch(error:Exception) {CreationAttempt(owned.journalReady,error)}
             }
         }
+    internal suspend fun create(context:Context,uri:Uri,doc:MindMapDocument,providedTarget:MapTarget?=null,checkActive:()->Unit={}) {
+        createAttempt(context,uri,doc,providedTarget,checkActive).cause?.let {throw it}
+    }
     /** Checked independent JSON copy for explorer actions. Neither the source nor a live model is adopted. */
     suspend fun copyToDestination(context:Context,source:String,destination:Uri,checkActive:()->Unit={}) = withContext(Dispatchers.IO) {
         val coroutine=currentCoroutineContext();val check={coroutine.ensureActive();checkActive()}

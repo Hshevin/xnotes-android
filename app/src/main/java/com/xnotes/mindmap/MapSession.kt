@@ -10,6 +10,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -50,10 +52,14 @@ class MapSession() : ViewModel() {
     private val existingSourceJobs=mutableSetOf<Job>()
     private data class SourceLife(val nodeId:String,val target:MapSourceTarget,val token:Any=Any())
     private val sourceLifetimes=mutableMapOf<String,SourceLife>()
+    private val nodeLifetimes=mutableMapOf<String,Any>()
     private var previewController:MapSourcePreviewController?=null
     internal val sourcePreviews:MapSourcePreviewController get()=previewController ?:
         MapSourcePreviewController(this,app,viewModelScope).also {previewController=it}
     private fun reconcileSourceLifetimes() {
+        val nodes=document?.nodes.orEmpty()
+        nodeLifetimes.keys.retainAll(nodes.mapTo(hashSetOf()) {it.id})
+        nodes.forEach {nodeLifetimes.getOrPut(it.id) {Any()}}
         val present=hashSetOf<String>()
         document?.nodes?.forEach {node->node.sources.forEach {source->
             present.add(source.id)
@@ -161,7 +167,7 @@ class MapSession() : ViewModel() {
         connectedImport?.cancel();connectedImport=null;connectedImportId=null;connectedSourceRequest=null;connectedDraft=null
     }
     private fun retireConnectedDraft() {
-        previewController?.retireAll();sourceLifetimes.clear()
+        previewController?.retireAll();sourceLifetimes.clear();nodeLifetimes.clear()
         sourcePickerInstance?.retire()
         selectedRelation=null
         nodeSelectionMode=false
@@ -346,6 +352,7 @@ class MapSession() : ViewModel() {
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
     private var opened = false
+    internal val hasStartedOpen get()=opened
     private var history: MapHistory? = null
     private lateinit var store: MapStore
     private lateinit var app: Context
@@ -353,6 +360,9 @@ class MapSession() : ViewModel() {
     @Volatile private var revision = 0L
     @Volatile private var durableRevision = -1L
     private var debounce: Job? = null
+    private var saveTail:Deferred<MapSaveOutcome>?=null
+    private var acceptedSaves=0
+    internal val hasUnconfirmedContent get()=inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null
     val recoverySafe get() = ::store.isInitialized && store.journalReady && durableRevision == revision
 
     fun open(context: Context, uri: Uri) {
@@ -417,31 +427,123 @@ class MapSession() : ViewModel() {
         debounce = viewModelScope.launch { delay(350); save() }
     }
     /** [overwrite] is the explicit conflict choice to keep this version over the destination's. */
-    fun save(onClosed: (() -> Unit)? = null, overwrite: Boolean = false) {
-        if(replacingDocument) return
-        val doc = document ?: return
+    internal fun saveAttempt(overwrite:Boolean=false):Deferred<MapSaveOutcome> {
         debounce?.cancel()
-        if (onClosed != null) {retireConnectedDraft();closing = true}
-        val version = revision
-        saving = true
-        MapSaves.scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                lock.withLock {
-                    if (version != revision) null else runCatching { if (overwrite) store.overwrite(doc) else store.save(doc) }.also {
-                        if (store.journalReady) durableRevision = version
+        val expectedHistory=history
+        val epoch=connectedEpoch
+        val requestedRevision=revision
+        val previous=saveTail
+        acceptedSaves++;saving=true
+        return MapSaves.scope.async(start=kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                previous?.await()
+                if(expectedHistory==null || history!==expectedHistory || connectedEpoch!=epoch || replacingDocument)
+                    return@async MapSaveOutcome.Changed(requestedRevision)
+                androidx.compose.runtime.snapshotFlow {inkContact}.first {!it}
+                if(history!==expectedHistory || connectedEpoch!=epoch || replacingDocument)
+                    return@async MapSaveOutcome.Changed(requestedRevision)
+                val doc=document ?: return@async MapSaveOutcome.Changed(requestedRevision)
+                val version=revision
+                val result=withContext(Dispatchers.IO) {lock.withLock {
+                    if(version!=revision || connectedEpoch!=epoch || replacingDocument) null
+                    else runCatching {if(overwrite) store.overwrite(doc) else store.save(doc)}.also {
+                        if(store.journalReady) durableRevision=version
                     }
-                }
+                }} ?: return@async MapSaveOutcome.Changed(version)
+                val latest=history===expectedHistory && connectedEpoch==epoch && revision==version && !replacingDocument
+                result.fold({
+                    if(latest) {dirty=false;saveFailed=false;recovered=false;conflict=false}
+                    MapSaveOutcome.Written(version,latest)
+                },{error->
+                    if(error is java.util.concurrent.CancellationException) throw error
+                    if(latest) {saveFailed=true;conflict=error is MapConflict}
+                    when {
+                        error is MapConflict -> MapSaveOutcome.Conflict(version,store.journalReady,error)
+                        store.journalReady -> MapSaveOutcome.Retained(version,latest,error)
+                        else -> MapSaveOutcome.Failed(version,error)
+                    }
+                })
+            } finally {acceptedSaves--;saving=acceptedSaves>0 || replacingDocument}
+        }.also {saveTail=it;it.start()}
+    }
+    fun save(onClosed:(()->Unit)?=null,overwrite:Boolean=false) {
+        if(replacingDocument || document==null) return
+        if(onClosed!=null) {retireConnectedDraft();closing=true}
+        val attempt=saveAttempt(overwrite)
+        if(onClosed!=null) MapSaves.scope.launch {
+            val result=attempt.await()
+            // Closing a view releases its lease; it does not close a shared document actor.
+            closing=false;reconcileSourceLifetimes()
+            if(result is MapSaveOutcome.Written && result.latest) onClosed()
+        }
+    }
+    internal fun captureSourceImport(destination:MapReferenceDestination):MapSourceImportTicket? {
+        if(loading || closing || replacingDocument || inkContact) return null
+        val doc=document ?: return null
+        val nodeLife:Any?
+        val parentLife:Any?
+        when(destination) {
+            is MapReferenceDestination.Existing -> {
+                nodeLife=nodeLifetimes[destination.nodeId] ?: return null;parentLife=null
             }
-            if (version != revision) return@launch
-            saving = false
-            result?.onSuccess {
-                dirty = false; saveFailed = false; recovered = false; conflict = false
-                onClosed?.invoke()
-            }?.onFailure {
-                saveFailed = true; conflict = it is MapConflict; closing = false
-                reconcileSourceLifetimes()
+            is MapReferenceDestination.New -> {
+                val node=destination.node
+                if(node.kind!=NodeKind.REFERENCE || node.sources.isNotEmpty() || node.primarySource!=null ||
+                    doc.nodes.any {it.id==node.id} || (node.parent==null && !node.free)) return null
+                parentLife=node.parent?.let {nodeLifetimes[it] ?: return null};nodeLife=null
+                try {doc.copy(nodes=doc.nodes+node).validate()} catch(_:IllegalArgumentException) {return null}
             }
         }
+        return MapSourceImportTicket(this,connectedEpoch,doc.id,destination,nodeLife,parentLife)
+    }
+    /** Read-only validity check for a selected destination before asynchronous source preparation. */
+    internal fun sourceImportCurrent(ticket:MapSourceImportTicket):Boolean {
+        if(ticket.issuer!==this || ticket.epoch!=connectedEpoch || ticket.documentId!=document?.id) return false
+        val doc=document ?: return false
+        return when(val destination=ticket.destination) {
+            is MapReferenceDestination.Existing -> nodeLifetimes[destination.nodeId]===ticket.nodeLifetime
+            is MapReferenceDestination.New -> {
+                val parentCurrent=destination.node.parent?.let {nodeLifetimes[it]===ticket.parentLifetime} ?: true
+                parentCurrent && if(ticket.importedNodeLifetime!=null) nodeLifetimes[destination.node.id]===ticket.importedNodeLifetime
+                    else doc.nodes.none {it.id==destination.node.id}
+            }
+        }
+    }
+    internal fun importSource(source:MapSource,ticket:MapSourceImportTicket):MapSourceImportResult {
+        if(!sourceImportCurrent(ticket)) return MapSourceImportResult.Changed
+        if(loading || closing || replacingDocument || inkContact) return MapSourceImportResult.Busy
+        if(ticket.destination is MapReferenceDestination.New && ticket.destination.node.parent!=null &&
+            (textDraft!=null || textRestore!=null)) return MapSourceImportResult.Busy
+        val doc=document ?: return MapSourceImportResult.Changed
+        val node=when(val destination=ticket.destination) {
+            is MapReferenceDestination.Existing -> {
+                if(nodeLifetimes[destination.nodeId]!==ticket.nodeLifetime) return MapSourceImportResult.Changed
+                doc.nodes.firstOrNull {it.id==destination.nodeId} ?: return MapSourceImportResult.Changed
+            }
+            is MapReferenceDestination.New -> {
+                if(destination.node.parent?.let {nodeLifetimes[it]!==ticket.parentLifetime}==true) return MapSourceImportResult.Changed
+                doc.nodes.firstOrNull {it.id==destination.node.id} ?: destination.node
+            }
+        }
+        val existing=doc.nodes.firstNotNullOfOrNull {n->n.sources.firstOrNull {it.id==source.id}?.let {n to it}}
+        if(existing!=null) return if(existing.first.id==node.id && existing.second.target==source.target)
+            MapSourceImportResult.Applied(node.id,source.id,true) else MapSourceImportResult.Changed
+        if(ticket.destination is MapReferenceDestination.New && doc.nodes.any {it.id==node.id}) return MapSourceImportResult.Changed
+        return try {
+            source.validate()
+            val attached=node.copy(sources=node.sources+source,primarySource=
+                if(ticket.destination is MapReferenceDestination.New) source.id else node.primarySource)
+            var next=if(ticket.destination is MapReferenceDestination.Existing) doc.update(node.id) {attached}
+                else doc.copy(nodes=doc.nodes+attached)
+            if(ticket.destination is MapReferenceDestination.New && node.parent!=null)
+                next=MapLayout.arrange(next.update(node.parent) {it.copy(collapsed=false)})
+            next.validate()
+            if(!commit(next)) MapSourceImportResult.Invalid else {
+                if(ticket.destination is MapReferenceDestination.New) ticket.importedNodeLifetime=nodeLifetimes[node.id]
+                if(textDraft==null && textRestore==null) selected=node.id
+                MapSourceImportResult.Applied(node.id,source.id,false)
+            }
+        } catch(_:IllegalArgumentException) {MapSourceImportResult.Invalid}
     }
     internal fun beginExistingSource(nodeId:String):String? {
         val doc=document ?: return null
