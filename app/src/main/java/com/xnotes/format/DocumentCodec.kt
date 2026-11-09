@@ -772,6 +772,35 @@ class DocumentCodec(
     fun read(input:InputStream,pdfDir:File?=null,imageDir:File?=null,timing:ReadTiming?=null,pdfStore:((InputStream)->File)?=null):Document =
         readDocument(input,pdfDir,imageDir,timing,pdfStore,false)
 
+    /** Observe actual page/item survival without changing the ordinary tolerant reader. */
+    internal fun readObserved(input:InputStream,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
+        pdfStore:((InputStream)->File)?=null):ObservedRead {
+        var complete:CompleteRead?=null
+        val document=readDocument(input,pdfDir,imageDir,timing,pdfStore,false,onRead={doc,survived->
+            if(survived) complete=CompleteRead.capture(doc)
+        })
+        return ObservedRead(document,complete)
+    }
+    internal fun readComplete(input:InputStream,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
+        pdfStore:((InputStream)->File)?=null):CompleteRead {
+        var complete:CompleteRead?=null
+        readDocument(input,pdfDir,imageDir,timing,pdfStore,false,requireCompleteItems=true,onRead={doc,survived->
+            if(survived) complete=CompleteRead.capture(doc)
+        })
+        return requireNotNull(complete)
+    }
+    internal class ObservedRead(val document:Document,val complete:CompleteRead?)
+    /** Drawing-item provenance plus explicit XML parse failures; not a proof of every future XML extension. */
+    internal class CompleteRead private constructor(val document:Document) {
+        private val pages=document.pages.toList()
+        private val items=pages.map {it.items.toList()}
+        internal fun matches(actual:Document)=actual===document && actual.pages.size==pages.size && pages.indices.all {index->
+            actual.pages[index]===pages[index] && pages[index].items.size==items[index].size &&
+                items[index].indices.all {pages[index].items[it]===items[index][it]}
+        }
+        companion object {internal fun capture(document:Document)=CompleteRead(document)}
+    }
+
     /** Explicit recovery copy: validate the source first, then mint independent identities without cloning sample arrays. */
     fun readInkCopy(input:InputStream,imageDir:File?=null):Document = readDocument(input,null,imageDir,null,null,true)
 
@@ -782,6 +811,8 @@ class DocumentCodec(
         timing: ReadTiming? = null,
         pdfStore: ((InputStream) -> File)? = null,
         independentCopy:Boolean,
+        requireCompleteItems:Boolean=false,
+        onRead:((Document,Boolean)->Unit)?=null,
     ): Document {
         val created=ArrayList<File>()
         try {
@@ -791,6 +822,7 @@ class DocumentCodec(
             val entryNames=hashSetOf<String>();var duplicateEntry=false
             var flowBytes: ByteArray? = null
             var markupBytes: ByteArray? = null
+            var unreadableMarkup=false
             val templates = HashMap<String, String>()
             val packages = HashMap<String, File>()
             val imageFiles = HashMap<String, File>()
@@ -816,7 +848,7 @@ class DocumentCodec(
                                 val probe = InflateProbe(zis)
                                 val started = System.nanoTime()
                                 manifest = try {
-                                    parseManifest(JsonPull(InputStreamReader(probe, Charsets.UTF_8)),independentCopy)
+                                    parseManifest(JsonPull(InputStreamReader(probe, Charsets.UTF_8)),independentCopy,requireCompleteItems)
                                 } catch (_: JsonPullException) {
                                     throw XNoteFormatException(NOT_XNOTE)
                                 }
@@ -869,7 +901,8 @@ class DocumentCodec(
                         } else if (name == FlowXml.ENTRY_NAME) {
                             flowBytes = zis.readBytes()
                         } else if (name == MarkupsXfdf.ENTRY_NAME) {
-                            markupBytes = readAtMost(zis, MarkupsXfdf.MAX_BYTES)
+                            markupBytes=readAtMost(zis,MarkupsXfdf.MAX_BYTES)
+                            unreadableMarkup=markupBytes==null
                         } else if (name.startsWith(TEMPLATE_DIR) && name.endsWith(TEMPLATE_EXT)) {
                             val key = name.substring(TEMPLATE_DIR.length, name.length - TEMPLATE_EXT.length)
                             val bytes = readAtMost(zis, TemplateReader.MAX_BYTES)
@@ -907,17 +940,19 @@ class DocumentCodec(
             }
 
             doc.bookmarks.addAll(m.bookmarks)
-            flowBytes?.let { FlowXml.readInto(doc.flow, it) }
+            flowBytes?.let {if(!FlowXml.readObservedInto(doc.flow,it)) m.lost()}
 
             if (m.pages.isEmpty()) {
+                m.lost()
                 require(anchorMarker==null && !independentCopy) {"Cannot substitute a new blank page for a reference or recovery document"}
                 m.anchors.complete(null,identity,emptySequence())
                 doc.pages.add(Page.blank(PageSize.A4, Orientation.PORTRAIT, m.dpi))
-                return doc
+                onRead?.invoke(doc,false);return doc
             }
             doc.pages.addAll(m.pages)
             if (m.writer < OWN_TEMPLATE_SETTINGS_SINCE) doc.keepBorrowedTemplateSettings()
-            markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
+            if(unreadableMarkup) m.lost()
+            markupBytes?.let {if(!MarkupsXfdf.readObservedInto(doc.pages,it)) m.lost()}
 
             // Image entries stream out of the zip after the manifest, so image items materialize only
             // now that their files exist; the recorded index restores each one's z-order slot.
@@ -929,7 +964,7 @@ class DocumentCodec(
                         is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
                     }
                     if (item == null || (independentCopy && page.layers.entries.none { it.id == item.layerId })) {
-                        dropped++
+                        m.lost();dropped++
                     } else {
                         require(page.layers.entries.any { it.id == item.layerId })
                         page.items.add(spec.index - dropped, item)
@@ -986,6 +1021,7 @@ class DocumentCodec(
                 doc.dirty=true
             }
             if(doc.hasReferenceAnchors && !independentCopy) doc.bindLoadedReferenceScope()
+            onRead?.invoke(doc,m.complete)
             return doc
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
@@ -997,7 +1033,9 @@ class DocumentCodec(
 
     // --- streaming json -> model ---
 
-    private class ParsedManifest(val independentCopy:Boolean) {
+    private class ParsedManifest(val independentCopy:Boolean,val requireCompleteItems:Boolean=false) {
+        var complete=true
+        fun lost() {complete=false;if(requireCompleteItems) throw XNoteFormatException("A note body element could not be decoded")}
         val anchors=AnchorReadState(independentCopy)
         var rawItems=0
         var formatOk = false
@@ -1095,8 +1133,8 @@ class DocumentCodec(
         return if (isNote) NotePeek(pages, hasPdf, created) else null
     }
 
-    private fun parseManifest(p: JsonPull,independentCopy:Boolean=false): ParsedManifest {
-        val m = ParsedManifest(independentCopy)
+    private fun parseManifest(p:JsonPull,independentCopy:Boolean=false,requireCompleteItems:Boolean=false):ParsedManifest {
+        val m=ParsedManifest(independentCopy,requireCompleteItems)
         p.beginObject();val anchorKeys=hashSetOf<String>()
         while (p.hasNext()) {
             val key=p.nextName();m.anchors.key(anchorKeys,key)
@@ -1149,12 +1187,12 @@ class DocumentCodec(
     }
 
     private fun parsePages(p: JsonPull, m: ParsedManifest) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {m.anchors.invalid();return p.skipValue()}
+        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {m.lost();m.anchors.invalid();return p.skipValue()}
         val (fallbackW, fallbackH) = PageSize.A4.pixels(Orientation.PORTRAIT, m.dpi)
         p.beginArray()
         while (p.hasNext()) {
             if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
-                m.anchors.invalid();m.anchors.observe(null);p.skipValue()
+                m.lost();m.anchors.invalid();m.anchors.observe(null);p.skipValue()
                 continue
             }
             var referenceId:String?=null;var referenceSeen=false
@@ -1191,6 +1229,7 @@ class DocumentCodec(
             }
             p.endObject()
             if (!(width > 0.0 && width.isFinite() && height > 0.0 && height.isFinite())) {
+                m.lost()
                 // a page with no area (a broken PDF page from an older import) takes its neighbour's size
                 val prev = m.pages.lastOrNull()
                 width = prev?.width ?: fallbackW
@@ -1215,10 +1254,21 @@ class DocumentCodec(
         p.endArray()
     }
 
-    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead, m:ParsedManifest) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
+    private sealed interface ParsedItem {
+        class Actual(val item:CanvasItem):ParsedItem
+        class Deferred(val pending:Pending):ParsedItem
+    }
+    private fun parseItems(p:JsonPull,items:MutableList<CanvasItem>,pending:MutableList<Pending>,glue:GlueRead,m:ParsedManifest) {
+        if(p.peek()!=JsonPull.Token.BEGIN_ARRAY) {m.lost();return p.skipValue()}
         p.beginArray()
-        while (p.hasNext()) {m.rawItems++;parseItem(p, items, pending, glue)}
+        while(p.hasNext()) {
+            m.rawItems++
+            when(val read=parseItem(p,items.size+pending.size,glue)) {
+                is ParsedItem.Actual->items.add(read.item)
+                is ParsedItem.Deferred->pending.add(read.pending)
+                null->m.lost()
+            }
+        }
         p.endArray()
     }
 
@@ -1302,8 +1352,8 @@ class DocumentCodec(
         var highlighterInverse: Boolean? = null
     }
 
-    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
-        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) return p.skipValue()
+    private fun parseItem(p:JsonPull,index:Int,glue:GlueRead):ParsedItem? {
+        if(p.peek()!=JsonPull.Token.BEGIN_OBJECT) {p.skipValue();return null}
         val s = ItemScratch()
         p.beginObject()
         while (p.hasNext()) {
@@ -1368,52 +1418,32 @@ class DocumentCodec(
             }
         }
         p.endObject()
-        val before = items.size
-        val sync = s.rec?.let { SyncMark(it, s.recMs) }
-        when (s.kind) {
-            Stroke.KIND -> items.add(buildStroke(s))
-            ImageItem.KIND -> {
-                val asset = s.asset
-                if (!asset.isNullOrEmpty()) {
-                    pending.add(
-                        PendingImage(
-                            items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
-                        ),
-                    )
-                }
+        val sync=s.rec?.let {SyncMark(it,s.recMs)}
+        val read=when(s.kind) {
+            Stroke.KIND->ParsedItem.Actual(buildStroke(s))
+            ImageItem.KIND->s.asset?.takeIf {it.isNotEmpty()}?.let {asset->
+                ParsedItem.Deferred(PendingImage(index,asset,s.rect,s.srcW,s.srcH,s.orientation,s.angle,
+                    Flip.fromId(s.flip),s.locked,s.id,sync,s.group,s.layerId,s.part))
             }
-            AudioItem.KIND -> {
-                val asset = s.asset
-                if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
-                }
+            AudioItem.KIND->s.asset?.takeIf {it.isNotEmpty()}?.let {asset->
+                ParsedItem.Deferred(PendingAudio(index,asset,s.rect,s.rid,s.name,s.durationMs,s.peaks ?: ByteArray(0),s.locked,s.group,s.layerId))
             }
-            TextItem.KIND -> items.add(
-                TextItem(
-                    pos = s.pos ?: Pt.ZERO,
-                    width = s.width,
-                    height = s.height,
-                    text = s.text,
-                    rgba = s.rgba ?: TextItem.DEFAULT_COLOR,
-                    pointSize = s.pointSize,
-                    face = FontFace.fromId(s.fontFace),
-                    measurer = textMeasurer,
-                ),
-            )
-            ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
-                val c = s.connector
-                items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
+            TextItem.KIND->ParsedItem.Actual(TextItem(pos=s.pos ?: Pt.ZERO,width=s.width,height=s.height,text=s.text,
+                rgba=s.rgba ?: TextItem.DEFAULT_COLOR,pointSize=s.pointSize,face=FontFace.fromId(s.fontFace),measurer=textMeasurer))
+            ShapeItem.KIND,ShapeItem.GLYPHS_KIND,ShapeItem.FILL_KIND->{
+                val c=s.connector
+                ParsedItem.Actual(if(c!=null && s.kind==ShapeItem.KIND) buildConnector(s,c,glue) else buildShape(s))
             }
-            TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
-            else -> {} // unrecognized kind: skipped (forgiving)
+            TapeItem.KIND->buildTape(s)?.let {ParsedItem.Actual(it)}
+            else->null
         }
-        if (items.size > before) items[before].layerId = s.layerId
-        if (items.size > before) glue.named(items[before], s.id)
-        // Absent on every note written before locking existed, which reads back as unlocked.
-        if (s.locked && items.size > before) items[before].locked = true
-        if (s.group != null && items.size > before) items[before].group = s.group
-        if (sync != null && items.size > before) items[before].sync = sync
+        if(read is ParsedItem.Actual) {
+            val item=read.item;item.layerId=s.layerId;glue.named(item,s.id)
+            if(s.locked) item.locked=true
+            if(s.group!=null) item.group=s.group
+            if(sync!=null) item.sync=sync
+        }
+        return read
     }
 
     /** A tape, or null without the points it runs along. A strip or a rectangle keeps its axis's two ends. */

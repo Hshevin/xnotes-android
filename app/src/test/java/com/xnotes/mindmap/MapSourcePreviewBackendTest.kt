@@ -55,7 +55,7 @@ import org.robolectric.shadows.ShadowContentResolver
 @Config(manifest=Config.NONE,sdk=[35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MapSourcePreviewBackendTest {
-    private class Provider(val root:File):ContentProvider() {
+    internal class Provider(val root:File):ContentProvider() {
         var reads=0;var writes=0
         var allowWrites=false
         var afterTruncate:(()->Unit)?=null
@@ -79,7 +79,7 @@ class MapSourcePreviewBackendTest {
             return ParcelFileDescriptor.open(file(uri),ParcelFileDescriptor.MODE_READ_ONLY)
         }
     }
-    private class Fixture(initializeCatalogs:Boolean=true):AutoCloseable {
+    internal class Fixture(initializeCatalogs:Boolean=true):AutoCloseable {
         val base=RuntimeEnvironment.getApplication()
         val root=File(base.cacheDir,"preview-backend-${UUID.randomUUID()}").apply {mkdirs()}
         val context=object:ContextWrapper(base) {

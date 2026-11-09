@@ -150,14 +150,18 @@ object MarkupsXfdf {
     // --- read ---
 
     /** Puts the markups in [bytes] on [pages], on top of any there. */
-    fun readInto(pages: List<Page>, bytes: ByteArray) {
-        val root = parse(bytes) ?: return
+    fun readInto(pages:List<Page>,bytes:ByteArray) {readObservedInto(pages,bytes)}
+    internal fun readObservedInto(pages:List<Page>,bytes:ByteArray):Boolean {
+        val root=parse(bytes) ?: return false
+        var complete=true
         val byPage = LinkedHashMap<Int, ArrayList<TextMarkup>>()
         for (el in markupElements(root)) {
-            val m = markupOf(el, pages.size) ?: continue
+            val m=markupOf(el,pages.size)
+            if(m==null) {complete=false;continue}
             byPage.getOrPut(m.first) { ArrayList() } += m.second
         }
         for ((i, marks) in byPage) pages[i].markups = pages[i].markups + marks
+        return complete
     }
 
     private fun parse(bytes: ByteArray): Element? = try {

@@ -68,7 +68,9 @@ internal class NativeDocumentPreview(
     fun note(doc:Document,index:Int,maxSidePx:Int,region:Rect?=null,checkActive:()->Unit={}):Bitmap? {
         checkOpen();checkActive();require(maxSidePx in 1..2048)
         val page=doc.pages.getOrNull(index) ?: return null
-        val cover=footprint(doc,page);val frame=region?.let {intersect(cover,it)} ?: if(region==null) cover else return null
+        val cover=footprint(doc,page);val frame=region ?: cover
+        // Preserve the original page-local frame even when only part still lies on the paper.
+        val visible=intersect(cover,frame) ?: return null
         require(frame.w>0 && frame.h>0 && listOf(frame.x,frame.y,frame.w,frame.h).all {it.isFinite()})
         prepareNote(doc,index,checkActive)
         val scale=maxSidePx/maxOf(frame.w,frame.h)
@@ -77,8 +79,8 @@ internal class NativeDocumentPreview(
         val surface=AndroidRasterSurface.create(width,height);var transferred=false
         try {
             surface.fill(page.resolvedPageColor(doc,null) ?: Rgba(255,255,255))
-            val r=surface.renderer();r.scale(scale,scale);r.translate(-frame.left,-frame.top);r.clipRect(frame)
-            checkActive();TemplateLibrary.paint(r,doc,page,cover,frame,maxOf(1.0,maxOf(width,height)/300.0)/scale)
+            val r=surface.renderer();r.scale(scale,scale);r.translate(-frame.left,-frame.top);r.clipRect(visible)
+            checkActive();TemplateLibrary.paint(r,doc,page,cover,visible,maxOf(1.0,maxOf(width,height)/300.0)/scale)
             page.pdfKey?.let {key->
                 val file=doc.pdfFile ?: throw IOException("PDF original is unavailable")
                 val source=pdf ?: PdfSource.open(file).also {pdf=it}
