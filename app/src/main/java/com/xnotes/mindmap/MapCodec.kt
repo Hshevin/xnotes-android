@@ -32,9 +32,12 @@ object MapCodec {
     }
     private fun extended(doc:MindMapDocument)=doc.organization!=MapOrganization.MIND_MAP || doc.nodes.any {it.fileCardId!=null}
     internal fun toJson(doc: MindMapDocument):JSONObject {
-        val expanded=extended(doc)
+        val regionSchema=doc.nodes.any {node->node.sources.any {
+            it.scope==SourceScope.CANVAS_REGION || it.lastPreview?.target?.scope==SourceScope.CANVAS_REGION
+        }}
+        val expanded=extended(doc) || regionSchema
         return JSONObject()
-        .put("format", "xnotes-mind-map").put("version", if(expanded) 4 else 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+        .put("format", "xnotes-mind-map").put("version", if(regionSchema) 5 else if(expanded) 4 else 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
         .also {if(expanded) it.put("organization",doc.organization.name)}
         .put("previewAssets",JSONArray().also {array->doc.prunePreviewAssets().previewAssets.values.forEach {asset->
             array.put(JSONObject().put("key",asset.key).put("pngBase64",asset.pngBase64).put("width",asset.width).put("height",asset.height))
@@ -57,10 +60,11 @@ object MapCodec {
     internal fun fromJson(j: JSONObject): MindMapDocument {
         require(j.string("format") == "xnotes-mind-map")
         val version=j.number("version");val versionValue=j.get("version")
-        require(version==1.0 || version==2.0 || version in setOf(3.0,4.0) && (versionValue is Int || versionValue is Long))
+        require(version==1.0 || version==2.0 || version in setOf(3.0,4.0,5.0) && (versionValue is Int || versionValue is Long))
         val organization=if(version>=4.0) MapOrganization.valueOf(j.string("organization")) else MapOrganization.MIND_MAP
         val array = j.getJSONArray("nodes")
         require(array.length() in (if(organization==MapOrganization.MIND_MAP) 1 else 0)..MindMapDocument.MAX_NODES)
+        if(version<5.0) MapGraphJson.rejectCanvasRegions(array)
         var count = 0
         val nodes = (0 until array.length()).map { i ->
             val n = array.getJSONObject(i)

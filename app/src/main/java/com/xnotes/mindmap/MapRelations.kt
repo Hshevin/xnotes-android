@@ -3,7 +3,7 @@ package com.xnotes.mindmap
 import com.xnotes.core.geometry.Rect
 import java.util.UUID
 
-enum class SourceScope { FILE, PAGE }
+enum class SourceScope { FILE, PAGE, CANVAS_REGION }
 enum class SourceStatus { UNVERIFIED, CURRENT, STALE, UNAVAILABLE, PARTIALLY_DELETED, DELETED, EMPTY, TRASHED }
 /** Cached display fields never participate in source identity. Preview keys are opaque asset IDs. */
 data class MapSource(
@@ -12,7 +12,7 @@ data class MapSource(
     val fileName: String = "",
     val scope: SourceScope = SourceScope.FILE,
     val pageId: String? = null,
-    /** Optional page-local locator hint; never an object selection or a separate reference target. */
+    /** Fixed page-local or canvas-world locator hint; never an object identity or following selection. */
     val region: Rect? = null,
     val note: String = "",
     val status: SourceStatus = SourceStatus.UNVERIFIED,
@@ -41,6 +41,7 @@ data class MapSource(
         when(scope) {
             SourceScope.FILE -> require(pageId == null && region == null && lastKnownPage == null)
             SourceScope.PAGE -> require(pageId != null)
+            SourceScope.CANVAS_REGION -> require(pageId == null && region != null && lastKnownPage == null)
         }
     }
 }

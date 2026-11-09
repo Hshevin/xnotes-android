@@ -9,7 +9,11 @@ data class MapSourceTarget(val documentId:String,val scope:SourceScope,val pageI
         require(UUID.fromString(documentId).toString()==documentId)
         require(pageId==null || UUID.fromString(pageId).toString()==pageId)
         region?.let {r->require(listOf(r.x,r.y,r.w,r.h).all {it.isFinite() && kotlin.math.abs(it)<=MindMapDocument.MAX_COORD} && r.w>0 && r.h>0)}
-        when(scope) {SourceScope.FILE->require(pageId==null && region==null);SourceScope.PAGE->require(pageId!=null)}
+        when(scope) {
+            SourceScope.FILE->require(pageId==null && region==null)
+            SourceScope.PAGE->require(pageId!=null)
+            SourceScope.CANVAS_REGION->require(pageId==null && region!=null)
+        }
     }
     companion object {fun from(source:MapSource)=MapSourceTarget(source.documentId,source.scope,source.pageId,source.region)}
 }
@@ -21,3 +25,12 @@ data class MapLastPreview(val assetKey:String,val target:MapSourceTarget,val ren
         target.validate()
     }
 }
+
+/** Cached pixels can remain useful after an empty refresh or failed/newer observation. */
+internal fun historicalPreview(target:MapSourceTarget,status:SourceStatus,depicted:MapSourceTarget,rendered:String,
+    observed:String?,accepted:String?=null,raw:String?=null)=depicted!=target || status!=SourceStatus.CURRENT ||
+    observed?.let {it!=rendered}==true || accepted?.let {it!=rendered}==true ||
+    rendered.startsWith("native-sha256:") && raw?.let {rendered!="native-sha256:$it"}==true
+internal val MapSource.hasHistoricalPreview:Boolean get()=lastPreview?.let {
+    historicalPreview(target,status,it.target,it.renderedVersion,observedVersion,acceptedPreviewVersion,sourceVersion)
+} ?: false

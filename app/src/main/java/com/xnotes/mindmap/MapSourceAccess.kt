@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.xnotes.core.util.DocumentKind
+import com.xnotes.core.geometry.Rect
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.storage.NativeSourceSnapshot
 import com.xnotes.storage.ReferenceContractViolation
@@ -49,6 +50,28 @@ internal object MapSourceAccess {
             }
             DocumentKind.SPLIT -> error("Unsupported source kind")
         }.also {checkActive()}
+    }
+    /** Canvas region creation supplies the required type and UUID; a display suffix is never type evidence. */
+    fun offerCanvas(context:Context,uri:Uri,documentId:String,checkActive:()->Unit={}):MapSourceOffer {
+        MapSourceTarget(documentId,SourceScope.FILE).validate();checkActive()
+        val storage=NotebookStorage.get(context);rememberPermission(context,uri)
+        val displayName=name(context,uri)
+        return storage.openSource(uri.toString(),DocumentKind.CANVAS,checkActive).use {source->
+            val catalog=source.referenceCatalog()
+            if(catalog.documentId!=documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            val header=BundleHeader.read(source.file) {checkActive();false}
+            checkActive();storage.registry.registerObserved(header,DocumentKind.CANVAS.extension,displayName,uri.toString())
+            unique(storage,documentId);checkActive()
+            MapSourceOffer.observed(uri,DocumentKind.CANVAS,displayName,
+                MapSource(documentId=documentId,fileName=displayName,sourceVersion=catalog.sha256),catalog)
+        }
+    }
+    fun selectCanvasRegion(context:Context,expected:MapSourceOffer,region:Rect,checkActive:()->Unit={}):MapSource {
+        require(expected.kind==DocumentKind.CANVAS)
+        MapSourceTarget(expected.fileSource.documentId,SourceScope.CANVAS_REGION,region=region).validate()
+        val actual=offerCanvas(context,expected.uri,expected.fileSource.documentId,checkActive);same(expected,actual)
+        return actual.fileSource.copy(id=expected.fileSource.id,scope=SourceScope.CANVAS_REGION,region=region)
+            .also {it.validate();checkActive()}
     }
     private fun same(expected:MapSourceOffer,actual:MapSourceOffer) {
         if(expected.kind!=actual.kind || expected.fileSource.documentId!=actual.fileSource.documentId)

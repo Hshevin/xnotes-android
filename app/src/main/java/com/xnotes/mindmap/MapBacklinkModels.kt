@@ -3,7 +3,7 @@ package com.xnotes.mindmap
 import android.net.Uri
 import com.xnotes.ui.NativeBacklinkContext
 
-internal enum class BacklinkGroup { CURRENT_PAGE,OTHER_PAGE,WHOLE_FILE }
+internal enum class BacklinkGroup { CURRENT_PAGE,OTHER_PAGE,WHOLE_FILE,CANVAS_REGION }
 internal enum class BacklinkOrigin { STORED,RECOVERY,LIVE }
 internal enum class BacklinkProblem {
     UNAVAILABLE,CORRUPT,RECOVERY_CONFLICT,DUPLICATE,IDENTITY,LOADING,LIMIT,CHANGED,BUSY,SAVE_FAILED,TRASHED,UNKNOWN_SCOPE,CANCELLED
@@ -21,16 +21,21 @@ internal data class MapBacklinkRow internal constructor(
     val nodeTitle:String,val kind:NodeKind,val sourceFileName:String,val sourceNote:String,
     val lastKnownPage:Int?,val status:SourceStatus,val preview:BacklinkPreview?,
     val origin:BacklinkOrigin,val conflict:Boolean=false,val blocked:BacklinkProblem?=null,
-    internal val membership:MapBacklinkMembership?=null,
+    internal val membership:MapBacklinkMembership?=null,val observedVersion:String?=null,
+    val sourceVersion:String?=null,val acceptedPreviewVersion:String?=null,
 ) {
     // Length prefixes keep user-editable IDs containing separators unambiguous in lazy-list keys.
     val key:String get()=listOf(location.key,location.graphId,nodeId,sourceId).joinToString("") {"${it.length}:$it"}
     fun group(pageId:String?)=when {
         target.scope==SourceScope.FILE->BacklinkGroup.WHOLE_FILE
+        target.scope==SourceScope.CANVAS_REGION->BacklinkGroup.CANVAS_REGION
         pageId!=null && target.pageId==pageId->BacklinkGroup.CURRENT_PAGE
         else->BacklinkGroup.OTHER_PAGE
     }
 }
+internal val MapBacklinkRow.hasHistoricalPreview:Boolean get()=preview?.let {
+    historicalPreview(target,status,it.depictedTarget,it.renderedVersion,observedVersion,acceptedPreviewVersion,sourceVersion)
+} ?: false
 internal data class BacklinkIssue(val problem:BacklinkProblem,val displayName:String?=null)
 internal data class BacklinkReport(val rows:List<MapBacklinkRow>,val issues:List<BacklinkIssue>,val checkedMaps:Int,
     val complete:Boolean,val omittedIssues:Int=0,val excludedMaps:Int=0,val fileRelations:List<MapFileRelationRow> = emptyList())

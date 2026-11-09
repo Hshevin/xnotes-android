@@ -262,9 +262,10 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                     Text(row.sourceFileName.ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
                     if(report?.filterActive==true && evidence.fileId !in report.matchedFiles)
                         Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
-                    val range=if(row.target.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-                        else row.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
-                    Text(if(row.target.region!=null) stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)
+                    val range=sourceRangeLabel(row.target.scope,row.lastKnownPage)
+                    Text(if(row.target.scope==SourceScope.PAGE && row.target.region!=null)
+                        stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)
+                    if(row.hasHistoricalPreview) Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
                     if(row.sourceNote.isNotBlank()) Text(row.sourceNote,fontSize=TextSize.body)
                     Text(stringResource(networkStatusText(row.status)),fontSize=TextSize.caption)
                     row.blocked?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.caption)}

@@ -819,7 +819,7 @@ class MapSession() : ViewModel() {
         val merged=proposed.sources.map {source->latest[source.id]?.let {actual->
             actual.copy(documentId=source.documentId,scope=source.scope,pageId=source.pageId,region=source.region,note=source.note,
                 lastKnownPage=if(source.target==actual.target) actual.lastKnownPage
-                    else if(source.scope==SourceScope.FILE) null else source.lastKnownPage,
+                    else if(source.scope!=SourceScope.PAGE) null else source.lastKnownPage,
                 status=if(source.target!=actual.target) {
                     if(actual.lastPreview!=null) SourceStatus.STALE else SourceStatus.UNVERIFIED
                 } else actual.status)

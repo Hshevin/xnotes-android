@@ -27,6 +27,7 @@ import com.xnotes.mindmap.BacklinkOrigin
 import com.xnotes.mindmap.BacklinkProblem
 import com.xnotes.mindmap.BacklinkRemovalState
 import com.xnotes.mindmap.MapBacklinkController
+import com.xnotes.mindmap.hasHistoricalPreview
 import com.xnotes.mindmap.MapBacklinkRow
 import com.xnotes.mindmap.MapButton
 import com.xnotes.mindmap.NodeKind
@@ -103,6 +104,7 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
             }
             val groups=report?.rows.orEmpty().groupBy {row->when {
                 row.target.scope==SourceScope.FILE->BacklinkGroup.WHOLE_FILE
+                row.target.scope==SourceScope.CANVAS_REGION->BacklinkGroup.CANVAS_REGION
                 context.pageId!=null && row.target.pageId==context.pageId->BacklinkGroup.CURRENT_PAGE
                 else->BacklinkGroup.OTHER_PAGE
             }}
@@ -113,6 +115,7 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
                     BacklinkGroup.CURRENT_PAGE->R.string.graph_backlinks_current_page
                     BacklinkGroup.OTHER_PAGE->R.string.graph_backlinks_other_pages
                     BacklinkGroup.WHOLE_FILE->R.string.graph_backlinks_whole_file
+                    BacklinkGroup.CANVAS_REGION->R.string.graph_backlinks_canvas_regions
                 }),fontSize=TextSize.title,fontWeight=FontWeight.SemiBold)}
                 items(rows,key={it.key}) {row->BacklinkRow(row,controller,hooks,enabled=!busy && !controller.loading)}
             }
@@ -166,8 +169,8 @@ private fun BacklinkRow(row:MapBacklinkRow,controller:MapBacklinkController,hook
             else->Unit
         }
         row.blocked?.let {Text(stringResource(backlinkProblemLabel(it)),fontSize=TextSize.caption)}
-        if(row.preview?.depictedTarget?.let {it!=row.target}==true)
-            Text(stringResource(R.string.graph_preview_old_target),fontSize=TextSize.caption)
+        if(row.hasHistoricalPreview)
+            Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
         SourcePreviewImage(controller.previewAssets[row.key])
         when {
             row.key in controller.previewBusy->Text(stringResource(R.string.graph_backlinks_loading),fontSize=TextSize.caption)
@@ -188,9 +191,9 @@ private fun backlinkNodeTitle(row:MapBacklinkRow)=row.nodeTitle.ifBlank {stringR
 })}
 @Composable
 private fun backlinkRange(row:MapBacklinkRow):String {
-    val range=if(row.target.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-        else row.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
-    return if(row.target.region!=null) stringResource(R.string.graph_backlinks_range_region,range) else range
+    val range=com.xnotes.mindmap.sourceRangeLabel(row.target.scope,row.lastKnownPage)
+    return if(row.target.scope==SourceScope.PAGE && row.target.region!=null)
+        stringResource(R.string.graph_backlinks_range_region,range) else range
 }
 
 private fun backlinkProblemLabel(problem:BacklinkProblem)=when(problem) {

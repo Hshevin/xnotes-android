@@ -59,7 +59,7 @@ class MapHistory(initial:MindMapDocument) {
                         val patch=edits[source.id]?.takeIf {it.target==source.target} ?: return@map source
                         source.copy(status=patch.status,fileName=patch.fileName ?: source.fileName,
                             observedVersion=patch.observedVersion ?: source.observedVersion,
-                            lastKnownPage=if(source.scope==SourceScope.FILE) null else patch.lastKnownPage ?: source.lastKnownPage,
+                            lastKnownPage=if(source.scope!=SourceScope.PAGE) null else patch.lastKnownPage ?: source.lastKnownPage,
                             sourceVersion=if(patch.acceptBaseline) requireNotNull(patch.rawVersion) else source.sourceVersion,
                             acceptedPreviewVersion=if(patch.acceptBaseline) requireNotNull(patch.renderedVersion)
                                 else if(patch.preview!=null) null else source.acceptedPreviewVersion,

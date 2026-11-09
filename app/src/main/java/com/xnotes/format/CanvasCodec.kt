@@ -501,6 +501,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
      */
     fun read(input: InputStream, imageDir: File? = null): InfiniteDocument = readDocument(input,imageDir,false).document
 
+    /** Preserve ordinary tolerance while reporting whether this actual decode lost any items. */
+    internal fun readObserved(input:InputStream,imageDir:File):ObservedRead = readDocument(input,imageDir,false).let {
+        ObservedRead(it.document,if(it.complete) CompleteRead.capture(it.document,it.items) else null)
+    }
+    internal class ObservedRead(val document:InfiniteDocument,val complete:CompleteRead?)
+
     /** Every manifest item must survive this decode before a reference may become an editable source. */
     internal fun readComplete(input:InputStream,imageDir:File):CompleteRead = readDocument(input,imageDir,true).let {
         CompleteRead.capture(it.document,it.items)
@@ -513,7 +519,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             internal fun capture(document:InfiniteDocument,items:List<CanvasItem>)=CompleteRead(document,items)
         }
     }
-    private class DecodedDocument(val document:InfiniteDocument,val items:List<CanvasItem>)
+    private class DecodedDocument(val document:InfiniteDocument,val items:List<CanvasItem>,val complete:Boolean)
     private fun readDocument(input:InputStream,imageDir:File?,requireCompleteItems:Boolean):DecodedDocument {
         val created=ArrayList<File>()
         try {
@@ -598,7 +604,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             doc.layers.restore(m.layers.entries, m.layers.activeId)
             require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
             doc.addAll(items)
-            return DecodedDocument(doc,if(requireCompleteItems) items else emptyList())
+            return DecodedDocument(doc,items,m.completeItems && dropped==0)
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
             created.forEach {runCatching {it.delete()}}
@@ -647,6 +653,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     private class ParsedManifest {
         var formatOk = false
+        var completeItems = true
         var writer = 0
         var created: Long? = null
         var dpi = PageSize.DEFAULT_DPI
@@ -709,7 +716,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "layers" -> m.layers = LayerJson.read(p)
                 "view" -> m.view = parseWaypoint(p, named = false)
                 "waypoints" -> parseWaypoints(p, m.waypoints)
-                "items" -> parseItems(p,m.items,m.images,m.glue,requireCompleteItems)
+                "items" -> m.completeItems = parseItems(p,m.items,m.images,m.glue,requireCompleteItems) && m.completeItems
                 else -> p.skipValue()
             }
         }
@@ -778,20 +785,22 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         class Deferred(val pending:Pending):ParsedItem
     }
     private fun parseItems(p:JsonPull,items:MutableList<CanvasItem>,pending:MutableList<Pending>,glue:GlueRead,
-        requireCompleteItems:Boolean) {
+        requireCompleteItems:Boolean):Boolean {
         if(p.peek()!=JsonPull.Token.BEGIN_ARRAY) {
             if(requireCompleteItems) throw XCanvasFormatException("A canvas item list could not be decoded")
-            return p.skipValue()
+            p.skipValue();return false
         }
+        var complete=true
         p.beginArray()
         while(p.hasNext()) {
             when(val read=parseItem(p,items.size+pending.size,glue,requireCompleteItems)) {
                 is ParsedItem.Actual->items.add(read.item)
                 is ParsedItem.Deferred->pending.add(read.pending)
-                null->Unit
+                null->complete=false
             }
         }
         p.endArray()
+        return complete
     }
 
     /** Union of every kind's fields, so an item parses in one pass whatever its key order. */

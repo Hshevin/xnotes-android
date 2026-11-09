@@ -96,21 +96,21 @@
     <string name="graph_preview_image">Last saved source preview</string>
     <string name="graph_preview_backup_notice">Previews do not back up source files. Whole-note and PDF previews show the first page.</string>
     <string name="graph_reference_this_page">Reference this page</string>
-    <string name="graph_ref_preparing">Preparing the saved page…</string>
+    <string name="graph_ref_preparing">Preparing the saved source…</string>
     <string name="graph_ref_save_then_retry">Save this note first, then reference the desired page again.</string>
     <string name="graph_ref_save_copy_then_retry">Save an independent copy of these changes, then reference the saved page again. The original source stays unchanged.</string>
     <string name="graph_ref_enable_notice">This note needs page references enabled. Enabling saves permanent page IDs. Reopen the file afterwards, then reference the desired page again. Existing ink and PDF content are kept.</string>
     <string name="graph_ref_reopened_retry">The file was reopened. Reference the desired page again.</string>
     <string name="graph_ref_reopen_notice">Reopen the file to identify the page reliably, then reference the desired page again. The current document stays open if reopening fails.</string>
     <string name="graph_ref_reopen">Reopen this note</string>
-    <string name="graph_ref_destination_notice">Add this page to an existing map or create a map. Reading stays in this pane.</string>
+    <string name="graph_ref_destination_notice">Add this reference to an existing map or create a map. Reading stays in this pane.</string>
     <string name="graph_ref_choose_map">Choose an existing map</string>
     <string name="graph_ref_choose_node">Choose a concept below, or create a reference node. Existing node content is kept.</string>
     <string name="graph_ref_target_recovery">This map has recovery data or a save conflict. Open the map to review it; no conflict is overwritten automatically.</string>
     <string name="graph_ref_wait_pen">Waiting for the pen in the destination map…</string>
     <string name="graph_ref_new_branch">New reference in a branch</string>
     <string name="graph_ref_branch_parent">Branch parent: %1$s</string>
-    <string name="graph_ref_finish_edit">Finish text editing in the map before adding a branch. You can still attach this page to an existing node or create a free node.</string>
+    <string name="graph_ref_finish_edit">Finish text editing in the map before adding a branch. You can still attach this reference to an existing node or create a free node.</string>
     <string name="graph_ref_new_free">New free reference node</string>
     <string name="graph_ref_change_map">Choose another map</string>
     <string name="graph_ref_add">Add reference</string>
@@ -121,8 +121,8 @@
     <string name="graph_ref_retry_save">Retry saving this map</string>
     <string name="graph_ref_create_retained">Map creation did not finish. Retained data is kept for this target. Continue with this same map or open it to review recovery; do not create it again.</string>
     <string name="graph_ref_open_retained">Continue with the retained map</string>
-    <string name="graph_ref_source_changed">The page or source changed, or cannot be read now. Retry; if needed, reopen the note and reference the page again.</string>
-    <string name="graph_ref_retry_source">Check the page again</string>
+    <string name="graph_ref_source_changed">The source changed or cannot be read completely. Retry; if needed, reopen the source and create the reference again.</string>
+    <string name="graph_ref_retry_source">Check the source again</string>
     <string name="graph_ref_target_changed">The target map changed or is unavailable. Choose it again or open it to review. Reading remains unchanged.</string>
     <string name="graph_host_import_notice">An import is waiting. Close this map to continue.</string>
     <string name="graph_source_opening">Opening source…</string>
@@ -285,4 +285,7 @@
     <string name="network_canvas_known_targets">Application maps and canvases (last known)</string>
     <string name="network_canvas_create_confirm_notice">For a new canvas, Save in the system picker confirms creation of the complete file cards.</string>
     <string name="graph_source_live_canvas">Showing the open canvas, including unsaved edits.</string>
+    <string name="graph_source_canvas_region">Fixed canvas region</string>
+    <string name="graph_preview_historical">Historical preview; may differ from the current range or content</string>
+    <string name="graph_backlinks_canvas_regions">Canvas regions</string>
 </resources>

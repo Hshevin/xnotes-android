@@ -541,7 +541,8 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         val title=node.text.ifBlank {if(node.kind==NodeKind.REFERENCE) node.sources.firstOrNull()?.fileName.orEmpty() else ""}
         return MapBacklinkRow(location,node.id,source.id,source.target,title.take(BacklinkBudget.LABEL_CHARS),node.kind,
             source.fileName.take(BacklinkBudget.LABEL_CHARS),source.note.take(BacklinkBudget.NOTE_CHARS),source.lastKnownPage,
-            source.status,preview,origin,conflict,blocked,membership?.invoke(node.id,source.id,source.target))
+            source.status,preview,origin,conflict,blocked,membership?.invoke(node.id,source.id,source.target),
+            source.observedVersion,source.sourceVersion,source.acceptedPreviewVersion)
     }
 
     /** Fresh action-time metadata: a previous live URI cannot undo a later move into Trash. */

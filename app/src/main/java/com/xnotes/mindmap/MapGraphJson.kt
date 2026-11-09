@@ -20,6 +20,20 @@ internal object MapGraphJson {
                     .put("generatedAt",preview.generatedAt).put("target",target(preview.target)))}
             })
     } }
+    /** v1 skips sources and v2 skips previews, so the format gate inspects their exact raw paths first. */
+    fun rejectCanvasRegions(nodes:JSONArray) {
+        for(i in 0 until nodes.length()) {
+            val node=nodes.opt(i) as? JSONObject ?: continue
+            val sources=node.opt("sources") as? JSONArray ?: continue
+            for(k in 0 until sources.length()) {
+                val source=sources.opt(k) as? JSONObject ?: continue
+                require(source.opt("scope")!=SourceScope.CANVAS_REGION.name)
+                val preview=source.opt("lastPreview") as? JSONObject ?: continue
+                val target=preview.opt("target") as? JSONObject ?: continue
+                require(target.opt("scope")!=SourceScope.CANVAS_REGION.name)
+            }
+        }
+    }
     fun readSources(n: JSONObject, previews:Boolean = false): List<MapSource> {
         val a=n.getJSONArray("sources"); require(a.length()<=128)
         return (0 until a.length()).map { i -> val s=a.getJSONObject(i)

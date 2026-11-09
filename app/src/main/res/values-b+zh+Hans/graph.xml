@@ -96,21 +96,21 @@
     <string name="graph_preview_image">最后保存的来源预览</string>
     <string name="graph_preview_backup_notice">预览不构成来源文件的备份。整份笔记与 PDF 的预览显示首页。</string>
     <string name="graph_reference_this_page">引用此页</string>
-    <string name="graph_ref_preparing">正在核实已保存的页面…</string>
+    <string name="graph_ref_preparing">正在准备已保存的来源…</string>
     <string name="graph_ref_save_then_retry">请先保存笔记，然后在所需页面再次引用。</string>
     <string name="graph_ref_save_copy_then_retry">请先将当前修改另存为独立副本，再从保存后的页面引用。原来源保持不变。</string>
     <string name="graph_ref_enable_notice">此笔记尚未启用页面引用。启用会保存永久页编号；完成后请重新打开，并在所需页面再次引用。原有笔迹和 PDF 保留。</string>
     <string name="graph_ref_reopened_retry">文件已重新打开，请在所需页面再次引用。</string>
     <string name="graph_ref_reopen_notice">请先重新打开文件，再在所需页面发起引用，确保页面对应正确。重新打开失败会保留当前文档。</string>
     <string name="graph_ref_reopen">重新打开此笔记</string>
-    <string name="graph_ref_destination_notice">将此页添加到已有图，或新建图。当前窗格继续保留阅读位置。</string>
+    <string name="graph_ref_destination_notice">将此引用添加到已有导图，或新建导图。当前阅读位置保持不变。</string>
     <string name="graph_ref_choose_map">选择已有导图</string>
     <string name="graph_ref_choose_node">选择下方概念节点，或创建引用节点。已有节点的正文将保留。</string>
     <string name="graph_ref_target_recovery">此图有恢复资料或保存冲突，可打开导图处理；不会自动覆盖冲突文件。</string>
     <string name="graph_ref_wait_pen">正在等待目标导图抬笔…</string>
     <string name="graph_ref_new_branch">新建分支引用节点</string>
     <string name="graph_ref_branch_parent">加入分支：%1$s</string>
-    <string name="graph_ref_finish_edit">添加分支前，请先在导图中完成文本编辑。仍可附加到已有节点，或创建自由节点。</string>
+    <string name="graph_ref_finish_edit">请先结束导图内的文字编辑，再添加分支。仍可将此引用添加到已有节点，或创建自由节点。</string>
     <string name="graph_ref_new_free">新建自由引用节点</string>
     <string name="graph_ref_change_map">更换目标导图</string>
     <string name="graph_ref_add">添加引用</string>
@@ -121,8 +121,8 @@
     <string name="graph_ref_retry_save">重试保存此图</string>
     <string name="graph_ref_create_retained">导图创建尚未完成，已为此目标保留资料。请继续处理同一张图，或打开查看恢复状态；不要重复创建。</string>
     <string name="graph_ref_open_retained">继续处理保留的导图</string>
-    <string name="graph_ref_source_changed">页面或来源已变化，或暂时无法读取。请重试；必要时重新打开笔记，再在所需页面引用。</string>
-    <string name="graph_ref_retry_source">重新核实此页</string>
+    <string name="graph_ref_source_changed">来源已变化，或目前无法完整读取。请重试；必要时重新打开来源，再创建引用。</string>
+    <string name="graph_ref_retry_source">重新核实来源</string>
     <string name="graph_ref_target_changed">目标导图已变化或不可用。请重新选择，或打开导图核实；当前阅读内容保持不变。</string>
     <string name="graph_host_import_notice">有文件等待导入，请关闭当前导图后继续。</string>
     <string name="graph_source_opening">正在打开来源…</string>
@@ -285,4 +285,7 @@
     <string name="network_canvas_known_targets">应用内已有导图与画布（最后记录）</string>
     <string name="network_canvas_create_confirm_notice">新建时，系统选择器中的“保存”将直接确认创建完整文件卡片。</string>
     <string name="graph_source_live_canvas">已定位到打开的画布，保留尚未保存的修改。</string>
+    <string name="graph_source_canvas_region">画布固定区域</string>
+    <string name="graph_preview_historical">历史预览，可能不代表当前范围或内容</string>
+    <string name="graph_backlinks_canvas_regions">画布区域</string>
 </resources>

@@ -175,7 +175,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 Text(s.fileName,fontSize=TextSize.title)
                 Text(sourceScopeLabel(s),fontSize=TextSize.caption)
                 SourcePreviewImage(editor.previewAsset(s.id))
-                if(s.lastPreview?.target?.let {it!=s.target}==true) Text(stringResource(R.string.graph_preview_old_target),fontSize=TextSize.caption)
+                if(s.hasHistoricalPreview) Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
                 if(s.id in editor.busySourceIds) Text(stringResource(R.string.graph_preview_working),fontSize=TextSize.caption)
                 if(s.id in editor.failedSourceIds) Text(stringResource(R.string.graph_preview_failed),fontSize=TextSize.caption)
                 Text(stringResource(when(s.status) {
@@ -238,8 +238,15 @@ internal fun SourcePreviewImage(asset:MapPreviewAsset?) {
 }
 
 @Composable
-internal fun sourceScopeLabel(source:MapSource)=if(source.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-    else source.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
+internal fun sourceScopeLabel(source:MapSource)=sourceRangeLabel(source.scope,source.lastKnownPage)
+
+@Composable
+internal fun sourceRangeLabel(scope:SourceScope,lastKnownPage:Int?):String=when(scope) {
+    SourceScope.FILE->stringResource(R.string.graph_source_whole_file)
+    SourceScope.CANVAS_REGION->stringResource(R.string.graph_source_canvas_region)
+    SourceScope.PAGE->lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)}
+        ?: stringResource(R.string.graph_source_page_unknown)
+}
 
 /** A text-only actual page directory; rows never decode or read their source independently. */
 @Composable

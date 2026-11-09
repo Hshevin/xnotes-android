@@ -124,6 +124,26 @@ internal class NativeDocumentPreview(
             checkActive();transferred=true;return surface.bitmap
         } finally {if(!transferred) surface.recycle()}
     }
+    /** A Canvas range is a fixed world frame, including blank space beyond current content bounds. */
+    fun canvasRegion(doc:InfiniteDocument,region:Rect,maxSidePx:Int,checkActive:()->Unit={}):Bitmap {
+        checkOpen();checkActive();require(maxSidePx in 1..2048)
+        require(listOf(region.x,region.y,region.w,region.h).all {it.isFinite()} && region.w>0 && region.h>0)
+        val scale=maxSidePx/maxOf(region.w,region.h)
+        val width=(region.w*scale).roundToInt().coerceIn(1,maxSidePx)
+        val height=(region.h*scale).roundToInt().coerceIn(1,maxSidePx)
+        val surface=AndroidRasterSurface.create(width,height);var transferred=false
+        try {
+            surface.fill(doc.background.paperColor ?: Rgba(255,255,255))
+            val r=surface.renderer();r.scale(scale,scale);r.translate(-region.left,-region.top);r.clipRect(region)
+            val bg=doc.background
+            val period=bg.clampedSpacing*com.xnotes.core.infinite.BackgroundPattern.levelMultiplier(bg.clampedSpacing,scale)
+            paintPagePattern(r,bg.pattern,bg.patternColor,period,region,region)
+            for(item in doc.layers.ordered(doc.items.toList())) {
+                checkActive();if(item.paintBounds().intersects(region)) item.paint(r)
+            }
+            checkActive();transferred=true;return surface.bitmap
+        } finally {if(!transferred) surface.recycle()}
+    }
     override fun close() {if(closed) return;closed=true;pdf?.close();pdf=null;flowFrame=null;flowDocument=null}
     companion object {
         fun footprint(doc:Document,page:Page):Rect=page.insets(doc).let {Rect(-it.left,-it.top,it.left+page.width+it.right,it.top+page.height+it.bottom)}

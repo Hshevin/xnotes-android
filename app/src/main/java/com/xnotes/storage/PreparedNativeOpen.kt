@@ -26,6 +26,7 @@ internal class PreparedNativeOpen private constructor(
     private val pdfIds:Set<String>,private val lease:AutoCloseable,
     private val recoveryBinding:RecoveryBinding?=null,
     private val completeCanvas:CanvasCodec.CompleteRead?=null,
+    private val observedCanvas:CanvasCodec.CompleteRead?=completeCanvas,
 ) : AutoCloseable {
     private class RecoveryBinding(val session:NativeWorkingSession,val read:NativeWorkingSession.Read,val id:String)
     @Volatile private var recoveryClaimed=false
@@ -64,6 +65,9 @@ internal class PreparedNativeOpen private constructor(
     @Synchronized fun adopt(document:InfiniteDocument) {
         checkReady();if(!same(document) || completeCanvas?.matches(document)==false) reject();adopted=true
     }
+    /** Only the actual complete decoded model can seed a new reference's in-place save baseline. */
+    @Synchronized fun completeCanvasOrigin(document:InfiniteDocument):Boolean =
+        !closed && adopted && same(document) && observedCanvas?.matches(document)==true
     private fun checkReady() {check(!closed && protected) {"Prepared open is not ready for adoption"}}
     @Synchronized fun sourceVersion(document:Document):NativeSourceVersion {
         check(adopted) {"Source version requires actual adoption"};if(!same(document)) reject();return version
@@ -384,6 +388,7 @@ internal class PreparedNativeOpen private constructor(
                 val bytes=source.file.length();val version=source.version
                 val note:Document?;val canvas:InfiniteDocument?
                 var completeCanvas:CanvasCodec.CompleteRead?=null
+                var observedCanvas:CanvasCodec.CompleteRead?=null
                 fun input()=object:java.io.FilterInputStream(source.file.inputStream()) {
                     override fun read():Int {checkActive();return super.read()}
                     override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length)}
@@ -396,9 +401,10 @@ internal class PreparedNativeOpen private constructor(
                     DocumentKind.CANVAS -> {
                         if(requireCompleteCanvas) {
                             val complete=input().use {canvasCodec.readComplete(it,assets)}
-                            completeCanvas=complete;canvas=complete.document;source.verify(complete)
+                            completeCanvas=complete;observedCanvas=complete;canvas=complete.document;source.verify(complete)
                         } else {
-                            canvas=input().use {canvasCodec.read(it,assets)};source.verify(canvas)
+                            val observed=input().use {canvasCodec.readObserved(it,assets)}
+                            canvas=observed.document;observedCanvas=observed.complete;source.verify(canvas)
                         }
                         note=null
                     }
@@ -411,7 +417,8 @@ internal class PreparedNativeOpen private constructor(
                 } ?: emptySet()
                 lease=source.retainPdfForAdoption()
                 checkActive()
-                return PreparedNativeOpen(version,bytes,note,canvas,assets,resources,ids,lease,completeCanvas=completeCanvas)
+                return PreparedNativeOpen(version,bytes,note,canvas,assets,resources,ids,lease,
+                    completeCanvas=completeCanvas,observedCanvas=observedCanvas)
             } catch(error:Throwable) {
                 try {lease?.close()} catch(close:Throwable) {error.addSuppressed(close)}
                 try {if(!assets.deleteRecursively() && assets.exists()) error.addSuppressed(java.io.IOException("Cannot remove prepared document assets"))}
