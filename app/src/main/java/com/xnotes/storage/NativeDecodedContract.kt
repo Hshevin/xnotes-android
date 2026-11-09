@@ -17,8 +17,10 @@ internal object NativeDecodedContract {
                 throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
         } else if(actual.any {it!=null}) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
         val expected=info.originalPdfHash
-        // A legacy body may have no identity; no source binding is inferred from its decoded ID.
-        if(info.header.identity!=null && document.identity!=info.header.identity && (expected==null || document.identity.pdfResource!=expected))
+        // Only a legacy note with no PDF contract may use its decoder-generated UUID unbound.
+        // A matching PDF file never excuses a decoded identity pointing at another resource.
+        val hasPdfContract=info.header.identity!=null || expected!=null || document.identity.pdfResource!=null
+        if(hasPdfContract && document.identity!=info.header.identity && (expected==null || document.identity.pdfResource!=expected))
             throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
         val original=document.pdfFile
         if(expected==null) {

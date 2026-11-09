@@ -87,6 +87,8 @@ class PreparedRecoveryPreviewTest {
     @Test fun anEmbeddedOriginalStaysLeasedUntilPreviewCloseAndIsNeverDeletedByAssetCleanup()=scenario {f->
         val source=bundle(f,pdf="%PDF-1.7 immutable original".toByteArray());val before=source.readBytes()
         val preview=f.preview(BundleSnapshot.take(source,f.root));val pdf=preview.note!!.pdfFile!!
+        assertEquals(BundleMigration.hash(pdf),preview.note!!.identity.pdfResource)
+        assertNull(BundleIdentity.read(source));assertArrayEquals(before,source.readBytes())
         f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0")
         f.storage.pdfResources.collect();assertTrue(pdf.isFile)
         preview.close();assertTrue(pdf.isFile) // Closing never deletes a shared original directly.

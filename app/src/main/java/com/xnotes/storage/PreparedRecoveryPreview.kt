@@ -96,11 +96,19 @@ internal class PreparedRecoveryPreview private constructor(
                 val note:Document?;val canvas:InfiniteDocument?
                 when(kind) {
                     DocumentKind.NOTE->{
+                        var admittedOriginal:File?=null
                         note=input().use {noteCodec.read(it,pdfDir,owned,pdfStore={input->input.use {stream->
                             val expected=info.embeddedPdfHash ?: throw WorkingSessionCache.Invalid()
                             val held=resources.admitHeld(stream,"PDF",expected);leases.add(held.lease)
+                            admittedOriginal=held.file
                             checkActive();held.file
                         }})};canvas=null
+                        // A genuinely old body has no persisted resource field. Bind only the
+                        // exact original admitted above against this body's verified PDF hash.
+                        if(info.header.identity==null && note.identity.pdfResource==null && admittedOriginal!=null &&
+                            note.pdfFile===admittedOriginal) {
+                            note.identity=note.identity.copy(pdfResource=requireNotNull(info.embeddedPdfHash))
+                        }
                         NativeDecodedContract.note(note,info,expectedId ?: info.header.identity?.documentId,checkActive)
                         if(info.header.anchors!=null && note.pages.map {it.referenceIdentity.id}!=info.orderedPageIds)
                             throw WorkingSessionCache.Invalid()
