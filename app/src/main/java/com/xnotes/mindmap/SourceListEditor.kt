@@ -8,6 +8,9 @@ import androidx.compose.runtime.setValue
 internal class SourceListEditor(private val session:MapSession,initial:SourceEditSnapshot) {
     private var expected=initial
     private var active=true
+    private data class NoteDraft(val ticket:MapSourcePreviewTicket?,val initial:String,val value:String)
+    private var noteDrafts by mutableStateOf<Map<String,NoteDraft>>(emptyMap())
+    val hasNoteDrafts:Boolean get()=noteDrafts.isNotEmpty()
     var conflict by mutableStateOf(false);private set
     val busySourceIds:Set<String> get()=session.sourcePreviews.busy(this)
     val failedSourceIds:Set<String> get()=session.sourcePreviews.failures(this)
@@ -43,7 +46,7 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
         return session.sourcePreviews.request(this,tickets,MapSourcePreviewMode.CHECK,::alive)
     }
     fun cancel() {session.sourcePreviews.cancel(this)}
-    fun close() {if(active) {active=false;cancel()}}
+    fun close() {if(active) {active=false;noteDrafts=emptyMap();cancel()}}
     fun sync(displayed:SourceEditSnapshot) {
         if(!active) return
         val actual=session.sourceEditSnapshot(expected.node.id) ?: return close()
@@ -57,6 +60,52 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
         if(!session.editSources(expected,next)) {conflict=true;return false}
         session.sourceEditSnapshot(expected.node.id)?.let {expected=it} ?: close()
         conflict=false;return true
+    }
+    fun noteDraft(id:String):String?=noteDrafts[id]?.value
+    /** Capture from the displayed row, before a late field callback can encounter a new member. */
+    fun captureNote(shown:MapSource):MapSourcePreviewTicket? {
+        if(!alive()) return null
+        val ticket=session.captureSourcePreview(expected.node.id,shown.id) ?: return null
+        val actual=session.currentSourcePreview(ticket) ?: return null
+        return ticket.takeIf {actual.target==shown.target && actual.note==shown.note}
+    }
+    /** Keystrokes only change this row's draft; sync must never replace its original baseline. */
+    fun draftNote(shown:MapSource,ticket:MapSourcePreviewTicket?,value:String):Boolean {
+        if(!alive() || value.length>20_000) return false
+        val id=shown.id
+        val draft=noteDrafts[id]
+        if(draft!=null) {
+            if(draft.ticket!=ticket) {conflict=true;return false}
+            noteDrafts=noteDrafts+(id to draft.copy(value=value));return true
+        }
+        val bound=ticket?.takeIf {it.nodeId==expected.node.id && it.sourceId==id && it.target==shown.target}
+        noteDrafts=noteDrafts+(id to NoteDraft(bound,shown.note,value))
+        val actual=bound?.let(session::currentSourcePreview)
+        if(actual==null || actual.note!=shown.note) {conflict=true;return false}
+        return true
+    }
+    fun commitNote(id:String,ticket:MapSourcePreviewTicket?):Boolean {
+        val draft=noteDrafts[id] ?: return true
+        if(draft.ticket!=ticket) {conflict=true;return false}
+        return commitNotes(setOf(id))
+    }
+    fun commitNotes():Boolean=commitNotes(noteDrafts.keys)
+    private fun commitNotes(ids:Set<String>):Boolean {
+        val pending=noteDrafts.filterKeys {it in ids}
+        if(pending.isEmpty()) return true
+        if(!alive()) return false
+        val current=session.sourceEditSnapshot(expected.node.id) ?: return false
+        val changed=pending.filterValues {it.value!=it.initial}
+        if(changed.values.any {draft->draft.ticket?.let(session::currentSourcePreview)?.note!=draft.initial}) {conflict=true;return false}
+        if(changed.isNotEmpty()) {
+            val next=current.node.copy(sources=current.node.sources.map {source->
+                changed[source.id]?.let {source.copy(note=it.value)} ?: source
+            })
+            if(!session.editSources(current,next)) {conflict=true;return false}
+        }
+        session.sourceEditSnapshot(expected.node.id)?.let {expected=it} ?: return false
+        noteDrafts=noteDrafts.filterKeys {it !in pending};conflict=false
+        return true
     }
     fun note(id:String,value:String):Boolean {
         val node=expected.node
@@ -79,6 +128,8 @@ internal class SourceListEditor(private val session:MapSession,initial:SourceEdi
     fun remove(id:String):Boolean {
         val node=expected.node
         if(node.sources.none {it.id==id}) return false
-        return apply(node.copy(sources=node.sources.filterNot {it.id==id},primarySource=node.primarySource.takeUnless {it==id}))
+        return apply(node.copy(sources=node.sources.filterNot {it.id==id},primarySource=node.primarySource.takeUnless {it==id})).also {
+            if(it) noteDrafts=noteDrafts-id
+        }
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import com.xnotes.R
 import com.xnotes.ui.theme.*
@@ -150,8 +151,10 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
     val alive=remember(editor) {java.util.concurrent.atomic.AtomicBoolean(true)}
     DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
     SideEffect {editor.sync(snapshot)}
-    fun dismiss() {if(alive.get()) {alive.set(false);editor.close();close()}}
-    AlertDialog(onDismissRequest=::dismiss,title={Column {
+    fun dismiss(confirmNotes:Boolean=true) {
+        if(alive.get() && (!confirmNotes || editor.commitNotes())) {alive.set(false);editor.close();close()}
+    }
+    AlertDialog(onDismissRequest={dismiss()},title={Column {
         if(node.text.isNotBlank()) Text(node.text.take(256),fontSize=TextSize.heading)
         Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
     }},text={
@@ -169,6 +172,8 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
             feedback?.let {message->item {Text(stringResource(message),fontSize=TextSize.body)}}
             items(node.sources.size,key={node.sources[it].id}) { index ->
                 val s=node.sources[index]
+                val noteTicket=editor.captureNote(s)
+                var noteFocused by remember(s.id) {mutableStateOf(false)}
                 // Bind the visible row before click; remove/undo must not let an old UI mint a new lifetime.
                 val navigation=if(open!=null) editor.captureNavigation(s.id,s.target) else null
                 LaunchedEffect(editor,s.id,s.target) {if(alive.get()) editor.showPreview(s.id,s.target)}
@@ -190,12 +195,16 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 }),fontSize=TextSize.caption)
                 Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
                     if(open!=null) MapButton(R.string.open,enabled=navigation!=null) {
-                        if(alive.get() && navigation!=null) open(navigation)
+                        if(alive.get() && navigation!=null && editor.commitNotes()) open(navigation)
                     }
                     MapButton(R.string.graph_preview_check,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.check(s.id,s.target)}
                     MapButton(R.string.graph_preview_refresh,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.refresh(s.id,s.target)}
                 }
-                OutlinedTextField(s.note,{ note -> if(alive.get()) editor.note(s.id,note) },enabled=!LocalInkBusy.current,
+                OutlinedTextField(editor.noteDraft(s.id) ?: s.note,{ note -> if(alive.get()) editor.draftNote(s,noteTicket,note) },enabled=!LocalInkBusy.current,
+                    modifier=Modifier.onFocusChanged {state->
+                        val blurred=noteFocused && !state.isFocused;noteFocused=state.isFocused
+                        if(blurred && alive.get()) editor.commitNote(s.id,noteTicket)
+                    },
                     label={Text(stringResource(R.string.graph_note),fontSize=TextSize.body)},textStyle=androidx.compose.ui.text.TextStyle(fontSize=TextSize.body))
                 Row {
                     MapButton(R.string.graph_primary,selected=node.primarySource==s.id){if(alive.get()) editor.primary(s.id)}
@@ -210,7 +219,10 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 HorizontalDivider()
             }
         }
-    },confirmButton={if(node.fileCardId==null) MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
+    },confirmButton={if(node.fileCardId==null) MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get() && editor.commitNotes()) add()}},dismissButton={Row {
+        if(editor.hasNoteDrafts) MapButton(R.string.cancel) {dismiss(false)}
+        MapButton(R.string.map_done) {dismiss()}
+    }})
 }
 
 /** Only validated immutable PNG assets enter Android's decoder; late unpublished bitmaps are ours. */

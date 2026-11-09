@@ -84,15 +84,16 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
         error("No composed action for $label; available ${semantics().mapNotNull {it.config.getOrNull(SemanticsProperties.Text)}}")
     }
     fun click(id:Int) {assertTrue(clickAction(id)());settle()}
-    fun enter(value:String) {
+    fun textAction():(AnnotatedString)->Boolean {
         repeat(30) {
             semantics().firstNotNullOfOrNull {it.config.getOrNull(SemanticsActions.SetText)?.action}?.let {action->
-                assertTrue(action(AnnotatedString(value)));settle();return
+                return action
             }
             settle()
         }
         error("No actual composed text field")
     }
+    fun enter(value:String) {assertTrue(textAction()(AnnotatedString(value)));settle()}
     fun visible(id:Int)=semantics().any {node->node.config.getOrNull(SemanticsProperties.Text)?.any {it.text==activity.getString(id)}==true}
     override fun close() {
         activity.setContent {};settle()
