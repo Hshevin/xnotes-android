@@ -150,9 +150,11 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
             if(held==null && !loaded(MapDocuments.acquire(app,uri))) return@runAccepted
             if(!current()) {release()?.join();return@runAccepted}
             val session=requireNotNull(targetSession)
-            if(session.document?.id!=targetId || session.interactionEpoch!=targetEpoch || session.hasUnconfirmedContent) {
+            if(session.document?.id!=targetId || session.hasUnconfirmedContent) {
                 problem=true;step=NetworkCanvasStep.CONFIRM;return@runAccepted
             }
+            // Each explicit retry authorizes the current interaction, not a retired busy attempt.
+            targetEpoch=session.interactionEpoch
             val prepared=session.captureFileCards(selection.seeds)
             if(prepared==null) {problem=true;step=NetworkCanvasStep.CONFIRM;return@runAccepted}
             when(val result=session.importFileCards(prepared)) {
@@ -193,7 +195,8 @@ internal class NetworkToCanvasController(context:Context,val selection:NetworkCa
         val result=session.saveAttempt().await()
         if(!active) return
         saveOutcome=result
-        step=if(result is MapSaveOutcome.Written && matchingCards()) NetworkCanvasStep.ADDED else NetworkCanvasStep.SAVE_FAILED
+        step=if((result is MapSaveOutcome.Written || result is MapSaveOutcome.Changed) && matchingCards())
+            NetworkCanvasStep.ADDED else NetworkCanvasStep.SAVE_FAILED
         problem=step==NetworkCanvasStep.SAVE_FAILED
     }
     fun retrySave():Boolean {
