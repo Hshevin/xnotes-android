@@ -26,7 +26,7 @@ class NetworkFileRelationDataTest {
     private suspend fun controller(f:MapBacklinkLibraryTest.Fixture,a:String,block:suspend(LocalFileNetworkController)->Unit)=withContext(Dispatchers.Main) {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         val c=LocalFileNetworkController(f.context,scope,NetworkQuery(a,"A",listOf(f.tree.toString())))
-        try {assertTrue(c.refresh());await {!c.loading && c.report!=null};block(c)} finally {c.close();scope.cancel()}
+        try {assertTrue(c.refresh());await {!c.loading && !c.filtering && c.report!=null};block(c)} finally {c.close();scope.cancel()}
     }
     @Test fun manualOnlyGraphsWorkInLocalCollectionAndLibraryAndNeverInventOwnerEdges()=MapBacklinkLibraryTest().scenario {f->
         val a=id();val b=id();val doc=cards(a,b);val second=cards(b,a)
@@ -36,9 +36,9 @@ class NetworkFileRelationDataTest {
             assertEquals(1,c.report!!.aggregatedFileRelations.size);assertEquals(setOf(a,b),c.report!!.files.map {it.documentId}.toSet())
             val row=c.report!!.fileRelations.first();val request=c.captureRelation(row)!!;assertTrue(request.current())
             assertTrue(c.applyFilter(NetworkFilter(fileIds=setOf(doc.id))));assertTrue(c.report!!.fileRelations.isEmpty());assertFalse(request.current())
-            assertTrue(c.applyFilter(NetworkFilter()));assertTrue(c.showLibrary());await {!c.loading && c.report!!.browseMode==NetworkBrowseMode.LIBRARY}
+            assertTrue(c.applyFilter(NetworkFilter()));assertTrue(c.showLibrary());await {!c.loading && !c.filtering && c.report!!.browseMode==NetworkBrowseMode.LIBRARY}
             assertEquals(2,c.report!!.fileRelations.size);assertTrue(c.fileChoices.any {it.documentId==b})
-            assertTrue(c.showCollection(setOf(b)));await {!c.loading && c.report!!.browseMode==NetworkBrowseMode.FILES}
+            assertTrue(c.showCollection(setOf(b)));await {!c.loading && !c.filtering && c.report!!.browseMode==NetworkBrowseMode.FILES}
             assertEquals(2,c.report!!.fileRelations.size);assertTrue(c.report!!.concepts.isEmpty())
             assertFalse(c.captureRelation(row)?.current()==true)
         }
@@ -52,10 +52,10 @@ class NetworkFileRelationDataTest {
         await {!lease.session.loading}
         controller(f,a) {c->
             assertEquals(1,c.report!!.fileRelations.size);assertTrue(c.report!!.concepts.isEmpty())
-            assertTrue(c.setExpanded(b,true));await {!c.loading && c.report!!.concepts.size==1}
+            assertTrue(c.setExpanded(b,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==1}
             val center=c.report!!.concepts.single();assertEquals(1,center.origin!!.relationPath.size)
             val open=c.captureFocus(center.members.first(),center.members.last())!!;assertTrue(open.current())
-            assertTrue(c.setExpanded(cId,true));await {!c.loading && c.report!!.fileRelations.size==2}
+            assertTrue(c.setExpanded(cId,true));await {!c.loading && !c.filtering && c.report!!.fileRelations.size==2}
             assertTrue(c.applyFilter(NetworkFilter(fileIds=setOf(d))))
             assertEquals(2,c.report!!.fileRelations.size);assertEquals(1,c.report!!.contextFileRelations.size)
             assertEquals(setOf("concept"),c.report!!.contextConcepts.map {it.nodeId}.toSet());assertEquals(setOf(d),c.report!!.matchedFiles)
@@ -76,7 +76,7 @@ class NetworkFileRelationDataTest {
         controller(f,a) {c->
             val stored=c.report!!.fileRelations.single();assertNotNull(c.captureRelation(stored))
             val lease=MapDocuments.acquire(f.context,f.uri(file)).also(f.leases::add)
-            await {!lease.session.loading && !c.loading && c.report!!.fileRelations.singleOrNull()?.origin==BacklinkOrigin.LIVE}
+            await {!lease.session.loading && !c.loading && !c.filtering && c.report!!.fileRelations.singleOrNull()?.origin==BacklinkOrigin.LIVE}
             assertNull(c.captureRelation(stored));val live=c.report!!.fileRelations.single();val old=c.captureRelation(live)!!
             val reads=f.reads.get();val trees=f.treeQueries.get()
             assertTrue(lease.session.operate {it.copy(relations=it.relations.map {r->r.copy(label="Changed remark")})})
@@ -97,10 +97,10 @@ class NetworkFileRelationDataTest {
         controller(f,a) {c->
             assertEquals(2,c.report!!.fileRelations.size);assertTrue(c.report!!.fileRelations.all {it.blocked==BacklinkProblem.DUPLICATE})
             assertEquals(1,c.report!!.aggregatedFileRelations.size);assertNull(c.captureRelation(c.report!!.fileRelations.first()))
-            assertTrue(c.setExpanded(b,true));await {!c.loading}
+            assertTrue(c.setExpanded(b,true));await {!c.loading && !c.filtering}
             assertEquals(2,c.report!!.fileRelations.size);assertFalse(c.report!!.files.any {it.documentId==cId})
             val lease=MapDocuments.acquire(f.context,f.uri(first)).also(f.leases::add)
-            await {!lease.session.loading && !c.loading && c.report!!.fileRelations.any {it.origin==BacklinkOrigin.LIVE}}
+            await {!lease.session.loading && !c.loading && !c.filtering && c.report!!.fileRelations.any {it.origin==BacklinkOrigin.LIVE}}
             assertEquals(2,c.report!!.fileRelations.size);assertTrue(c.report!!.fileRelations.all {it.blocked==BacklinkProblem.DUPLICATE})
             assertFalse(c.report!!.files.any {it.documentId==cId})
         }
@@ -111,7 +111,7 @@ class NetworkFileRelationDataTest {
         val prefix=f.graph("prefix.xmap",first);f.graph("next.xmap",cards(b,cId));f.graph("concept.xmap",concept(b,cId))
         val original=prefix.readBytes()
         controller(f,a) {c->
-            assertTrue(c.setExpanded(b,true));await {!c.loading && c.report!!.fileRelations.size==2 && c.report!!.concepts.size==1}
+            assertTrue(c.setExpanded(b,true));await {!c.loading && !c.filtering && c.report!!.fileRelations.size==2 && c.report!!.concepts.size==1}
             val relation=c.report!!.fileRelations.single {cId in it.fileIds};val relationRequest=c.captureRelation(relation)!!
             val concept=c.report!!.concepts.single();val conceptRequest=c.captureFocus(concept.members.first(),concept.members.last())!!
             assertTrue(relationRequest.current());assertTrue(conceptRequest.current())
@@ -120,14 +120,14 @@ class NetworkFileRelationDataTest {
             assertFalse(relationRequest.current());assertFalse(conceptRequest.current())
             await {!independent.session.loading}
             independent.close().join()
-            await {!c.loading && c.report!!.fileRelations.all {it.origin!=BacklinkOrigin.LIVE}}
+            await {!c.loading && !c.filtering && c.report!!.fileRelations.all {it.origin!=BacklinkOrigin.LIVE}}
             assertFalse(relationRequest.current());assertFalse(conceptRequest.current())
             val editing=MapDocuments.acquire(f.context,f.uri(prefix)).also(f.leases::add)
             await {!editing.session.loading}
             assertTrue(editing.session.operate {it.copy(relations=emptyList())});editing.session.cancelPendingAutosave()
-            await {!c.loading && c.report!!.concepts.isEmpty() && c.report!!.fileRelations.isEmpty()}
+            await {!c.loading && !c.filtering && c.report!!.concepts.isEmpty() && c.report!!.fileRelations.isEmpty()}
             editing.session.undo();editing.session.cancelPendingAutosave()
-            await {!c.loading && c.report!!.fileRelations.size==2}
+            await {!c.loading && !c.filtering && c.report!!.fileRelations.size==2}
             assertFalse(relationRequest.current());assertFalse(conceptRequest.current())
         }
         assertArrayEquals(original,prefix.readBytes());assertEquals(0,f.writes.get());assertEquals(0,f.deletes.get())
@@ -138,7 +138,7 @@ class NetworkFileRelationDataTest {
         val both=doc.copy(relations=doc.relations+tail)
         val file=f.graph("same-graph.xmap",both);val original=file.readBytes()
         controller(f,a) {c->
-            assertTrue(c.setExpanded(b,true));await {!c.loading && c.report!!.fileRelations.size==2}
+            assertTrue(c.setExpanded(b,true));await {!c.loading && !c.filtering && c.report!!.fileRelations.size==2}
             val row=c.report!!.fileRelations.single {it.relation.id=="tail"};val request=c.captureRelation(row)!!
             val ready=acquireFileRelation(f.context,request,{true}) as FileRelationAccessResult.Ready
             f.leases+=ready.lease
@@ -155,7 +155,7 @@ class NetworkFileRelationDataTest {
         val concept=MapNode(id="concept",parent=null,free=true,text="Concept",sources=listOf(MapSource(documentId=b),MapSource(documentId=cId)))
         val doc=linked.copy(nodes=linked.nodes+concept);val file=f.graph("same-graph-concept.xmap",doc);val original=file.readBytes()
         controller(f,a) {c->
-            assertTrue(c.setExpanded(b,true));await {!c.loading && c.report!!.concepts.size==1}
+            assertTrue(c.setExpanded(b,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==1}
             val item=c.report!!.concepts.single();val request=c.captureFocus(item.members.first(),item.members.last())!!
             val result=acquireNetwork(f.context,request,{true}) as MapNetworkAccessResult.Ready
             f.leases+=result.lease;assertTrue(request.current())

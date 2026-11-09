@@ -22,7 +22,7 @@ class NetworkExpansionDataTest {
     private suspend fun controller(f:MapBacklinkLibraryTest.Fixture,focus:String,block:suspend(LocalFileNetworkController)->Unit)=withContext(Dispatchers.Main) {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         val c=LocalFileNetworkController(f.context,scope,NetworkQuery(focus,"Center",listOf(f.tree.toString())))
-        try {assertTrue(c.refresh());await {!c.loading && c.report!=null};block(c)}
+        try {assertTrue(c.refresh());await {!c.loading && !c.filtering && c.report!=null};block(c)}
         finally {c.close();scope.cancel()}
     }
     @Test fun aSingleActualReadProjectsDirectDeepAndOwnedConceptsWithoutFollowingOrdinaryEdges()=MapBacklinkLibraryTest().scenario {f->
@@ -61,8 +61,8 @@ class NetworkExpansionDataTest {
         controller(f,s.documentId) {c->
             assertEquals(setOf("st"),c.report!!.concepts.map {it.key.nodeId}.toSet())
             assertFalse(c.setExpanded(v.documentId,true));assertFalse(c.setExpanded(s.documentId,false))
-            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && c.report!!.concepts.size==2}
-            assertTrue(c.setExpanded(u.documentId,true));await {!c.loading && c.report!!.concepts.size==3}
+            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==2}
+            assertTrue(c.setExpanded(u.documentId,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==3}
             val tu=c.report!!.concepts.single {it.key.nodeId=="tu"}
             val request=c.captureFocus(tu.members.single {it.fileId==t.documentId},tu.members.single {it.fileId==u.documentId})!!
             assertEquals(t.documentId,request.anchor.target.documentId);assertTrue(request.current())
@@ -74,10 +74,10 @@ class NetworkExpansionDataTest {
             assertEquals(setOf(s.documentId,t.documentId,u.documentId,v.documentId),c.catalog.map {it.documentId}.toSet())
             assertFalse(request.current());assertFalse(c.collapseAll(oldRevision))
             assertTrue(c.applyFilter(NetworkFilter()));assertTrue(c.setExpanded(t.documentId,false))
-            await {!c.loading && c.report!!.concepts.size==1}
+            await {!c.loading && !c.filtering && c.report!!.concepts.size==1}
             assertTrue(c.expandedFiles.contains(u.documentId));assertFalse(request.current())
-            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && c.report!!.concepts.size==3}
-            assertFalse(request.current());assertTrue(c.collapseAll());await {!c.loading && c.report!!.concepts.size==1}
+            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==3}
+            assertFalse(request.current());assertTrue(c.collapseAll());await {!c.loading && !c.filtering && c.report!!.concepts.size==1}
             assertTrue(c.expandedFiles.isEmpty())
         }
         listOf(a,b,d).forEachIndexed {i,file->assertArrayEquals(bytes[i],file.readBytes())}
@@ -88,7 +88,7 @@ class NetworkExpansionDataTest {
         val doc=graph(concept("direct",s,t),concept("owned-only",u));val file=f.graph("owner.xmap",doc)
         val bytes=file.readBytes()
         controller(f,s.documentId) {c->
-            assertTrue(c.setExpanded(doc.id,true));await {!c.loading && c.report!!.concepts.size==2}
+            assertTrue(c.setExpanded(doc.id,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==2}
             val direct=c.report!!.concepts.single {it.key.nodeId=="direct"}
             val owned=c.report!!.concepts.single {it.key.nodeId=="owned-only"}
             assertEquals(NetworkOriginKind.OWNER,owned.origin!!.kind);assertEquals(doc.id,owned.origin!!.fileId)
@@ -106,7 +106,7 @@ class NetworkExpansionDataTest {
         val lease=withContext(Dispatchers.Main) {MapDocuments.acquire(f.context,f.uri(a)).also(f.leases::add)}
         await {!lease.session.loading}
         controller(f,s.documentId) {c->
-            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && c.report!!.concepts.size==2}
+            assertTrue(c.setExpanded(t.documentId,true));await {!c.loading && !c.filtering && c.report!!.concepts.size==2}
             val deep=c.report!!.concepts.single {it.key.nodeId=="tu"}
             val request=c.captureFocus(deep.members.single {it.fileId==t.documentId},deep.members.single {it.fileId==u.documentId})!!
             val reads=f.reads.get();val trees=f.treeQueries.get()

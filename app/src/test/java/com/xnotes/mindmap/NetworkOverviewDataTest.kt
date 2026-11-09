@@ -22,7 +22,7 @@ class NetworkOverviewDataTest {
     private suspend fun controller(f:MapBacklinkLibraryTest.Fixture,query:NetworkQuery,block:suspend(LocalFileNetworkController)->Unit)=withContext(Dispatchers.Main) {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         val c=LocalFileNetworkController(f.context,scope,query)
-        try {assertTrue(c.refresh());await {!c.loading && c.report!=null};block(c)}
+        try {assertTrue(c.refresh());await {!c.loading && !c.filtering && c.report!=null};block(c)}
         finally {c.close();scope.cancel()}
     }
     @Test fun libraryProjectsEveryRealSourceConceptInOneReadPerGraphWithoutInventingBodyReferences()=MapBacklinkLibraryTest().scenario {f->
@@ -66,16 +66,16 @@ class NetworkOverviewDataTest {
         controller(f,NetworkQuery(s.documentId,"S",listOf(f.tree.toString()))) {c->
             assertEquals(NetworkBrowseMode.LOCAL,c.browseMode);assertTrue(c.fileChoices.isEmpty())
             assertFalse(c.showCollection(setOf(u.documentId)))
-            assertTrue(c.showLibrary());await {!c.loading && c.browseMode==NetworkBrowseMode.LIBRARY && c.report!!.concepts.size==2}
+            assertTrue(c.showLibrary());await {!c.loading && !c.filtering && c.browseMode==NetworkBrowseMode.LIBRARY && c.report!!.concepts.size==2}
             val old=c.report!!.concepts.first().members.first();val request=c.captureFocus(old,old)!!
             val draftRevision=c.filterRevision
             assertTrue(c.applyFilter(NetworkFilter(fileIds=setOf(u.documentId))))
-            assertTrue(c.showCollection(setOf(u.documentId)));await {!c.loading && c.browseMode==NetworkBrowseMode.FILES}
+            assertTrue(c.showCollection(setOf(u.documentId)));await {!c.loading && !c.filtering && c.browseMode==NetworkBrowseMode.FILES}
             assertEquals(setOf(u.documentId),c.centreFiles);assertEquals(setOf("u"),c.report!!.concepts.map {it.key.nodeId}.toSet())
             assertTrue(c.filter.active);assertFalse(request.current());assertFalse(c.showLibrary(draftRevision))
-            assertTrue(c.showLocal());await {!c.loading && c.browseMode==NetworkBrowseMode.LOCAL}
+            assertTrue(c.showLocal());await {!c.loading && !c.filtering && c.browseMode==NetworkBrowseMode.LOCAL}
             assertTrue(c.filter.active);assertTrue(c.report!!.concepts.isEmpty());assertFalse(request.current())
-            assertTrue(c.showLibrary());await {!c.loading && c.browseMode==NetworkBrowseMode.LIBRARY}
+            assertTrue(c.showLibrary());await {!c.loading && !c.filtering && c.browseMode==NetworkBrowseMode.LIBRARY}
             assertFalse(request.current());assertTrue(c.fileChoices.any {it.documentId==b.id})
             assertFalse(c.showCollection(emptySet()));assertFalse(c.showCollection(setOf(id())))
         }

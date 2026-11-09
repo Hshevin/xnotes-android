@@ -37,7 +37,7 @@ class LocalFileNetworkDataTest {
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
         val c=LocalFileNetworkController(f.context,scope,NetworkQuery(focus,"Current source",listOf(f.tree.toString())),budget)
         try {
-            assertTrue(c.refresh());await {!c.loading && c.report!=null}
+            assertTrue(c.refresh());await {!c.loading && !c.filtering && c.report!=null}
             block(c)
         } finally {c.close();scope.cancel()}
     }
@@ -91,7 +91,7 @@ class LocalFileNetworkDataTest {
             val storedTarget=stored.single {it.row.sourceId==s.second.id}
             assertNotNull(c.captureFocus(storedAnchor,storedTarget))
             val lease=MapDocuments.acquire(f.context,f.uri(file)).also(f.leases::add)
-            await {!lease.session.loading && !c.loading && members(c.report!!).all {it.row.origin==BacklinkOrigin.LIVE}}
+            await {!lease.session.loading && !c.loading && !c.filtering && members(c.report!!).all {it.row.origin==BacklinkOrigin.LIVE}}
             val session=lease.session;assertFalse(session.loadFailed)
             assertNull("A stored display row cannot re-sign against an actor opened by somebody else",c.captureFocus(storedAnchor,storedTarget))
             val live=members(c.report!!);val anchor=live.single {it.row.sourceId==s.center.id};val target=live.single {it.row.sourceId==s.second.id}
@@ -167,7 +167,7 @@ class LocalFileNetworkDataTest {
             }
             checkDuplicate()
             val lease=MapDocuments.acquire(f.context,f.uri(a)).also(f.leases::add)
-            await {!lease.session.loading && !c.loading && c.report!!.concepts.any {it.members.all {m->m.row.origin==BacklinkOrigin.LIVE}}}
+            await {!lease.session.loading && !c.loading && !c.filtering && c.report!!.concepts.any {it.members.all {m->m.row.origin==BacklinkOrigin.LIVE}}}
             checkDuplicate();assertEquals(doc,lease.session.document)
             assertArrayEquals(beforeA,a.readBytes());assertArrayEquals(beforeB,b.readBytes())
             assertEquals(0,f.writes.get());assertEquals(0,f.deletes.get())
