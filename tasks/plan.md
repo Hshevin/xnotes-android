@@ -547,3 +547,7 @@ Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Su
 实际选择／截图→CANVAS_REGION／v5→已有／新图及概念→保存重开／裁切PNG→真实宿主定位／返回。完整采用／发布才续来源观察；有修改显式strict保存，无路径显式typed独立副本并安全采用同模型，保history／C1，失败只续同候选；FILE＋region仍拒。独审两入口／定位问题已修。251项有效相关主机测试与Android源码编译、独立复核通过；真实平台／设备未运行。见canvas-region-sources-2026-11-10.md。
 
 下一阶段接分页选择／套索及截图区域来源，沿永久pageId＋worldRect，核PDF原文／含批注选择语义；同样交付完整创建／保存／预览／来源定位返回，不仅放宽模型。原完整需求及设备验收保留，整体active。
+
+### 分页固定区域创建与往返（2026-11-10，verified）
+
+单页选区／套索／截图固定actual Doc/Page/localRect，复用永久页身份、严格版本和原PageToMapFlow，一次导入／失败仅重存；保存PNG冷重开／来源定位返回。区域Note完整item观察与明确XML失败、旧DTO取消／delete-undo退休、固定frame／保守EMPTY和旧图均已接；普通读取不扩大。281项有效相关测试与Android源码编译、独立复核通过，真实平台未运行。见paged-region-sources-2026-11-10.md。PDF当前是此份批注笔记上下文；下一原PDF独立内容模式，#7两模式和完整需求仍未完。

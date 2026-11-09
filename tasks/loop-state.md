@@ -1,11 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；当前 Canvas 区域来源 verified，整体仍 active。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；当前分页区域来源 verified，整体仍 active。
 工作树：/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes；分支 codex/mind-map-region-continue；2026-11-10 用户再次明确要求从上一续作树 HEAD 4f413d16 新建，45 个当前未提交文件逐一 SHA 校验复制，原树原样保留；起点 63371f5d13ca4d7457249d468c315db59cc69b5c，创建时原树clean；本聊天未写原树。提交后只读观察原树已由其他任务推进至f8cd9b2f且有未提交修改，保留、不合并。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：Canvas 固定区域来源（verified）
+## 当前阶段：分页固定区域来源（verified）
+
+分页本地提交：`69ccde43`（完整读取／固定预览）、`d5c8fcc2`（实际入口／请求／定位）、`40ce03b5`（主机与Android菜单测试源码）。
+
+d2381a33 clean起步；上轮为progress（Canvas区域4本地提交／251有效测试）。当前actual选区／截图→Doc/Page/localRect→PAGE＋永久页ID→已有／新图及概念→保存重开／PNG→来源定位与同图返回已接。PDF明确为当前批注笔记上下文，原文独立mode仍下一片，完整原#7不缩减。选区不信旧index，截图UP固定页，跨页/gap拒；外发DTO用doc/page移除epoch＋选区代次／当前截图身份退休，clear/reselect/delete-undo旧菜单不复活，已签request不随dismiss取消。Note actual item/pending和明确XML失败可观察，默认reader不变；region prepare在known partial flush前拒，region source首读/晚B重读与preview严格读取。固定frame／EMPTY／历史PNG／actual host定位已回归。
+
+独立计划／实现／证据复核d2d2_plan_review完成。50814夹具API编译错未执行测试已修；67148临时旧行为3/3真红后fixed立刻恢复；54454终态281/2（279绿＋两新夹具），Android源码compile过，1121输入SHA全同。93555按speed-time契约／分页relayout修夹具后仅SPEED流程绿；locator最后仅±0对象相等，改三轴delta0数值比较，30768单项绿。保原有效279＋两项逐case替换，281/0失败错误跳过，1121最终SHA全同；之后无app/src变。证据tmp/paged-region-verified-summary.json及final/recheck/locator-recheck日志与inputs。所有作业已终态，作者冻结，root统一本地提交；运行状态tmp/paged-region-runtime.json。
+
+下一实际动作：原PDF原文独立内容模式，先核可复用的原件指纹／原页与笔记永久页映射、当前来源／preview／定位契约，独审typed模型和完整创建→保存→预览→打开／返回后实现。不复活已废includeAnnotations、不把hash当UUID、不将某份批注笔记冒充共享原件；不引入普通保存权限。其余完整14组、范围编辑／失效恢复、Map来源／双pane、Canvas反向引用、原件定位与重授权／移动／回收站、完整引用备份、主预览／目录缩略、同级插入／边缘平移等保留。
+
+真实Android／Compose／SAF／配置重建杀进程／MovinkPad Android15 ProPen3／掌触／Surface／GPU／性能未运行。无APK／安装／推送／合并／发布，overall complete=false。
+
+## 既有阶段：Canvas 固定区域来源（verified）
 
 本地提交：`60dfacfa`（格式／预览／完整读取）、`c711b11b`（实际入口／保存／副本采用／定位返回）、`8c787750`（主机与Android事件测试源码）。
 

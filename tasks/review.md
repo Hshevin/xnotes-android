@@ -1,3 +1,9 @@
+## 分页固定区域来源（2026-11-10）
+
+独立计划接受actualDoc/Page冻结与Note丢项／XML明确失败观察，默认宽容reader保留，futureXML不冒称无损。实现Required外发截图／选区DTO取消后复活已以candidate身份／selection代次闭合，实际Main旧菜单Host拒绝；页移除／换model epoch、共享pane同步、region strict首读／晚B重读、固定frame／保守EMPTY／保历史PNG、Locator进入宿主后卸载退休已核。67148旧行为3项真红；fixed恢复全比一致。
+
+54454实际281项279绿／Android源码compile，1121SHA全同。夹具修正仅两个unit文件：SPEED保持t=10断言、切分页先relayout、三轴delta0数值比较允许±0，不改页号／outline／history／零写。93555 sourceflow绿，30768 locator绿，逐case合并281全绿、0失败错误跳过；最终1121全同，生产/Android未变不重复跑。tmp/paged-region-verified-summary.json。真实Android／设备／SAF／Surface／GPU未运行；原PDF独立模式及其他原14组仍未完成。
+
 ## Canvas 固定区域来源（2026-11-10）
 
 独立计划、copy安全采用补充合同、实现和证据复核完成。Required两个：未保存Canvas误入NOTE专用SaveAs、已入host pending定位跨卸载复活，均以实际专用picker／typed copy采用和enteredHost退休修复；原Locator新增Window case真实RED保留。完整读取观察、严格expected保存、C1与identity revision换算、旧v1—4 raw门禁、历史EMPTY图、固定裁切与明确Canvas kind、retained同候选／取消只保copy均静态及相关Host验证闭合。
