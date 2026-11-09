@@ -3,6 +3,7 @@ package com.xnotes.pen
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.database.MatrixCursor
@@ -14,6 +15,16 @@ import android.opengl.EGLSurface
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.result.ActivityResultRegistry
+import androidx.activity.result.ActivityResultRegistryOwner
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.runtime.AbstractApplier
+import androidx.compose.runtime.Composition
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Recomposer
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.ActivityOptionsCompat
 import com.xnotes.mindmap.*
 import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.storage.NotebookStorage
@@ -38,6 +49,13 @@ import org.robolectric.util.ReflectionHelpers
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class PageToMapFlowConsumerTest {
+    private class NoViews:AbstractApplier<Unit>(Unit) {
+        override fun insertTopDown(index:Int,instance:Unit)=Unit
+        override fun insertBottomUp(index:Int,instance:Unit)=Unit
+        override fun remove(index:Int,count:Int)=Unit
+        override fun move(from:Int,to:Int,count:Int)=Unit
+        override fun onClear()=Unit
+    }
     @Before fun eglHandles() {
         fun <T> empty(type:Class<T>):T=ReflectionHelpers.callConstructor(type,ReflectionHelpers.ClassParameter.from(java.lang.Long.TYPE,0L))
         if(EGL14.EGL_NO_DISPLAY==null) EGL14.EGL_NO_DISPLAY=empty(EGLDisplay::class.java)
@@ -125,6 +143,34 @@ class PageToMapFlowConsumerTest {
             }
             assertTrue("Page-to-map consumer did not settle",job.isCompleted);failure?.let {throw it}
         } finally {source.release.countDown();scope.cancel();root.deleteRecursively()}
+    }
+    @Test fun readingPageMapCreationUsesTheNativeExtensionWithoutProviderJsonSuffix()=scenario {
+        val registry=object:ActivityResultRegistry() {
+            override fun <I,O> onLaunch(requestCode:Int,contract:ActivityResultContract<I,O>,input:I,options:ActivityOptionsCompat?)=Unit
+        }
+        val owner=object:ActivityResultRegistryOwner {override val activityResultRegistry=registry}
+        val recomposer=Recomposer(Dispatchers.Main.immediate)
+        val composition=Composition(NoViews(),recomposer)
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalContext provides context,LocalActivityResultRegistryOwner provides owner) {
+                    PageToMapFlowHost(source.editor,{},{})
+                }
+            }
+            // Inspect the contracts actually registered by the production host. No document or
+            // destination is substituted, and neither picker needs to leave the process.
+            val callbacksField=ActivityResultRegistry::class.java.declaredFields.single {it.name=="keyToCallback" || it.name=="mKeyToCallback"}.apply {isAccessible=true}
+            val callbacks=callbacksField.get(registry) as Map<*,*>
+            val intents=callbacks.values.map {callback->
+                val field=callback!!.javaClass.declaredFields.single {ActivityResultContract::class.java.isAssignableFrom(it.type)}.apply {isAccessible=true}
+                val contract=field.get(callback) as ActivityResultContract<*,*>
+                if(contract is androidx.activity.result.contract.ActivityResultContracts.CreateDocument) contract.createIntent(context,"Referenced.xmap") else null
+            }.filterNotNull()
+            val creation=intents.single()
+            assertEquals(Intent.ACTION_CREATE_DOCUMENT,creation.action)
+            assertEquals("Referenced.xmap",creation.getStringExtra(Intent.EXTRA_TITLE))
+            assertEquals("application/octet-stream",creation.type)
+        } finally {composition.dispose();recomposer.cancel()}
     }
     @Test fun theReadingPageUsesTheActualOpenMapAndMergesLateBodyEditsInOneUndoableOperation()=scenario {
         val existing=lease();val flow=flow();val sourcePage=source.editor.state.document.pages[1]

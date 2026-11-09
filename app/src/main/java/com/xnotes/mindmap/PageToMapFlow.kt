@@ -38,7 +38,7 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
         if(kind=="OPEN") current.selectMap(uri) else current.createMap(uri)
     }
     val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {receive(it,"OPEN")}
-    val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) {receive(it,"NEW")}
+    val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {receive(it,"NEW")}
     DisposableEffect(controller) {onDispose {controller?.close()}}
     LaunchedEffect(controller) {controller?.start()}
     SideEffect {

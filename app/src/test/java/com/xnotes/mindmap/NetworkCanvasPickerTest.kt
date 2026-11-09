@@ -16,6 +16,21 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class NetworkCanvasPickerTest {
+    @Test fun nativeMapCreationDoesNotAskTheProviderToAppendAJsonExtension() {
+        var intent:Intent?=null
+        val registry=object:ActivityResultRegistry() {
+            override fun <I,O> onLaunch(requestCode:Int,contract:ActivityResultContract<I,O>,input:I,options:ActivityOptionsCompat?) {
+                intent=contract.createIntent(RuntimeEnvironment.getApplication(),input)
+            }
+        }
+        val picker=NetworkCanvasPicker(registry)
+        try {
+            assertTrue(picker.launch(true,"New.xmap") {})
+            assertEquals(Intent.ACTION_CREATE_DOCUMENT,intent?.action)
+            assertEquals("New.xmap",intent?.getStringExtra(Intent.EXTRA_TITLE))
+            assertEquals("application/octet-stream",intent?.type)
+        } finally {picker.dispose()}
+    }
     @Test fun aRetiredOpenSlotCannotDeliverItsRawUriToANewCreateFlow() {
         val codes=mutableListOf<Int>();val intents=mutableListOf<Intent>()
         val registry=object:ActivityResultRegistry() {

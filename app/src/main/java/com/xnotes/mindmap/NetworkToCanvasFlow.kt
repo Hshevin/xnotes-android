@@ -37,7 +37,7 @@ internal class NetworkCanvasPicker(private val registry:ActivityResultRegistry) 
         return try {
             val key="network-canvas-${UUID.randomUUID()}"
             if(create) {
-                val launcher=registry.register(key,ActivityResultContracts.CreateDocument("application/json"),::receive)
+                val launcher=registry.register(key,ActivityResultContracts.CreateDocument("application/octet-stream"),::receive)
                 request.unregister=launcher::unregister
                 if(disposed || cell!==request) {release(request);false} else {launcher.launch(name);true}
             } else {
