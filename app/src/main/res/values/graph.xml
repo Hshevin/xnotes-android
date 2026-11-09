@@ -182,4 +182,25 @@
     <string name="graph_backlinks_range_region">%1$s · saved region hint</string>
     <string name="graph_backlinks_saved_changed">The map was saved. The reference changed after removal; review the node in the map.</string>
     <string name="graph_backlinks_saved_changed_newer">The map was saved, and has newer unsaved changes. The reference changed after removal; review the node in the map.</string>
+    <string name="network_title">Local relationship network</string>
+    <string name="network_canvas_description">Read-only file relationship network. Select a node or connection to inspect its references.</string>
+    <string name="network_file">File</string>
+    <string name="network_concept">Concept</string>
+    <string name="network_reference_count">References: %1$d</string>
+    <string name="network_return">Return to relationship network</string>
+    <string name="network_refresh">Check network again</string>
+    <string name="network_fit">Fit network</string>
+    <string name="network_semantics">Content references connect concepts to their source files. Sharing a concept does not mean the files reference or depend on each other. Names and source states are the last recorded values.</string>
+    <string name="network_counts">%1$d files · %2$d concepts · %3$d maps checked</string>
+    <string name="network_explanation">Relationship evidence</string>
+    <string name="network_ownership">This concept belongs to its map. This is separate from the content sources below.</string>
+    <string name="network_content_evidence">Choose a specific source to open the concept and that exact source in its map.</string>
+    <string name="network_overlapping">Choose an overlapping connection</string>
+    <string name="network_edge_choice">%1$s · %2$s</string>
+    <string name="network_empty">No concept references this file in the checked locations.</string>
+    <string name="network_unnamed_concept">Untitled concept</string>
+    <string name="network_open_reference">Open this reference in its map</string>
+    <string name="network_concepts">Concepts in this local network</string>
+    <string name="network_import_notice">An import is waiting. Close the relationship network to continue.</string>
+    <string name="network_opening_snapshot">Opening the selected reference. The diagram is held while current sources are checked.</string>
 </resources>

@@ -131,6 +131,7 @@ class MindMapView(context: Context) : View(context) {
     private var panX = 0f
     private var panY = 0f
     private var initialized = false
+    var automaticInitialFit=true
     private var downX = 0f; private var downY = 0f
     private var lastX = 0f; private var lastY = 0f
     private var dragging = false
@@ -335,7 +336,7 @@ class MindMapView(context: Context) : View(context) {
         panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
         invalidate();onViewportChanged()
     }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { retireReadOnlyNavigation();discardCapturedGesture();cancelConnection();inkInput.cancel(); if (!initialized) fit();onViewportChanged() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { retireReadOnlyNavigation();discardCapturedGesture();cancelConnection();inkInput.cancel(); if (!initialized && automaticInitialFit) fit();onViewportChanged() }
     override fun setEnabled(enabled:Boolean) {if(inputReady && !enabled) {retireReadOnlyNavigation();cancelDetectors();discardCapturedGesture();cancelConnection()};super.setEnabled(enabled)}
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
