@@ -28,10 +28,12 @@ internal data class InterruptedDestination(val request:DestinationPickerRequest,
 internal class DestinationPickerState {
     var pending by mutableStateOf<DestinationPickerRequest?>(null)
     var interrupted by mutableStateOf<InterruptedDestination?>(null)
-    fun retain(request:DestinationPickerRequest,uri:Uri?) {
+    fun retain(request:DestinationPickerRequest,uri:Uri?,retainOpen:Boolean=false) {
         // A CreateDocument result does not prove that its URI was absent beforehand. Even an
-        // empty result is never deletion authority. OpenDocument creates no target to recover.
-        if(uri!=null && request.kind=="CREATE") interrupted=InterruptedDestination(request,uri.toString())
+        // empty result is never deletion authority. A restored OpenDocument still needs its
+        // selected file exposed for explicit retry; a runtime-retired open creates no artifact.
+        if(uri!=null && (request.kind=="CREATE" || retainOpen && request.kind=="OPEN"))
+            interrupted=InterruptedDestination(request,uri.toString())
     }
     companion object {
         val Saver=listSaver<DestinationPickerState,String>(save={state->
@@ -63,7 +65,8 @@ internal fun InterruptedDestinationNotice(state:DestinationPickerState) {
     }
     AlertDialog(onDismissRequest={},title={Text(stringResource(R.string.destination_interrupted_title),fontSize=TextSize.heading)},text={
         Column(verticalArrangement=Arrangement.spacedBy(Space.s8)) {
-            Text(stringResource(R.string.destination_interrupted_notice),fontSize=TextSize.body)
+            Text(stringResource(if(result.request.kind=="OPEN") R.string.destination_interrupted_open_notice
+                else R.string.destination_interrupted_notice),fontSize=TextSize.body)
             if(result.request.name.isNotBlank()) Text(result.request.name,fontSize=TextSize.body)
             SelectionContainer {Text(result.uri,fontSize=TextSize.caption)}
         }

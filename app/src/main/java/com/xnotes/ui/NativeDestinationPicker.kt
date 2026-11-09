@@ -19,7 +19,7 @@ internal class NativeDestinationPicker(private val registry:ActivityResultRegist
     internal val saved:DestinationPickerState=DestinationPickerState(),
     private val createContract:ActivityResultContract<String,Uri?> = ActivityResultContracts.CreateDocument("application/octet-stream"),
     private val openContract:ActivityResultContract<Array<String>,Uri?> = ActivityResultContracts.OpenDocument()) {
-    private class Cell(val request:DestinationPickerRequest,var callback:((Uri?)->Unit)?,val current:()->Boolean) {
+    private class Cell(val request:DestinationPickerRequest,var callback:((Uri?)->Unit)?,val current:()->Boolean,val restored:Boolean=false) {
         var unregister:(()->Unit)?=null
         var launch:(()->Unit)?=null
     }
@@ -28,7 +28,7 @@ internal class NativeDestinationPicker(private val registry:ActivityResultRegist
     var busy by mutableStateOf(false);private set
 
     init {saved.pending?.let {request->
-        val cell=Cell(request,null,{false})
+        val cell=Cell(request,null,{false},restored=true)
         if(request.kind=="OPEN") register(cell,openContract,emptyArray()) else register(cell,createContract,request.name)
     }}
 
@@ -64,7 +64,7 @@ internal class NativeDestinationPicker(private val registry:ActivityResultRegist
                 val callback=cell.callback
                 val accepted=callback!=null && runCatching(cell.current).getOrDefault(false)
                 release(cell,consume=true)
-                if(accepted) callback?.invoke(uri) else saved.retain(cell.request,uri)
+                if(accepted) callback?.invoke(uri) else saved.retain(cell.request,uri,retainOpen=cell.restored)
             }
         }
         // Registration can deliver a pending raw result synchronously.

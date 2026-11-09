@@ -76,14 +76,14 @@ class NativeDestinationPickerTest {
         fun close() {composition.dispose();recomposer.cancel()}
     }
     private data class Launch(val code:Int,val name:String)
-    private class Registry(private val context:Context):ActivityResultRegistry() {
+    private class Registry(private val context:Context,private val create:Boolean=true):ActivityResultRegistry() {
         val launches=mutableListOf<Launch>()
         var failNext=false
         override fun <I,O> onLaunch(code:Int,contract:ActivityResultContract<I,O>,input:I,options:ActivityOptionsCompat?) {
             val actual=contract.createIntent(context,input)
-            assertEquals(Intent.ACTION_CREATE_DOCUMENT,actual.action)
-            assertEquals("application/octet-stream",actual.type)
-            launches+=Launch(code,requireNotNull(actual.getStringExtra(Intent.EXTRA_TITLE)))
+            assertEquals(if(create) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT,actual.action)
+            assertEquals(if(create) "application/octet-stream" else "*/*",actual.type)
+            launches+=Launch(code,if(create) requireNotNull(actual.getStringExtra(Intent.EXTRA_TITLE)) else "<open>")
             if(failNext) {failNext=false;throw IllegalStateException("picker unavailable")}
         }
         fun result(launch:Launch,uri:Uri?) {
@@ -186,6 +186,26 @@ class NativeDestinationPickerTest {
             assertEquals("content://native-picker/document/unfinished",retained.uri)
             assertTrue("Returned destination must itself survive another saved-state round",restored.saved.performSave().toString().contains(retained.uri))
         } finally {restored.close()}
+    }
+
+    @Test fun aSavedOpenRequestRetainsItsOriginalUriWhenTheRuntimeOwnerCannotBeRestored() {
+        val context=RuntimeEnvironment.getApplication();val first=Host(Registry(context,create=false))
+        var abandoned=0
+        assertTrue(first.picker.launchOpen(arrayOf("application/json","application/octet-stream")) {abandoned++})
+        val launch=first.registry.launches.single();val request=requireNotNull(first.picker.saved.pending)
+        val registryState=Bundle();first.registry.onSaveInstanceState(registryState)
+        val composeState=first.saved.performSave();first.close()
+        val restoredRegistry=Registry(context,create=false).also {it.onRestoreInstanceState(registryState)}
+        val next=Host(restoredRegistry,composeState)
+        val uri=Uri.parse("content://native-picker/document/original-open.xmap")
+        try {
+            assertTrue(next.picker.busy);assertTrue(restoredRegistry.launches.isEmpty())
+            restoredRegistry.result(launch,uri)
+            assertFalse(next.picker.busy);assertEquals(0,abandoned)
+            assertEquals("Recreation must keep an OpenDocument result reviewable instead of silently losing the chosen file",uri.toString(),next.picker.saved.interrupted?.uri)
+            assertEquals(request,next.picker.saved.interrupted?.request)
+            assertTrue(next.saved.performSave().toString().contains(uri.toString()))
+        } finally {next.close()}
     }
 
     @Test fun rejectedDestinationRetainsTheActualRequestAndNeverDeletesAnExistingEmptyFile() {

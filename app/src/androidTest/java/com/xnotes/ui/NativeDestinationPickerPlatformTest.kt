@@ -70,4 +70,27 @@ class NativeDestinationPickerPlatformTest {
         }
         failure?.let {throw it}
     }
+
+    @Test fun aRestoredOpenResultKeepsItsUriAndOriginalRequestForExplicitRetry() {
+        var failure:Throwable?=null
+        PenTestRunner.instance.runOnMainSync {
+            try {
+                val first=Host(Registry());var oldCallbacks=0
+                assertTrue(first.picker.launchOpen(arrayOf("*/*")) {oldCallbacks++})
+                val code=first.registry.codes.single();val request=requireNotNull(first.picker.saved.pending)
+                val state=Bundle();first.registry.onSaveInstanceState(state)
+                val saved=first.saved.performSave();first.close()
+                val next=Host(Registry().also {it.onRestoreInstanceState(state)},saved)
+                val uri=Uri.parse("content://picker/document/original-open")
+                try {
+                    assertTrue(next.picker.busy);assertTrue(next.registry.codes.isEmpty())
+                    assertTrue(next.registry.dispatchResult(code,Activity.RESULT_OK,Intent().setData(uri)))
+                    assertFalse(next.picker.busy);assertEquals(0,oldCallbacks)
+                    assertEquals(uri.toString(),next.picker.saved.interrupted?.uri)
+                    assertEquals(request,next.picker.saved.interrupted?.request)
+                } finally {next.close()}
+            } catch(error:Throwable) {failure=error}
+        }
+        failure?.let {throw it}
+    }
 }
