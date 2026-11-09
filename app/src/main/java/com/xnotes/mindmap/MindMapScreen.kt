@@ -350,7 +350,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         propertiesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id == id }?.let { node ->
             MapNodeDialog(node, onDismiss = { editing = null;propertiesFor=null }, onConfirm = { edited ->
                 session.editNodeProperties(id,edited).also { if (it) {editing = null;propertiesFor=null} }
-            })
+            },previewAssets=session.document?.previewAssets.orEmpty())
         } }
         session.connectedDraft?.let {draft->ConnectedNodeDialog(session,draft,connectedPickerId!=null || session.connectedSourceRequest!=null) {
             if(connectedPickerId==null) session.beginConnectedSource(draft.token)?.let {request->

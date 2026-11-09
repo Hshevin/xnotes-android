@@ -16,9 +16,10 @@ import com.xnotes.ui.theme.*
 
 @Composable
 internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (MapNode) -> Boolean,
-                           title:Int?=null,notice:String?=null,problemLabel:Int=R.string.map_limit,onDraftChange:(MapNode)->Unit={}) {
+                           title:Int?=null,notice:String?=null,problemLabel:Int=R.string.map_limit,onDraftChange:(MapNode)->Unit={},
+                           previewAssets:Map<String,MapPreviewAsset> = emptyMap()) {
     var text by remember(node.id) { mutableStateOf(node.text) }
-    val history = remember(node.id) { MapHistory(MindMapDocument(nodes = listOf(node.copy(parent = null, free = false)))) }
+    val history = remember(node.id) { MapHistory(MindMapDocument(nodes = listOf(node.copy(parent = null, free = false)),previewAssets=previewAssets)) }
     var current by remember(node.id) { mutableStateOf(node) }
     var mode by remember { mutableStateOf(InkMode.PEN) }
     var width by remember { mutableStateOf(3f) }
@@ -69,7 +70,7 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                     MapButton(R.string.map_done) {
                         if(alive.get()) {
                             val next = current.copy(text = text, height = if (current.kind == NodeKind.TEXT) painter.measuredHeight(text, current.width) else current.height)
-                            try { MindMapDocument(nodes = listOf(next.copy(parent = null, free = false))).validate(); if (!onConfirm(next)) problem = true }
+                            try { history.document.update(node.id) {next.copy(parent = null, free = false)}.validate(); if (!onConfirm(next)) problem = true }
                             catch (_: IllegalArgumentException) { problem = true }
                         }
                     }
