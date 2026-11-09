@@ -793,7 +793,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     @Volatile private var nativeOpenRequest:NativeOpenRequest?=null
     private var noteEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
     private var canvasEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
-    private fun retireNoteEditSource() {noteEditSource?.invalidate();noteEditSource=null}
+    private fun retireNoteEditSource() {
+        noteEditSource?.invalidate();noteEditSource=null;noteSourceObservation=null;pageReferenceProtection=null
+        pageReferenceRequest?.let(::clearPageReference)
+        sharedPeer()?.let {peer->peer.pageReferenceRequest?.let(peer::clearPageReference)}
+    }
     private fun retireCanvasEditSource() {canvasEditSource?.invalidate();canvasEditSource=null}
     private fun invalidateNativeOpen() {
         nativeOpenRequest?.cancelled?.set(true);nativeOpenRequest=null;opening=false
@@ -806,6 +810,227 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return if(canvasOpen) infiniteOrNull?.document?.let {canvasEditSource?.version(it)}
             else noteEditSource?.version(state.document)
     }
+    /** Read-only evidence for exactly the body displayed or successfully published by this owner. */
+    private class NoteSourceObservation(val model:Document,val revision:Long,val version:com.xnotes.storage.NativeSourceVersion,
+                                        val identity:com.xnotes.format.BundleIdentity,val anchored:Boolean,
+                                        val scope:com.xnotes.core.model.PageReferenceScope?) {
+        fun sameOrigin(owner:Editor)=owner.sessionOwner.isCurrent() && owner.documentOwner===owner && owner.noteOpen && !owner.canvasOpen &&
+            owner.state.document===model && model.identity==identity && model.hasReferenceAnchors==anchored && model.pageReferenceScope===scope &&
+            model.path?.let {owner.notebookStorage.registry.locationKey(it)}==version.locationKey
+        fun matches(owner:Editor)=sameOrigin(owner) && model.bodyRevision==revision && !model.dirty
+    }
+    private var noteSourceObservation:NoteSourceObservation?=null
+    /** A source action must not fall back to weak stamps later through pause/close/queued autosave. */
+    private class PageReferenceProtection(val model:Document,val locationKey:String)
+    private var pageReferenceProtection:PageReferenceProtection?=null
+    private fun pageReferenceProtects(doc:Document,uri:String)=pageReferenceProtection?.let {
+        it.model===doc && it.locationKey==notebookStorage.registry.locationKey(uri)}==true
+    private var pageReferenceSaveGuards=0
+    private fun beginPageReferenceSave() {pageReferenceSaveGuards++;noteDebounceJob?.cancel()}
+    private fun endPageReferenceSave(doc:Document) {
+        noteDebounceJob?.cancel();pageReferenceSaveGuards--
+        if(pageReferenceSaveGuards==0 && sessionOwner.isCurrent() && documentOwner===this && noteOpen && !canvasOpen &&
+            state.document===doc && doc.dirty) scheduleAutosave()
+    }
+    private val pageReferenceIssuer=Any()
+    internal var pageReferenceRequest by mutableStateOf<PageReferenceRequest?>(null)
+        private set
+
+    private fun observePublishedNote(doc:Document,version:com.xnotes.storage.NativeSourceVersion,revision:Long=doc.bodyRevision) {
+        if(!sessionOwner.isCurrent() || documentOwner!==this || !noteOpen || canvasOpen || state.document!==doc ||
+            version.kind!=DocumentKind.NOTE || version.documentId!=doc.identity.documentId ||
+            doc.path?.let {notebookStorage.registry.locationKey(it)}!=version.locationKey) return
+        noteSourceObservation=NoteSourceObservation(doc,revision,version,doc.identity,doc.hasReferenceAnchors,doc.pageReferenceScope)
+    }
+    internal fun requestPageReference(page:Page):Boolean {
+        val owner=documentOwner;val doc=state.document
+        if(!noteOpen || canvasOpen || missingDocument!=null || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent() ||
+            owner.state.document!==doc || doc.pages.none {it===page}) return false
+        pageReferenceRequest?.retire()
+        pageReferenceRequest=PageReferenceRequest.capture(pageReferenceIssuer,this,owner,doc,page,
+            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner)
+        return true
+    }
+    internal fun clearPageReference(request:PageReferenceRequest) {
+        if(pageReferenceRequest!==request) return
+        request.retire();pageReferenceRequest=null
+    }
+    internal fun pageReferenceCurrent(request:PageReferenceRequest):Boolean {
+        val doc=request.model;val owner=request.owner
+        return pageReferenceRequest===request && request.issuedBy(pageReferenceIssuer) && request.pane===this && request.active() &&
+            sessionOwner===request.paneSession && owner.sessionOwner===request.ownerSession && documentOwner===owner && owner.documentOwner===owner &&
+            noteOpen && !canvasOpen && missingDocument==null && owner.noteOpen && !owner.canvasOpen &&
+            state.document===doc && owner.state.document===doc && doc.pages.any {it===request.page} &&
+            doc.identity.documentId==request.documentId && doc.path?.let(::documentKey)==request.path &&
+            (request.scope==null || doc.pageReferenceScope===request.scope) &&
+            (request.initialPageId==null || request.page.referenceIdentity.id==request.initialPageId)
+    }
+    private fun retireInvalidPageReference() {
+        pageReferenceRequest?.let {if(!pageReferenceCurrent(it)) clearPageReference(it)}
+    }
+    private inner class PageReferenceReadStamp(val request:PageReferenceRequest,val observation:NoteSourceObservation) {
+        private val revision=request.model.bodyRevision
+        private val panes=listOfNotNull(this@Editor,request.owner,request.owner.sharedPeer()).distinct()
+        private val writes=panes.map {Triple(it.noteWriteJob,it.canvasWriteJob,it.sessionWriteJob)}
+        fun current()=pageReferenceCurrent(request) && request.model.bodyRevision==revision &&
+            request.owner.noteSourceObservation===observation && observation.matches(request.owner) &&
+            !request.owner.noteTransactionsPending(request.model) && panes.zip(writes).all {(pane,jobs)->
+                pane.sessionOwner.isCurrent() && pane.noteWriteJob===jobs.first && pane.canvasWriteJob===jobs.second && pane.sessionWriteJob===jobs.third &&
+                    jobs.first?.isActive!=true && jobs.second?.isActive!=true && jobs.third?.isActive!=true}
+    }
+    private fun pageReferenceCheck(request:PageReferenceRequest,coroutine:kotlin.coroutines.CoroutineContext):()->Unit = {
+        coroutine.ensureActive()
+        if(!request.active()) throw java.util.concurrent.CancellationException("Page reference retired")
+    }
+    /** Reference saves use the last actual body as an atomic expected version, never weak stamps. */
+    private suspend fun flushPageReference(request:PageReferenceRequest):PageReferencePreparation? {
+        val owner=request.owner;val doc=request.model
+        val completed=kotlinx.coroutines.CompletableDeferred<PageReferencePreparation?>()
+        val pending=owner.noteWriteJob
+        owner.noteDebounceJob?.cancel()
+        val job=owner.autosaveScope.launch {
+            var outcome:PageReferencePreparation?=PageReferencePreparation.Changed
+            var restoreDirty=false
+            owner.beginPageReferenceSave()
+            try {
+                pending?.join();owner.awaitSessionEncoders()
+                owner.commitNoteTextForSave();owner.flowText.endSession()
+                if(!owner.awaitNoteCapture(doc) || !request.pane.pageReferenceCurrent(request)) return@launch
+                // An older in-flight B may have completed with C1 still dirty. Take its latest
+                // exact origin here, after joining, while preserving B's own captured revision.
+                val base=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)}
+                if(base==null) {outcome=PageReferencePreparation.ReopenRequired;return@launch}
+                if(doc.dirty) {
+                    val path=requireNotNull(doc.path);val identity=doc.identity
+                    val snapshot=doc.fixedWriteSnapshot();val scope=doc.pageReferenceScope;val revision=doc.bodyRevision
+                    doc.dirty=false;owner.dirty=false;restoreDirty=true
+                    val version=withContext(Dispatchers.IO) {owner.writeNoteSafely(path,snapshot,base.version)}
+                    if(version==null) {outcome=PageReferencePreparation.Failed;return@launch}
+                    // A written B is useful as the next expected base even while live C1 is dirty.
+                    restoreDirty=false
+                    // Cancellation retires the graph choice, not an already verified write of B.
+                    // Keep B as C1's expected base only on the original actual owner/model; never
+                    // pair its captured revision with a replacement or the current newer body.
+                    if(!owner.sessionOwner.isCurrent() || owner.documentOwner!==owner || !owner.noteOpen || owner.canvasOpen ||
+                        owner.state.document!==doc || doc.path!=path || doc.identity!=identity ||
+                        doc.pageReferenceScope!==scope || owner.noteSourceObservation!==base) return@launch
+                    doc.dirty=doc.dirty || doc.bodyRevision!=revision;owner.dirty=doc.dirty
+                    owner.observePublishedNote(doc,version,revision)
+                    owner.invalidateThumb(path);owner.requestWorkingSession()
+                }
+                owner.awaitSessionEncoders()
+                outcome=if(request.pane.pageReferenceCurrent(request) && owner.noteSourceObservation?.matches(owner)==true &&
+                    !owner.noteTransactionsPending(doc)) null else PageReferencePreparation.Changed
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:com.xnotes.storage.ReferenceContractViolation) {outcome=PageReferencePreparation.ReopenRequired}
+            catch(_:Exception) {outcome=PageReferencePreparation.Failed}
+            finally {
+                if(restoreDirty) {doc.dirty=true;if(owner.state.document===doc) owner.dirty=true}
+                owner.endPageReferenceSave(doc);owner.contentTransactionChanged();completed.complete(outcome)
+            }
+        }
+        owner.noteWriteJob=job
+        job.invokeOnCompletion {if(!completed.isCompleted) completed.complete(PageReferencePreparation.Changed)}
+        job.join()
+        val outcome=completed.await()
+        if(outcome!=null) return outcome
+        // This write's final Main notification can register the recovery encoder only after the
+        // native job has completed. Let that notification run, then await the actual accepted
+        // prefix before taking the read stamp; its own encoder is not a competing body edit.
+        owner.afterInputDispatch()
+        owner.awaitSessionEncoders()
+        return if(request.pane.pageReferenceCurrent(request) && owner.noteSourceObservation?.matches(owner)==true &&
+            !owner.noteTransactionsPending(doc)) null else PageReferencePreparation.Changed
+    }
+    internal suspend fun preparePageReference(request:PageReferenceRequest):PageReferencePreparation {
+        if(!pageReferenceCurrent(request)) return PageReferencePreparation.Changed
+        val uri=request.model.path ?: return PageReferencePreparation.SaveRequired
+        request.owner.pageReferenceProtection=PageReferenceProtection(request.model,notebookStorage.registry.locationKey(uri))
+        request.owner.beginPageReferenceSave()
+        try {
+            flushPageReference(request)?.let {return it}
+            if(!pageReferenceCurrent(request)) return PageReferencePreparation.Changed
+            val observed=request.owner.noteSourceObservation?.takeIf {it.matches(request.owner)} ?: return PageReferencePreparation.ReopenRequired
+            val stamp=PageReferenceReadStamp(request,observed)
+            if(!stamp.current()) return PageReferencePreparation.Changed
+            val offer=withContext(Dispatchers.IO) {
+                val check=pageReferenceCheck(request,kotlinx.coroutines.currentCoroutineContext())
+                com.xnotes.mindmap.MapSourceAccess.offer(appContext,android.net.Uri.parse(uri),check)
+            }
+            if(!stamp.current()) return PageReferencePreparation.Changed
+            val catalog=offer.catalog ?: return PageReferencePreparation.Failed
+            val version=observed.version
+            if(catalog.kind!=version.kind || catalog.documentId!=version.documentId || catalog.locationKey!=version.locationKey || catalog.sha256!=version.sha256)
+                return PageReferencePreparation.ReopenRequired
+            return when(val pages=catalog.pages) {
+                com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.NeedsActivation ->
+                    if(request.model.hasReferenceAnchors) PageReferencePreparation.ReopenRequired else PageReferencePreparation.EnableRequired(offer)
+                is com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.Available -> {
+                    val id=request.page.referenceIdentity.id ?: return PageReferencePreparation.ReopenRequired
+                    val index=pages.orderedIds.indexOf(id)
+                    if(index<0 || !request.model.hasReferenceAnchors) return PageReferencePreparation.ReopenRequired
+                    PageReferencePreparation.Ready(offer.fileSource.copy(id=request.sourceId,scope=com.xnotes.mindmap.SourceScope.PAGE,
+                        pageId=id,lastKnownPage=index+1).also {it.validate()})
+                }
+                com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.NotPaginated -> PageReferencePreparation.Failed
+            }
+        } catch(cancelled:java.util.concurrent.CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();return PageReferencePreparation.Changed
+        } catch(_:Exception) {return if(pageReferenceCurrent(request)) PageReferencePreparation.Failed else PageReferencePreparation.Changed}
+        finally {request.owner.endPageReferenceSave(request.model)}
+    }
+    internal suspend fun enablePageReference(request:PageReferenceRequest,offer:com.xnotes.mindmap.MapSourceOffer):PageReferenceEnableResult {
+        val prepared=preparePageReference(request)
+        if(prepared !is PageReferencePreparation.EnableRequired) return if(prepared==PageReferencePreparation.Changed || prepared==PageReferencePreparation.ReopenRequired)
+            PageReferenceEnableResult.Changed else PageReferenceEnableResult.Failed
+        val actual=prepared.offer
+        if(actual.kind!=offer.kind || actual.catalog?.locationKey!=offer.catalog?.locationKey || actual.fileSource.documentId!=offer.fileSource.documentId ||
+            actual.fileSource.sourceVersion!=offer.fileSource.sourceVersion) return PageReferenceEnableResult.Changed
+        return runPageReferenceEnable(request) {check->com.xnotes.mindmap.MapSourceAccess.activatePages(appContext,actual,check)}
+    }
+    internal suspend fun continuePageReferenceEnable(request:PageReferenceRequest):PageReferenceEnableResult {
+        if(!pageReferenceCurrent(request) || request.model.dirty) return PageReferenceEnableResult.Changed
+        val uri=request.model.path ?: return PageReferenceEnableResult.Changed
+        return runPageReferenceEnable(request) {check->com.xnotes.mindmap.MapSourceAccess.completeActivation(appContext,
+            android.net.Uri.parse(uri),check)}
+    }
+    private suspend fun runPageReferenceEnable(request:PageReferenceRequest,
+        action:((()->Unit))->com.xnotes.mindmap.MapSourceOffer):PageReferenceEnableResult {
+        if(!pageReferenceCurrent(request)) return PageReferenceEnableResult.Changed
+        val revision=request.model.bodyRevision
+        val uri=request.model.path ?: return PageReferenceEnableResult.Changed
+        request.owner.beginPageReferenceSave()
+        try {
+            val actual=withContext(Dispatchers.IO) {action(pageReferenceCheck(request,kotlinx.coroutines.currentCoroutineContext()))}
+            if(actual.fileSource.documentId!=request.documentId || actual.catalog?.locationKey!=notebookStorage.registry.locationKey(uri))
+                return PageReferenceEnableResult.Changed
+            return if(pageReferenceCurrent(request) && request.model.bodyRevision==revision && !request.model.dirty)
+                PageReferenceEnableResult.Enabled else PageReferenceEnableResult.Changed
+        } catch(cancelled:java.util.concurrent.CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();return PageReferenceEnableResult.Changed
+        } catch(_:Exception) {
+            if(!pageReferenceCurrent(request)) return PageReferenceEnableResult.Changed
+            val pending=try {withContext(Dispatchers.IO) {
+                val check=pageReferenceCheck(request,kotlinx.coroutines.currentCoroutineContext())
+                notebookStorage.hasPageActivationRecovery(uri,check)
+            }} catch(cancelled:java.util.concurrent.CancellationException) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive();return PageReferenceEnableResult.Changed
+            } catch(_:Exception) {false}
+            return if(pending) PageReferenceEnableResult.Retained else PageReferenceEnableResult.Failed
+        } finally {request.owner.endPageReferenceSave(request.model)}
+    }
+    internal suspend fun reopenPageReference(request:PageReferenceRequest):Boolean {
+        if(!pageReferenceCurrent(request)) return false
+        val uri=request.model.path ?: return false
+        val owner=request.owner
+        owner.beginPageReferenceSave()
+        try {
+            owner.noteWriteJob?.join();owner.awaitSessionEncoders();owner.commitNoteTextForSave();owner.flowText.endSession()
+            if(!owner.awaitNoteCapture(request.model) || !pageReferenceCurrent(request) || request.model.dirty) return false
+            return openNative(uri,request.model.displayName,DocumentKind.NOTE,cleanOnly=true)
+        } finally {owner.endPageReferenceSave(request.model)}
+    }
+
     /** Created only by an explicit Discard click's guard; expires when that exact body changes. */
     class OpenDiscard internal constructor(internal val owner:Editor,private val model:Document,private val revision:Long) {
         private val path=model.path?.let(owner::documentKey)
@@ -3942,6 +4167,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun sharedLayoutSnapshot() = state.document.pages.map { Triple(it, state.footprint(it), it.pdfTurn) }
 
     private fun refreshContent(notifySharedView: Boolean = true) {
+        retireInvalidPageReference();sharedPeer()?.retireInvalidPageReference()
         contentTransactionChanged()
         republishFlowIfStale()
         canUndo = history.canUndo
@@ -4313,7 +4539,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** One request covers preparation, saving the old owners and synchronous adoption. */
     private suspend fun openNative(uri:String,name:String?,kind:DocumentKind,fromHome:Boolean=false,
-                                   explicitlyDiscarded:Set<OpenDiscard> = emptySet()):Boolean {
+                                   explicitlyDiscarded:Set<OpenDiscard> = emptySet(),cleanOnly:Boolean=false):Boolean {
         if(opening || !sessionOwner.isCurrent() || nativeOpenPenInContact()) return false
         val request=NativeOpenRequest();nativeOpenRequest=request;opening=true
         val slots=captureOpenSlots(fromHome)
@@ -4338,7 +4564,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 checkActive();prepared.protectForAdoption();checkActive()
             }
             readMs=(System.nanoTime()-readStarted)/1_000_000
-            if(!settleOpenSlots(slots,fromHome,explicitlyDiscarded,request)) return false
+            if(!settleOpenSlots(slots,fromHome,explicitlyDiscarded,request,cleanOnly)) return false
             val stamps=slots.map(::OpenReadStamp)
             val verifyStarted=System.nanoTime()
             withContext(Dispatchers.IO) {
@@ -4395,7 +4621,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             } else {
                 val doc=requireNotNull(prepared.note)
                 try {replaceDocument(doc)} finally {
-                    if(state.document===doc) {prepared.adopt(doc);noteEditSource=prepared.editSource();adopted=true;adoptedModel=doc}
+                    if(state.document===doc) {prepared.adopt(doc);noteEditSource=prepared.editSource();observePublishedNote(doc,prepared.version);adopted=true;adoptedModel=doc}
                 }
                 state.openFileBytes=prepared.byteSize;state.lastSaveBytes=prepared.byteSize
                 state.lastOpenInflateMs=timing.inflateMs;state.lastOpenParseMs=timing.parseMs
@@ -4465,7 +4691,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * ANR: an explicit save targets whatever the system picker handed over, and openOutputStream on
      * a cloud provider is an untimed binder call into that provider's process.
      */
-    private data class CreatedNoteWrite(val error:Exception?=null,val retained:Boolean=false)
+    private data class CreatedNoteWrite(val error:Exception?=null,val retained:Boolean=false,
+        val version:com.xnotes.storage.NativeSourceVersion?=null)
 
     /** IO-only: encode a fixed copy without pinning an unpublished document as a permanent PDF owner. */
     private fun publishCreatedNote(uri:String,name:String,snapshot:Document,
@@ -4493,9 +4720,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 },embedPdf=false,isCancelled={checkActive();false})
                 output.fd.sync()
             }
-            notebookStorage.publishCreated(uri,file,permit,name,checkActive)
+            val version=notebookStorage.publishCreated(uri,file,permit,name,checkActive)
             published=true
-            return CreatedNoteWrite()
+            return CreatedNoteWrite(version=version)
         } catch(cancelled:java.util.concurrent.CancellationException) {failure=cancelled;throw cancelled}
         catch(error:Exception) {
             failure=error
@@ -4569,6 +4796,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val source=noteEditSource
                 val observation=source?.observe(doc)
                 val creating=forceCreation || originalPath==null || documentKey(originalPath)!=documentKey(uri)
+                val strictSource=!creating && pageReferenceProtects(doc,uri)
+                val expected=if(strictSource) noteSourceObservation?.takeIf {it.sameOrigin(this@Editor)}?.version else null
+                if(strictSource && expected==null) {rejected=appContext.getString(R.string.native_open_changed);return@launch}
                 val intent=if(creating) notebookStorage.beginCreation(DocumentKind.NOTE) else null
                 val copy=intent?.let {com.xnotes.core.model.PageReferenceCopy.prepare(doc,it.documentId)}
                 val originalScope=doc.pageReferenceScope
@@ -4581,7 +4811,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 savingNote=true
                 val written=if(intent!=null) withContext(Dispatchers.IO) {publishCreatedNote(uri,displayName,snapshot,intent)}
                     else withContext(Dispatchers.IO) {
-                        try {if(writeNoteSafely(uri,snapshot)) CreatedNoteWrite() else CreatedNoteWrite(java.io.IOException())}
+                        try {writeNoteSafely(uri,snapshot,expected)?.let {CreatedNoteWrite(version=it)} ?: CreatedNoteWrite(java.io.IOException())}
                         catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
                         catch(error:Exception) {CreatedNoteWrite(error)}
                     }
@@ -4609,6 +4839,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if(name!=null) doc.displayName=name
                 doc.dirty=!unchanged
                 dirty=doc.dirty
+                written.version?.let {observePublishedNote(doc,it,if(unchanged) doc.bodyRevision else revision)}
                 maybeBindAutosave(uri)
                 refreshContent()
                 invalidateThumb(uri)
@@ -5355,7 +5586,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Detached new documents are projected once; a live fork must supply its owner's prepared snapshot. */
     private fun createNoteFile(treeUri:String,parentDocId:String,name:String,document:Document,
-                               intent:com.xnotes.storage.NativeCreationIntent?=null,checkActive:()->Unit={}):String? {
+                               intent:com.xnotes.storage.NativeCreationIntent?=null,checkActive:()->Unit={},
+                               observed:((com.xnotes.storage.NativeSourceVersion)->Unit)?=null):String? {
         return try {
             checkActive()
             val creation=intent ?: notebookStorage.beginCreation(DocumentKind.NOTE)
@@ -5364,7 +5596,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 require(intent!=null && document.identity.documentId==creation.documentId)
                 document
             } else com.xnotes.core.model.PageReferenceCopy.prepare(document,creation.documentId).project(document.fixedWriteSnapshot())
-            createdFileResult(uri,publishCreatedNote(uri.toString(),name,snapshot,creation,checkActive))
+            val written=publishCreatedNote(uri.toString(),name,snapshot,creation,checkActive)
+            written.version?.let {observed?.invoke(it)}
+            createdFileResult(uri,written)
         } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
         catch(error:Exception) {android.util.Log.w("xnotes.save","Could not prepare a new note",error);null}
     }
@@ -5985,10 +6219,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private class NoteForkDraft(val intent:com.xnotes.storage.NativeCreationIntent,val copy:Result<com.xnotes.core.model.PageReferenceCopy>)
     private class Fork(val uri:String,val name:String,val identity:com.xnotes.format.BundleIdentity,
                        val originalTarget:String,val base:String,val pageCopy:com.xnotes.core.model.PageReferenceCopy?=null,
-                       val pdfFile:java.io.File?=null)
+                       val pdfFile:java.io.File?=null,val version:com.xnotes.storage.NativeSourceVersion?=null)
 
     /** Where a guarded save landed; [fork] is null when it wrote the file in place as usual. */
-    private class SaveResult(val uri: String, val fork: Fork?)
+    private class SaveResult(val uri: String, val fork: Fork?,val version:com.xnotes.storage.NativeSourceVersion?=fork?.version)
 
     /** The forks made here, so a save queued before its document forked follows it into the fork. */
     private val forks = com.xnotes.core.util.ForkLedger()
@@ -6056,9 +6290,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val name = forkName(root, parentId, title, com.xnotes.core.util.DocumentKind.NOTE)
         val copy=draft.copy.getOrThrow()
         val projected=copy.project(doc)
-        val forked=createNoteFile(root,parentId,name,projected,draft.intent) ?: return null
+        var version:com.xnotes.storage.NativeSourceVersion?=null
+        val forked=createNoteFile(root,parentId,name,projected,draft.intent,observed={version=it}) ?: return null
         rememberStamp(forked)
-        return Fork(forked,name,projected.identity,uri,DocumentKind.stripSuffix(title),copy,projected.pdfFile)
+        return Fork(forked,name,projected.identity,uri,DocumentKind.stripSuffix(title),copy,projected.pdfFile,requireNotNull(version))
     }
 
     /** The canvas sibling of [forkNote]. */
@@ -6077,15 +6312,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         error is com.xnotes.storage.MigrationPublication.RecoveryRequired || error is com.xnotes.storage.PdfResources.Unavailable
 
     /** The same candidate/registry transaction is used for notes and canvases. IO. */
-    private fun saveNoteGuarded(uri:String,doc:Document,title:String,owner:Document,draft:NoteForkDraft):SaveResult? = synchronized(saveLock) {
+    private fun saveNoteGuarded(uri:String,doc:Document,title:String,owner:Document,draft:NoteForkDraft,
+                                expected:com.xnotes.storage.NativeSourceVersion?=null):SaveResult? = synchronized(saveLock) {
         try {
             val target=forks.target(uri,owner)
+            if(expected!=null) return@synchronized writeNoteSafely(target,doc,expected)?.let {SaveResult(target,null,it)}
             if(changedUnderneath(target)) {
                 val base=forks.base(target,DocumentKind.stripSuffix(title))
                 val fork=forkNote(target,doc,base,draft) ?: return null
                 return SaveResult(fork.uri,fork)
             }
-            if(writeNoteSafely(target,doc)) SaveResult(target,null) else null
+            writeNoteSafely(target,doc)?.let {SaveResult(target,null,it)}
         } catch(error:Exception) {
             if(!isNativeSaveRejection(error)) throw error
             if(state.document===owner) message=error.message ?: appContext.getString(R.string.err_save_note)
@@ -6162,8 +6399,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         pinPdfForWrite(doc)
         codec.write(doc, out, timing = timing, embedPdf = false, isCancelled = cancelled)
     }
-    private fun writeNoteSafely(uri: String, doc: Document): Boolean = synchronized(saveLock) {
-        if(runCatching { pinPdfForWrite(doc) }.isFailure) return false
+    private fun writeNoteSafely(uri: String, doc: Document,expected:com.xnotes.storage.NativeSourceVersion?=null): com.xnotes.storage.NativeSourceVersion? = synchronized(saveLock) {
+        if(runCatching { pinPdfForWrite(doc) }.isFailure) return null
         // Build a complete private candidate. An unprotected in-place splice could corrupt the
         // source before publication preflight had a chance to retain its original bytes.
         runCatching {
@@ -6173,7 +6410,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val timing = com.xnotes.format.DocumentCodec.WriteTiming()
                 java.io.FileOutputStream(tmp).use { writeLocalNote(doc, it, timing = timing) }
                 val copyStart = System.nanoTime()
-                notebookStorage.publishNote(uri,tmp,DocumentKind.NOTE,doc.displayName ?: doc.title)
+                val version=if(expected==null) notebookStorage.publishNoteObserved(uri,tmp,DocumentKind.NOTE,doc.displayName ?: doc.title)
+                    else notebookStorage.publishExpected(uri,tmp,expected,doc.displayName ?: doc.title)
                 state.lastSaveEncodeMs = msBetween(encodeStart, copyStart) // all four for the debug overlay
                 state.lastSaveCopyMs = msSince(copyStart)
                 state.lastSaveManifestMs = timing.manifestMs
@@ -6182,13 +6420,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.lastSaveManifestBytes = timing.manifestBytes
                 state.lastSaveBytes = tmp.length() // live file size for the debug overlay
                 rememberStamp(uri) // read back what the provider reports, not what we wrote
-                true
+                version
             } finally {
                 tmp.delete()
             }
         }.getOrElse {error->
                     if(isNativeSaveRejection(error) || error is java.util.concurrent.CancellationException) throw error
-                    false
+                    null
                 }
     }
 
@@ -6208,6 +6446,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun scheduleAutosave() {
         sharedOwner?.let { it.scheduleAutosave(); return }
+        if(pageReferenceSaveGuards>0) {noteDebounceJob?.cancel();return}
         val uri = autosaveUri ?: return
         val doc = state.document
         noteDebounceJob?.cancel()
@@ -6237,6 +6476,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 sessionOwner.awaitAccepted()
                 if (!awaitNoteCapture(doc)) return@launch
                 val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val strictSource=pageReferenceProtects(doc,target)
+                val expected=if(strictSource) noteSourceObservation?.takeIf {it.sameOrigin(this@Editor)}?.version else null
+                if(strictSource && expected==null) return@launch
                 val originalPath=doc.path
                 val originalIdentity=doc.identity
                 val originalPdf=doc.pdfFile
@@ -6255,7 +6497,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 wasDirty=doc.dirty
                 doc.dirty=false;dirty=false;state.autosaveStatus="in progress"
                 if (showOverlay) savingNote = true
-                val res=withContext(Dispatchers.IO) {saveNoteGuarded(target,snapshot,captureTitle,doc,NoteForkDraft(intent,forkCopy))}
+                val res=withContext(Dispatchers.IO) {saveNoteGuarded(target,snapshot,captureTitle,doc,NoteForkDraft(intent,forkCopy),expected)}
                 if(res!=null) {
                     res.fork?.let {fork->
                         savingNote=false
@@ -6268,8 +6510,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         adoptNoteFork(fork)
                         doc.dirty=doc.dirty || !unchanged
                         dirty=doc.dirty
+                        res.version?.let {observePublishedNote(doc,it,if(unchanged) doc.bodyRevision else revision)}
                         requestWorkingSession()
                     }
+                    if(res.fork==null && state.document===doc && !canvasOpen && documentOwner===this@Editor &&
+                        doc.path==originalPath && doc.identity==originalIdentity && doc.pageReferenceScope===originalScope &&
+                        noteEditSource===source && observation?.isCurrent()!=false &&
+                        doc.identity==snapshot.identity) res.version?.let {observePublishedNote(doc,it,revision)}
                     invalidateThumb(res.uri)
                     success=true
                 }
@@ -10585,7 +10832,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         return true
     }
-    private suspend fun settleOpenSlots(slots:List<OpenSlot>,whole:Boolean,discarded:Set<OpenDiscard>,request:NativeOpenRequest?):Boolean {
+    private suspend fun settleOpenSlots(slots:List<OpenSlot>,whole:Boolean,discarded:Set<OpenDiscard>,request:NativeOpenRequest?,
+                                        cleanOnly:Boolean=false):Boolean {
         fun current()=(request==null || nativeOpenCurrent(request)) && sameOpenSlots(slots,whole)
         if(!current() || nativeOpenPenInContact()) return false
         for (ed in slots.map { it.pane }.distinct()) {
@@ -10609,7 +10857,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         for(ed in panes.map {it.documentOwner}.distinct()) {
             if(!current()) return false
             if(discarded.any {it.owner===ed && it.applies()}) continue
-            if(!ed.flushSplitDocument()) {say(appContext.getString(R.string.err_save_note));return false}
+            if(cleanOnly) {
+                ed.noteDebounceJob?.cancel()
+                if(ed.canvasOpen || !ed.awaitNoteCapture(ed.state.document) || ed.state.document.dirty) return false
+            } else if(!ed.flushSplitDocument()) {say(appContext.getString(R.string.err_save_note));return false}
         }
         for (ed in panes) ed.awaitSessionEncoders()
         // No policy for discarding an already-written/pending save is guessed here.

@@ -132,6 +132,13 @@ class NotebookStorage internal constructor(private val context:Context,
             }
         }
     }
+    internal fun hasPageActivationRecovery(uri:String,checkActive:()->Unit={}):Boolean = synchronized(lock) {
+        checkActive();val pending=journal(uri,checkActive)
+        if(!pending.pending) false else try {
+            pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES,checkActive);true
+        } catch(_:MigrationPublication.RecoveryRequired) {false}
+    }
+
     /** Only an explicit user-selected recovery may finish a retained page upgrade. Never called by ensure/save. */
     internal fun completePageActivation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
         checkActive()
@@ -526,8 +533,12 @@ class NotebookStorage internal constructor(private val context:Context,
 
     /** Complete candidate first; local replacement is atomic, SAF retains a durable recovery journal. */
     fun publishNote(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String) {
-        synchronized(lock) {publishExisting(uri,candidate,kind,name,null)}
+        publishNoteObserved(uri,candidate,kind,name)
     }
+
+    /** The exact committed candidate, for read-only UI baselines; never a model/source binding. */
+    internal fun publishNoteObserved(uri:String,candidate:File,kind:com.xnotes.core.util.DocumentKind,name:String):NativeSourceVersion =
+        synchronized(lock) {publishExisting(uri,candidate,kind,name,null)}
 
     /** Ordinary save of a model based on an issued source version. No implicit creation or repair. */
     internal fun publishExpected(uri:String,candidate:File,expected:NativeSourceVersion,name:String):NativeSourceVersion = synchronized(lock) {
