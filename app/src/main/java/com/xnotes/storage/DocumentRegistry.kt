@@ -96,6 +96,35 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     internal fun uriAtLocation(uri:String):String? = readableDatabase.rawQuery("SELECT uri FROM locations WHERE location_key=?",arrayOf(locationKey(uri))).use {if(it.moveToFirst()) it.getString(0) else null}
     internal fun nameForId(id:String):String? = readableDatabase.rawQuery("SELECT name FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
     internal fun kindForId(id:String):String? = readableDatabase.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
+    internal data class ObservedLocation(val uri:String,val key:String,val available:Boolean)
+    internal data class ObservedFile(val kind:String?,val name:String?,val locations:List<ObservedLocation>)
+    internal data class FileObservations(val files:Map<String,ObservedFile>,val limited:Boolean)
+    /** Last-registered metadata only. A limit never turns a truncated set into one chosen location. */
+    internal fun fileObservations(ids:Set<String>,checkActive:()->Unit={}):FileObservations {
+        require(ids.size<=10000)
+        data class Read(val kind:String?,val name:String?,val locations:MutableList<ObservedLocation> = mutableListOf())
+        val found=linkedMapOf<String,Read>();var positions=0;var limited=false
+        loop@for(chunk in ids.toList().chunked(200)) {
+            checkActive()
+            val placeholders=chunk.joinToString(",") {"?"}
+            val args=(chunk+((10000-positions)+chunk.size+1).toString()).toTypedArray()
+            readableDatabase.rawQuery("SELECT d.id,d.kind,d.name,l.uri,l.location_key,l.available FROM documents d LEFT JOIN locations l ON l.document_id=d.id "+
+                "WHERE d.id IN ($placeholders) ORDER BY d.id,l.location_key LIMIT ?",args).use {cursor->
+                while(cursor.moveToNext()) {
+                    checkActive()
+                    val id=cursor.getString(0)
+                    val file=found.getOrPut(id) {Read(cursor.getString(1),cursor.getString(2))}
+                    if(!cursor.isNull(3)) {
+                        if(++positions>10000) {limited=true;break}
+                        file.locations+=ObservedLocation(cursor.getString(3),cursor.getString(4),cursor.getInt(5)!=0)
+                    }
+                }
+            }
+            if(limited) break@loop
+        }
+        checkActive()
+        return FileObservations(found.mapValues {(_,file)->ObservedFile(file.kind,file.name,file.locations.toList())},limited)
+    }
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
     fun locations(id: String): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations WHERE document_id=? AND available=1 ORDER BY uri", arrayOf(id)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
