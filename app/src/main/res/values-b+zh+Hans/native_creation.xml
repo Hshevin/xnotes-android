@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="extract_copy_kept_source_changed">副本已保存。来源已发生修改，因此保留了原页面。</string>
+</resources>

@@ -80,6 +80,7 @@ import com.xnotes.core.search.TypedTexts
 import com.xnotes.core.model.deepCopy
 import com.xnotes.core.model.snapshot
 import com.xnotes.core.model.fixedWriteSnapshot
+import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
@@ -1218,15 +1219,32 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 sessionOwner.awaitAccepted()
                 if (!awaitCanvasCapture(doc)) return@launch
                 val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val originalPath=doc.path
+                val originalIdentity=doc.identity
+                val source=canvasEditSource
+                val observation=source?.observe(doc)
+                val intent=notebookStorage.beginCreation(DocumentKind.CANVAS)
                 val snapshot=doc.snapshotForWrite(fixedItems=true)
+                val revision=doc.bodyRevision
                 val captureTitle = doc.displayName ?: title
                 wasDirty=doc.dirty;doc.dirty=false
                 if (showOverlay) savingNote = true
-                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(target,snapshot,captureTitle,doc)}
-                success=res!=null
+                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(target,snapshot,captureTitle,doc,intent)}
                 if(res!=null) {
-                    if(infiniteOrNull?.document===doc) res.fork?.let {adoptCanvasFork(it)}
+                    res.fork?.let {fork->
+                        savingNote=false
+                        infinite.commitText()
+                        if(!awaitCanvasCapture(doc) || doc.path!=originalPath || doc.identity!=originalIdentity ||
+                            canvasEditSource!==source || observation?.isCurrent()==false) {
+                            message=appContext.getString(R.string.native_open_changed);return@launch
+                        }
+                        val unchanged=doc.bodyRevision==revision
+                        adoptCanvasFork(fork)
+                        doc.dirty=doc.dirty || !unchanged
+                        requestWorkingSession()
+                    }
                     invalidateThumb(res.uri)
+                    success=true
                 }
             } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
             } catch (_: Throwable) {
@@ -4451,15 +4469,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** IO-only: encode a fixed copy without pinning an unpublished document as a permanent PDF owner. */
     private fun publishCreatedNote(uri:String,name:String,snapshot:Document,
-                                   intent:com.xnotes.storage.NativeCreationIntent):CreatedNoteWrite {
+                                   intent:com.xnotes.storage.NativeCreationIntent,checkActive:()->Unit={}):CreatedNoteWrite {
         var candidate:java.io.File?=null
         var lease:AutoCloseable?=null
         var failure:Throwable?=null
         var published=false
         try {
-            val permit=notebookStorage.prepareNewTarget(intent,uri)
+            val permit=notebookStorage.prepareNewTarget(intent,uri,checkActive)
             snapshot.pdfFile?.let {pdf->
-                val held=notebookStorage.pdfResources.admitHeld(pdf,name)
+                val held=notebookStorage.pdfResources.admitHeld(pdf,name,checkActive)
                 lease=held.lease
                 val hash=held.file.nameWithoutExtension
                 if(snapshot.identity.pdfResource?.let {it!=hash}==true)
@@ -4472,16 +4490,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 codec.write(snapshot,object:java.io.FilterOutputStream(output) {
                     override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
                     override fun close() {flush()}
-                },embedPdf=false)
+                },embedPdf=false,isCancelled={checkActive();false})
                 output.fd.sync()
             }
-            notebookStorage.publishCreated(uri,file,permit,name)
+            notebookStorage.publishCreated(uri,file,permit,name,checkActive)
             published=true
             return CreatedNoteWrite()
         } catch(cancelled:java.util.concurrent.CancellationException) {failure=cancelled;throw cancelled}
         catch(error:Exception) {
             failure=error
-            val retained=try {notebookStorage.retainedCreation(intent,uri,name)!=null}
+            val retained=try {notebookStorage.retainedCreation(intent,uri,name,checkActive)!=null}
                 catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
                 catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);false}
             return CreatedNoteWrite(error,retained)
@@ -4493,6 +4511,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 else throw close
             }
         }
+    }
+
+    /** Canvas creation has no page projection or PDF admission, but uses the same checked publication. */
+    private fun publishCreatedCanvas(uri:String,name:String,snapshot:com.xnotes.core.infinite.InfiniteDocument,
+                                     intent:com.xnotes.storage.NativeCreationIntent):CreatedNoteWrite {
+        var candidate:java.io.File?=null
+        try {
+            val permit=notebookStorage.prepareNewTarget(intent,uri)
+            val file=java.io.File.createTempFile("create-canvas-",".xcanvas",saveTmpDir).also {candidate=it}
+            java.io.FileOutputStream(file).use {output->
+                canvasCodec.write(snapshot,object:java.io.FilterOutputStream(output) {
+                    override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
+                    override fun close() {flush()}
+                })
+                output.fd.sync()
+            }
+            notebookStorage.publishCreated(uri,file,permit,name)
+            return CreatedNoteWrite()
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(error:Exception) {
+            val retained=try {notebookStorage.retainedCreation(intent,uri,name)!=null}
+                catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);false}
+            return CreatedNoteWrite(error,retained)
+        } finally {candidate?.delete()}
     }
 
     fun saveToThen(uri:String,onDone:(Boolean)->Unit)=saveToThen(uri,null,false,onDone)
@@ -5293,44 +5336,68 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return "${base}_$n$ext"
     }
 
-    /** Creates a new `.xnote` named [name] under [parentDocId], written by [write]; returns its URI, or null.
-     *  If [write] throws (an IO error, or a cancelled import), the half-written file is deleted so a failed
-     *  import never leaves an empty/partial note behind. */
-    private fun createNoteFile(treeUri: String, parentDocId: String, name: String, write: (OutputStream) -> Unit): String? {
+    /** A provider's returned URI is only a proposed target, never evidence that we own its contents. */
+    private fun createDocumentTarget(treeUri:String,parentDocId:String,name:String):android.net.Uri? {
         val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(treeUri), parentDocId)
-        val uri = runCatching {
+        return try {
             android.provider.DocumentsContract.createDocument(appContext.contentResolver, parent, "application/octet-stream", name)
-        }.getOrNull() ?: return null
-        return runCatching {
-            checkNotNull(appContext.contentResolver.openOutputStream(uri, "wt")).use { write(it) }
-            if (DocumentKind.ofName(name) in listOf(DocumentKind.NOTE,DocumentKind.CANVAS)) notebookStorage.ensure(uri.toString(),name,DocumentKind.ofName(name)!!.extension)
-            uri.toString()
-        }.getOrElse {
-            runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, uri) }
-            null
-        }
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(_:Exception) {null}
+    }
+
+    private fun createdFileResult(uri:android.net.Uri,written:CreatedNoteWrite):String? {
+        if(written.error==null) return uri.toString()
+        android.util.Log.w("xnotes.save","New document publication did not complete",written.error)
+        if(written.retained) message=appContext.getString(R.string.native_copy_unfinished)
+        return null
+    }
+
+    /** Detached new documents are projected once; a live fork must supply its owner's prepared snapshot. */
+    private fun createNoteFile(treeUri:String,parentDocId:String,name:String,document:Document,
+                               intent:com.xnotes.storage.NativeCreationIntent?=null,checkActive:()->Unit={}):String? {
+        return try {
+            checkActive()
+            val creation=intent ?: notebookStorage.beginCreation(DocumentKind.NOTE)
+            val uri=createDocumentTarget(treeUri,parentDocId,name) ?: return null
+            val snapshot=if(document.isWriteSnapshot) {
+                require(intent!=null && document.identity.documentId==creation.documentId)
+                document
+            } else com.xnotes.core.model.PageReferenceCopy.prepare(document,creation.documentId).project(document.fixedWriteSnapshot())
+            createdFileResult(uri,publishCreatedNote(uri.toString(),name,snapshot,creation,checkActive))
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(error:Exception) {android.util.Log.w("xnotes.save","Could not prepare a new note",error);null}
+    }
+
+    private fun createCanvasFile(treeUri:String,parentDocId:String,name:String,snapshot:com.xnotes.core.infinite.InfiniteDocument,
+                                 intent:com.xnotes.storage.NativeCreationIntent):String? {
+        val uri=createDocumentTarget(treeUri,parentDocId,name) ?: return null
+        return createdFileResult(uri,publishCreatedCanvas(uri.toString(),name,snapshot,intent))
     }
 
     /** Creates an independent native mind map; never touches notebook identities or bundles. IO. */
-    fun createBlankMindMapFile(treeUri: String, parentDocId: String, rawName: String): String? {
+    suspend fun createBlankMindMapFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, DocumentKind.MIND_MAP)
         val doc = com.xnotes.mindmap.MindMapDocument(nodes = listOf(com.xnotes.mindmap.MapNode(parent = null, text = appContext.getString(R.string.map_topic))))
-        return createNoteFile(treeUri, parentDocId, name) { it.write(com.xnotes.mindmap.MapCodec.encode(doc)) }
+        val uri=createDocumentTarget(treeUri,parentDocId,name) ?: return null
+        return try {com.xnotes.mindmap.MapFiles.create(appContext,uri,doc);uri.toString()}
+        catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(error:Exception) {android.util.Log.w("xnotes.save","New mind map publication did not complete",error);null}
     }
 
     /** Creates a blank `.xcanvas` under [parentDocId]; returns its URI, or null. IO — call off-thread. */
     fun createBlankCanvasFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.CANVAS)
-        return createNoteFile(treeUri, parentDocId, name) {
-            canvasCodec.write(com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis()), it)
-        }
+        val intent=notebookStorage.beginCreation(DocumentKind.CANVAS)
+        val snapshot=com.xnotes.core.infinite.InfiniteDocument(created=System.currentTimeMillis()).snapshotForWrite(fixedItems=true)
+        snapshot.identity=snapshot.identity.copy(documentId=intent.documentId)
+        return createCanvasFile(treeUri,parentDocId,name,snapshot,intent)
     }
 
     /** Creates a blank `.xnote` under [parentDocId]; returns its URI, or null. IO — call off-thread. */
     fun createBlankNoteFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
         val blank = blankDocument().also { stampNewNoteDefaults(it) }
-        return createNoteFile(treeUri, parentDocId, name) { writeLocalNote(blank, it) }
+        return createNoteFile(treeUri,parentDocId,name,blank)
     }
 
     /** What the New note screen chose: the page size in mm, every page's style, and the cover's when there is one. */
@@ -5352,25 +5419,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             TemplateLibrary.embed(doc, style.template, imageDir)
             doc.pages.add(0, cover)
         }
-        return createNoteFile(treeUri, parentDocId, name) { writeLocalNote(doc, it) }
+        return createNoteFile(treeUri,parentDocId,name,doc)
     }
 
     /** Imports the PDF at [pdfFile] into a new `.xnote` under [parentDocId] (named after [rawName]);
      *  returns its URI, or null. The PDF is streamed to the shared store; the bundle keeps a reference. IO. */
     fun createPdfNoteFile(treeUri: String, parentDocId: String, rawName: String, pdfFile: java.io.File): String? {
         val source = com.xnotes.platform.PdfSource.open(pdfFile)
-        lastImportError = source.openError
-        if (source.pageCount == 0) {
-            source.close()
-            return null
-        }
-        val doc = com.xnotes.platform.PdfImporter.import(source, state.document.dpi) // doc.pdfFile = pdfFile
-        stampNewNoteDefaults(doc)
-        doc.created = System.currentTimeMillis()
-        val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        val uri = createNoteFile(treeUri, parentDocId, name) { writeLocalNote(doc, it) { importCancelled.get() } }
-        source.close()
-        return uri
+        try {
+            lastImportError = source.openError
+            if (source.pageCount == 0) {
+                return null
+            }
+            val doc = com.xnotes.platform.PdfImporter.import(source, state.document.dpi) // doc.pdfFile = pdfFile
+            stampNewNoteDefaults(doc)
+            doc.created = System.currentTimeMillis()
+            val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
+            return createNoteFile(treeUri,parentDocId,name,doc,checkActive={if(importCancelled.get()) throw DocumentCodec.WriteCancelled()})
+        } finally {source.close()}
     }
 
     /**
@@ -5398,7 +5464,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             extra = frame().extraPagesNeeded
         }
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        return createNoteFile(treeUri, parentDocId, name) { writeLocalNote(doc, it) { importCancelled.get() } }
+        return createNoteFile(treeUri,parentDocId,name,doc,checkActive={if(importCancelled.get()) throw DocumentCodec.WriteCancelled()})
     }
 
     /** The text of the markdown file at [uri], or null when it cannot be read or is too big to be one. IO. */
@@ -5915,7 +5981,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val knownStamps = java.util.concurrent.ConcurrentHashMap<String, FileStamp>()
 
     /** Where a fork landed: the new file's uri, and the name to show the user. */
-    private class Fork(val uri: String, val name: String, val identity: com.xnotes.format.BundleIdentity)
+    private class NoteForkDraft(val intent:com.xnotes.storage.NativeCreationIntent,val copy:Result<com.xnotes.core.model.PageReferenceCopy>)
+    private class Fork(val uri:String,val name:String,val identity:com.xnotes.format.BundleIdentity,
+                       val originalTarget:String,val base:String,val pageCopy:com.xnotes.core.model.PageReferenceCopy?=null,
+                       val pdfFile:java.io.File?=null)
 
     /** Where a guarded save landed; [fork] is null when it wrote the file in place as usual. */
     private class SaveResult(val uri: String, val fork: Fork?)
@@ -5980,38 +6049,39 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * Write [doc] to a new sibling of [uri], leaving the file that changed underneath us untouched.
      * Both versions survive and both sync onward; nothing is merged and nothing is overwritten.
      */
-    private fun forkNote(uri: String, doc: Document, title: String): Fork? {
+    private fun forkNote(uri:String,doc:Document,title:String,draft:NoteForkDraft):Fork? {
         val root = documentStorageRoot(uri) ?: return null
         val parentId = parentDocIdOf(uri) ?: return null
         val name = forkName(root, parentId, title, com.xnotes.core.util.DocumentKind.NOTE)
-        doc.identity = com.xnotes.format.BundleIdentity(pdfResource = doc.identity.pdfResource)
-        val forked = createNoteFile(root, parentId, name) { writeLocalNote(doc, it) } ?: return null
+        val copy=draft.copy.getOrThrow()
+        val projected=copy.project(doc)
+        val forked=createNoteFile(root,parentId,name,projected,draft.intent) ?: return null
         rememberStamp(forked)
-        return Fork(forked, name, doc.identity)
+        return Fork(forked,name,projected.identity,uri,DocumentKind.stripSuffix(title),copy,projected.pdfFile)
     }
 
     /** The canvas sibling of [forkNote]. */
-    private fun forkCanvas(uri: String, doc: com.xnotes.core.infinite.InfiniteDocument, title: String): Fork? {
+    private fun forkCanvas(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,
+                           intent:com.xnotes.storage.NativeCreationIntent):Fork? {
         val root = documentStorageRoot(uri) ?: return null
         val parentId = parentDocIdOf(uri) ?: return null
         val name = forkName(root, parentId, title, com.xnotes.core.util.DocumentKind.CANVAS)
-        doc.identity = com.xnotes.format.BundleIdentity()
-        val forked = createNoteFile(root, parentId, name) { canvasCodec.write(doc, it) } ?: return null
+        doc.identity=doc.identity.copy(documentId=intent.documentId)
+        val forked=createCanvasFile(root,parentId,name,doc,intent) ?: return null
         rememberStamp(forked)
-        return Fork(forked, name, doc.identity)
+        return Fork(forked,name,doc.identity,uri,DocumentKind.stripSuffix(title))
     }
 
     private fun isNativeSaveRejection(error:Throwable)=error is com.xnotes.storage.ReferenceContractViolation ||
         error is com.xnotes.storage.MigrationPublication.RecoveryRequired || error is com.xnotes.storage.PdfResources.Unavailable
 
     /** The same candidate/registry transaction is used for notes and canvases. IO. */
-    private fun saveNoteGuarded(uri:String,doc:Document,title:String,owner:Document):SaveResult? = synchronized(saveLock) {
+    private fun saveNoteGuarded(uri:String,doc:Document,title:String,owner:Document,draft:NoteForkDraft):SaveResult? = synchronized(saveLock) {
         try {
             val target=forks.target(uri,owner)
             if(changedUnderneath(target)) {
                 val base=forks.base(target,DocumentKind.stripSuffix(title))
-                val fork=forkNote(target,doc,base) ?: return null
-                forks.record(target,fork.uri,owner,DocumentKind.stripSuffix(fork.name),base)
+                val fork=forkNote(target,doc,base,draft) ?: return null
                 return SaveResult(fork.uri,fork)
             }
             if(writeNoteSafely(target,doc)) SaveResult(target,null) else null
@@ -6022,13 +6092,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
     private fun saveCanvasGuarded(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,
-                                  owner:com.xnotes.core.infinite.InfiniteDocument):SaveResult? = synchronized(saveLock) {
+                                  owner:com.xnotes.core.infinite.InfiniteDocument,intent:com.xnotes.storage.NativeCreationIntent):SaveResult? = synchronized(saveLock) {
         try {
             val target=forks.target(uri,owner)
             if(changedUnderneath(target)) {
                 val base=forks.base(target,DocumentKind.stripSuffix(title))
-                val fork=forkCanvas(target,doc,base) ?: return null
-                forks.record(target,fork.uri,owner,DocumentKind.stripSuffix(fork.name),base)
+                val fork=forkCanvas(target,doc,base,intent) ?: return null
                 return SaveResult(fork.uri,fork)
             }
             if(writeCanvasSafely(target,doc)) SaveResult(target,null) else null
@@ -6040,11 +6109,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Point the open note at the copy it just forked into, and say so. Main thread. */
-    private fun adoptNoteFork(fork: Fork) {
+    private fun adoptNoteFork(fork:Fork) {
+        requireNotNull(fork.pageCopy).adopt(state.document)
+        retireNoteEditSource()
+        state.document.pdfFile=fork.pdfFile
         state.document.identity = fork.identity
         state.document.path = fork.uri
         state.document.displayName = fork.name
         autosaveUri = fork.uri
+        forks.record(fork.originalTarget,fork.uri,state.document,DocumentKind.stripSuffix(fork.name),fork.base)
         refreshContent()
         message = appContext.getString(R.string.note_forked, com.xnotes.core.util.DocumentKind.stripSuffix(fork.name))
     }
@@ -6052,10 +6125,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The canvas sibling of [adoptNoteFork]. Main thread. */
     private fun adoptCanvasFork(fork: Fork) {
         infinite.document.identity = fork.identity
+        retireCanvasEditSource()
         val canvas = infiniteOrNull ?: return
         canvas.document.path = fork.uri
         canvas.document.displayName = fork.name
         canvasAutosaveUri = fork.uri
+        forks.record(fork.originalTarget,fork.uri,canvas.document,DocumentKind.stripSuffix(fork.name),fork.base)
         refreshContent()
         message = appContext.getString(R.string.canvas_forked, com.xnotes.core.util.DocumentKind.stripSuffix(fork.name))
     }
@@ -6161,18 +6236,41 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 sessionOwner.awaitAccepted()
                 if (!awaitNoteCapture(doc)) return@launch
                 val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val originalPath=doc.path
+                val originalIdentity=doc.identity
+                val originalPdf=doc.pdfFile
+                val source=noteEditSource
+                val observation=source?.observe(doc)
+                val intent=notebookStorage.beginCreation(DocumentKind.NOTE)
+                // Reaching the copy-lineage limit may reject a new fork, but never an ordinary save.
+                val forkCopy=try {Result.success(com.xnotes.core.model.PageReferenceCopy.prepare(doc,intent.documentId))}
+                    catch(error:IllegalArgumentException) {Result.failure(error)}
+                val originalScope=doc.pageReferenceScope
                 val captureStart = System.nanoTime()
                 val snapshot = doc.fixedWriteSnapshot()
+                val revision=doc.bodyRevision
                 val captureTitle = doc.displayName ?: title
                 state.lastSaveSnapshotMs = msSince(captureStart)
                 wasDirty=doc.dirty
                 doc.dirty=false;dirty=false;state.autosaveStatus="in progress"
                 if (showOverlay) savingNote = true
-                val res=withContext(Dispatchers.IO) {saveNoteGuarded(target,snapshot,captureTitle,doc)}
-                success=res!=null
+                val res=withContext(Dispatchers.IO) {saveNoteGuarded(target,snapshot,captureTitle,doc,NoteForkDraft(intent,forkCopy))}
                 if(res!=null) {
-                    if(state.document===doc) res.fork?.let {adoptNoteFork(it)}
+                    res.fork?.let {fork->
+                        savingNote=false
+                        commitNoteTextForSave()
+                        if(!awaitNoteCapture(doc) || doc.path!=originalPath || doc.identity!=originalIdentity ||
+                            doc.pdfFile!==originalPdf || doc.pageReferenceScope!==originalScope || noteEditSource!==source || observation?.isCurrent()==false) {
+                            message=appContext.getString(R.string.native_open_changed);return@launch
+                        }
+                        val unchanged=doc.bodyRevision==revision
+                        adoptNoteFork(fork)
+                        doc.dirty=doc.dirty || !unchanged
+                        dirty=doc.dirty
+                        requestWorkingSession()
+                    }
                     invalidateThumb(res.uri)
+                    success=true
                 }
             } catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled
             } catch (_: Throwable) {
@@ -8083,50 +8181,52 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * step. This note stays open, and a message names the new one with a button to open it.
      */
     fun extractPages(indices: List<Int>, name: String, move: Boolean) {
-        val root = browseRoot ?: run { message = appContext.getString(R.string.err_extract_pages); return }
-        val doc = state.document
-        val picked = indices.filter { it in doc.pages.indices }.distinct().sorted()
-        if (picked.isEmpty()) return
-        if (move && picked.size >= doc.pages.size) {
-            message = appContext.getString(R.string.err_keep_one_page)
-            return
-        }
-        val leaving = picked.map { doc.pages[it] }
-        val cargo = com.xnotes.core.model.PageCargo.pack(doc, picked, textMeasurer)
-        // A name of its own for the PDF, which a note switched away from meanwhile would delete.
-        val sourcePdf = doc.pdfFile?.takeIf { cargo.pdfIndices.isNotEmpty() }?.let { keepPdf(it) }
-        val parentId = currentUri?.takeIf { isUnderTree(it, root) }?.let { parentDocIdOf(it) } ?: browseRootDocId(root)
+        val root=browseRoot ?: run {message=appContext.getString(R.string.err_extract_pages);return}
+        val doc=state.document
+        val leaving=indices.filter {it in doc.pages.indices}.distinct().sorted().map {doc.pages[it]}
+        if(leaving.isEmpty()) return
         autosaveScope.launch {
+            // Do not capture an unconfirmed selection/table preview or block its confirmation with a modal.
+            if(!awaitStableForSave() || state.document!==doc || canvasOpen) return@launch
+            val picked=leaving.map {page->doc.pages.indexOfFirst {it===page}}
+            if(picked.any {it<0}) {message=appContext.getString(R.string.native_open_changed);return@launch}
+            if(move && picked.size>=doc.pages.size) {message=appContext.getString(R.string.err_keep_one_page);return@launch}
+            val from=doc.fixedWriteSnapshot()
+            val revision=doc.bodyRevision
+            val sourceIdentity=doc.identity
+            val sourcePath=doc.path
+            val sourceScope=doc.pageReferenceScope
+            val cargo=com.xnotes.core.model.PageCargo.pack(from,picked,textMeasurer)
+            val sourcePdf=from.pdfFile?.takeIf {cargo.pdfIndices.isNotEmpty()}?.let {keepPdf(it)}
+            val parentId=doc.path?.takeIf {isUnderTree(it,root)}?.let {parentDocIdOf(it)} ?: browseRootDocId(root)
             importCancelled.set(false)
-            busyWith = R.string.making_note
-            importing = true
-            val made = try {
-                withContext(Dispatchers.IO) {
-                    writeCargoNote(root, parentId, name, doc, cargo, sourcePdf)?.also { made ->
-                        if (importCancelled.get()) {
-                            runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(made.uri)) }
-                        }
-                    }
-                }
+            busyWith=R.string.making_note
+            importing=true
+            val made=try {
+                withContext(Dispatchers.IO) {writeCargoNote(root,parentId,name,from,cargo,sourcePdf)}
             } finally {
-                importing = false
-                busyWith = null
+                importing=false
+                busyWith=null
                 sourcePdf?.delete()
                 cargo.pdf?.delete()
             }
-            if (importCancelled.get()) return@launch
-            if (made == null) {
-                message = appContext.getString(R.string.err_extract_pages)
-                return@launch
+            if(importCancelled.get()) return@launch
+            if(made==null) {message=appContext.getString(R.string.err_extract_pages);return@launch}
+            if(move) {
+                commitNoteTextForSave()
+                if(!awaitNoteCapture(doc) || doc.bodyRevision!=revision || doc.identity!=sourceIdentity ||
+                    doc.path!=sourcePath || doc.pageReferenceScope!==sourceScope) {
+                    say(appContext.getString(R.string.extract_copy_kept_source_changed),
+                        appContext.getString(R.string.open) to {openInPane?.invoke(made.uri)})
+                    return@launch
+                }
+                deletePages(leaving.map {page->doc.pages.indexOfFirst {it===page}}.filter {it>=0})
             }
-            if (move && state.document === doc) deletePages(leaving.map { p -> doc.pages.indexOfFirst { it === p } }.filter { it >= 0 })
-            val folder = withContext(Dispatchers.IO) {
-                queryDisplayName(android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(root), parentId))
+            val folder=withContext(Dispatchers.IO) {
+                queryDisplayName(android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(root),parentId))
             } ?: ""
-            say(
-                appContext.getString(R.string.pages_now_in, com.xnotes.core.util.DocumentKind.stripSuffix(made.name), folder),
-                appContext.getString(R.string.open) to { openInPane?.invoke(made.uri) },
-            )
+            say(appContext.getString(R.string.pages_now_in,DocumentKind.stripSuffix(made.name),folder),
+                appContext.getString(R.string.open) to {openInPane?.invoke(made.uri)})
         }
     }
 
@@ -8154,8 +8254,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (cargo.cover) pages.firstOrNull()?.cover = true
         note.pages.addAll(pages)
         note.bookmarks.addAll(cargo.bookmarks.map { Bookmark(it.page, it.label) })
+        if(from.hasReferenceAnchors) note.enableReferenceAnchors()
         val name = uniqueDocumentName(root, parentId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        val uri = createNoteFile(root, parentId, name) { writeLocalNote(note, it) } ?: return null
+        val uri=createNoteFile(root,parentId,name,note,checkActive={if(importCancelled.get()) throw DocumentCodec.WriteCancelled()}) ?: return null
         return MadeFile(uri, name)
     }
 
@@ -8174,11 +8275,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             importing = true
             val made = try {
                 withContext(Dispatchers.IO) {
-                    writeMergedNote(root, parentId, rawName, uris)?.also { made ->
-                        if (importCancelled.get()) {
-                            runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(made.uri)) }
-                        }
-                    }
+                    writeMergedNote(root,parentId,rawName,uris)
                 }
             } finally {
                 importing = false
@@ -8195,17 +8292,25 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun writeMergedNote(root: String, parentId: String, rawName: String, uris: List<String>): MadeFile? {
         val docs = ArrayList<Document>()
         val temps = ArrayList<java.io.File>()
+        val leases=ArrayList<AutoCloseable>()
         try {
             for (u in uris) {
                 if (importCancelled.get()) return null
-                val doc = runCatching {
-                    appContext.contentResolver.openInputStream(android.net.Uri.parse(u))?.use { codec.read(it, pdfDir, imageDir) }
-                }.getOrNull() ?: return null
+                val doc=try {
+                    withStoredNativeSource(u,DocumentKind.NOTE,{if(importCancelled.get()) throw DocumentCodec.WriteCancelled()}) {snapshot,identity,_->
+                        // Transfer one additional lease to the whole merge before the source holder closes.
+                        val ids=identity.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
+                        val held=notebookStorage.pdfResources.holdResolved(ids)
+                        try {
+                            snapshot.file.inputStream().use {codec.read(it,pdfDir,imageDir)}.also {leases+=held}
+                        } catch(error:Throwable) {try {held.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
+                    }
+                } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                catch(_:Exception) {return null}
                 docs += doc
                 doc.pdfFile?.takeUnless { com.xnotes.storage.PdfResources.get(appContext).isOwned(it) }?.let { temps += it }
             }
             val merged = docs.first()
-            merged.identity = merged.identity.copy(documentId = java.util.UUID.randomUUID().toString())
             merged.path = null
             merged.displayName = null
             merged.created = System.currentTimeMillis()
@@ -8238,13 +8343,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 com.xnotes.core.text.FlowMerge.append(merged.flow, doc.flow, offset + flowStart(doc))
             }
             merged.pdfFile = pdf
+            // Merging authorizes a new PDF composition; fork/save continue to require the original hash.
+            merged.identity=merged.identity.copy(pdfResource=null,externalPdf=false)
+            if(docs.any {it.hasReferenceAnchors} && !merged.hasReferenceAnchors) merged.enableReferenceAnchors()
             if (importCancelled.get()) return null
             val name = uniqueDocumentName(root, parentId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-            val uri = createNoteFile(root, parentId, name) { writeLocalNote(merged, it) } ?: return null
+            val uri=createNoteFile(root,parentId,name,merged,checkActive={if(importCancelled.get()) throw DocumentCodec.WriteCancelled()}) ?: return null
             return MadeFile(uri, name)
         } finally {
             for (file in temps) file.delete()
             for (doc in docs) deleteImageTemps(doc)
+            for(lease in leases.asReversed()) try {lease.close()}
+                catch(error:Exception) {android.util.Log.w("xnotes.storage","Retained PDF lease after merge",error)}
         }
     }
 

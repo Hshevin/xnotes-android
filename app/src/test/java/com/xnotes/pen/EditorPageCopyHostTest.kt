@@ -52,23 +52,43 @@ import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 
 /** A provider can deliberately return target again from createDocument for later fork/new-note tests. */
-internal class EditorPageCopyFixture(base:Context,val root:File) {
+internal class EditorPageCopyFixture(base:Context,val root:File,private val namespaced:Boolean=false) {
     val authority="editor-page-copy"
-    val sourceUri="content://$authority/document/source"
-    val targetUri="content://$authority/document/target"
+    val sourceId=if(namespaced) "root/source" else "source"
+    val targetId=if(namespaced) "root/target" else "target"
+    val sourceUri=DocumentsContract.buildDocumentUri(authority,sourceId).toString()
+    val targetUri=DocumentsContract.buildDocumentUri(authority,targetId).toString()
     val source=File(root,"source.xnote")
     val target=File(root,"target.xnote").apply {writeBytes(byteArrayOf())}
     var sourceDisplayName="source.xnote"
+    var targetDisplayName="target.xnote"
+    var retryDisplayName="retry.xnote"
+    val retry=File(root,"retry.xnote").apply {writeBytes(byteArrayOf())}
+    private val madeIds=java.util.concurrent.CopyOnWriteArrayList<String>()
     val writes=AtomicInteger();val deletes=AtomicInteger();val writeOpens=AtomicInteger();val creates=AtomicInteger()
     val release=CountDownLatch(1)
+    @Volatile var createdDocumentId=targetId
+    @Volatile var denyTargetRead=false
     @Volatile var beforeTargetRead:(()->Unit)?=null
     @Volatile var beforeTargetWrite:(()->Unit)?=null
-    private fun file(id:String)=when(id) {"source"->source;"target"->target;else->error("Unknown document: $id")}
+    @Volatile var afterTargetWrite:(()->Unit)?=null
+    private fun file(id:String)=when(id.substringAfterLast('/')) {"source"->source;"target"->target;"retry"->retry;"root"->root;else->error("Unknown document: $id")}
     val provider=object:DocumentsProvider() {
         override fun onCreate()=true
         override fun queryRoots(projection:Array<out String>?)=MatrixCursor(projection ?: arrayOf(DocumentsContract.Root.COLUMN_ROOT_ID))
-        override fun queryChildDocuments(parentDocumentId:String,projection:Array<out String>?,sortOrder:String?)=
-            MatrixCursor(projection ?: arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID))
+        override fun queryChildDocuments(parentDocumentId:String,projection:Array<out String>?,sortOrder:String?):Cursor {
+            val columns=projection ?: arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            return MatrixCursor(columns).apply {
+                if(namespaced && parentDocumentId=="root") for(id in (listOf(sourceId)+madeIds).distinct()) {
+                    queryDocument(id,columns).use {c->
+                        while(c.moveToNext()) addRow(columns.indices.map {at->when(c.getType(at)) {
+                            Cursor.FIELD_TYPE_INTEGER->c.getLong(at);Cursor.FIELD_TYPE_STRING->c.getString(at);else->null
+                        }})
+                    }
+                }
+            }
+        }
+        override fun isChildDocument(parentDocumentId:String,documentId:String)=documentId.startsWith("$parentDocumentId/")
         override fun queryDocument(documentId:String,projection:Array<out String>?):Cursor {
             val columns=projection ?: arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,DocumentsContract.Document.COLUMN_FLAGS,DocumentsContract.Document.COLUMN_SIZE,
@@ -76,8 +96,8 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
             val document=file(documentId)
             return MatrixCursor(columns).apply {addRow(columns.map {column->when(column) {
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID->documentId
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME->if(documentId=="source") sourceDisplayName else document.name
-                DocumentsContract.Document.COLUMN_MIME_TYPE->"application/octet-stream"
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME->when(documentId.substringAfterLast('/')) {"source"->sourceDisplayName;"target"->targetDisplayName;"retry"->retryDisplayName;else->document.name}
+                DocumentsContract.Document.COLUMN_MIME_TYPE->if(documentId=="root") DocumentsContract.Document.MIME_TYPE_DIR else "application/octet-stream"
                 DocumentsContract.Document.COLUMN_FLAGS->DocumentsContract.Document.FLAG_SUPPORTS_WRITE or DocumentsContract.Document.FLAG_SUPPORTS_DELETE
                 DocumentsContract.Document.COLUMN_SIZE->document.length()
                 DocumentsContract.Document.COLUMN_LAST_MODIFIED->document.lastModified()
@@ -85,10 +105,15 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
             }})}
         }
         override fun openDocument(documentId:String,mode:String,signal:CancellationSignal?):ParcelFileDescriptor {
+            if(documentId.substringAfterLast('/')=="target" && 'w' !in mode && denyTargetRead) throw SecurityException("Target read permission lost")
             if('w' in mode) writeOpens.incrementAndGet()
             return ParcelFileDescriptor.open(file(documentId),ParcelFileDescriptor.parseMode(mode))
         }
-        override fun createDocument(parentDocumentId:String,mimeType:String,displayName:String):String {creates.incrementAndGet();return "target"}
+        override fun createDocument(parentDocumentId:String,mimeType:String,displayName:String):String {
+            creates.incrementAndGet();madeIds.add(createdDocumentId)
+            if(namespaced) when(createdDocumentId.substringAfterLast('/')) {"target"->targetDisplayName=displayName;"retry"->retryDisplayName=displayName}
+            return createdDocumentId
+        }
         override fun deleteDocument(documentId:String) {deletes.incrementAndGet();file(documentId).delete()}
     }
     // Robolectric's resolver calls the pre-O query overload, which DocumentsProvider deliberately
@@ -96,7 +121,8 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
     private val resolverProvider=object:android.content.ContentProvider() {
         override fun onCreate()=true
         override fun query(uri:android.net.Uri,projection:Array<out String>?,selection:String?,args:Array<out String>?,sort:String?)=
-            provider.queryDocument(DocumentsContract.getDocumentId(uri),projection)
+            if(uri.pathSegments.lastOrNull()=="children") provider.queryChildDocuments(DocumentsContract.getDocumentId(uri),projection,sort)
+            else provider.queryDocument(DocumentsContract.getDocumentId(uri),projection)
         override fun openFile(uri:android.net.Uri,mode:String)=provider.openDocument(DocumentsContract.getDocumentId(uri),mode,null)
         override fun getType(uri:android.net.Uri)="application/octet-stream"
         override fun insert(uri:android.net.Uri,values:android.content.ContentValues?):android.net.Uri?=null
@@ -115,10 +141,14 @@ internal class EditorPageCopyFixture(base:Context,val root:File) {
     }
     val codec=DocumentCodec(AndroidImageCodec(),AndroidTextMeasurer())
     val storage=NotebookStorage(context,targetOverride={uri->
-        val document=if(uri==sourceUri) source else if(uri==targetUri) target else error("Unexpected target $uri")
+        val documentId=DocumentsContract.getDocumentId(android.net.Uri.parse(uri))
+        val document=file(documentId)
         object:MigrationPublication.Target {
-            override fun read():java.io.InputStream {if(uri==targetUri) beforeTargetRead?.invoke();return document.inputStream()}
-            override fun write(source:File) {if(uri==targetUri) beforeTargetWrite?.invoke();writes.incrementAndGet();source.copyTo(document,overwrite=true)}
+            override fun read():java.io.InputStream {
+                if(documentId.substringAfterLast('/')=="target") {if(denyTargetRead) throw SecurityException("Target read permission lost");beforeTargetRead?.invoke()}
+                return document.inputStream()
+            }
+            override fun write(source:File) {if(documentId.substringAfterLast('/')=="target") beforeTargetWrite?.invoke();writes.incrementAndGet();source.copyTo(document,overwrite=true);if(documentId.substringAfterLast('/')=="target") afterTargetWrite?.invoke()}
         }
     })
     lateinit var editor:Editor
