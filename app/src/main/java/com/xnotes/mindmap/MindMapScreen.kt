@@ -78,7 +78,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         // The host parks only the visible editor. OS picker slots above retain their original owner.
         if(!presentationState.visible) return@screen
-        val close = { if (session.document == null) onClose() else session.save(onClose) }
+        val close = { if (session.document == null || !session.dirty) onClose() else session.save(onClose) }
         val focus = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
         val density = LocalDensity.current
