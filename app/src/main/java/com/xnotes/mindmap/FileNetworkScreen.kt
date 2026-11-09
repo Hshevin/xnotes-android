@@ -56,9 +56,10 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                     MapButton(R.string.map_close) {actions.close(entry)}
                     Text(stringResource(R.string.network_title),fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
-                    MapButton(R.string.network_refresh,enabled=!busy && !controller.loading) {localProblem=null;controller.refresh()}
+                    NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
+                    MapButton(R.string.network_refresh,enabled=!busy && !controller.loading && !controller.filtering) {localProblem=null;controller.refresh()}
                     MapButton(R.string.network_fit,enabled=presentation.idle && !busy && scene!=null) {presentation.requestFit()}
-                    if(controller.loading) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
+                    if(controller.loading || controller.filtering) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
                     if(busy) MapButton(R.string.cancel) {actions.cancel(entry)}
                 }
                 Text(entry.query.title,Modifier.padding(horizontal=Space.s12),fontSize=TextSize.body,fontWeight=FontWeight.SemiBold)
@@ -69,7 +70,7 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                         scene?.let {LocalNetworkCanvas(it,presentation,true,modifier)} ?: Box(modifier)
                     }
                     val details:@Composable (Modifier)->Unit={modifier->NetworkDetails(entry,report,modifier,
-                        enabled=!busy && presentation.idle && presentation.cameraReady,
+                        enabled=!busy && !controller.loading && !controller.filtering && presentation.idle && presentation.cameraReady,
                         open={anchor,target->
                             // Acquiring a stored map creates a live LOADING actor. Hold only the visible
                             // diagram; the controller and final source proofs continue checking live data.
@@ -86,14 +87,17 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                     }
                     // Progress and errors must not resize the canvas and retire an in-flight input proof.
                     val problem=actions.feedback(entry) ?: localProblem ?: controller.problem
-                    if(currentReport!=null || controller.loading || busy || problem!=null) Surface(
+                    if(currentReport!=null || controller.loading || controller.filtering || busy || problem!=null) Surface(
                         Modifier.align(Alignment.TopStart).padding(Space.s8),color=LocalPalette.current.panel.toComposeColor()) {
                         Column(Modifier.padding(Space.s8)) {
                             currentReport?.let {data->
                                 Text(stringResource(R.string.network_counts,data.files.size,data.concepts.size,data.checkedMaps),fontSize=TextSize.caption)
                                 if(!data.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
                                 if(data.limited) Text(stringResource(R.string.graph_backlinks_problem_limit),fontSize=TextSize.body)
+                                if(data.filterActive) Text(stringResource(R.string.network_filter_summary,data.filteredConcepts),fontSize=TextSize.caption)
+                                if(data.unknownFilterFiles.isNotEmpty()) Text(stringResource(R.string.network_filter_unknown,data.unknownFilterFiles.size),fontSize=TextSize.caption)
                             }
+                            if(controller.filtering) Text(stringResource(R.string.network_filter_checking),fontSize=TextSize.body)
                             if(controller.loading || busy) Text(stringResource(if(busy) R.string.network_opening_snapshot else R.string.graph_backlinks_loading),fontSize=TextSize.body)
                             problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.body)}
                         }
@@ -122,6 +126,13 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             Text(stringResource(R.string.network_explanation),fontSize=TextSize.heading)
             if(selectedEdge is NetworkSceneEdgeKey.Belongs) Text(stringResource(R.string.network_ownership),fontSize=TextSize.body)
             else Text(stringResource(R.string.network_content_evidence),fontSize=TextSize.caption)
+            val file=when {
+                selectedEdge is NetworkSceneEdgeKey.References->selectedEdge.fileId
+                selectedNode is NetworkSceneNodeKey.File->selectedNode.documentId
+                else->null
+            }
+            if(report?.filterActive==true && file!=null && file !in report.matchedFiles)
+                Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
         }
         if(p.candidates.size>1) item {Column {
             Text(stringResource(R.string.network_overlapping),fontSize=TextSize.body)
@@ -140,7 +151,11 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             Text(stringResource(networkProblemText(issue.problem)),fontSize=TextSize.caption)
         }}
         report?.takeIf {it.omittedIssues>0}?.let {item("omitted") {Text(stringResource(R.string.graph_backlinks_omitted_issues,it.omittedIssues),fontSize=TextSize.caption)}}
-        if(report!=null && concepts.isEmpty()) item {Text(stringResource(if(report.complete) R.string.network_empty else R.string.graph_backlinks_empty_partial),fontSize=TextSize.body)}
+        if(report!=null && concepts.isEmpty()) item {Text(stringResource(when {
+            !report.complete->R.string.graph_backlinks_empty_partial
+            report.filterActive->R.string.network_filter_empty
+            else->R.string.network_empty
+        }),fontSize=TextSize.body)}
         for(c in selected) {
             item("concept:${c.key.stableKey}") {Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
                 Text(c.location.title,fontSize=TextSize.body,fontWeight=FontWeight.SemiBold)
@@ -158,6 +173,8 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                 val row=evidence.row
                 item("source:${row.key}") {Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
                     Text(row.sourceFileName.ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
+                    if(report?.filterActive==true && evidence.fileId !in report.matchedFiles)
+                        Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
                     val range=if(row.target.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
                         else row.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
                     Text(if(row.target.region!=null) stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)

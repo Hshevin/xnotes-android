@@ -40,7 +40,9 @@ internal data class LocalNetworkConcept(val key:NetworkConceptKey,val location:B
 internal data class LocalNetworkFile(val documentId:String,val observedNames:List<String>)
 internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:List<LocalNetworkFile>,
     val concepts:List<LocalNetworkConcept>,val issues:List<BacklinkIssue>,val checkedMaps:Int,val complete:Boolean,
-    val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false)
+    val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false,
+    val filterActive:Boolean=false,val matchedFiles:Set<String> = emptySet(),val unknownFilterFiles:Set<String> = emptySet(),
+    val filteredConcepts:Int=0)
 
 /** A graph explanation proves both its connection to the focus and the specific source to inspect. */
 internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,val anchor:MapBacklinkRow,

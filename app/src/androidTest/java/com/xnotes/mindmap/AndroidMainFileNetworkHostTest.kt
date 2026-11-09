@@ -62,6 +62,15 @@ class AndroidMainFileNetworkHostTest {
         waitUntil(label) {target=nodes().filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable);target!=null}
         assertTrue(target!!.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
+    private fun clickScrolled(label:String) {
+        repeat(35) {
+            runner.waitForIdleSync()
+            val target=nodes().filter {it.isVisibleToUser && matches(it,label)}.firstNotNullOfOrNull(::clickable)
+            if(target!=null) {assertTrue(target.performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync();return}
+            assertTrue("Dialog action remains reachable: $label",scroll());Thread.sleep(30)
+        }
+        fail("No visible dialog action: $label")
+    }
     private fun openSourceRow(note:String,action:String) {
         var target:AccessibilityNodeInfo?=null
         repeat(35) {
@@ -99,7 +108,8 @@ class AndroidMainFileNetworkHostTest {
         val splitOpen=split.exists() && runCatching {org.json.JSONObject(split.readText()).optBoolean("secondOpen",false)}.getOrDefault(true)
         assertTrue("Run on an empty instrumentation profile; existing recovery data is never replaced",existing.none {it.exists()} && !splitOpen)
         val source=File.createTempFile("network-source-s-",".xnote",base.cacheDir)
-        val target=File.createTempFile("network-source-t-",".xnote",base.cacheDir)
+        val targetFolder=File(AppStorageDocumentsProvider.rootDir(base),"network-filter-${UUID.randomUUID()}").apply {mkdirs()}
+        val target=File(targetFolder,"Network target T.xnote").apply {createNewFile()}
         val map=File(AppStorageDocumentsProvider.rootDir(base),"network-main-${UUID.randomUUID()}.xmap")
         val mapUri=DocumentsContract.buildDocumentUriUsingTree(AppStorageDocumentsProvider.treeUri(base),"root/${map.name}")
         val s=seed(source);val t=seed(target);assertNotEquals(s.identity.documentId,t.identity.documentId)
@@ -173,6 +183,51 @@ class AndroidMainFileNetworkHostTest {
             assertTrue(visible(host.getString(R.string.network_semantics)))
             click("A concept connects its two independent files")
             waitUntil("concept evidence contains the co-source rather than only center S") {visible(coSource.note)}
+            // D2a: actual controls use the complete source catalog, never the 250-node scene.
+            val filterView=main {graph(host)!!}
+            val filterCamera=main {filterView.zoomBy(1.17f);filterView.panText(29f,-17f);filterView.viewport()}
+            val filterSize=main {filterView.width to filterView.height}
+            val filterPositions=main {positions(filterView.document)}
+            val filterMapBytes=map.readBytes()
+            click(host.getString(R.string.network_filter))
+            clickScrolled(host.getString(R.string.network_filter_none)) // first section: source files
+            clickScrolled(target.name)
+            click(host.getString(R.string.cancel))
+            main {assertNull(entry.controller.filter.fileIds);assertFalse(entry.controller.filter.active)}
+            click(host.getString(R.string.network_filter))
+            clickScrolled(host.getString(R.string.network_filter_none))
+            clickScrolled(target.name)
+            click(host.getString(R.string.apply))
+            waitUntil("applied exact source T collection with full concept evidence") {main {
+                !entry.controller.filtering && entry.controller.filter.fileIds==setOf(t.identity.documentId) &&
+                    entry.controller.report?.concepts?.singleOrNull()?.members?.map {it.row.sourceId}?.toSet()==setOf(anchor.id,coSource.id)
+            }}
+            main {
+                val report=entry.controller.report!!
+                assertEquals(setOf(s.identity.documentId,t.identity.documentId,original.id),report.files.map {it.documentId}.toSet())
+                assertEquals(setOf(s.identity.documentId,t.identity.documentId),report.concepts.single().members.map {it.fileId}.toSet())
+                assertTrue(report.filterActive);assertTrue(t.identity.documentId in report.matchedFiles)
+                assertSame(filterView,graph(host));assertEquals(filterSize,filterView.width to filterView.height)
+                assertEquals(filterCamera,filterView.viewport());assertEquals(filterPositions,positions(filterView.document))
+            }
+            click(host.getString(R.string.network_filter))
+            clickScrolled(host.getString(R.string.network_filter_folder_internal))
+            clickScrolled(targetFolder.name)
+            click(host.getString(R.string.network_filter_folder_use))
+            click(host.getString(R.string.apply))
+            waitUntil("application-owned child directory restricts sources without changing browseRoot") {main {
+                !entry.controller.filtering && entry.controller.filter.folder?.let {
+                    DocumentsContract.getDocumentId(Uri.parse(it.uri))=="root/${targetFolder.name}"
+                }==true && entry.controller.report?.concepts?.singleOrNull()?.members?.size==2
+            }}
+            main {
+                assertSame(originalNative,editor.state.document);assertFalse(originalNative.dirty)
+                assertEquals(filterCamera,graph(host)!!.viewport());assertEquals(filterSize,graph(host)!!.let {it.width to it.height})
+                assertEquals(filterPositions,positions(graph(host)!!.document));assertFalse(graphWorkspace.visible)
+            }
+            assertArrayEquals(sourceBytes,source.readBytes());assertArrayEquals(targetBytes,target.readBytes())
+            assertArrayEquals(filterMapBytes,map.readBytes())
+            // The original concrete T open/return assertions below also execute under both filters.
             // This is a real closed graph, not the easier already-live case. Its first own acquire
             // must expose LOADING to the controller without replacing the diagram being checked.
             val locationKey=MapSaves.key(mapUri)
@@ -295,7 +350,7 @@ class AndroidMainFileNetworkHostTest {
                 assertNotNull(runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {editor.awaitHostParking()}}})
             }
             activity?.let {main {it.finish()};runner.waitForIdleSync()}
-            source.delete();target.delete();map.delete()
+            source.delete();target.delete();targetFolder.delete();map.delete()
         }
     }
 }

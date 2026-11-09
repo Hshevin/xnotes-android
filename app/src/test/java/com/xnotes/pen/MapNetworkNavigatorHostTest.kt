@@ -223,4 +223,46 @@ class MapNetworkNavigatorHostTest {
             withContext(Dispatchers.Main) {presentation.visible=false;holder.removeAllViews();activity.pause().stop().destroy()}
         }
     }
+    @Test fun aTypedFilterDoesNotRetireItsAcceptedStoredRequestWhenItsOwnActorStartsLoading()=scenario {f->
+        val sources=withContext(Dispatchers.Main) {f.session.document!!.node("concept").sources}
+        withContext(Dispatchers.Main) {f.lease.close()}.join()
+        f.await {MapDocuments.observations(f.native.context).none {it.key==MapSaves.key(Uri.fromFile(f.file))}}
+        val controller=withContext(Dispatchers.Main) {LocalFileNetworkController(f.native.context,f.scope,f.query)}
+        val lock=MapSaves.lockFor(Uri.fromFile(f.file));var locked=false
+        try {
+            withContext(Dispatchers.Main) {assertTrue(controller.refresh())}
+            f.await {!controller.loading && controller.report?.concepts?.size==1}
+            withContext(Dispatchers.Main) {assertTrue(controller.applyFilter(NetworkFilter(kinds=setOf(NetworkFileKind.NOTE))))}
+            f.await {!controller.filtering}
+            val request=withContext(Dispatchers.Main) {
+                val concept=controller.report!!.concepts.single()
+                assertTrue(controller.report!!.filterActive);assertTrue(concept.members.all {it.row.origin==BacklinkOrigin.STORED})
+                val s=concept.members.single {it.row.sourceId==sources[0].id}
+                val t=concept.members.single {it.row.sourceId==sources[1].id}
+                requireNotNull(controller.captureFocus(s,t))
+            }
+            lock.lock();locked=true
+            withContext(Dispatchers.Main) {assertTrue(f.navigator.openNetwork(request))}
+            f.await {MapDocuments.observations(f.native.context).any {it.key==MapSaves.key(Uri.fromFile(f.file)) && it.loading} &&
+                controller.report?.concepts?.isEmpty()==true && !controller.filtering}
+            withContext(Dispatchers.Main) {
+                assertTrue("The accepted query's own live LOADING overlay cannot invalidate its original typed request",request.current())
+                assertFalse(f.workspace.visible);assertTrue(f.navigator.busy)
+            }
+            lock.unlock();locked=false
+            f.await {!f.navigator.busy}
+            withContext(Dispatchers.Main) {
+                val shown=requireNotNull(f.workspace.current)
+                assertTrue(f.workspace.visible);assertEquals(1,f.presented);assertFalse(shown.flushNativeOnPresent)
+                assertNotSame("Only this action's newly-created actor can adopt the stored observation",f.lease.session,shown.session)
+                assertEquals("concept",shown.session.selected)
+                assertEquals(request.target.sourceId,shown.presentation.pendingBacklinkFocus!!.sourceId)
+                assertTrue(f.native.editor.noteOpen);assertTrue(f.native.editor.secondary!!.noteOpen)
+            }
+            assertEquals(0,f.native.writes.get())
+        } finally {
+            if(locked) lock.unlock()
+            withContext(Dispatchers.Main) {controller.close()}
+        }
+    }
 }
