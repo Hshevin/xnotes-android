@@ -34,6 +34,12 @@ internal data class BacklinkLibraryScan(val candidates:List<BacklinkCandidate>,v
 
 /** Owned, cancellable read observation. No graph lease, writer baseline or native/PDF decode. */
 internal class MapBacklinkLibrary(private val app:Context,private val roots:List<String>,private val budget:BacklinkBudget=BacklinkBudget()) {
+    private data class Projection<T>(val value:T,val limited:Boolean=false)
+    private data class ReadGraph<T>(val candidate:BacklinkCandidate,val graphId:String?,val value:T?,
+        val keys:Set<String> = emptySet(),val limited:Boolean=false,val problem:BacklinkProblem?=null)
+    private data class LibraryScan<T>(val candidates:List<BacklinkCandidate>,val graphs:List<ReadGraph<T>>,
+        val issues:List<BacklinkIssue>,val omittedIssues:Int,val excludedMaps:Int,
+        val reservedIds:Map<String,BacklinkProblem>,val limited:Boolean,val liveBlocked:Map<String,BacklinkProblem>)
     private val resolver=app.contentResolver
     private val candidates=linkedMapOf<String,BacklinkCandidate>()
     private val issues=mutableListOf<BacklinkIssue>()
@@ -168,7 +174,31 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             }}
         }
     }
-    suspend fun scan(documentId:String,live:List<MapDocumentObservation> = emptyList()):BacklinkLibraryScan = withContext(Dispatchers.IO) {
+    suspend fun scan(documentId:String,live:List<MapDocumentObservation> = emptyList()):BacklinkLibraryScan {
+        val result=scanProjected(live) {doc,location,origin,conflict,blocked,_->
+            val found=project(doc,documentId,location,origin,conflict,blocked)
+            Projection(found,projectionLimited)
+        }
+        return BacklinkLibraryScan(result.candidates,result.graphs.map {graph->
+            BacklinkStoredGraph(graph.candidate,graph.graphId,graph.value.orEmpty(),graph.keys,graph.problem)
+        },result.issues,result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
+    }
+    /** The same observation projects all memberships before its actual document leaves the lock. */
+    suspend fun scanNetwork(focusId:String,live:List<MapDocumentObservation> = emptyList(),
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(read=budget)):NetworkLibraryScan {
+        var evidence=0
+        val result=scanProjected(live) {doc,location,origin,conflict,blocked,active->
+            val found=projectNetworkWithin(doc,focusId,location,origin,conflict,blocked,null,
+                (networkBudget.evidenceLimit-evidence).coerceAtLeast(0),active)
+            evidence+=found.concepts.sumOf {it.members.size}
+            Projection(found.concepts,found.limited)
+        }
+        return NetworkLibraryScan(result.candidates,result.graphs.map {graph->
+            NetworkStoredGraph(graph.candidate,graph.graphId,graph.value.orEmpty(),graph.keys,graph.problem)
+        },result.issues,result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
+    }
+    private suspend fun <T> scanProjected(live:List<MapDocumentObservation>,
+        projector:(MindMapDocument,BacklinkLocation,BacklinkOrigin,Boolean,BacklinkProblem?,()->Unit)->Projection<T>):LibraryScan<T> = withContext(Dispatchers.IO) {
         candidates.clear();issues.clear();reservedRoots.clear();reservedIds.clear()
         omitted=0;directories=0;entries=0;bytes=0;rows=0;limited=false;exhausted=false;projectionLimited=false
         val coroutine=currentCoroutineContext();val active={coroutine.ensureActive();check()}
@@ -227,23 +257,25 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             }
         }
         val liveKeys=live.mapTo(hashSetOf()) {it.key}
-        val graphs=mutableListOf<BacklinkStoredGraph>()
+        val graphs=mutableListOf<ReadGraph<T>>()
         for(candidate in candidates.values) {
             coroutine.ensureActive()
             if(candidate.key in liveKeys || candidate.place in setOf(BacklinkPlace.RESERVED,BacklinkPlace.TRASH)) continue
             if(exhausted) break
-            try {graphs+=read(candidate,documentId,active)
-                if(projectionLimited) {issue(BacklinkProblem.LIMIT);break}
+            try {
+                val graph=read(candidate,active,projector);graphs+=graph
+                if(graph.limited) {issue(BacklinkProblem.LIMIT);break}
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:BacklinkLimit) {limited=true;issue(BacklinkProblem.LIMIT);break}
             catch(error:Exception) {
                 val problem=if(error is MapRecoveryObservationException) BacklinkProblem.RECOVERY_CONFLICT else BacklinkProblem.CORRUPT
-                issue(problem,candidate.name);graphs+=BacklinkStoredGraph(candidate,null,emptyList(),problem=problem)
+                issue(problem,candidate.name);graphs+=ReadGraph<T>(candidate,null,null,problem=problem)
             }
         }
-        BacklinkLibraryScan(candidates.values.toList(),graphs,issues.toList(),omitted,excluded,reservedIds.toMap(),limited,liveBlocked)
+        LibraryScan(candidates.values.toList(),graphs,issues.toList(),omitted,excluded,reservedIds.toMap(),limited,liveBlocked)
     }
-    private suspend fun read(candidate:BacklinkCandidate,documentId:String,active:()->Unit):BacklinkStoredGraph = MapSaves.lockFor(candidate.uri).withLock {
+    private suspend fun <T> read(candidate:BacklinkCandidate,active:()->Unit,
+        projector:(MindMapDocument,BacklinkLocation,BacklinkOrigin,Boolean,BacklinkProblem?,()->Unit)->Projection<T>):ReadGraph<T> = MapSaves.lockFor(candidate.uri).withLock {
         active();var failure:Exception?=null
         for(alias in candidate.aliases) {
             active();val uri=Uri.parse(alias)
@@ -252,10 +284,10 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
                 val store=MapFiles.store(app,uri,target,active,candidate.aliases)
                 val observed=store.observe(active,::account);active()
                 val location=BacklinkLocation(uri,candidate.aliases,candidate.key,observed.document.id,candidate.name)
-                val found=project(observed.document,documentId,location,if(observed.recovered) BacklinkOrigin.RECOVERY else BacklinkOrigin.STORED,
-                    observed.conflict,if(candidate.place==BacklinkPlace.UNKNOWN) BacklinkProblem.UNKNOWN_SCOPE else null)
+                val found=projector(observed.document,location,if(observed.recovered) BacklinkOrigin.RECOVERY else BacklinkOrigin.STORED,
+                    observed.conflict,if(candidate.place==BacklinkPlace.UNKNOWN) BacklinkProblem.UNKNOWN_SCOPE else null,active)
                 if(!observed.remoteAvailable) issue(BacklinkProblem.UNAVAILABLE,candidate.name)
-                return@withLock BacklinkStoredGraph(candidate,observed.document.id,found,store.recoveryKeys)
+                return@withLock ReadGraph(candidate,observed.document.id,found.value,store.recoveryKeys,found.limited)
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(limit:BacklinkLimit) {throw limit}
             catch(error:MapRecoveryObservationException) {throw error}
@@ -281,15 +313,40 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         loop@for(node in doc.nodes) for(source in node.sources) if(source.documentId==documentId) {
             if(rows>=budget.maxRows) {limited=true;projectionLimited=true;break@loop}
             rows++
-            val preview=source.lastPreview?.let {BacklinkPreview(it.assetKey,it.target,it.renderedVersion,it.generatedAt)}
-            val title=node.text.ifBlank {if(node.kind==NodeKind.REFERENCE) node.sources.firstOrNull()?.fileName.orEmpty() else ""}
-            out+=MapBacklinkRow(location,node.id,source.id,source.target,title.take(BacklinkBudget.LABEL_CHARS),node.kind,
-                source.fileName.take(BacklinkBudget.LABEL_CHARS),source.note.take(BacklinkBudget.NOTE_CHARS),source.lastKnownPage,
-                source.status,preview,origin,conflict,blocked,membership?.invoke(node.id,source.id,source.target))
+            out+=projectMember(node,source,location,origin,conflict,blocked,membership)
         }
         return out
     }
     internal fun resetProjectionBudget() {rows=0;projectionLimited=false}
+
+    internal fun projectNetwork(doc:MindMapDocument,focusId:String,location:BacklinkLocation,origin:BacklinkOrigin,
+        conflict:Boolean,blocked:BacklinkProblem?=null,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?=null,
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(),checkActive:()->Unit={}):NetworkProjection =
+        projectNetworkWithin(doc,focusId,location,origin,conflict,blocked,membership,networkBudget.evidenceLimit,checkActive)
+
+    private fun projectNetworkWithin(doc:MindMapDocument,focusId:String,location:BacklinkLocation,origin:BacklinkOrigin,
+        conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?,
+        maxEvidence:Int,checkActive:()->Unit):NetworkProjection {
+        val concepts=mutableListOf<NetworkConceptProjection>();var count=0
+        for(node in doc.nodes) {
+            checkActive()
+            if(node.sources.none {checkActive();it.documentId==focusId}) continue
+            if(node.sources.size>maxEvidence-count) return NetworkProjection(concepts,true)
+            val members=node.sources.map {source->checkActive();projectMember(node,source,location,origin,conflict,blocked,membership)}
+            concepts+=NetworkConceptProjection(NetworkConceptKey(location.key,location.graphId,node.id),location,
+                members.first().nodeTitle,node.kind,members)
+            count+=members.size
+        }
+        return NetworkProjection(concepts,false)
+    }
+    private fun projectMember(node:MapNode,source:MapSource,location:BacklinkLocation,origin:BacklinkOrigin,
+        conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?):MapBacklinkRow {
+        val preview=source.lastPreview?.let {BacklinkPreview(it.assetKey,it.target,it.renderedVersion,it.generatedAt)}
+        val title=node.text.ifBlank {if(node.kind==NodeKind.REFERENCE) node.sources.firstOrNull()?.fileName.orEmpty() else ""}
+        return MapBacklinkRow(location,node.id,source.id,source.target,title.take(BacklinkBudget.LABEL_CHARS),node.kind,
+            source.fileName.take(BacklinkBudget.LABEL_CHARS),source.note.take(BacklinkBudget.NOTE_CHARS),source.lastKnownPage,
+            source.status,preview,origin,conflict,blocked,membership?.invoke(node.id,source.id,source.target))
+    }
 
     /** Fresh action-time metadata: a previous live URI cannot undo a later move into Trash. */
     internal suspend fun actionProblem(row:MapBacklinkRow):BacklinkProblem? = withContext(Dispatchers.IO) {

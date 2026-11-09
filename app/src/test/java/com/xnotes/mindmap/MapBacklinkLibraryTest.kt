@@ -36,7 +36,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class MapBacklinkLibraryTest {
-    private class Fixture(base:Context,val root:File,val opaqueRoot:Boolean=false) {
+    internal class Fixture(base:Context,val root:File,val opaqueRoot:Boolean=false) {
         val context=object:ContextThemeWrapper(base,android.R.style.Theme_Material_Light_NoActionBar) {
             override fun getApplicationContext():Context=this
             override fun getFilesDir()=File(root,"files").apply {mkdirs()}
@@ -50,7 +50,7 @@ class MapBacklinkLibraryTest {
         val tree=if(opaqueRoot) DocumentsContract.buildTreeDocumentUri(authority,"opaque-root") else actualTree
         val storage=NotebookStorage(context)
         val original=AppStorageDocumentsProvider()
-        val reads=AtomicInteger();val writes=AtomicInteger()
+        val reads=AtomicInteger();val writes=AtomicInteger();val treeQueries=AtomicInteger();val deletes=AtomicInteger()
         var beforeChildren:((CancellationSignal?)->Unit)?=null
         val bridge=object:ContentProvider() {
             override fun onCreate()=true
@@ -59,6 +59,7 @@ class MapBacklinkLibraryTest {
                 @Suppress("UNCHECKED_CAST") val columns=projection as? Array<String>
                 val id=DocumentsContract.getDocumentId(uri)
                 return if(uri.pathSegments.lastOrNull()=="children") {
+                    treeQueries.incrementAndGet()
                     beforeChildren?.invoke(signal);signal?.throwIfCanceled()
                     original.queryChildDocuments(if(opaqueRoot && id=="opaque-root") "root/.xnote" else id,columns,sort)
                 } else if(opaqueRoot && id=="opaque-root") null else original.queryDocument(id,columns)
@@ -70,7 +71,7 @@ class MapBacklinkLibraryTest {
             override fun getType(uri:Uri)=original.getDocumentType(DocumentsContract.getDocumentId(uri))
             override fun insert(uri:Uri,values:android.content.ContentValues?):Uri?=null
             override fun update(uri:Uri,values:android.content.ContentValues?,selection:String?,args:Array<out String>?)=0
-            override fun delete(uri:Uri,selection:String?,args:Array<out String>?):Int {original.deleteDocument(DocumentsContract.getDocumentId(uri));return 1}
+            override fun delete(uri:Uri,selection:String?,args:Array<out String>?):Int {deletes.incrementAndGet();original.deleteDocument(DocumentsContract.getDocumentId(uri));return 1}
             override fun call(method:String,arg:String?,extras:android.os.Bundle?)=original.call(method,arg,extras)
         }
         val leases=mutableListOf<MapDocumentLease>()
@@ -96,7 +97,7 @@ class MapBacklinkLibraryTest {
             if(!dir.exists()) emptyMap() else dir.walkTopDown().filter {it.isFile}.associate {it.relativeTo(dir).path to it.readBytes().toList()}
         }
     }
-    private fun scenario(opaqueRoot:Boolean=false,block:suspend (Fixture)->Unit) {
+    internal fun scenario(opaqueRoot:Boolean=false,block:suspend (Fixture)->Unit) {
         initializeParkingEglHandles()
         val app=RuntimeEnvironment.getApplication();val root=File(app.cacheDir,"backlink-library-${UUID.randomUUID()}").apply {mkdirs()}
         val f=Fixture(app,root,opaqueRoot);val field=NotebookStorage::class.java.getDeclaredField("instance").apply {isAccessible=true};val previous=field.get(null)
