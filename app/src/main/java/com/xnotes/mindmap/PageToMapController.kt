@@ -174,10 +174,11 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
         if(branch && chosenParent!=null && selectedTicket?.let(session::sourceImportCurrent)!=true) {
             step=PageToMapStep.TARGET_ERROR;return false
         }
-        val parent=doc.nodes.firstOrNull {it.id==(chosenParent ?: session.selected)} ?: doc.root
-        val right=doc.visible().maxOf {it.bounds.right}
-        val node=MapNode(parent=if(branch) parent.id else null,free=!branch,kind=NodeKind.REFERENCE,text=title,
-            x=if(branch) 0.0 else right+Space.s32.value,y=if(branch) 0.0 else doc.root.y)
+        val parent=doc.nodes.firstOrNull {it.id==(chosenParent ?: session.selected)} ?: doc.centralRoot
+        if(branch && parent==null) return false
+        val right=doc.visible().maxOfOrNull {it.bounds.right} ?: 0.0
+        val node=MapNode(parent=if(branch) parent!!.id else null,free=!branch,kind=NodeKind.REFERENCE,text=title,
+            x=if(branch) 0.0 else right+Space.s32.value,y=if(branch) 0.0 else doc.centralRoot?.y ?: 0.0)
         return choose(MapReferenceDestination.New(node))
     }
     fun renameNewReference(value:String,expectedNode:String?=(destination as? MapReferenceDestination.New)?.node?.id,expectedContext:Any?=targetContext):Boolean {

@@ -44,6 +44,7 @@ class MapSession() : ViewModel() {
     internal var connectedDraft by mutableStateOf<ConnectedNodeDraft?>(null);private set
     internal var connectedSourceRequest by mutableStateOf<ConnectedSourceRequest?>(null);private set
     private var connectedEpoch=0L
+    private var fileCardsHistoryEpoch by mutableStateOf(0L)
     internal val interactionEpoch:Long get()=connectedEpoch
     private var connectedImport:Job?=null
     private var connectedImportId:String?=null
@@ -387,7 +388,7 @@ class MapSession() : ViewModel() {
     }
     fun completeTextRestore(token:String) {
         val restore=textRestore?.takeIf {it.token==token} ?: return
-        selected=restore.selection?.takeIf {id->document?.nodes?.any {it.id==id}==true} ?: document?.root?.id
+        selected=restore.selection?.takeIf {id->document?.nodes?.any {it.id==id}==true} ?: document?.initialSelection
         textRestore=null
     }
     var inkContact by mutableStateOf(false)
@@ -509,7 +510,7 @@ class MapSession() : ViewModel() {
             } } }
             result.onSuccess {
                 recoveryKeys=store.recoveryKeys
-                history = MapHistory(it.document); document = it.document; selected = it.document.root.id
+                history = MapHistory(it.document); document = it.document; selected = it.document.initialSelection
                 reconcileNavigationReveal()
                 reconcileSourceLifetimes()
                 recovered = it.recovered; conflict = it.conflict; dirty = it.recovered
@@ -547,8 +548,8 @@ class MapSession() : ViewModel() {
         val result=doc.changeRelation(initial,proposed)
         return if(result is RelationEditResult.Applied && !commit(result.document)) RelationEditResult.Invalid else result
     }
-    fun undo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.undo(); if (it.document != document) publish(it) } }
-    fun redo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.redo(); if (it.document != document) publish(it) } }
+    fun undo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.undo(); if (it.document != document) {fileCardsHistoryEpoch++;publish(it)} } }
+    fun redo() { if (!closing && !replacingDocument && !inkContact) history?.let { it.redo(); if (it.document != document) {fileCardsHistoryEpoch++;publish(it)} } }
     private fun publish(h: MapHistory) {
         limitError=false
         document = h.document
@@ -559,7 +560,7 @@ class MapSession() : ViewModel() {
         if(h.document.relations.none {it.id==selectedRelation && it.from in visible && it.to in visible}) selectedRelation=null
         if(selectedRelation!=null) replaceNodeSelection(emptySet())
         else if(nodeSelectionMode) replaceNodeSelection(selectedNodes.intersect(visible))
-        else if (h.document.nodes.none { it.id == selected }) selected = h.document.root.id
+        else if (h.document.nodes.none { it.id == selected }) selected = h.document.initialSelection
         canUndo = h.canUndo; canRedo = h.canRedo; dirty = true; copySaved = false; revision++
         debounce?.cancel()
         debounce = viewModelScope.launch { delay(350); save() }
@@ -615,6 +616,35 @@ class MapSession() : ViewModel() {
             closing=false;reconcileSourceLifetimes()
             if(result is MapSaveOutcome.Written && result.latest) onClosed()
         }
+    }
+    internal fun captureFileCards(seeds:List<MapFileCardSeed>):MapFileCardsTicket? {
+        if(loading || !selectionReady() || seeds.isEmpty() || seeds.size>250) return null
+        val doc=document ?: return null
+        return MapFileCardsTicket(this,connectedEpoch,fileCardsHistoryEpoch,doc.id,seeds)
+    }
+    internal fun fileCardsCurrent(ticket:MapFileCardsTicket):Boolean {
+        if(ticket.issuer!==this || ticket.epoch!=connectedEpoch || ticket.historyEpoch!=fileCardsHistoryEpoch ||
+            ticket.documentId!=document?.id) return false
+        return ticket.appliedNodes?.all {(id,applied)->nodeLifetimes[id]===applied.lifetime &&
+            document?.nodes?.any {it.id==id && it.fileCardId==applied.documentId}==true}!=false
+    }
+    internal fun importFileCards(ticket:MapFileCardsTicket):MapFileCardsImportResult {
+        if(!fileCardsCurrent(ticket)) return MapFileCardsImportResult.Changed
+        if(loading || !selectionReady()) return MapFileCardsImportResult.Busy
+        ticket.appliedNodes?.let {return MapFileCardsImportResult.Applied(it.keys,true)}
+        val doc=document ?: return MapFileCardsImportResult.Changed
+        return try {
+            val result=doc.addFileCards(ticket.seeds)
+            if(result.document!==doc && !commit(result.document)) return MapFileCardsImportResult.Invalid
+            val cards=result.document.nodes.associateBy {it.id}
+            val lives=result.nodeIds.associateWith {id->MapFileCardAppliedNode(
+                nodeLifetimes[id] ?: return MapFileCardsImportResult.Changed,
+                cards[id]?.fileCardId ?: return MapFileCardsImportResult.Changed)}
+            ticket.appliedNodes=java.util.Collections.unmodifiableMap(lives)
+            if(result.nodeIds.size>1) nodeSelectionMode=true
+            replaceNodeSelection(result.nodeIds);selectedRelation=null
+            MapFileCardsImportResult.Applied(result.nodeIds,result.addedIds.isEmpty())
+        } catch(_:IllegalArgumentException) {MapFileCardsImportResult.Invalid}
     }
     internal fun captureSourceImport(destination:MapReferenceDestination):MapSourceImportTicket? {
         if(loading || closing || replacingDocument || inkContact) return null
@@ -755,7 +785,7 @@ class MapSession() : ViewModel() {
                 retireConnectedDraft()
                 // A new revision drops any save still queued for the discarded edits.
                 revision++
-                history = MapHistory(it.document); document = it.document; selected = it.document.root.id
+                history = MapHistory(it.document); document = it.document; selected = it.document.initialSelection
                 reconcileNavigationReveal()
                 reconcileSourceLifetimes()
                 canUndo = false; canRedo = false

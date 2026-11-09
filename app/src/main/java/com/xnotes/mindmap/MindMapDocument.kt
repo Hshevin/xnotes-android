@@ -5,6 +5,7 @@ import java.util.UUID
 import kotlin.math.abs
 
 enum class NodeKind { TEXT, INK, REFERENCE }
+enum class MapOrganization { MIND_MAP, RELATION_CANVAS }
 data class InkPoint(val x: Double, val y: Double, val pressure: Double = 1.0, val time: Double = 0.0)
 data class MapInk(val points: List<InkPoint>, val width: Double = 3.0)
 
@@ -23,6 +24,8 @@ data class MapNode(
     val free: Boolean = false,
     val sources: List<MapSource> = emptyList(),
     val primarySource: String? = null,
+    /** Explicit file alias, never inferred from a concept's body, name or source count. */
+    val fileCardId: String? = null,
 ) {
     val bounds get() = Rect(x, y, width, height)
 }
@@ -33,8 +36,11 @@ data class MindMapDocument(
     val relations: List<MapRelation> = emptyList(),
     val direction: MapDirection = MapDirection.BOTH,
     val previewAssets: Map<String, MapPreviewAsset> = emptyMap(),
+    val organization: MapOrganization = MapOrganization.MIND_MAP,
 ) {
-    val root get() = nodes.single { it.parent == null && !it.free }
+    val centralRoot get() = nodes.singleOrNull { it.parent == null && !it.free }
+    val root get() = requireNotNull(centralRoot)
+    val initialSelection get() = centralRoot?.id ?: nodes.firstOrNull()?.id
     fun node(id: String) = nodes.first { it.id == id }
     fun children(id: String) = nodes.filter { it.parent == id }
     fun update(id: String, change: (MapNode) -> MapNode) = copy(nodes = nodes.map { if (it.id == id) change(it) else it })
@@ -84,12 +90,12 @@ data class MindMapDocument(
         return MapLayout.arrange(doc) to added.id
     }
     fun delete(id: String): MindMapDocument {
-        if (id == root.id) return this
+        if (id == centralRoot?.id) return this
         val removed = descendants(id)
         return copy(nodes = nodes.filter { it.id !in removed }, relations = relations.filter { it.from !in removed && it.to !in removed })
     }
     fun reparent(id: String, parent: String): MindMapDocument {
-        if (id == root.id || parent in descendants(id) || nodes.none { it.id == parent }) return this
+        if (id == centralRoot?.id || parent in descendants(id) || nodes.none { it.id == parent }) return this
         val doc = update(id) { it.copy(parent = parent, free = false) }.update(parent) { it.copy(collapsed = false) }
         // Moving a deep subtree must also respect the reader's depth limit.
         return runCatching { doc.validate(); MapLayout.arrange(doc) }.getOrDefault(this)
@@ -101,7 +107,10 @@ data class MindMapDocument(
 
     fun validate() {
         require(id.isNotBlank() && id.length <= 128)
-        require(nodes.size in 1..MAX_NODES && nodes.count { it.parent == null && !it.free } == 1)
+        require(nodes.size in (if(organization==MapOrganization.MIND_MAP) 1 else 0)..MAX_NODES &&
+            nodes.count { it.parent == null && !it.free } == if(organization==MapOrganization.MIND_MAP) 1 else 0)
+        val fileCards=nodes.mapNotNull {it.fileCardId}
+        require(fileCards.distinct().size==fileCards.size)
         val byId = nodes.associateBy { it.id }
         require(byId.size == nodes.size)
         require(relations.size <= 4000 && relations.map { it.id }.distinct().size == relations.size)
@@ -119,6 +128,10 @@ data class MindMapDocument(
             require(!n.free || n.parent == null)
             require(n.sources.size <= 128 && (n.primarySource == null || n.sources.any { it.id == n.primarySource }))
             n.sources.forEach { it.validate() }
+            n.fileCardId?.let {file->
+                require(UUID.fromString(file).toString()==file && n.kind==NodeKind.REFERENCE && n.sources.size==1)
+                require(n.sources.single().let {it.documentId==file && it.scope==SourceScope.FILE})
+            }
             require(n.id.isNotBlank() && n.id.length <= 128 && n.text.length <= 20_000)
             require(n.width.isFinite() && n.width in 48.0..4096.0 && n.height.isFinite() && n.height in 48.0..4096.0)
             require(n.x.isFinite() && abs(n.x) <= MAX_COORD && n.y.isFinite() && abs(n.y) <= MAX_COORD)

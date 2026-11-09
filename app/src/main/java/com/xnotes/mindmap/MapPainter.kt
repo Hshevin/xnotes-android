@@ -39,7 +39,7 @@ class MapPainter {
                 val badge=badgeBounds(node,label)
                 node.bounds.union(Rect(node.x+badge.x,node.y+badge.y,badge.w,badge.h))
             }
-        }.reduce {a,b->a.union(b)}
+        }.reduceOrNull {a,b->a.union(b)} ?: Rect(0.0,0.0,1.0,1.0)
         return relationGeometry(doc,expanded).mapNotNull {it.labelBounds}.fold(nodes) {bounds,label->bounds.union(label)}
             .outset(Space.s32.value.toDouble())
     }

@@ -382,7 +382,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
     internal fun project(doc:MindMapDocument,documentId:String,location:BacklinkLocation,origin:BacklinkOrigin,
         conflict:Boolean,blocked:BacklinkProblem?=null,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?=null):List<MapBacklinkRow> {
         val out=mutableListOf<MapBacklinkRow>()
-        loop@for(node in doc.nodes) for(source in node.sources) if(source.documentId==documentId) {
+        loop@for(node in doc.nodes) if(node.fileCardId==null) for(source in node.sources) if(source.documentId==documentId) {
             if(rows>=budget.maxRows) {limited=true;projectionLimited=true;break@loop}
             rows++
             out+=projectMember(node,source,location,origin,conflict,blocked,membership)
@@ -401,7 +401,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         maxEvidence:Int,checkActive:()->Unit):NetworkProjection {
         val concepts=mutableListOf<NetworkConceptProjection>();var count=0
         for(node in doc.nodes) {
-            checkActive()
+            checkActive();if(node.fileCardId!=null) continue
             if(node.sources.none {checkActive();it.documentId==focusId}) continue
             if(node.sources.size>maxEvidence-count) return NetworkProjection(concepts,true)
             val members=node.sources.map {source->checkActive();projectMember(node,source,location,origin,conflict,blocked,membership)}
@@ -425,7 +425,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         val concepts=mutableListOf<NetworkConceptProjection>();var direct=0;var deeper=0;var hitLimit=false
         val owned=doc.id in expanded
         for(node in doc.nodes) {
-            checkActive()
+            checkActive();if(node.fileCardId!=null) continue
             if(node.sources.isEmpty()) continue
             var isDirect=false;var reachable=owned
             for(source in node.sources) {
@@ -455,7 +455,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         maxDirect:Int,maxDeeper:Int,checkActive:()->Unit):NetworkProjection {
         val concepts=mutableListOf<NetworkConceptProjection>();var direct=0;var deeper=0;var hitLimit=false
         for(node in doc.nodes) {
-            checkActive();if(node.sources.isEmpty()) continue
+            checkActive();if(node.fileCardId!=null || node.sources.isEmpty()) continue
             var isDirect=doc.id in roots;var reachable=isDirect || doc.id in expanded
             for(source in node.sources) {checkActive()
                 if(source.documentId in roots) {isDirect=true;reachable=true}
@@ -479,7 +479,7 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
         maxEvidence:Int,checkActive:()->Unit):NetworkProjection {
         val concepts=mutableListOf<NetworkConceptProjection>();var count=0
         for(node in doc.nodes) {
-            checkActive();if(node.sources.isEmpty()) continue
+            checkActive();if(node.fileCardId!=null || node.sources.isEmpty()) continue
             if(node.sources.size>maxEvidence-count) return NetworkProjection(concepts,true)
             val members=node.sources.map {checkActive();projectMember(node,it,location,origin,conflict,blocked,membership)}
             concepts+=NetworkConceptProjection(NetworkConceptKey(location.key,location.graphId,node.id),location,

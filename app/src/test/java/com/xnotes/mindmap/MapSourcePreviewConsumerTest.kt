@@ -241,7 +241,15 @@ class MapSourcePreviewConsumerTest {
         assertEquals("Both visible cards must use one source snapshot rather than one per row",once,f.provider.sourceReadOpens.get())
         assertTrue(f.png(id=f.one.id).isNotEmpty());assertTrue(f.png(id=f.two.id).isNotEmpty());assertFalse(f.session.canUndo)
     }
-    @Test fun aSelfReferenceAndTwoMapsReferencingEachOtherKeepSemanticPreviewBaselinesStable()=scenario {f->
+    @Test fun aSelfReferenceAndTwoMapsReferencingEachOtherKeepSemanticPreviewBaselinesStable()=semanticCycle(false)
+    @Test fun versionFourCardsKeepSelfAndMutualPreviewBaselinesStable()=semanticCycle(true)
+    private fun semanticCycle(extended:Boolean)=scenario {f->
+        if(extended) {
+            assertTrue(f.session.operate {it.addFileCards(listOf(MapFileCardSeed(
+                java.util.UUID.randomUUID().toString(),"File card",600.0,300.0))).document})
+            f.session.save();await {!f.session.saving}
+            assertTrue(MapCodec.semanticPreviewVersion(f.session.document!!).startsWith("xmap-render-v2:"))
+        }
         val aId=f.session.document!!.id
         val self=MapSourceAccess.offer(f.context,f.map).fileSource
         val back=MapSource(documentId=aId,fileName="graph.xmap",sourceVersion=self.sourceVersion)

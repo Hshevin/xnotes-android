@@ -39,7 +39,7 @@ fun MindMapDocument.translateNodes(ids:Set<String>,dx:Double,dy:Double):MindMapD
 fun MindMapDocument.deleteNodes(ids:Set<String>):MindMapDocument {
     require(nodes.mapTo(hashSetOf()) {it.id}.containsAll(ids))
     // Exclude the root BEFORE expansion, otherwise selecting it would delete all other branches.
-    val removed=selectedSubtrees(ids-root.id)
+    val removed=selectedSubtrees(ids-listOfNotNull(centralRoot?.id).toSet())
     if(removed.isEmpty()) return this
     return copy(nodes=nodes.filter {it.id !in removed},
         relations=relations.filter {it.from !in removed && it.to !in removed}).also {it.validate()}

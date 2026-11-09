@@ -42,7 +42,8 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
             Column(Modifier.fillMaxSize().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
                 Text(stringResource(title ?: if (current.kind == NodeKind.INK) R.string.map_ink_node else R.string.map_edit), fontSize = TextSize.heading)
                 notice?.let {Text(it,fontSize=TextSize.body,maxLines=3,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}
-                Row {
+                if(current.fileCardId!=null) Text(stringResource(R.string.graph_file_card_notice),fontSize=TextSize.caption)
+                else Row {
                     MapButton(R.string.map_text_node, selected = current.kind == NodeKind.TEXT, enabled = current.ink.isEmpty()) {
                         commit(current.copy(kind = NodeKind.TEXT))
                     }

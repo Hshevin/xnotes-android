@@ -56,7 +56,7 @@ fun MindMapDocument.addFree(kind: NodeKind, text: String, x: Double, y: Double):
     val added=MapNode(parent=null,kind=kind,text=text,x=x,y=y,free=true)
     return copy(nodes=nodes+added).also { it.validate() } to added.id
 }
-fun MindMapDocument.detach(id: String): MindMapDocument = if (id == root.id) this else update(id) { it.copy(parent=null,free=true) }
+fun MindMapDocument.detach(id: String): MindMapDocument = if (id == centralRoot?.id) this else update(id) { it.copy(parent=null,free=true) }
 fun MindMapDocument.connect(from: String, to: String, kind: RelationKind): Pair<MindMapDocument,String> {
     require(from != to); node(from);node(to)
     val edge=MapRelation(from=from,to=to,kind=kind)

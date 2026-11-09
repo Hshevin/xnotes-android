@@ -17,8 +17,9 @@ object MapLayout {
             val kids = if (n.collapsed) emptyList() else children[n.id].orEmpty()
             maxOf(n.height, kids.sumOf { height(it) } + V_GAP * (kids.size - 1).coerceAtLeast(0))
         }
-        val root = doc.root
-        val placed = hashMapOf(root.id to root.copy(x = 0.0, y = -root.height / 2))
+        val root = doc.centralRoot
+        val placed = hashMapOf<String,MapNode>()
+        if(root!=null) placed[root.id]=root.copy(x = 0.0, y = -root.height / 2)
         fun place(n: MapNode, x: Double, centerY: Double, right: Boolean) {
             val p = n.copy(x = x, y = centerY - n.height / 2)
             placed[n.id] = p
@@ -31,7 +32,7 @@ object MapLayout {
                 top += h + V_GAP
             }
         }
-        if (!root.collapsed) for (right in listOf(true, false)) {
+        if (root!=null && !root.collapsed) for (right in listOf(true, false)) {
             val kids = children[root.id].orEmpty().filterIndexed { i, _ -> if(doc.direction == MapDirection.RIGHT) right else (i % 2 == 0) == right }
             var top = -(kids.sumOf { height(it) } + V_GAP * (kids.size - 1).coerceAtLeast(0)) / 2
             for (c in kids) {

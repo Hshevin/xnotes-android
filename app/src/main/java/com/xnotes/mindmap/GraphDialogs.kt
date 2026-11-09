@@ -156,7 +156,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
         Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
     }},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
-            item { Text(stringResource(R.string.graph_sources_notice),fontSize=TextSize.body) }
+            item { Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body) }
             item {
                 Text(stringResource(R.string.graph_preview_backup_notice),fontSize=TextSize.caption)
                 Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
@@ -205,12 +205,12 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                     MapButton(R.string.graph_down,enabled=index<node.sources.lastIndex){
                         if(alive.get()) editor.move(s.id,1)
                     }
-                    MapButton(R.string.delete){if(alive.get()) editor.remove(s.id)}
+                    if(node.fileCardId==null) MapButton(R.string.delete){if(alive.get()) editor.remove(s.id)}
                 }
                 HorizontalDivider()
             }
         }
-    },confirmButton={MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
+    },confirmButton={if(node.fileCardId==null) MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get()) add()}},dismissButton={MapButton(R.string.map_done,onClick=::dismiss)})
 }
 
 /** Only validated immutable PNG assets enter Android's decoder; late unpublished bitmaps are ours. */

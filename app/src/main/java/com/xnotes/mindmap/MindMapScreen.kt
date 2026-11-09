@@ -264,7 +264,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         MapButton(if (node?.let {session.isEffectivelyCollapsed(it.id)} == true) R.string.map_expand else R.string.map_collapse, enabled = !nodeMode && node != null && doc.children(node.id).isNotEmpty()) {
                             node?.let {session.toggleCollapse(it.id)}
                         }
-                        MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.root.id} && !session.closing) {deleting=actionCapture}
+                        MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.centralRoot?.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
                     }
@@ -362,7 +362,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         if(addFree) AlertDialog(onDismissRequest={addFree=false},title={Text(stringResource(R.string.graph_free),fontSize=TextSize.heading)},text={Column {
             for(k in NodeKind.entries) MapButton(when(k){NodeKind.TEXT->R.string.map_text_node;NodeKind.INK->R.string.map_ink_node;NodeKind.REFERENCE->R.string.graph_reference}) {
                 var added: String?=null
-                val accepted=session.operate { d -> val n=d.addFree(k,if(k==NodeKind.REFERENCE) "" else context.getString(R.string.map_topic),d.root.x+d.root.width+100,d.root.y+300+d.nodes.count { it.free }*100);added=n.second;n.first }
+                val accepted=session.operate { d -> val n=d.addFree(k,if(k==NodeKind.REFERENCE) "" else context.getString(R.string.map_topic),(d.visible().maxOfOrNull {it.bounds.right} ?: -100.0)+100,(d.centralRoot?.y ?: 0.0)+300+d.nodes.count { it.free }*100);added=n.second;n.first }
                 if(accepted) { session.selected=added;addFree=false;if(k==NodeKind.REFERENCE) showSources(added) else editing=added }
             }
         }},confirmButton={MapButton(R.string.cancel){addFree=false}})

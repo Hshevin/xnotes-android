@@ -30,8 +30,12 @@ object MapCodec {
         require(bytes.size <= MAX_BYTES - 4096)
         return fromJson(JSONObject(String(bytes, Charsets.UTF_8)))
     }
-    internal fun toJson(doc: MindMapDocument) = JSONObject()
-        .put("format", "xnotes-mind-map").put("version", 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+    private fun extended(doc:MindMapDocument)=doc.organization!=MapOrganization.MIND_MAP || doc.nodes.any {it.fileCardId!=null}
+    internal fun toJson(doc: MindMapDocument):JSONObject {
+        val expanded=extended(doc)
+        return JSONObject()
+        .put("format", "xnotes-mind-map").put("version", if(expanded) 4 else 3).put("id", doc.id).put("direction",doc.direction.name).put("relations",MapGraphJson.relations(doc))
+        .also {if(expanded) it.put("organization",doc.organization.name)}
         .put("previewAssets",JSONArray().also {array->doc.prunePreviewAssets().previewAssets.values.forEach {asset->
             array.put(JSONObject().put("key",asset.key).put("pngBase64",asset.pngBase64).put("width",asset.width).put("height",asset.height))
         }})
@@ -40,6 +44,7 @@ object MapCodec {
                 .put("kind", n.kind.name).put("text", n.text).put("x", n.x).put("y", n.y)
                 .put("width", n.width).put("height", n.height).put("collapsed", n.collapsed)
                 .put("free",n.free).put("sources",MapGraphJson.sources(n)).put("primarySource",n.primarySource ?: JSONObject.NULL)
+                .also {if(expanded) it.put("fileCardId",n.fileCardId ?: JSONObject.NULL)}
                 .put("ink", JSONArray().also { ink -> n.ink.forEach { s ->
                     ink.put(JSONObject().put("width", s.width).put("points", JSONArray().also { points ->
                         s.points.forEach { p -> points.put(JSONObject().put("x", p.x).put("y", p.y)
@@ -47,13 +52,15 @@ object MapCodec {
                     }))
                 } }))
         } })
+    }
 
     internal fun fromJson(j: JSONObject): MindMapDocument {
         require(j.string("format") == "xnotes-mind-map")
         val version=j.number("version");val versionValue=j.get("version")
-        require(version==1.0 || version==2.0 || version==3.0 && (versionValue is Int || versionValue is Long))
+        require(version==1.0 || version==2.0 || version in setOf(3.0,4.0) && (versionValue is Int || versionValue is Long))
+        val organization=if(version>=4.0) MapOrganization.valueOf(j.string("organization")) else MapOrganization.MIND_MAP
         val array = j.getJSONArray("nodes")
-        require(array.length() in 1..MindMapDocument.MAX_NODES)
+        require(array.length() in (if(organization==MapOrganization.MIND_MAP) 1 else 0)..MindMapDocument.MAX_NODES)
         var count = 0
         val nodes = (0 until array.length()).map { i ->
             val n = array.getJSONObject(i)
@@ -66,6 +73,7 @@ object MapCodec {
                 free=if(version>=2.0) MapGraphJson.bool(n,"free") else false,
                 sources=if(version>=2.0) MapGraphJson.readSources(n,previews=version>=3.0) else emptyList(),
                 primarySource=if(version>=2.0) MapGraphJson.nullable(n,"primarySource") else null,
+                fileCardId=if(version>=4.0) MapGraphJson.nullable(n,"fileCardId") else null,
                 ink = (0 until ink.length()).map { k ->
                     val s = ink.getJSONObject(k)
                     val points = s.getJSONArray("points")
@@ -78,7 +86,7 @@ object MapCodec {
         }
         return MindMapDocument(j.string("id"), nodes, if(version>=2.0) MapGraphJson.readRelations(j) else emptyList(),
             if(version>=2.0) MapDirection.valueOf(j.string("direction")) else MapDirection.BOTH,
-            if(version>=3.0) readAssets(j.getJSONArray("previewAssets")) else emptyMap()).also { it.validate() }
+            if(version>=3.0) readAssets(j.getJSONArray("previewAssets")) else emptyMap(),organization).also { it.validate() }
     }
     private fun readAssets(array:JSONArray):Map<String,MapPreviewAsset> {
         require(array.length()<=MapPreviewAsset.MAX_ASSETS)
@@ -109,11 +117,15 @@ object MapCodec {
         val out=DataOutputStream(DigestOutputStream(sink,digest))
         fun text(value:String) {val bytes=value.toByteArray(Charsets.UTF_8);out.writeInt(bytes.size);out.write(bytes)}
         fun optional(value:String?) {out.writeBoolean(value!=null);if(value!=null) text(value)}
-        text("xmap-render-v1");text(doc.id);text(doc.direction.name);out.writeInt(doc.nodes.size)
+        val expanded=extended(doc)
+        text(if(expanded) "xmap-render-v2" else "xmap-render-v1");text(doc.id);text(doc.direction.name)
+        if(expanded) text(doc.organization.name)
+        out.writeInt(doc.nodes.size)
         doc.nodes.forEach {n->
             text(n.id);optional(n.parent);text(n.kind.name);text(n.text)
             out.writeDouble(n.width);out.writeDouble(n.height);out.writeDouble(n.x);out.writeDouble(n.y)
             out.writeBoolean(n.collapsed);out.writeBoolean(n.free);optional(n.primarySource)
+            if(expanded) optional(n.fileCardId)
             out.writeInt(n.ink.size);n.ink.forEach {s->out.writeDouble(s.width);out.writeInt(s.points.size);s.points.forEach {p->
                 out.writeDouble(p.x);out.writeDouble(p.y);out.writeDouble(p.pressure);out.writeDouble(p.time)
             }}
@@ -124,7 +136,7 @@ object MapCodec {
         }
         out.writeInt(doc.relations.size);doc.relations.forEach {r->text(r.id);text(r.from);text(r.to);text(r.kind.name);text(r.label)}
         out.flush()
-        return "xmap-render-v1:"+digest.digest().joinToString("") {"%02x".format(it)}
+        return (if(expanded) "xmap-render-v2:" else "xmap-render-v1:")+digest.digest().joinToString("") {"%02x".format(it)}
     }
     private fun JSONObject.string(key: String): String = get(key).let { require(it is String); it }
     private fun JSONObject.number(key: String): Double = get(key).let { require(it is Number); it.toDouble().also { d -> require(d.isFinite()) } }
