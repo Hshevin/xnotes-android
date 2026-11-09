@@ -1,13 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；当前原PDF独立原文 in_progress，整体仍 active。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；当前原PDF独立原文 verified，整体仍 active。
 工作树：/Users/kita/.codex/worktrees/mind-map-original-pdf/xnotes；分支 codex/mind-map-original-pdf；2026-11-10 用户明确要求在当前工作树基础上新建并继续，以 mind-map-region-continue 的实际 HEAD 579e5f54a25579ca8dfb5465f8a80e1a24c52272 创建。原树两份未提交的原PDF阶段计划逐字节校验后复制，原树保持原样。新树迁移清单 tmp/original-pdf-worktree-copy.json；新阶段构建与项目缓存分别独立为 /private/tmp/xnotes-mind-map-original-pdf-build、/private/tmp/xnotes-mind-map-original-pdf-cache。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：原PDF独立原文（in_progress）
+## 已验证阶段：原PDF独立原文（verified）
 
-上一goal turn为progress，分页区域已本地提交579e5f54／281有效测试。当前HEAD579e5f54 clean起步，原完整14组不缩减。独立身份关键决策已审：新catalog随机doc/pageUUID，SHA仅资源指纹；与resource pin同SQLite事务，tombstone／显式恢复／mutation-start epoch防ABA。完整规格docs/movinkpad/original-pdf-sources-2026-11-10.md已独审，两项Required已补（实际pageInfo/整页同模式选择），开始实施真实模式选择／保留／加图／预览／独立reader／返回及原件库管理。旧已知构建终态，无重启。
+新树以579e5f54创建；迁移/计划本地提交2e991e47。原完整14组不缩减。身份/catalog与resource pin同SQLite事务、独立source projection/v6、实际整页/区域mode选择、只读reader/同图返回、独立原件库管理已接源码。catalog是权威身份资料，不是可重建索引；完整引用备份仍未接。实际PDF尺寸/可逆几何与整页同modechooser两项计划Required已补。
+
+实现独审Required已修：Creation两处prompt-cancel holder归属；SQL原始类型/范围拒截断；坏首条frame不污染整批；取得raster后取消也归还；旧reader host在unbind同步退休；双指同时平移缩放用previous anchor；own pinset必须active恰{sha}/deleted空且异常保pin。最后发现PageToMapFlow→Main默认flush=true的实际消费者缺口，已接request策略(defaulttrue/PDFmodefalse)到Main/mapping，正在补完整纵向Flow/PNG冷开/原文Reader/同图返回测试。
+
+49373首次production compile终态0/58s，仅初步接口证据，后续源码已变。45983临时仅恢复旧IO外取得ownership行为，两取消case2/2真实失败（都在IO成功、lease1后等不到close）；shell退出已逐字节恢复fixed。85330统一终态1：180项178过、2失败，1157源码/资源/构建输入SHA全部相同，Android测试源码编译通过。两失败已独立确认夹具：semantic对照误建随机新图ID，delete→undo误要求失效ticket重新开source panel；只修夹具并加强身份/旧新票断言。没有把失败改作通过，首轮XML与日志保留。
+
+最终34437终态0/33s：31套185唯一项、0失败/错误/跳过，Android测试源码编译通过，1158源码/资源/构建输入SHA全同。完整Flow2case与首次开图实际消费者、冷PNG与实际Reader返回已接通验证；scope无Note身份/无保存权限回退。own pinset2case、真实surface返回后取消1case和实际JSON/双指/升级仪器源码已纳。独立审核及逐XML/红绿/输入证据结案，phase verified成立。
+
+本地源码提交9982ac5b，测试提交cf276494；文档提交后见HEAD。全部作者冻结、所有已知构建终态，无运行作业；新树runtime tmp/original-pdf-runtime.json、正式记录docs/movinkpad/original-pdf-sources-2026-11-10.md。尚未实际运行Android/SAF/Compose重建/PDFium像素/MovinkPad Android15 ProPen3/Surface/GPU/性能；不打包/安装/推送/合并/发布。旧阶段证据保留在上一工作树tmp。
+
+下一实际动作：原文身份在文件网络的格式/可用状态中只读整合（不按标题猜Note、不读取PDF正文、不授原生打开权限），写可验证小阶段并独审后继续；随后保留来源范围调整/换源、Map来源与双窗格、Canvas反向引用、精确权限/移动/回收站恢复、完整引用备份、主要预览/目录缩略、同级插入/边缘平移等完整14组。整体active/complete=false；不要重跑未变有效测试或重新打包。
 
 ## 既有阶段：分页固定区域来源（verified）
 

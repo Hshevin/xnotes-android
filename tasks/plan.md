@@ -551,3 +551,7 @@ Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Su
 ### 分页固定区域创建与往返（2026-11-10，verified）
 
 单页选区／套索／截图固定actual Doc/Page/localRect，复用永久页身份、严格版本和原PageToMapFlow，一次导入／失败仅重存；保存PNG冷重开／来源定位返回。区域Note完整item观察与明确XML失败、旧DTO取消／delete-undo退休、固定frame／保守EMPTY和旧图均已接；普通读取不扩大。281项有效相关测试与Android源码编译、独立复核通过，真实平台未运行。见paged-region-sources-2026-11-10.md。PDF当前是此份批注笔记上下文；下一原PDF独立内容模式，#7两模式和完整需求仍未完。
+
+### 独立原 PDF 原文（2026-11-10，verified）
+
+整页与区域同mode选择，actual PDF geometry/DPI/Rooms固定映射；独立catalog随机文档/页UUID与资源保护同SQLite事务、tombstone/严格同SHA恢复/v6投影。原文预览、专用只读reader/同图返回与原件库实际管理已接，首次开图及返回不额外保存脏Note。185相关主机测试、Android测试源码编译及独立复核通过，真实平台/像素/硬件未运行；见original-pdf-sources-2026-11-10.md。下一原文在网络格式/状态中的只读整合，范围调整/换源与完整引用备份等完整要求仍保留，整体active。

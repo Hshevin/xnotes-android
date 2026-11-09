@@ -162,3 +162,7 @@
 ## 2026-11-10：精简接手工作树
 
 用户在原树因其他聊天归属无法绑定后明确要求“在这个工作树基础上新建工作树继续”。已通过 create_worktree 从原 codex/mind-map 的 63371f5d13ca4d7457249d468c315db59cc69b5c 创建 mind-map-continue，并创建本地分支 codex/mind-map-continue。授权实现、相关编译/测试、文档、本地提交；未授权 APK、安装、推送、合并或发布。原树未改动。
+
+## 2026-11-10：在区域续作树基础上新建原文续作树
+
+用户明确要求“那你在这个工作树基础上新建工作树继续”。通过create_worktree从mind-map-region-continue的实际HEAD579e5f54a25579ca8dfb5465f8a80e1a24c52272创建mind-map-original-pdf，使用本地分支codex/mind-map-original-pdf。两份未提交阶段计划逐字节核对复制，原工作树及其改动原样保留。授权范围沿用实现、相关编译/测试、文档与本地提交；不包含APK、安装、推送、合并或发布。

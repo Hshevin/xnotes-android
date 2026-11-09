@@ -1,7 +1,7 @@
 # 思维导图续作检查点（2026-11-10）
 
 用户要求：按完整持续需求逐步实现直到完成；原树不能绑定后，用户明确允许在它基础上新建工作树继续。
-状态：D2d2、Canvas整文件／区域来源及分页区域创建往返均已实现／主机验证；整体未完成，下一原PDF独立原文模式。
+状态：D2d2、Canvas整文件／区域、分页区域及原PDF独立原文创建往返均已实现／主机验证；整体未完成，下一原文在网络中的格式／状态整合。
 本轮边界：实现、相关编译／测试、文档、本地提交；不打包 APK、安装、推送、合并或发布。
 
 ## 工作位置
@@ -45,12 +45,16 @@ D2d1 已交所选文件加入可保存关系画布并返回网络。D2d2 现从�
 
 54454为281中279过、Android源码compile过、1121输入全同；93555与30768只修两新夹具（SPEED才保存time、分页先relayout、相机数值±0），保原有效279，逐case替换合并281全绿。独立计划／实现／证据复核通过。详见docs/movinkpad/paged-region-sources-2026-11-10.md；tmp/paged-region-verified-summary.json/-locator-recheck-inputs.json；无运行构建。
 
+## 原 PDF 独立原文阶段（verified）
+
+新树源码9982ac5b、测试cf276494。PDF整页/区域actual菜单→独立mode request→同SHA原件catalog/永久页身份→已有/新图概念→PNG/保存冷开→专用只读Reader→同Entry/相机/选择/来源返回已接；原件库可list/read/明确delete/restore/relink同SHA。Note无页锚/dirty亦不补ID、不flush；首次打开导图通过request策略到Main真实persist消费者，不额外保存Note。原件与catalog身份未纳完整备份，不称可重建缓存。
+
+独审Required均修并回归：IO-return prompt取消归属、SQL type/range截断、own精确pin保护、批坏frame隔离/late raster回收、旧reader宿主退休、合并pan/pinch锚点、真实Main默认flush路径。45983旧行为两取消例真实失败，fixed同例最终绿；85330首轮180/2失败仅两个独立确认夹具，保原XML。最终34437终态0/33s，31套185唯一case，0失败/错误/跳过，Android源码compile过，1158输入SHA全同；独立实现与证据结案通过。日志/XML/input/summary见tmp/original-pdf-*，runtime中所有作业终态、作者冻结。真实Android/PDFium像素/SAF/重建杀进程/MovinkPad Pro14 Android15 ProPen3/Surface/GPU/性能未运行。
+
 ## 下一实际动作
 
-接原PDF原文独立内容模式：先核源指纹／原PDF页及当前Note永久页映射、source模型／预览／定位的可复用点，写精确typed契约并独审，再完整创建→持久化／预览→打开返回。不能复活废弃includeAnnotations字段或把资源hash当docUUID；当前批注上下文不等于原件来源。继续保留原14组，不重复未变有效测试，不以全native4迁移作前置。
+继续原文身份在文件网络格式/状态中的只读整合：先核NetworkFileFactsReader与NetworkFileKind/过滤、catalog轻量身份观察及来源行，不把原文归到Note、不按文件名猜；实际PDF内容保持不读取。独立审核一个完整可操作阶段后实现、相关验证、本地提交。
 
-仍缺可选同图出现／失效检查、PDF独立原文模式／范围调整、导图来源打开与真正导图双窗格、权限/身份/移动/回收站精确恢复、独立副本和完整引用文件备份、主要预览/页目录缩略图、同级插入/边缘平移和实际平台验收。整体保持 active，阶段完成不是任务完成。
+仍缺可选同图出现／失效检查、来源范围调整/换源、导图来源打开与真正导图双窗格、Canvas侧反向引用、权限/身份/移动/回收站精确恢复、独立副本和完整引用文件备份、主要预览/页目录缩略图、同级插入/边缘平移和实际平台验收。原14组不缩减，整体active；阶段完成不是任务完成。
 
-Canvas本地提交：`60dfacfa`（格式／预览／完整读取）、`c711b11b`（实际入口／保存／副本采用／定位返回）、`8c787750`（主机与Android事件测试源码）。
-
-分页本地提交：`69ccde43`（完整读取／固定预览）、`d5c8fcc2`（实际入口／请求／定位）、`40ce03b5`（主机与Android菜单测试源码）。
+历史Canvas/分页本地提交和证据保留在上文阶段及对应记录，旧树不写入、不清理、不合并。源码/测试/文档只在新树继续。

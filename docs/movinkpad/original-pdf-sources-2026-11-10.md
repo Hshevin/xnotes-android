@@ -1,6 +1,6 @@
 # 原 PDF 独立原文来源（2026-11-10）
 
-状态：in_progress，完整计划已独立审核；两项Required（实际pageInfo、整页入口同模式选择）已纳入；整体 active 未完成。
+状态：verified（源码／主机验证及Android测试源码编译），计划、实现与逐项证据已独立复核；整体 active 未完成。
 基线579e5f54，新工作树mind-map-original-pdf从该提交创建；原树两份未提交计划复制后保留，迁移清单tmp/original-pdf-worktree-copy.json；上一goal turn为progress（分页区域完整流程、281有效测试与本地提交）。旧构建全部终态。
 范围：本地原生实现、相关编译／测试、文档及本地提交；不打包APK、安装、推送、合并或发布。
 
@@ -50,3 +50,15 @@ A：DocumentRegistry/catalog/access/engine接口、xmap v6模型与preview/diges
 B：原文reader/Workspace与Navigator、PdfSource/Pdfium关闭等待、停车与lease/输入Host测试。
 C：actual映射、模式选择SourceCreationRequest／PageToMapFlow和Editor绑定、坐标／源创建与Android菜单事件测试。
 文件/API先对齐、作者不各自构建或提交。独立reviewer只读审核，不派生代理。真实Android/PDFium像素/SAF/Compose重建/MovinkPad Android15 ProPen3/Surface/GPU/性能未运行必须单列；旧有效未变证据不重跑。
+
+## 实现与验证
+
+源码已接：独立catalog/严格pin事务、原文v6投影与派生预览、actual整页/区域选择、纯原文reader/返回、原件库管理及显式同SHA重新关联。原文创建后打开导图使用本次request显式停车策略，不额外persist停放Note；普通NOTE默认策略不变。完整引用备份与网络筛选中的原文类型整合仍属后续完整需求，不能把原文当成某份Note或从SHA重建永久身份。
+
+49373初步源码编译通过，后续源码改变不将其作最终证据。45983临时只恢复旧IO外取得ownership，两取消case均在IO成功、lease=1后等不到实际close而真实失败；shell退出逐字节恢复fixed。85330首轮180项178过／2新夹具失败，1157输入全同、Android源码compile通过。两夹具仅改对照：摘要保同图/节点/来源ID；delete→undo后不复活旧票，不要求重开来源条目，保当前用户结果并核旧票失效/新票有效。首轮日志及XML保留。
+
+最终34437为 **31套185项，0失败/错误/跳过**，Android测试源码编译通过；1158源码/资源/构建输入逐一SHA相同。完整纵向case覆盖actual选区与整页mode→已有/新图/概念→失败重存不重复→实际原文backend固定PNG→保存冷重开→真实专用Reader→同MapEntry/相机/选集/来源返回，并调用Main实际persist消费者核脏Note零写。数据库测试包括真实1→3/2→3、raw SQL非整数/巨大值拒绝、active额外pin与tombstone残留pin全保护；取消反例fixed同名2项最终绿。另新增surface实际返回后取消回收、配置宿主间隙旧reader退休、双指同时平移缩放回归。
+
+独立计划/实现/Required修复及证据复核完成：取消归属、SQL截断、坏首条frame整批污染、取消像素回收、own pinset、旧宿主与双指锚点、首次开图隐式flush均已处理。忽略证据：`tmp/original-pdf-{ownership-red,first,final}-summary.json`、相应XML/log和final-inputs；最新状态`tmp/original-pdf-runtime.json`。所有构建已终态，无运行作业。
+
+主机PDF解析/像素使用明确注入的受控engine，实际SQLite、资源/租约、Editor、MapSession、IO、PNG编解码、Reader与消费者按生产流程验证；不据此宣称实际PDFium像素通过。Android原JSON空值/v6、双指MotionEvent及schema1/2迁移保留真实仪器测试源码，但本轮只编译。真实Android/SAF/Compose重建与进程死亡、MovinkPad Pro14/Android15/ProPen3、Surface/GPU/性能未运行；未打包APK、安装、推送、合并或发布。
