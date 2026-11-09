@@ -134,7 +134,7 @@
     <string name="graph_source_duplicate">More than one source has this identity. Resolve the duplicate before opening.</string>
     <string name="graph_source_busy">An edit is still in progress. Finish it and retry opening the source.</string>
     <string name="graph_source_navigation_changed">The source or workspace changed. Review the source and retry.</string>
-    <string name="graph_source_open_unsupported">Opening canvas and map sources is not available yet. The reference is kept.</string>
+    <string name="graph_source_open_unsupported">Opening this source type is not available yet. The reference is kept.</string>
     <string name="graph_source_open_unavailable">The source could not be opened. Check its identity, permission or original PDF in the file browser. The map is kept.</string>
     <string name="graph_source_guard_save_failed">The outgoing note could not be saved. The map is kept. Review the save problem and retry opening the source.</string>
     <string name="graph_backlinks_title">References and associations</string>
@@ -284,4 +284,5 @@
     <string name="graph_file_card_notice">This card represents one file. Its title and remark are independent; delete the card to remove it from this canvas.</string>
     <string name="network_canvas_known_targets">Application maps and canvases (last known)</string>
     <string name="network_canvas_create_confirm_notice">For a new canvas, Save in the system picker confirms creation of the complete file cards.</string>
+    <string name="graph_source_live_canvas">Showing the open canvas, including unsaved edits.</string>
 </resources>

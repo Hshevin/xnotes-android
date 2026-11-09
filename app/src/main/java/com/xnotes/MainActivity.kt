@@ -158,7 +158,7 @@ private fun standardPenAction(action: Int): Int = when (action) {
 
 /** Network exploration parks native buffers without starting an extra persistence operation. */
 internal fun persistNativeForMapPresentation(editor:Editor,entry:com.xnotes.mindmap.MapWorkspace.Entry) {
-    if(entry.flushNativeOnPresent) editor.persist()
+    if(entry.flushNativeOnPresent && !entry.skipNativePersistOnPresent) editor.persist()
 }
 
 class MainActivity : ComponentActivity() {
@@ -391,7 +391,7 @@ private fun EditorScreen(
         }
     }
     SideEffect {maps.current?.let {savedMapUri=it.uri.toString();savedMapTitle=it.title}}
-    LaunchedEffect(maps.visible,maps.current?.flushNativeOnPresent) {if(maps.visible) {
+    LaunchedEffect(maps.visible,maps.current?.flushNativeOnPresent,maps.current?.skipNativePersistOnPresent) {if(maps.visible) {
         mapActivity?.cancelPenRecording?.invoke()
         editor.openPanes.forEach {it.resetPenButtons()}
         StylusButtonLatch.releaseKey()
@@ -838,7 +838,7 @@ private fun EditorScreen(
             paneHomes=emptyMap();homeFocus=null;mainMenu=false
             editor.message=when {
                 opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
-                live->context.getString(R.string.graph_source_live_note)
+                live->context.getString(if(opened.pane.canvasOpen) R.string.graph_source_live_canvas else R.string.graph_source_live_note)
                 else->null
             }
         }

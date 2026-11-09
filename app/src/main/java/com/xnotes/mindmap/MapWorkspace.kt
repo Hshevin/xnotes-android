@@ -43,6 +43,8 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         // Runtime map data only. A retained Entry must never keep an old native Editor/Activity.
         internal var sourceReturn by mutableStateOf<MapSourceReturnBookmark?>(null)
         internal var flushNativeOnPresent by mutableStateOf(true)
+        // A Canvas source return parks its dirty model for this presentation only.
+        internal var skipNativePersistOnPresent by mutableStateOf(false)
     }
     private val app=context.applicationContext
     private var active=true
@@ -82,7 +84,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                     return@launch
                 }
                 val next=reused ?: Entry(lease.uri,title,lease)
-                next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent
+                next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent;next.skipNativePersistOnPresent=false
                 next.presentation.visible=true
                 current=next;visible=true;adopted=true
                 if(prior!=null && prior!==next) {prior.presentation.visible=false;prior.parkingCheck={false};prior.lease.close()}

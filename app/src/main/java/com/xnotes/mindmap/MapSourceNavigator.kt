@@ -77,6 +77,7 @@ internal class MapSourceNavigator(
                                     // before this callback. The map therefore has no new draft/pen to drop.
                                     committed=true
                                     entry.sourceReturn=bookmark
+                                    entry.skipNativePersistOnPresent=opened.pane.canvasOpen
                                     workspace.hide(entry)
                                     onOpened(opened,native.keptOwner!=null)
                                 }
@@ -110,12 +111,14 @@ internal class MapSourceNavigator(
             failure=NativeReferenceIssue.CHANGED;return false
         }
         val token=++generation;val operation=Any()
+        val skipNativePersist=entry.skipNativePersistOnPresent
         failure=null;saveFailed=false;busy=true;returning=true;returnOperation=operation
         fun valid()=current(entry,token) && entry.sourceReturn===bookmark && entry.session.canRestoreSourceReturn(bookmark)
         val accepted=workspace.open(entry.uri,entry.title,preparePresentation={
             if(!valid()) null else editor.awaitHostParking()?.let {proof->({valid() && proof.current()})}
         },stillCurrent={valid() && !workspace.visible},operation=operation,flushNativeOnPresent=entry.flushNativeOnPresent,onPresented={shown->
             if(current(entry,token) && shown===entry && entry.sourceReturn===bookmark) {
+                entry.skipNativePersistOnPresent=skipNativePersist
                 if(entry.presentation.applySourceReturn(entry.session,bookmark)) entry.sourceReturn=null
                 returnOperation=null;busy=false;returning=false
             }

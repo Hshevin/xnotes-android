@@ -4715,6 +4715,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * the loaded note and leaves the explorer as it was. A second tap while one open is in flight is
      * ignored, so two reads never race to swap in a document.
      */
+    private fun liveReferenceOwners(documentId:String)=openPanes.filter {it.missingDocument==null}.map {it.documentOwner}.distinct()
+        .filter {owner->if(owner.canvasOpen) owner.infiniteOrNull?.document?.identity?.documentId==documentId
+            else owner.state.document.identity.documentId==documentId}
     /** Freeze the actual panes and models, while allowing another owner a same-model Save As. */
     internal suspend fun prepareReference(target:com.xnotes.storage.NativeReferenceTarget,region:Rect?=null,
                                           selectedUri:String?=null):NativeReferencePreparation {
@@ -4724,61 +4727,86 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
         val initialSlots=hostParkingSlots();val initialMissing=initialSlots.map {it.pane.missingDocument}
         fun initialCurrent()=sameHostParkingSlots(initialSlots) && initialSlots.zip(initialMissing).all {(slot,m)->slot.pane.missingDocument===m}
-        fun live()=openPanes.filter {!it.canvasOpen && it.missingDocument==null}.map {it.documentOwner}.distinct()
-            .filter {it.state.document.identity.documentId==target.documentId}
-        fun freeze(uri:String?,owner:Editor?,name:String?):NativeReferencePreparation {
+        fun freeze(uri:String?,owner:Editor?,name:String?,kind:DocumentKind):NativeReferencePreparation {
             if(!sessionOwner.isCurrent() || opening) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.BUSY)
+            if(kind==DocumentKind.CANVAS && (target.pageId!=null || region!=null))
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
             val slots=hostParkingSlots();val missing=slots.map {it.pane.missingDocument}
             if(slots.any {!it.pane.sessionOwner.isCurrent() || !it.owner.sessionOwner.isCurrent()})
                 return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-            val model=owner?.state?.document
-            // Once RAM was identified as a source, all later saves retain its original strict base.
+            val model=owner?.takeUnless {it.canvasOpen}?.state?.document
+            val canvas=owner?.takeIf {it.canvasOpen}?.infiniteOrNull?.document
+            if(owner!=null && (if(kind==DocumentKind.CANVAS) canvas==null else model==null))
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+            // A retained source keeps its original strict edit source; this navigation never saves it.
             model?.path?.let {requireNotNull(owner).pageReferenceProtection=PageReferenceProtection(model,notebookStorage.registry.locationKey(it))}
-            val page=try {model?.let(target::page)} catch(error:com.xnotes.storage.NativeReferenceFailure) {
+            val page=try {
+                canvas?.let {target.canvas(it)}
+                model?.let(target::page)
+            } catch(error:com.xnotes.storage.NativeReferenceFailure) {
                 return NativeReferencePreparation.Failed(error.issue)
             }
-            val identity=model?.identity;val path=model?.path;val scope=model?.pageReferenceScope
+            val identity=model?.identity ?: canvas?.identity;val path=model?.path ?: canvas?.path;val scope=model?.pageReferenceScope
             val guards=slots.filter {it.open}.map {it.owner}.distinct().filter {it!==owner}
-            val request=NativeReferenceRequest.observe(referenceIssuer,this,target,region,uri,name,owner,guards,model,page,
+            val request=NativeReferenceRequest.observe(referenceIssuer,this,target,kind,region,uri,name,owner,guards,model,page,canvas,
                 valid={sameHostParkingSlots(slots) && slots.zip(missing).all {(slot,m)->slot.pane.missingDocument===m} &&
-                    (owner==null || owner.state.document===model && model!!.identity==identity && model.path==path && model.pageReferenceScope===scope &&
-                        runCatching {target.page(model)===page}.getOrDefault(false))},
+                    (owner==null || if(kind==DocumentKind.CANVAS) owner.canvasOpen && owner.infiniteOrNull?.document===canvas &&
+                        canvas!!.identity==identity && canvas.path==path && runCatching {target.canvas(canvas);true}.getOrDefault(false)
+                    else !owner.canvasOpen && owner.state.document===model && model!!.identity==identity && model.path==path &&
+                        model.pageReferenceScope===scope && runCatching {target.page(model)===page}.getOrDefault(false))},
                 active={slots.all {it.pane.sessionOwner.isCurrent() && it.owner.sessionOwner.isCurrent()}})
             return NativeReferencePreparation.Ready(request)
         }
-        val first=live()
+        val first=liveReferenceOwners(target.documentId)
         if(first.size>1) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
-        first.singleOrNull()?.let {owner->owner.state.document.path?.let {
+        first.singleOrNull()?.takeUnless {it.canvasOpen}?.let {owner->owner.state.document.path?.let {
             owner.pageReferenceProtection=PageReferenceProtection(owner.state.document,notebookStorage.registry.locationKey(it))
         }}
         val initialSource=first.singleOrNull()
-        val initialIdentity=initialSource?.state?.document?.identity
-        val initialPath=initialSource?.state?.document?.path
-        val initialScope=initialSource?.state?.document?.pageReferenceScope
+        val initialKind=initialSource?.let {if(it.canvasOpen) DocumentKind.CANVAS else DocumentKind.NOTE}
+        val initialModel=initialSource?.takeUnless {it.canvasOpen}?.state?.document
+        val initialCanvas=initialSource?.takeIf {it.canvasOpen}?.infiniteOrNull?.document
+        val initialIdentity=initialModel?.identity ?: initialCanvas?.identity
+        val initialPath=initialModel?.path ?: initialCanvas?.path
+        val initialScope=initialModel?.pageReferenceScope
         val resolved=try {withContext(Dispatchers.IO) {
+            val coroutine=kotlinx.coroutines.currentCoroutineContext();val checkActive={coroutine.ensureActive()}
             val registry=notebookStorage.registry
-            val kind=registry.kindForId(target.documentId)
-            if(kind!=null && kind!="xnote") throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+            val knownKind=when(registry.kindForId(target.documentId)) {
+                null->null;"xnote"->DocumentKind.NOTE;"xcanvas"->DocumentKind.CANVAS
+                else->throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+            }
+            if(initialKind!=null && knownKind!=null && initialKind!=knownKind)
+                throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             if(registry.locations(target.documentId).size>1) throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
             val uri=selectedUri ?: registry.resolve(target.documentId)
+            val kind=initialKind ?: knownKind ?: uri?.let {notebookStorage.referenceKind(it,target,checkActive)}
+                ?: throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
             val actualName=uri?.let {location->runCatching {
                 val parsed=android.net.Uri.parse(location)
                 if(parsed.scheme=="file") java.io.File(requireNotNull(parsed.path)).name
                 else appContext.contentResolver.query(parsed,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)
                     ?.use {c->if(c.moveToFirst() && !c.isNull(0)) c.getString(0) else null}
             }.getOrNull()?.takeIf {it.isNotBlank()}}
-            uri to (actualName ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()})
+            Triple(uri,actualName ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()},kind)
         }} catch(error:java.util.concurrent.CancellationException) {throw error
         } catch(error:Exception) {return NativeReferencePreparation.Failed(referenceIssue(error))}
-        if(!initialCurrent() || initialSource!=null && (initialSource.state.document.identity!=initialIdentity ||
-                initialSource.state.document.path!=initialPath || initialSource.state.document.pageReferenceScope!==initialScope))
+        if(!initialCurrent() || initialSource!=null && (if(initialKind==DocumentKind.CANVAS)
+                initialSource.infiniteOrNull?.document!==initialCanvas || initialCanvas?.identity!=initialIdentity || initialCanvas?.path!=initialPath
+            else initialSource.state.document!==initialModel || initialModel?.identity!=initialIdentity ||
+                initialModel?.path!=initialPath || initialModel?.pageReferenceScope!==initialScope))
             return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        val uri=resolved.first
-        val after=live()
+        val uri=resolved.first;val kind=resolved.third
+        val after=liveReferenceOwners(target.documentId)
         if(after.size>1) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
-        if(after.size==1) return freeze(after.single().state.document.path,after.single(),after.single().state.document.displayName)
+        if(after.size==1) {
+            val owner=after.single();val actualKind=if(owner.canvasOpen) DocumentKind.CANVAS else DocumentKind.NOTE
+            if(actualKind!=kind) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+            return if(owner.canvasOpen) freeze(owner.infinite.document.path,owner,owner.infinite.document.displayName,kind)
+                else freeze(owner.state.document.path,owner,owner.state.document.displayName,kind)
+        }
         if(uri==null) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
-        return freeze(uri,null,resolved.second ?: DocumentKind.withSuffix(appContext.getString(R.string.untitled),DocumentKind.NOTE))
+        return freeze(uri,null,resolved.second ?: DocumentKind.withSuffix(appContext.getString(R.string.untitled),kind),kind)
     }
     private fun referenceIssue(error:Exception)=when(error) {
         is com.xnotes.storage.NativeReferenceFailure->error.issue
@@ -4798,11 +4826,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         if(request.keptOwner!=null) return locateReference(request,explicitlyDiscarded,stillCurrent,onOpened)
         if(!request.current()) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        if(openPanes.any {!it.canvasOpen && it.missingDocument==null && it.state.document.identity.documentId==request.target.documentId})
+        if(liveReferenceOwners(request.target.documentId).isNotEmpty())
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         val uri=request.uri ?: return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
         val context=ReferenceOpenContext(request,stillCurrent,onOpened)
-        val success=openNative(uri,request.displayName,DocumentKind.NOTE,true,explicitlyDiscarded,reference=context)
+        val success=openNative(uri,request.displayName,request.kind,true,explicitlyDiscarded,reference=context)
         return if(success) context.result ?: NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             else (context.result as? NativeReferenceResult.Failed) ?: NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
     }
@@ -4813,8 +4841,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(!request.issuedBy(referenceIssuer) || request.workspace!==this || !stillCurrent())
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         val keep=request.keptOwner ?: return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        if(keep.state.document===request.model) try {request.target.page(keep.state.document)}
-            catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
+        try {
+            if(request.kind==DocumentKind.CANVAS) request.canvasModel?.let {request.target.canvas(it)}
+            else if(keep.state.document===request.model) request.target.page(keep.state.document)
+        } catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
         if(!request.current()) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         val slots=captureOpenSlots(true)
         if(!settleOpenSlots(slots,true,explicitlyDiscarded,null,retainedOwner=keep))
@@ -4826,14 +4856,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(duplicate) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
         if(!request.current() || !stillCurrent() || !stamps.all {it.isCurrent()} || !readyToAdopt(slots,true,explicitlyDiscarded,null,keep))
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        val page=try {request.target.page(keep.state.document)} catch(error:com.xnotes.storage.NativeReferenceFailure) {
-            return NativeReferenceResult.Failed(error.issue)
-        }
+        val page=try {
+            if(request.kind==DocumentKind.CANVAS) {request.target.canvas(requireNotNull(request.canvasModel));null}
+            else request.target.page(keep.state.document)
+        } catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
         // No suspension from this final check through the owner's UI handoff.
         detachReferenceOthers(keep)
         focusedPane=keep.pane
-        val result=NativeReferenceResult.Opened(keep,keep.referenceLocator.show(keep.state.document,page,request.region))
-        keep.refreshView();onOpened(result)
+        val region=if(request.kind==DocumentKind.CANVAS) ReferenceRegionReveal.NONE
+            else keep.referenceLocator.show(keep.state.document,page,request.region)
+        val result=NativeReferenceResult.Opened(keep,region)
+        if(request.kind==DocumentKind.CANVAS) keep.infinite.view.requestRender() else keep.refreshView()
+        onOpened(result)
         return result
     }
     private fun detachReferenceOthers(keep:Editor) {
@@ -4869,7 +4903,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     if(!nativeOpenCurrent(request) || reference?.reference?.ioCurrent()==false) throw java.util.concurrent.CancellationException("Open request expired")
                 }
                 val prepared=if(reference==null) notebookStorage.prepareOpen(uri,kind,codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
-                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
+                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,kind=reference.reference.kind,checkActive=checkActive)
                 // The outer holder owns the result even if withContext's return dispatch is cancelled.
                 owned.set(prepared)
                 prepared.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
@@ -4902,7 +4936,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         var primary:Throwable?=null
                         try {
                             refreshed=com.xnotes.storage.PreparedNativeOpen.read(source,notebookStorage.pdfResources,
-                                codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
+                                codec,canvasCodec,pdfDir,imageDir,timing,
+                                requireCompleteCanvas=reference?.reference?.kind==DocumentKind.CANVAS,checkActive=checkActive)
                             refreshed.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             refreshed.canvas?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             checkActive();refreshed.protectForAdoption();checkActive()
@@ -4928,7 +4963,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val prepared=requireNotNull(owned.get())
             if(reference!=null) {
                 if(!reference.current()) return false
-                reference.reference.target.page(requireNotNull(prepared.note))
+                if(prepared.version.kind!=reference.reference.kind) return false
+                if(kind==DocumentKind.CANVAS) reference.reference.target.canvas(requireNotNull(prepared.canvas))
+                else reference.reference.target.page(requireNotNull(prepared.note))
             }
             nativeOpenRequest=null;opening=false
             if(fromHome) {detachSettledWorkspace();abandonSecondary();focusedPane=Pane.PRIMARY}
@@ -4949,11 +4986,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             missingDocument=null;rememberOpened(uri,name)
             if(reference!=null) {
-                val doc=requireNotNull(prepared.note)
-                observePublishedNote(doc,prepared.version)
-                pageReferenceProtection=PageReferenceProtection(doc,prepared.version.locationKey)
-                val result=NativeReferenceResult.Opened(this,referenceLocator.show(doc,reference.reference.target.page(doc),reference.reference.region))
-                reference.result=result;refreshView();reference.onOpened(result)
+                val region=if(kind==DocumentKind.CANVAS) ReferenceRegionReveal.NONE else {
+                    val doc=requireNotNull(prepared.note)
+                    observePublishedNote(doc,prepared.version)
+                    pageReferenceProtection=PageReferenceProtection(doc,prepared.version.locationKey)
+                    referenceLocator.show(doc,reference.reference.target.page(doc),reference.reference.region)
+                }
+                val result=NativeReferenceResult.Opened(this,region)
+                reference.result=result
+                if(kind==DocumentKind.CANVAS) infinite.view.requestRender() else refreshView()
+                reference.onOpened(result)
             }
         } catch(error:java.util.concurrent.CancellationException) {
             failure=error
@@ -11184,7 +11226,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         for(ed in panes.map {it.documentOwner}.distinct()) {
             if(!current()) return false
-            if(ed===retainedOwner) {if(!ed.awaitNoteCapture(ed.state.document)) return false;continue}
+            if(ed===retainedOwner) {
+                val stable=if(ed.canvasOpen) ed.awaitCanvasCapture(ed.infinite.document) else ed.awaitNoteCapture(ed.state.document)
+                if(!stable) return false
+                continue
+            }
             if(discarded.any {it.owner===ed && it.applies()}) continue
             if(cleanOnly) {
                 ed.noteDebounceJob?.cancel()

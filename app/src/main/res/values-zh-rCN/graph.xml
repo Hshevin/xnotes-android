@@ -134,7 +134,7 @@
     <string name="graph_source_duplicate">存在重复的来源身份，请先处理身份冲突再打开。</string>
     <string name="graph_source_busy">仍有编辑尚未结束，请完成后重试打开来源。</string>
     <string name="graph_source_navigation_changed">来源或工作区已变化，请核对来源后重试。</string>
-    <string name="graph_source_open_unsupported">尚未支持打开画布与导图来源，引用已保留。</string>
+    <string name="graph_source_open_unsupported">尚未支持打开此类来源，引用已保留。</string>
     <string name="graph_source_open_unavailable">无法打开来源，请在文件浏览器中检查其身份、权限或原 PDF。导图已保留。</string>
     <string name="graph_source_guard_save_failed">原文档未能保存，导图已保留。请处理保存问题后重试打开来源。</string>
     <string name="graph_backlinks_title">引用与关联</string>
@@ -284,4 +284,5 @@
     <string name="graph_file_card_notice">此卡片代表一份文件，标题和备注可分别修改；需要移除时请删除卡片本体。</string>
     <string name="network_canvas_known_targets">应用内已有导图与画布（最后记录）</string>
     <string name="network_canvas_create_confirm_notice">新建时，系统选择器中的“保存”将直接确认创建完整文件卡片。</string>
+    <string name="graph_source_live_canvas">已定位到打开的画布，保留尚未保存的修改。</string>
 </resources>

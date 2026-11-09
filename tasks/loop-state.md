@@ -1,7 +1,7 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified；本地提交锚点见 tmp/mind-map-continue-runtime.json。
-工作树：/Users/kita/.codex/worktrees/mind-map-continue/xnotes；分支 codex/mind-map-continue；起点 63371f5d13ca4d7457249d468c315db59cc69b5c，原树 clean、原分支未修改。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源阶段 verified，等待本地提交；下一 Canvas 区域来源流程。。
+工作树：/Users/kita/.codex/worktrees/mind-map-continue/xnotes；分支 codex/mind-map-continue；起点 63371f5d13ca4d7457249d468c315db59cc69b5c，创建时原树clean；本聊天未写原树。提交后只读观察原树已由其他任务推进至f8cd9b2f且有未提交修改，保留、不合并。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
@@ -13,7 +13,10 @@
 实现分工：relation_evidence（扫描/模型）、relation_navigation（actor票/聚焦/导航）、relation_network（网络/过滤/展开/场景）；主代理接来源侧与Main/UI、验证和本地提交。均同树编辑且文件归属分离，原作者已停止。
 验证：45869编译通过、unit夹具编译错；72986为153项152过1夹具失败；93077为108项107过1真实观察缺陷（conflict不在snapshotFlow上游）已修；4017终态0，81受影响定向通过。按逐suite替换合并159项，0失败/错误/跳过，1063最终输入SHA全同；Android源码编译通过。全部日志/逐case/input SHA见tmp/file-relations-{related,recheck,conflict,verified}-summary.json及同名日志。两个折叠分支聚焦和真实Host的来源/网络往返保存删除、原native bytes/零写均实际验证。独立阶段审核与三必修+新增冲突观察复核通过。构建输出 /private/tmp/xnotes-mind-map-continue-build；project cache /private/tmp/xnotes-mind-map-continue-cache。
 未运行：真实 Android 仪器/SAF、重建/杀进程、MovinkPad Pro 14/Android 15/Pro Pen 3、Surface/GPU/性能。
-下一实际阶段：Canvas具体来源打开与返回；先核现有Editor参考打开/停车/采用接口，接实际单文档Canvas路径，不回头以整套native4迁移为前置。relation_evidence正在只读查最小入口，无实现改动。
+下一实际阶段：Canvas区域来源创建→保存重开→区域临时定位/返回。先只读核范围表示、持久化兼容、预览裁切和现Canvas overlay/viewport接口，写一个完整可操作小阶段，不回头以整套native4迁移为前置。只读检查已完成，计划独立审阅通过。现NOTE-only阻点集中NativeReferenceTarget/NotebookStorage参考读核、NativeReferenceRequest/Editor参考准备与采用、保活Canvas停车，以及Main成功提示；底层PreparedNativeOpen/openNative已支持Canvas。
+本片先交Canvas整文件往返（现来源选择可添加），不放宽FILE+region。实际kind由live模型/身份登记并经实际源验证，不按文件扩展名猜；Canvas禁止pageId/region。活Canvas保同模型/历史/修改，其他owner沿现保护，冷打开按UUID/类型/唯一位置/版本核验。采用与隐藏图同Main不挂起；单文档不恢复Canvas分屏。独审补入实际Main消费者边界：Canvas返回仅本次呈现跳过persistNativeForMapPresentation，普通NOTE/正常打开和网络既有flush策略不改变；测试调用真实helper验证dirty/history保留且零写。
+实现：relation_evidence为storage读核，relation_navigation为Editor/Request+native Host，relation_network为Map Canvas Host/Android场景；root为Navigator/Main返回策略与协调验证。
+Canvas首编50322终态1：production过，新unit/Android夹具误直接访问private canvasAutosaveUri导致测试编译失败，root已改反射注入（不扩生产接口）。独审实际复现旧CanvasCodec会丢unknown/missing-asset对象而仍授editSource；现仅reference Canvas首读/最终重读启用严格逐项物化与采用前完整proof，默认reader不变；raw首读/保存期间坏B、顺序/同count替换回归已补并静态独审通过。作者已冻结，1066输入SHA固定；69241终态0：187相关项0失败/错误/跳过，Android源码compile过，1066输入SHA全同，独立证据复核通过；日志tmp/canvas-source-recheck.log，逐case证据tmp/canvas-source-verified-summary.json。无APK/安装/推送/合并/发布。验收覆盖冷/活/保存后重读、错ID/类型/重复位置/迟到、Canvas笔画停车与返回、源字节零写及Android源码编译；真实平台仍未运行。
 其余原需求持续保留，见需求清单和交接文件，不将本阶段或交接视为全目标完成。
 
 ## 最新恢复点：D2c 全库与多文件网络（verified，已本地提交）

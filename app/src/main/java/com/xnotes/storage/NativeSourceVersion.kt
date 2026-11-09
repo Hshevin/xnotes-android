@@ -106,6 +106,10 @@ internal class NativeSourceSnapshot private constructor(
         if(document.identity.documentId!=version.documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
         verifyContainer()
     }
+    internal fun verify(read:com.xnotes.format.CanvasCodec.CompleteRead) {
+        if(!read.matches(read.document)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
+        verify(read.document)
+    }
     /** Data from the actual source, not a permission to bind any external model. */
     internal fun verifyWorkingContract(info:BundleReferenceInfo):com.xnotes.format.BundleIdentity {
         synchronized(gate) {checkOpen()};checkActive()
