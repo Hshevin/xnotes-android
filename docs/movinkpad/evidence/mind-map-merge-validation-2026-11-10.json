@@ -26,5 +26,8 @@
   "apk_packaged": false,
   "installed": false,
   "pushed": false,
-  "release_published": false
+  "release_published": false,
+  "branch_master_sync_merge": "e1c2361473af678dcfb888fd2021d39ff815b014",
+  "local_master_no_ff_merge": "7044e1b2c49a07537475a15f661e447a1e92a66a",
+  "app_source_identical_to_validated_branch": true
 }
