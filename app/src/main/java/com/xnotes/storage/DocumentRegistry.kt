@@ -117,6 +117,16 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     fun referenceIds(owner: String): Set<String> = readableDatabase.rawQuery("SELECT resource_id FROM resource_refs WHERE owner=?",arrayOf(owner)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun owners(prefix: String): Set<String> = readableDatabase.rawQuery("SELECT DISTINCT owner FROM resource_refs WHERE owner LIKE ?",arrayOf("$prefix%" )).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun knownLocations(): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations",null).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
+    internal data class MapLocation(val id:String,val name:String,val uri:String,val available:Boolean)
+    /** Discovery hints only; callers still read the actual graph and classify its library location. */
+    internal fun knownMapLocations(limit:Int=4097,documentId:String?=null):List<MapLocation> {
+        require(limit in 1..4097)
+        val where=if(documentId==null) "" else " AND d.id=?"
+        val args=if(documentId==null) arrayOf(limit.toString()) else arrayOf(documentId,limit.toString())
+        return readableDatabase.rawQuery(
+            "SELECT d.id,d.name,l.uri,l.available FROM documents d JOIN locations l ON l.document_id=d.id WHERE d.kind='xmap'"+where+" ORDER BY l.available DESC,l.uri LIMIT ?",args,
+        ).use {c->buildList {while(c.moveToNext()) add(MapLocation(c.getString(0),c.getString(1),c.getString(2),c.getInt(3)!=0))}}
+    }
     fun resource(id: String): Resource? = readableDatabase.rawQuery("SELECT id,name,path,size,digest,version,owned FROM resources WHERE id=?", arrayOf(id)).use { c ->
         if (!c.moveToFirst()) null else Resource(c.getString(0), c.getString(1), c.getString(2), c.getLong(3), c.getString(4), c.getInt(5), c.getInt(6) == 1)
     }
