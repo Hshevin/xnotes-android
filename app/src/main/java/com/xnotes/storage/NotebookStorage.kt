@@ -23,9 +23,13 @@ class NotebookStorage internal constructor(private val context:Context,
     /** An actual retained stage, not a source context or evidence that a working cache is durable. */
     internal class StagedSave private constructor(
         private val issuer:Any,internal val uri:String,internal val journalPath:String,internal val recordDigest:String,
-        val original:NativeSourceVersion,val candidate:NativeSourceVersion,val handoffId:String?,
-        private val anchored:Boolean,private val originalPdfHash:String?,
+        private val originalInspection:NativeSourceVersion.Inspected,private val candidateInspection:NativeSourceVersion.Inspected,
+        val handoffId:String?,
     ) {
+        val original get()=originalInspection.version
+        val candidate get()=candidateInspection.version
+        private val anchored=originalInspection.info.header.anchors!=null
+        private val originalPdfHash=originalInspection.info.originalPdfHash
         private var consumed=false
         @Synchronized internal fun consume(owner:Any) {
             if(owner!==issuer || consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
@@ -35,18 +39,25 @@ class NotebookStorage internal constructor(private val context:Context,
             if(owner!==issuer || !consumed || handoffId==null) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
             // This retains the old witness; commit must still revalidate the exact record and all
             // original/candidate/target bytes. It is not a newly observed source or a receipt.
-            return StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId,anchored,originalPdfHash)
+            return StagedSave(issuer,uri,journalPath,recordDigest,originalInspection,candidateInspection,handoffId)
         }
         internal val wasConsumed get()=synchronized(this) {consumed}
+        /** Only this issuer's retained A/B and exact record may reuse the stage's decoded facts. */
+        @Synchronized internal fun publicationInspections(owner:Any,state:MigrationPublication.Validation):Pair<NativeSourceVersion.Inspected,NativeSourceVersion.Inspected> {
+            if(owner!==issuer || !consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            if(state.recordDigest!=recordDigest || state.originalHash!=original.sha256 || state.candidateHash!=candidate.sha256)
+                throw MigrationPublication.RecoveryRequired(StorageText.t(StorageMsg.MIGRATION_RECOVERY_INVALID),reason=StorageMsg.MIGRATION_RECOVERY_INVALID)
+            return originalInspection to candidateInspection
+        }
         internal fun verifyWorkingContract(info:com.xnotes.format.BundleReferenceInfo) {
             if(info.format!=original.kind.extension || info.header.identity?.documentId!=original.documentId ||
                 (info.header.anchors!=null)!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
             if(info.originalPdfHash!=originalPdfHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
         }
         companion object {
-            internal fun issue(issuer:Any,uri:String,journalPath:String,recordDigest:String,original:NativeSourceVersion,
-                               candidate:NativeSourceVersion,handoffId:String?,info:com.xnotes.format.BundleReferenceInfo)=
-                StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId,info.header.anchors!=null,info.originalPdfHash)
+            internal fun issue(issuer:Any,uri:String,journalPath:String,recordDigest:String,original:NativeSourceVersion.Inspected,
+                               candidate:NativeSourceVersion.Inspected,handoffId:String?)=
+                StagedSave(issuer,uri,journalPath,recordDigest,original,candidate,handoffId)
         }
     }
     /** Read-only: unsupported metadata layout retries from the URI start, never inventing identity. */
@@ -362,12 +373,13 @@ class NotebookStorage internal constructor(private val context:Context,
         pending.publishValidated(backend,validate={state->
             if(state.purpose!=expected) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
             checkActive()
-            val original=inspect(state.original,checkActive)
-            val checked=NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),
-                kind,checkActive)
+            // Publication has just hashed the actual retained A/B against this exact marker.
+            // A live stage can reuse only the inspections issued for those identical bytes;
+            // cold recovery and callers without a stage still inspect the complete bundles.
+            val staged=stage?.publicationInspections(saveIssuer,state)
+            val original=staged?.first?.info ?: inspect(state.original,checkActive)
+            val checked=staged?.second ?: NativeSourceVersion.inspect(state.candidate,registry.locationKey(uri),kind,checkActive)
             val candidate=checked.info;receipt=checked.version
-            if(stage!=null && (BundleMigration.hash(state.original) {checkActive();false}!=stage.original.sha256 ||
-                checked.version.sha256!=stage.candidate.sha256)) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
             val current=when(state.current) {state.original->original;state.candidate->candidate;else->error("Unbound publication version")}
             NativeSaveContract.verify(original,candidate,current,expected,registry.expectationAt(uri),
                 current.header.identity?.let {registry.expectationForId(it.documentId)})
@@ -617,7 +629,7 @@ class NotebookStorage internal constructor(private val context:Context,
             val recordDigest=pending.stage(source.file,candidate,expected,expectedCandidateHash=next.version.sha256,
                 expectedOriginalHash=original.version.sha256,handoffId=handoffId,checkActive=checkActive)
             checkActive()
-            StagedSave.issue(saveIssuer,uri,pending.directoryPath,recordDigest,original.version,next.version,handoffId,original.info)
+            StagedSave.issue(saveIssuer,uri,pending.directoryPath,recordDigest,original,next,handoffId)
         }
     }
 

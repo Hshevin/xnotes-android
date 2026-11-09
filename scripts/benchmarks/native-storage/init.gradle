@@ -1,0 +1,13 @@
+allprojects {
+    pluginManager.withPlugin("com.android.application") {
+        extensions.getByName("android").testOptions.unitTests.includeAndroidResources = true
+    }
+    tasks.withType(Test).configureEach {
+        ['xnotes.storageBenchmark', 'xnotes.storageBenchmark.root', 'xnotes.storageBenchmark.label'].each { key ->
+            def value = System.getProperty(key)
+            if (value != null) systemProperty key, value
+        }
+        maxHeapSize = '3g'
+        testLogging.showStandardStreams = true
+    }
+}

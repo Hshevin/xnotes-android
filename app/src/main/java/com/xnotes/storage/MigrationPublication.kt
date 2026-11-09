@@ -30,7 +30,8 @@ class MigrationPublication internal constructor(private val directory:File,priva
         internal val creation get()=this==CREATE_NOTE || this==CREATE_CANVAS
         internal val ordinarySave get()=this==SAVE_NOTE || this==SAVE_CANVAS
     }
-    internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?)
+    internal data class Validation(val original:File,val candidate:File,val current:File,val purpose:Purpose?,
+                                   val originalHash:String,val candidateHash:String,val recordDigest:String)
     internal data class RetainedValidation(val original:File,val candidate:File,val purpose:Purpose?,val recordDigest:String,
                                            val originalHash:String,val candidateHash:String)
     internal data class RestoreValidation(val original:File,val purpose:Purpose?,val currentHash:String?,val candidateHash:String?,val candidateStageProof:Boolean,
@@ -130,7 +131,7 @@ class MigrationPublication internal constructor(private val directory:File,priva
             oldHash -> original
             else -> throw failure(StorageMsg.MIGRATION_INTERRUPTED)
         }
-        check();validate(Validation(original,candidate,current,record.purpose))
+        check();validate(Validation(original,candidate,current,record.purpose,oldHash,newHash,record.digest))
         unchanged(kept,checkActive=check)
         if(fingerprint(target,check)!=currentHash) throw failure(StorageMsg.MIGRATION_INTERRUPTED)
         check()

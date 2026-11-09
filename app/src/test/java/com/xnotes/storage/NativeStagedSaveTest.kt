@@ -33,8 +33,11 @@ class NativeStagedSaveTest {
         }
         val current=File(root,"source");val next=File(root,"next")
         var writes=0
+        var afterRead:(()->Unit)?=null
         val backend={_:String->object:MigrationPublication.Target {
-            override fun read()=current.inputStream()
+            override fun read()=object:java.io.FilterInputStream(current.inputStream()) {
+                override fun close() {super.close();afterRead?.invoke()}
+            }
             override fun write(source:File) {writes++;source.copyTo(current,overwrite=true)}
         }}
         val storage=NotebookStorage(context,targetOverride=backend)
@@ -104,6 +107,40 @@ class NativeStagedSaveTest {
         assertThrows(CancellationException::class.java) {f.storage.commitStaged(stage,"source") {throw CancellationException()}}
         assertEquals(0,f.writes);assertArrayEquals(original,f.current.readBytes());assertTrue(f.storage.hasRecovery(f.uri))
         assertTrue(File(f.journalDir,"candidate.zip").isFile)
+    }
+    @Test fun retainedCandidateChangedAfterTargetReadCannotReuseTheEarlierInspection()=scenario {f->
+        val original=f.current.readBytes();val stage=f.storage.prepareExpected(f.uri,f.next,f.version)
+        val candidate=File(f.journalDir,"candidate.zip");val stamp=candidate.lastModified()
+        val marker=File(f.journalDir,"pending").readBytes()
+        f.document.bookmarks.single().label="C"
+        val changed=File(f.root,"changed.xnote").also {file->file.outputStream().use {f.codec.write(f.document.snapshot(),it)}}
+        assertNotEquals(stage.candidate.sha256,BundleMigration.hash(changed))
+        var targetRead=false;var replaced=false
+        f.afterRead={targetRead=true}
+
+        assertThrows(MigrationPublication.RecoveryRequired::class.java) {f.storage.commitStaged(stage,"source") {
+            if(targetRead && !replaced) {
+                replaced=true;changed.copyTo(candidate,overwrite=true);candidate.setLastModified(stamp)
+            }
+        }}
+
+        assertTrue(replaced);assertEquals(0,f.writes);assertArrayEquals(original,f.current.readBytes())
+        assertTrue(f.storage.hasRecovery(f.uri));assertArrayEquals(marker,File(f.journalDir,"pending").readBytes())
+        assertArrayEquals(changed.readBytes(),candidate.readBytes())
+    }
+    @Test fun cancellationAfterTargetReadKeepsTheRetainedBytesAndNeverPublishesCachedFacts()=scenario {f->
+        val original=f.current.readBytes();val stage=f.storage.prepareExpected(f.uri,f.next,f.version)
+        val retained=f.journalDir.listFiles()!!.associate {it.name to it.readBytes().toList()}
+        var targetRead=false;var cancelled=false
+        f.afterRead={targetRead=true}
+
+        assertThrows(CancellationException::class.java) {f.storage.commitStaged(stage,"source") {
+            if(targetRead) {cancelled=true;throw CancellationException("cancel after actual target fingerprint")}
+        }}
+
+        assertTrue(cancelled);assertEquals(0,f.writes);assertArrayEquals(original,f.current.readBytes())
+        assertTrue(f.storage.hasRecovery(f.uri))
+        assertEquals(retained,f.journalDir.listFiles()!!.associate {it.name to it.readBytes().toList()})
     }
     @Test fun changedRecordRetainedBytesOrTargetNeverWritesOrClearsTheStage()=scenario {f->
         val original=f.current.readBytes();val candidate=f.next.readBytes()
