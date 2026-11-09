@@ -13,6 +13,16 @@ class MapPresentationState internal constructor() {
         set(value) {if(!value) cancelPendingBacklinkFocus();shown=value}
     internal var sourcesFor by mutableStateOf<String?>(null)
     private var owner:MapSession?=null
+    private var sourceEditorRuntime:SourceListEditor.Runtime?=null
+    private fun retireSourceEditor() {sourceEditorRuntime?.close();sourceEditorRuntime=null}
+    /** Each composition gets a fresh facade; only pure runtime ownership survives its absence. */
+    internal fun bindSourceEditor(session:MapSession,snapshot:SourceEditSnapshot):SourceListEditor {
+        synchronize(session)
+        val runtime=sourceEditorRuntime?.takeIf {it.matches(session,snapshot)} ?: run {
+            retireSourceEditor();SourceListEditor.Runtime(session,snapshot).also {sourceEditorRuntime=it}
+        }
+        return SourceListEditor(runtime)
+    }
     private var epoch=-1L
     private var documentId:String?=null
     private data class Camera(val viewport:MindMapView.Viewport,val width:Int,val height:Int,val density:Float)
@@ -28,7 +38,7 @@ class MapPresentationState internal constructor() {
     internal fun synchronize(session:MapSession) {
         val id=session.document?.id
         if(owner!==session || epoch!=session.interactionEpoch || documentId!=id) {
-            owner=session;epoch=session.interactionEpoch;documentId=id
+            retireSourceEditor();owner=session;epoch=session.interactionEpoch;documentId=id
             camera=null;restoredView.clear();sourcesFor=null;sourceFocus=null;protectedCamera=false
             cancelPendingBacklinkFocus()
         } else if(sourcesFor!=null && session.document?.nodes?.none {it.id==sourcesFor}!=false) closeSources()
@@ -64,19 +74,20 @@ class MapPresentationState internal constructor() {
         if(!protectedCamera && !capture(session,view,imeBottom)) return false
         if(camera==null) return false
         cancelPendingBacklinkFocus()
+        if(sourcesFor!=nodeId) retireSourceEditor()
         sourcesFor=nodeId;sourceFocus=null;protectedCamera=true
         return true
     }
-    internal fun parkSourcePanel() {sourcesFor=null;sourceFocus=null;protectedCamera=camera!=null}
+    internal fun parkSourcePanel() {retireSourceEditor();sourcesFor=null;sourceFocus=null;protectedCamera=camera!=null}
     private fun requestCameraRestore() {
         protectedCamera=camera!=null;restoredView.clear();restoreVersion=Math.incrementExact(restoreVersion)
     }
-    internal fun closeSources() {cancelPendingBacklinkFocus();sourcesFor=null;sourceFocus=null;requestCameraRestore()}
+    internal fun closeSources() {retireSourceEditor();cancelPendingBacklinkFocus();sourcesFor=null;sourceFocus=null;requestCameraRestore()}
     internal fun requestBacklinkFocus(session:MapSession,ticket:MapBacklinkFocusTicket):Boolean {
         synchronize(session)
         if(!visible || !session.backlinkFocusCurrent(ticket) || session.selected!=ticket.nodeId || session.nodeSelectionMode) return false
         pendingFileRelationFocus=null;pendingBacklinkFocus=ticket;pendingSelectionSerial=session.selectionSerial
-        sourcesFor=null;sourceFocus=null;protectedCamera=false
+        retireSourceEditor();sourcesFor=null;sourceFocus=null;protectedCamera=false
         return true
     }
     internal fun requestFileRelationFocus(session:MapSession,ticket:MapFileRelationFocusTicket):Boolean {
@@ -84,7 +95,7 @@ class MapPresentationState internal constructor() {
         if(!visible || !session.fileRelationFocusCurrent(ticket) || session.selectedRelation!=ticket.relationId ||
             session.selectedNodes.isNotEmpty() || session.nodeSelectionMode) return false
         pendingBacklinkFocus=null;pendingFileRelationFocus=ticket;pendingSelectionSerial=session.selectionSerial
-        sourcesFor=null;sourceFocus=null;protectedCamera=false
+        retireSourceEditor();sourcesFor=null;sourceFocus=null;protectedCamera=false
         return true
     }
     internal fun cancelPendingBacklinkFocus() {pendingBacklinkFocus=null;pendingFileRelationFocus=null;pendingSelectionSerial=-1L}
@@ -125,6 +136,7 @@ class MapPresentationState internal constructor() {
     internal fun reopenSourcePanel(session:MapSession,ticket:MapSourceNavigationTicket):Boolean {
         if(!graphCurrent(session) || ticket.issuer!==session || ticket.documentId!=documentId || ticket.source.epoch!=epoch) return false
         if(session.currentSourceNavigation(ticket)==null) {closeSources();return false}
+        if(sourcesFor!=ticket.nodeId) retireSourceEditor()
         sourcesFor=ticket.nodeId;sourceFocus=MapSourcePanelFocus(ticket);requestCameraRestore()
         return true
     }
@@ -132,8 +144,9 @@ class MapPresentationState internal constructor() {
         if(!graphCurrent(session) || !session.restoreSourceReturn(bookmark)) return false
         val ticket=bookmark.source
         if(session.currentSourceNavigation(ticket)!=null) {
+            if(sourcesFor!=ticket.nodeId) retireSourceEditor()
             sourcesFor=ticket.nodeId;sourceFocus=MapSourcePanelFocus(ticket)
-        } else {sourcesFor=null;sourceFocus=null}
+        } else {retireSourceEditor();sourcesFor=null;sourceFocus=null}
         requestCameraRestore()
         return true
     }

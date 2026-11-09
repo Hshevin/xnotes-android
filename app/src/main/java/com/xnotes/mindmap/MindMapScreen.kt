@@ -43,6 +43,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         var activeExistingSource by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         val sourceController=session.sourcePicker
+        val sourceTargets=session.sourceTargetEdits
+        val targetPicker=LocalSourceTargetPickerHost.current ?: rememberSourceTargetPickerHost()
+        val pendingTargetPickerId=targetPicker.pendingId
         val graphEpoch=session.interactionEpoch
         var graphTools by remember(graphEpoch) { mutableStateOf(false) }
         var pendingRelation by remember(graphEpoch) {mutableStateOf<MapRelation?>(null)}
@@ -389,22 +392,29 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         val currentSourceFocus=pendingSourceFocus?.takeIf {session.currentSourceNavigation(it.source)!=null}
         SideEffect {if(pendingSourceFocus!=null && currentSourceFocus==null) presentationState.consumeSourceFocus(pendingSourceFocus.token)}
         if(!session.hasUnconfirmedContent && !enlarged) presentationState.sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
-            val editor=remember(session,id,sourceEdit.epoch,sourceEdit.documentId) {SourceListEditor(session,sourceEdit)}
+            val editor=remember(presentationState,session,id,sourceEdit.epoch,sourceEdit.documentId) {presentationState.bindSourceEditor(session,sourceEdit)}
             GraphSourcesDialog(sourceEdit,editor, {
                 if(pendingSourceRequest==null) session.beginExistingSource(id)?.let {request->
                     pendingSourceRequest=request
                     try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
                     catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
                 }
-            },addEnabled=pendingSourceRequest==null && sourceController.state==null,
+            },addEnabled=pendingSourceRequest==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null,
                 open=if(hostHooks==null || !cameraReady) null else ::openSource,focus=currentSourceFocus,
-                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback) {
+                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback,
+                targetEditsEnabled=pendingSourceRequest==null && connectedPickerId==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null) {
                 listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
                 // Keep the system launch occupied until ITS result consumes the old ticket.
                 activeExistingSource=null;presentationState.closeSources();focus.clearFocus();keyboard?.hide()
             }
         } }
         sourceController.state?.let {GraphSourceChoiceDialog(it,sourceController)}
+        sourceTargets.state?.let {shown->SourceTargetEditDialog(sourceTargets,shown,
+            filePickerAvailable=pendingTargetPickerId==null && pendingSourceRequest==null && connectedPickerId==null) {slot->
+                if(pendingTargetPickerId!=null || pendingSourceRequest!=null || connectedPickerId!=null) sourceTargets.receivePicker(slot,null)
+                else targetPicker.launch(slot)
+            }
+        }
         if (discardingRecovery) AlertDialog(onDismissRequest = { discardingRecovery = false },
             title = { Text(stringResource(R.string.map_conflict_use_file), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.map_conflict_use_file_confirm), fontSize = TextSize.body) },

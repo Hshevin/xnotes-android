@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -87,7 +88,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent;next.skipNativePersistOnPresent=false
                 next.presentation.visible=true
                 current=next;visible=true;adopted=true
-                if(prior!=null && prior!==next) {prior.presentation.visible=false;prior.parkingCheck={false};prior.lease.close()}
+                if(prior!=null && prior!==next) {prior.presentation.closeSources();prior.presentation.visible=false;prior.parkingCheck={false};prior.lease.close()}
                 onPresented(next)
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
@@ -131,7 +132,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     }
     fun close(expected:Entry):Job? {
         if(!active || current!==expected) return null
-        cancelOpen();current=null;visible=false;expected.presentation.visible=false;expected.parkingCheck={false}
+        cancelOpen();current=null;visible=false;expected.presentation.closeSources();expected.presentation.visible=false;expected.parkingCheck={false}
         return expected.lease.close()
     }
     fun persist() {current?.takeIf {it.lease.alive && it.session.dirty}?.session?.save()}
@@ -140,7 +141,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         active=false;generation++;opening=false
         hostBinding=null
         val pending=acceptedOpens.toList();work=null;pending.forEach {it.cancel()}
-        val entry=current;current=null;visible=false;entry?.presentation?.visible=false;entry?.parkingCheck={false}
+        val entry=current;current=null;visible=false;entry?.presentation?.closeSources();entry?.presentation?.visible=false;entry?.parkingCheck={false}
         val released=entry?.lease?.close()
         return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released?.join()}.also {disposal=it}
     }
@@ -150,6 +151,8 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
 @Composable
 internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entry)->Unit,
     hooks:((MapWorkspace.Entry)->MapHostHooks)?=null,nativeContent:@Composable ()->Unit) {
+    val targetPicker=rememberSourceTargetPickerHost()
+    CompositionLocalProvider(LocalSourceTargetPickerHost provides targetPicker) {
     Box(Modifier.fillMaxSize()) {
         if(!workspace.visible) nativeContent()
         workspace.current?.let {entry->key(entry) {
@@ -167,5 +170,6 @@ internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entr
                 }
             }
         }
+    }
     }
 }

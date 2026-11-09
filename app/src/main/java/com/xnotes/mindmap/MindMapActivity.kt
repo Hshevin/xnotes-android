@@ -12,8 +12,9 @@ import androidx.lifecycle.ViewModel
 class MindMapActivity : ComponentActivity() {
     private class LeaseOwner:ViewModel() {
         var lease:MapDocumentLease?=null
+        val presentation=MapPresentationState()
         fun acquire(context:Context,uri:android.net.Uri):MapDocumentLease = lease ?: MapDocuments.acquire(context,uri).also {lease=it}
-        override fun onCleared() {lease?.close();lease=null;super.onCleared()}
+        override fun onCleared() {presentation.closeSources();lease?.close();lease=null;super.onCleared()}
     }
     private val owner by lazy { ViewModelProvider(this,object:ViewModelProvider.Factory {
         override fun <T:ViewModel> create(modelClass:Class<T>):T {
@@ -27,7 +28,7 @@ class MindMapActivity : ComponentActivity() {
         setResult(RESULT_OK, Intent().setData(uri))
         owner.acquire(this,uri)
         val title = intent.getStringExtra("title").orEmpty()
-        setContent { MindMapScreen(documentSession, title, onClose = ::finish) }
+        setContent { MindMapScreen(documentSession, title, onClose = ::finish,presentation=owner.presentation) }
     }
     // Only unsaved edits are written; an untouched map must not raise a conflict on backgrounding.
     override fun onStop() { if(owner.lease!=null) documentSession.let {if(it.dirty) it.save()}; super.onStop() }
