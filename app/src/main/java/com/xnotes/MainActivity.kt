@@ -1168,6 +1168,10 @@ private fun EditorScreen(
     // A DOCKED keyboard lifts only the open panes (the bottom format bar rides right above it) and
     // the snackbar; Home stays put and the keyboard slides over it. A floating keyboard reports no
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
+    com.xnotes.mindmap.PageToMapFlowHost(editor,
+        onSave={target->launchSaveAs(target)},
+        onOpenMap={uri->mindMapLauncher.launch(com.xnotes.mindmap.MindMapActivity.intent(context,uri.toString(),stemOf(uri.toString())))})
+
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },

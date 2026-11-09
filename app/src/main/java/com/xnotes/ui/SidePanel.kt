@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -517,6 +518,7 @@ private fun PageThumb(
                     PageContextMenu(
                         editor, index, page.cover, page.pdfPage != null, menuOpen, { menuOpen = false }, { sizing = true }, { extracting = it },
                         onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover,
+                        {editor.requestPageReference(page)},
                     )
                 }
             }
@@ -561,6 +563,7 @@ private fun PageContextMenu(
     onSavePagesAsImages: (List<Int>) -> Unit,
     onInsertPdf: (Int) -> Unit,
     onPickCover: () -> Unit,
+    onReferencePage: () -> Unit,
 ) {
     val palette = LocalPalette.current
     var sub by remember { mutableStateOf(MENU_MAIN) }
@@ -593,6 +596,9 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.insert_pdf)) }, leadingIcon = menuIcon(XnotesIcons.importDoc), onClick = { onInsertPdf(index); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { onDismiss(); editor.duplicatePages(one) })
                 DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.graph_reference_this_page),fontSize=TextSize.body) },
+                    modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget),
+                    leadingIcon=menuIcon(XnotesIcons.link),onClick={onDismiss();onReferencePage()})
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })
