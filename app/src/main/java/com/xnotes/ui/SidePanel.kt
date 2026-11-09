@@ -94,7 +94,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** The side panel's tabs. */
-enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS }
+enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS, REFERENCES }
 
 /**
  * The side panel. The Pages tab shows page thumbnails with a per-page three-dot menu (add / copy /
@@ -111,6 +111,7 @@ fun SidePanel(
     onInsertPdf: (after: Int) -> Unit = {},
     onImportTemplate: () -> Unit = {},
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
+    references: com.xnotes.mindmap.BacklinkHostHooks? = null,
 ) {
     val palette = LocalPalette.current
     val tab = editor.sidePanelTab
@@ -143,6 +144,7 @@ fun SidePanel(
             SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == SidePanelTab.CONTENTS) { editor.sidePanelTab = SidePanelTab.CONTENTS }
             SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == SidePanelTab.BOOKMARKS) { editor.sidePanelTab = SidePanelTab.BOOKMARKS }
             SegIcon(XnotesIcons.layers, stringResource(R.string.layers_title), tab == SidePanelTab.LAYERS) { editor.sidePanelTab = SidePanelTab.LAYERS }
+            SegIcon(XnotesIcons.link, stringResource(R.string.graph_backlinks_title), tab == SidePanelTab.REFERENCES) { editor.sidePanelTab = SidePanelTab.REFERENCES }
             SegIcon(XnotesIcons.search, stringResource(R.string.search), tab == SidePanelTab.SEARCH, shortcut = Keys.SEARCH) { editor.sidePanelTab = SidePanelTab.SEARCH }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -152,6 +154,7 @@ fun SidePanel(
                 SidePanelTab.BOOKMARKS -> BookmarksTab(editor)
                 SidePanelTab.SEARCH -> SearchTab(editor)
                 SidePanelTab.LAYERS -> LayersSidebar(editor)
+                SidePanelTab.REFERENCES -> ReferencesTab(editor,references)
             }
         }
         if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {

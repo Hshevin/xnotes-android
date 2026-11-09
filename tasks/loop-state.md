@@ -1,9 +1,25 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按原需求继续实现，active，overall complete=false。前阶段为Main图宿主/停车/运行时相机，3744全量与本地提交；本轮为progress（实际来源Open/定位/返回，3771全量与3项功能本地提交），未整体完成。
+目标：按原需求继续实现，active，overall complete=false。上一阶段为来源Open／定位／返回（3771全量）；当前反向引用阶段verified（3812全量与本地分阶段提交），整体仍未完成。
 工作树：/Users/kita/.codex/worktrees/mind-map/xnotes，分支codex/mind-map。
 授权：代码、编译／测试、文档、本地提交。master54f05b0f既有同步已完成；不打包APK、安装、推送、合并或发布。
 规则：page-level引用（分页永久页UUID，画布仅文档UUID，可选区域只存xmap），不恢复对象ID；原字节升级与PDF SHA校验／资源租约不变；失败已写版本保留，不回滚原件。遵守本仓AGENTS/MOVINKPAD/README/project-brief。
+
+## 最新阶段：来源侧栏反向引用（verified）
+
+基线 c9b72ab1。本阶段源码／主机测试／Android源码编译已verified，整体 active/complete=false。功能本地提交 c0519ebd（NativeContext5）、343789fd（Map focus6／readonlyStore5）、e1a5d122（Library7）、00cc4ea2（Controller9／Access）、013d0bdf（Navigator9）；Main／SidePanel／双语资源／Android两场景及本记录在随后的本地界面提交。未打包／安装／推送／合并／发布。
+
+真实路径：笔记／批注PDF SidePanel“引用与关联”→按永久页Current/Other/FILE查询真实sources→图文件/节点/范围/备注/最后status/PNG→sameactor精确source focus／运行时展开→确认只删一source／一次history→实际save／失败只retry，Undo后保存显示SavedChanged不误报Removed。查询沿真实内部树／read grants／knownmaps／alllive actor，未登记图可发现；只读恢复winner不写baseline／日志；loading/live不回退disk，C1仅overlay；samegraph PNG合批、有界总量/partial。Unknown scope／Trash／新alias恢复拒写，Entry粘性保dirty跨last lease，不取消accepted save。
+
+最终44355终态0：357套3812项，失败/错误/跳过全0，Android测试源码compile绿；tmp/map-backlinks-final-full.log及-summary.json。37 frozen源码/tests/resources摘要（tmp/map-backlinks-final-inputs.json）运行前后全同；后仅docs/提交。相关36871为41/40绿+Androidcompile，唯一Undo rawA==diskA却test期望write1，已紧为原bytes不变／writes0／仅初次拒写attempt1；最终full含修。38901真实40/3红：opaque root metadata缺失误scope、Undo Retry误Removed、双lease释放绕过scope；产品窄修与独审闭合。48549 37/8红为先行fixture问题，见正式stage doc，不能冒充产品红。无运行Gradle/exec。
+
+41新增方法：NativeContext5、MapFocus6、readonlyStore5、Library7、Controller9、Navigator9。Android NativeBacklinksEditingHostTest2已登记，仅编译未运行；其Open验typed hook，实际Main parking／actor／focus由主机Nav覆盖，不claimAndroid完整Main路径。全部Required独审闭合。README／AGENTS／plan／todo／review及docs/movinkpad/mind-map-backlinks-2026-11-09.md已同步。
+
+下一条立即执行：D 当前文件局部关系网络。source_loop_audit只读审计在 tmp/file-network-next-audit.txt：从真实同概念sources投影轻量File/Concept/成员证据，不能拿现仅指向中心文件的backlink rows推断邻居；文件按UUID去重，概念保canonical图位置+graph/nodeID；内容引用／显式手工文件关联／可选同图出现分开，多来源概念不推文件互引。复用既有MindMapView/Painter但必须显式只读导航模式，不塞MapSession造成自动保存；Main复用全部native停车与前台raw事件透明门。下一片先定精确规格/API与独审，再tests-first实现真实“侧栏→局部网络→解释路径→同actor具体图来源→返回网络”闭环；过滤／全库／展开／加入手工关系画布仍须持续完成，不以首片替代整个D。
+
+Canvas侧栏/来源打开、region入口／范围调整、真正Map双pane、精确身份/权限/文件移动与回收站恢复、独立副本/完整备份、主画布primary大图/目录缩略图、无中心/同级插入/边缘平移等原未完范围全部保留。真实Android/SAF/PDFium/IME/配置重建/杀进程/MovinkPad Android15 ProPen3/掌触/Surface/GPU/大PDF性能未运行。
+
+协作：Root统一Gradle／提交；source_loop_audit Source/Library全部freeze并完成D只读审计；cancel_event_tests Map/Controller/Access/tests全部freeze；review_input_plan独审收口。无待用户回答／外部阻塞。completed代理用followup_task唤醒，旧send_message不触发新turn。下轮先核git/最终提交与无活作业，再继续D，勿重做已绿来源／反向引用或以native4全量迁移作硬前置。
 
 ## 最新阶段：严格来源打开、定位与返回（verified）
 

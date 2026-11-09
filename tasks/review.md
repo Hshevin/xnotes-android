@@ -1,3 +1,14 @@
+## 来源侧栏反向引用（2026-11-09）
+
+独立计划与代码审核：review_input_plan，只读、不派生代理。三组真实引用、只读库／恢复赢家、live actor 覆盖、精确 focus／临时展开、单条移除、scope 拒写和取消隔离均已复核。必修全部闭合；不代表 Android 或设备验收。
+
+- `38901` 40 项／3 个真实行为红分别证实：不透明根元数据缺失误授权、Undo 后 Retry 误报 Removed、多 lease 最后默认关闭绕过拒写。最窄修复后由最终全量覆盖。
+- `Entry.retainDirty` 跨 lease 保留拒写，取消尚未接受的 debounce，保留实际脏会话／恢复资料；已接受保存不取消。Retry 只保存 latest，不再次删除；纯 applied receipt 决定 Removed／SavedChanged，编辑就绪状态只控制能否聚焦。
+- 侧栏取消绑定原 NativeBacklinkContext；旧 A 不能取消后来 B。运行时 reveal 统一渲染／命中／选择／相机，不改折叠／几何／历史。
+- `44355` 最终 357 套／3812 项主机测试、零失败／错误／跳过，Android 测试源码编译通过。37 个冻结输入逐项 SHA 与运行后当前文件一致；证据 `tmp/map-backlinks-final-full.log`、`-summary.json`、`-inputs.json`。
+- Undo 后内容与原磁盘完全相同时，重试仅核实／checkpoint、不重复输出；精确断言原 bytes、writes0／initial denied attempt1，无产品改动。此前夹具的 provider permission、未 open 异常类型与焦点交接预期均单独记录，没有当作产品反例。
+- Android SidePanel 两场景仅编译，主机 Window／provider／MapWorkspace 事件不替代实际 Android、SAF、IME、PDFium、Surface／GPU、MovinkPad Pro 14／Android 15／Pro Pen 3。网络、画布侧、手工关联、真正双窗格、精确恢复和原剩余交互保留。
+
 
 ## B1a 原位／放大共享笔输入（2026-11-06）
 

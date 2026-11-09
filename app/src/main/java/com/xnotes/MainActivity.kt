@@ -826,6 +826,27 @@ private fun EditorScreen(
         }
     }
     DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
+    fun captureMapHost():()->Boolean {
+        val panes=(listOf(editor)+editor.openPanes).distinct()
+        val checks=panes.map {pane->
+            val owner=pane.documentOwner;val open=pane.noteOpen;val canvas=pane.canvasOpen
+            val model:Any=if(canvas) pane.infinite.document else pane.state.document
+            val check:()->Boolean={pane.documentOwner===owner && pane.noteOpen==open && pane.canvasOpen==canvas &&
+                (if(canvas) pane.infinite.document else pane.state.document)===model}
+            check
+        }
+        val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed;val prompt=guardState.current
+        return {maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
+            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
+    }
+    val backlinkNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapBacklinkNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
+            onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire()})
+    }
+    DisposableEffect(backlinkNavigator) {onDispose {backlinkNavigator.dispose()}}
+    val backlinkHooks=remember(backlinkNavigator) {com.xnotes.mindmap.BacklinkHostHooks(
+        open=backlinkNavigator::open,busy={backlinkNavigator.busy},cancel=backlinkNavigator::cancel,
+        canCancel=backlinkNavigator::canCancel,problem=backlinkNavigator::failureFor)}
     LaunchedEffect(sourceNavigator.failure,sourceNavigator.saveFailed,maps.visible) {
         sourceNavigator.failure?.takeIf {!maps.visible}?.let {editor.message=context.getString(
             if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else referenceFailureText(it))}
@@ -1018,18 +1039,8 @@ private fun EditorScreen(
 
     fun openMap(uri:String,title:String=stemOf(uri)) {
         if(!maps.isHostCurrent(mapBinding)) return
-        sourceNavigator.retire()
-        val panes=(listOf(editor)+editor.openPanes).distinct()
-        val checks=panes.map {pane->
-            val owner=pane.documentOwner;val open=pane.noteOpen;val canvas=pane.canvasOpen
-            val model:Any=if(canvas) pane.infinite.document else pane.state.document
-            val check:()->Boolean={pane.documentOwner===owner && pane.noteOpen==open && pane.canvasOpen==canvas &&
-                (if(canvas) pane.infinite.document else pane.state.document)===model}
-            check
-        }
-        val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed;val prompt=guardState.current
-        val current={maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
-            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
+        backlinkNavigator.cancel();sourceNavigator.retire()
+        val current=captureMapHost()
         maps.open(Uri.parse(uri),title,preparePresentation={
             if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
         },stillCurrent=current)
@@ -1287,7 +1298,7 @@ private fun EditorScreen(
         onOpenMap={uri->openMap(uri.toString())},visible=!maps.visible)
 
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
-        if(maps.isHostCurrent(mapBinding) && maps.current===entry) sourceNavigator.retire()
+        if(maps.isHostCurrent(mapBinding) && maps.current===entry) {backlinkNavigator.cancel();sourceNavigator.retire()}
         if(maps.isHostCurrent(mapBinding) && maps.close(entry)!=null) {
             savedMapUri=null;savedMapTitle=""
             editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
@@ -1308,7 +1319,7 @@ private fun EditorScreen(
                 else Spacer(Modifier.weight(1f))
                 if(sourceNavigator.busy) androidx.compose.material3.TextButton(onClick={sourceNavigator.cancel()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                     Text(stringResource(R.string.cancel),fontSize=TextSize.body)
-                } else androidx.compose.material3.TextButton(onClick={sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                } else androidx.compose.material3.TextButton(onClick={backlinkNavigator.cancel();sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                     Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
                 }
             }
@@ -1518,6 +1529,7 @@ private fun EditorScreen(
                     pendingPdfInsert = PendingPdfInsert(pane, after)
                     insertPdfLauncher.launch(arrayOf("application/pdf"))
                 },
+                backlinks = backlinkHooks,
             )
             if (!mainMenu) SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null }) { pane ->
                 BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(com.xnotes.ui.theme.LocalPalette.current.bg.toComposeColor())) {
@@ -1791,6 +1803,7 @@ internal class PaneActions(
     val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
     val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
     val onInsertPdf: (Editor, Int) -> Unit,
+    val backlinks:com.xnotes.mindmap.BacklinkHostHooks?=null,
 )
 
 /** A recording's file name when it leaves the app: its name, made safe for any folder, and its format. */
@@ -2255,6 +2268,7 @@ private fun EditorPane(
                                 onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
                                 onImportTemplate = actions.onImportTemplate,
                                 onTemplateFromImage = actions.onTemplateFromImage,
+                                references = actions.backlinks,
                             )
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds().endsPageSelection(editor)) {
