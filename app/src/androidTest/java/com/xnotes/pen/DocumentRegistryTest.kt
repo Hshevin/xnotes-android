@@ -36,13 +36,15 @@ class DocumentRegistryTest {
     @Test fun platformSchemaUpgradeKeepsLocationsAndPersistsMonotonicPageContracts() = database {db,root->
         val id=UUID.randomUUID().toString();val uri="content://example/document/page-ref"
         db.register(id,"xnote","original",uri)
-        // All pre-existing table definitions are unchanged from v1; remove only the new table.
+        // Remove the tables introduced after v1; keep the actual historical native/resource rows.
+        db.writableDatabase.execSQL("DROP TABLE original_pdf_pages")
+        db.writableDatabase.execSQL("DROP TABLE original_pdf_documents")
         db.writableDatabase.execSQL("DROP TABLE page_reference_contracts")
         db.writableDatabase.version=1
         db.close()
         val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
         DocumentRegistry(context).use {upgraded->
-            assertEquals(2,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            assertEquals(3,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
             upgraded.register(id,"xnote","with references",uri,pageReferences=true)
             upgraded.register(id,"xnote","ordinary save",uri)
             assertTrue(upgraded.expectationForId(id).requiresPages)
@@ -50,6 +52,23 @@ class DocumentRegistryTest {
         }
         DocumentRegistry(context).use {reopened->
             assertNull(reopened.expectationAt(uri));assertTrue(reopened.expectationForId(id).requiresPages)
+        }
+    }
+    @Test fun platformSchemaTwoUpgradePreservesNativeContractsAndResourceProtection() = database {db,root->
+        val id=UUID.randomUUID().toString();val uri="content://example/document/v2-note"
+        val pdf=File(root,"v2-original.pdf").apply {writeText("original bytes")}
+        db.register(id,"xnote","existing",uri,pageReferences=true)
+        db.registerResource(DocumentRegistry.Resource("v2-resource","original",pdf.path,pdf.length(),"v2-digest"))
+        db.references("note:$id",setOf("v2-resource"))
+        db.writableDatabase.execSQL("DROP TABLE original_pdf_pages")
+        db.writableDatabase.execSQL("DROP TABLE original_pdf_documents")
+        db.writableDatabase.version=2;db.close()
+        val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
+        DocumentRegistry(context).use {upgraded->
+            assertEquals(3,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            assertTrue(upgraded.expectationForId(id).requiresPages)
+            assertEquals(setOf("v2-resource"),upgraded.referenceIds("note:$id"))
+            assertNotNull(upgraded.resource("v2-resource"));assertEquals("original bytes",pdf.readText())
         }
     }
     private fun database(block: (DocumentRegistry,File)->Unit) {

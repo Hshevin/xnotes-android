@@ -142,7 +142,8 @@ class PagedRegionReferenceHostTest {
             assertEquals(0,page.pdfPage)
             assertTrue(f.editor.requestPageRegionReference(PageSourceRegion(doc,page,area)))
             val request=f.editor.pageReferenceRequest!!
-            val clean=request.prepare();assertTrue(clean is PageReferencePreparation.Ready)
+            assertTrue(request.prepare() is PageReferencePreparation.ModeRequired)
+            val clean=request.selectMode(com.xnotes.ui.SourceCreationMode.NOTE_PAGE);assertTrue(clean is PageReferencePreparation.Ready)
             assertEquals(before.header.identity!!.documentId,(clean as PageReferencePreparation.Ready).source.documentId)
             assertEquals(page.referenceIdentity.id,clean.source.pageId);assertEquals(area,clean.source.region)
             assertEquals(0,f.writes.get())
