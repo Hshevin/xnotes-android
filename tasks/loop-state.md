@@ -1,9 +1,15 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-original-network/xnotes；分支 codex/mind-map-original-network。2026-11-10 再次按用户明确要求，以原工作树 mind-map-original-pdf 的实际 HEAD 64fec4179beecbc838650f2b570ed36a9025ddc0 新建。迁移38个未提交文件，逐文件SHA-256及Git差异清单一致，原树保持原样；迁移记录 tmp/original-network-worktree-copy.json。旧阶段证据与本机SDK配置一并保留，新阶段独立构建与项目缓存为 /private/tmp/xnotes-mind-map-original-network-build、/private/tmp/xnotes-mind-map-original-network-cache。
+工作树：/Users/kita/.codex/worktrees/mind-map-source-target/xnotes；分支 codex/mind-map-source-target。2026-11-10 按用户“在这个工作树基础上新建工作树继续”，从原工作树 mind-map-original-network 的实际 HEAD 8254f3b751db1a7e15f557c1dd3ea0115ae921ed 新建。28个未提交文件完整复制，逐文件SHA-256、模式和Git差异清单一致，原树保持原样；独立作者再次核对旧树28文件无变化。迁移记录 tmp/worktree-migration-source-target.json，既有失败和已通过证据一并复制。新阶段独立构建与项目缓存为 /private/tmp/xnotes-mind-map-source-target-build、/private/tmp/xnotes-mind-map-source-target-cache。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
+
+## 当前阶段：来源范围调整与更换（in_progress）
+
+8254f3b7起步并复制在途范围编辑；上一goal turn为progress（原文network完整流程、302唯一相关case／Android源码compile、独审与分层本地提交）。9002及旧树41691／31137已终态，不重启旧作业；旧31137实际15项中4处输入失败已保留原始证据。新树54658终态1：生产和单元源码编译通过，28项实际执行、5个真实失败（active pen取消UP／pointerUP、已结束平移的掌触取消／失焦相机、来源失效确认提示），1123个main／unit／资源／构建输入SHA前后全同。原始XML和固定输入存tmp/source-target-review-red-*，已据此修正View和确认提示，待复验；稳定来源面板owner与跨entry选择器接线继续实现，尚未宣称阶段通过。完整14组不缩减。
+
+只读核source模型／预览／navigation已支持目标与旧PNG，但来源行无调整入口、旧source-list事务不能安全跨IO单条patch、现页目录无视觉范围选择。新阶段计划docs/movinkpad/source-target-edit-2026-11-10.md：单row寿命票／保并发字段／视觉页与世界矩形／原PDF实际user-space／新源明确重选范围／只读准备和完整确认→保存冷开→预览→实际来源返回；文件卡不变身份。计划独审通过；页启用完成不回滚／旧Editor重开提示及普通只读零写与明确授权写分开均已纳。现按锁定API分工test-first实现；runtime tmp/source-target-edit-runtime.json。
 
 ## 最近已验证阶段：原文文件网络整合（verified）
 

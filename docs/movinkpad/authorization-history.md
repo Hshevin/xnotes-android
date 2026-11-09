@@ -166,3 +166,7 @@
 ## 2026-11-10：在区域续作树基础上新建原文续作树
 
 用户明确要求“那你在这个工作树基础上新建工作树继续”。通过create_worktree从mind-map-region-continue的实际HEAD579e5f54a25579ca8dfb5465f8a80e1a24c52272创建mind-map-original-pdf，使用本地分支codex/mind-map-original-pdf。两份未提交阶段计划逐字节核对复制，原工作树及其改动原样保留。授权范围沿用实现、相关编译/测试、文档与本地提交；不包含APK、安装、推送、合并或发布。
+
+## 2026-11-10：在原文网络工作树基础上新建范围编辑续作树
+
+- 用户明确要求“在这个工作树基础上新建工作树继续”。以 `mind-map-original-network/xnotes` 的实际提交 `8254f3b751db1a7e15f557c1dd3ea0115ae921ed` 新建托管工作树 `mind-map-source-target/xnotes`，本地分支 `codex/mind-map-source-target`。28个未提交文件及已有验证记录完整复制，逐文件SHA-256、模式与Git差异清单一致；原工作树保留不改，续作只在新树。此授权仅创建本次工作树，继续既有实现／编译测试／文档／本地提交边界，不扩展为打包、安装、推送、合并或发布。
