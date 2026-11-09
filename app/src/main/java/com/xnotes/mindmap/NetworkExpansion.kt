@@ -19,10 +19,13 @@ internal data class NetworkExpansionResult(val concepts:List<NetworkConceptProje
 /** File-concept traversal follows real content/ownership edges, activating only explicit expansions. */
 internal object NetworkExpansion {
     private data class Route(val depth:Int,val rows:List<MapBacklinkRow>)
-    fun select(focusId:String,expanded:Set<String>,projections:List<NetworkConceptProjection>):NetworkExpansionResult {
-        require(expanded.size<=250)
-        val active=linkedMapOf(focusId to Route(0,emptyList()))
-        val queue=ArrayDeque<String>().apply {add(focusId)}
+    fun select(focusId:String,expanded:Set<String>,projections:List<NetworkConceptProjection>):NetworkExpansionResult =
+        selectRoots(setOf(focusId),expanded,projections,includeOwnedRoots=false)
+    fun selectRoots(roots:Set<String>,expanded:Set<String>,projections:List<NetworkConceptProjection>,
+        includeOwnedRoots:Boolean=true):NetworkExpansionResult {
+        require(roots.size<=250 && expanded.size<=250)
+        val active=roots.sorted().associateWithTo(linkedMapOf()) {Route(0,emptyList())}
+        val queue=ArrayDeque<String>().apply {addAll(active.keys)}
         val found=linkedMapOf<NetworkConceptKey,NetworkConceptProjection>()
         val origins=linkedMapOf<NetworkConceptKey,NetworkConceptOrigin>()
         val ordered=projections.sortedBy {it.key.stableKey}
@@ -35,7 +38,7 @@ internal object NetworkExpansion {
                 if(p.key in found) continue
                 val anchor=p.members.firstOrNull {it.target.documentId==file}
                 val kind=when {anchor!=null->NetworkOriginKind.SOURCE
-                    file in expanded && p.key.graphId==file->NetworkOriginKind.OWNER
+                    (file in expanded || includeOwnedRoots && file in roots) && p.key.graphId==file->NetworkOriginKind.OWNER
                     else->continue}
                 if(p.members.isEmpty()) continue
                 found[p.key]=p

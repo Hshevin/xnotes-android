@@ -55,4 +55,9 @@ internal object NetworkFilterSelector {
         return NetworkFilterResult(kept,Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.toSet()),
             Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.toSet()),projections.size-kept.size)
     }
+    fun selectFiles(ids:Set<String>,filter:NetworkFilter,facts:NetworkFileFacts=NetworkFileFacts(emptyMap())):Pair<Set<String>,Set<String>> {
+        val matches=ids.associateWith {match(it,filter,facts)}
+        return Collections.unmodifiableSet(matches.filterValues {it==Match.YES}.keys.toSet()) to
+            Collections.unmodifiableSet(matches.filterValues {it==Match.UNKNOWN}.keys.toSet())
+    }
 }

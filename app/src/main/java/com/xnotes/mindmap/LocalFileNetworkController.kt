@@ -1,6 +1,8 @@
 package com.xnotes.mindmap
 
 import android.content.Context
+import com.xnotes.storage.DocumentRegistry
+import com.xnotes.storage.NotebookStorage
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,6 +16,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
 
 /** One pure query's read-only library and live overlay. It owns no native reading context or graph lease. */
 internal class LocalFileNetworkController(
@@ -34,10 +38,15 @@ internal class LocalFileNetworkController(
     private var observing:Job?=null
     private var library:MapBacklinkLibrary?=null
     private var stored:NetworkLibraryScan?=null
+    private var registered=DocumentRegistry.FileObservations(emptyMap(),false)
+    private var registryProblem:BacklinkProblem?=null
     private var projectionGeneration=0L
     private var filterWork:Job?=null
     var filter by mutableStateOf(NetworkFilter());private set
     var expandedFiles by mutableStateOf<Set<String>>(emptySet());private set
+    var browseMode by mutableStateOf(if(query.hasLocalFocus) NetworkBrowseMode.LOCAL else NetworkBrowseMode.LIBRARY);private set
+    var centreFiles by mutableStateOf<Set<String>>(if(query.hasLocalFocus) setOf(query.focusId) else emptySet());private set
+    var fileChoices by mutableStateOf<List<LocalNetworkFile>>(emptyList());private set
     val filterRevision get()=actionGeneration
     var catalog by mutableStateOf<List<LocalNetworkFile>>(emptyList());private set
     var filtering by mutableStateOf(false);private set
@@ -68,14 +77,25 @@ internal class LocalFileNetworkController(
         val request=++scanGeneration
         scanWork?.cancel();loading=true;stored=null;library=null
         val version=MapDocuments.observationVersion();inventory=version
-        val live=MapDocuments.observations(app);val expanded=expandedFiles
+        val live=MapDocuments.observations(app);val expanded=expandedFiles;val mode=browseMode;val centres=centreFiles
         val reader=MapBacklinkLibrary(app,query.roots,budget.read)
         scanWork=workScope.launch {
             try {
-                val result=reader.scanExpandedNetwork(query.focusId,expanded,live,budget)
+                val result=when(mode) {
+                    NetworkBrowseMode.LOCAL->reader.scanExpandedNetwork(query.focusId,expanded,live,budget)
+                    NetworkBrowseMode.FILES->reader.scanSelectedNetwork(centres,expanded,live,budget)
+                    NetworkBrowseMode.LIBRARY->reader.scanLibraryNetwork(live,budget)
+                }
+                var registryFailure:BacklinkProblem?=null
+                val known=if(mode==NetworkBrowseMode.LIBRARY) try {withContext(Dispatchers.IO) {
+                    val coroutine=currentCoroutineContext()
+                    NotebookStorage.get(app).registry.knownAvailableFiles(checkActive={coroutine.ensureActive()})
+                }} catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                catch(_:Exception) {registryFailure=BacklinkProblem.UNAVAILABLE;DocumentRegistry.FileObservations(emptyMap(),false)} else null
                 if(!current() || request!=scanGeneration) return@launch
                 if(MapDocuments.observationVersion()!=version) {startScan();return@launch}
                 stored=result;library=reader;problem=null
+                if(known!=null) {registered=known;registryProblem=registryFailure}
                 publish(MapDocuments.observations(app))
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(current() && request==scanGeneration) problem=BacklinkProblem.UNAVAILABLE}
@@ -91,10 +111,17 @@ internal class LocalFileNetworkController(
         val identities=linkedMapOf<String,String>()
         val projections=mutableListOf<NetworkConceptProjection>()
         val issues=scan.issues.toMutableList()
-        var limited=scan.limited;var direct=0;var deeper=0
+        val mode=browseMode
+        var limited=scan.limited || mode==NetworkBrowseMode.LIBRARY && registered.limited
+        if(mode==NetworkBrowseMode.LIBRARY) registryProblem?.let {issues+=BacklinkIssue(it)}
+        var direct=0;var deeper=0
         fun append(items:List<NetworkConceptProjection>) {
             for(concept in items) {
-                val isDirect=concept.members.any {it.target.documentId==query.focusId}
+                val isDirect=when(mode) {
+                    NetworkBrowseMode.LOCAL->concept.members.any {it.target.documentId==query.focusId}
+                    NetworkBrowseMode.FILES->concept.key.graphId in centreFiles || concept.members.any {it.target.documentId in centreFiles}
+                    NetworkBrowseMode.LIBRARY->true
+                }
                 val used=if(isDirect) direct else deeper
                 if(concept.members.size>budget.evidenceLimit-used) {limited=true;continue}
                 projections+=concept
@@ -132,8 +159,15 @@ internal class LocalFileNetworkController(
             val candidate=candidates[observation.key]
             val location=BacklinkLocation(observation.uri,candidate?.aliases ?: setOf(observation.uri.toString()),
                 observation.key,doc.id,candidate?.name ?: observation.uri.lastPathSegment.orEmpty().take(BacklinkBudget.LABEL_CHARS))
-            val projected=reader.projectExpandedNetwork(doc,query.focusId,expandedFiles,location,BacklinkOrigin.LIVE,observation.session.conflict,blocked,
-                membership={node,id,target->observation.captureMembership(node,id,target)},networkBudget=budget,checkActive={owner.ensureActive()})
+            val member:(String,String,MapSourceTarget)->MapBacklinkMembership?={node,id,target->observation.captureMembership(node,id,target)}
+            val projected=when(mode) {
+                NetworkBrowseMode.LOCAL->reader.projectExpandedNetwork(doc,query.focusId,expandedFiles,location,BacklinkOrigin.LIVE,
+                    observation.session.conflict,blocked,member,budget) {owner.ensureActive()}
+                NetworkBrowseMode.FILES->reader.projectSelectedNetwork(doc,centreFiles,expandedFiles,location,BacklinkOrigin.LIVE,
+                    observation.session.conflict,blocked,member,budget) {owner.ensureActive()}
+                NetworkBrowseMode.LIBRARY->reader.projectLibraryNetwork(doc,location,BacklinkOrigin.LIVE,
+                    observation.session.conflict,blocked,member,budget) {owner.ensureActive()}
+            }
             append(projected.concepts.map {concept->concept.copy(members=concept.members.map {row->
                 if(row.membership==null && row.blocked==null) row.copy(blocked=BacklinkProblem.CHANGED) else row
             })})
@@ -144,7 +178,15 @@ internal class LocalFileNetworkController(
             concept.copy(members=concept.members.map {it.copy(blocked=BacklinkProblem.DUPLICATE)}) else concept}
         duplicates.forEach {issues+=BacklinkIssue(BacklinkProblem.DUPLICATE)}
         if(limited) issues+=BacklinkIssue(BacklinkProblem.LIMIT)
-        val expansion=NetworkExpansion.select(query.focusId,expandedFiles,projected)
+        val expansion=when(mode) {
+            NetworkBrowseMode.LOCAL->NetworkExpansion.select(query.focusId,expandedFiles,projected)
+            NetworkBrowseMode.FILES->NetworkExpansion.selectRoots(centreFiles,expandedFiles,projected)
+            NetworkBrowseMode.LIBRARY->{
+                val valid=projected.filter {canonical(it.key.graphId)}
+                if(valid.size!=projected.size) issues+=BacklinkIssue(BacklinkProblem.IDENTITY)
+                NetworkExpansionResult(valid,valid.associate {it.key to NetworkConceptOrigin(it.key.graphId,NetworkOriginKind.OWNER,1)})
+            }
+        }
         val reachable=expansion.concepts
         val names=linkedMapOf<String,LinkedHashSet<String>>()
         for(concept in reachable) for(row in concept.members) {
@@ -152,6 +194,52 @@ internal class LocalFileNetworkController(
             if(values.size<8 && row.sourceFileName.isNotBlank()) values+=row.sourceFileName.take(BacklinkBudget.LABEL_CHARS)
         }
         catalog=names.map {LocalNetworkFile(it.key,it.value.toList())}
+        val observedMaps=scan.graphs.mapNotNull {graph->graph.graphId?.let {id->
+            BacklinkLocation(graph.candidate.uri,graph.candidate.aliases.toSet(),graph.candidate.key,id,graph.candidate.name)
+        }}+ready.mapNotNull {(observation,_)->observation.document?.let {doc->
+            val candidate=candidates[observation.key]
+            BacklinkLocation(observation.uri,candidate?.aliases?.toSet() ?: observation.knownAliases,
+                observation.key,doc.id,candidate?.name ?: observation.uri.lastPathSegment.orEmpty())
+        }}
+        val observedById=observedMaps.groupBy {it.graphId}
+        val observedIdsAt=observedMaps.groupBy {it.key}.mapValues {(_,locations)->locations.mapTo(hashSetOf()) {it.graphId}}
+        val extras=linkedMapOf<String,LinkedHashSet<String>>()
+        val blockedOwners=projected.filter {it.members.any {row->row.blocked!=null}}.mapTo(hashSetOf()) {it.key.graphId}
+        scan.graphs.filter {it.problem!=null}.mapNotNullTo(blockedOwners) {it.graphId}
+        ready.filter {it.second!=null}.mapNotNullTo(blockedOwners) {it.first.document?.id}
+        val unavailableChoices=blockedOwners.toMutableSet()
+        if(mode==NetworkBrowseMode.LIBRARY) {
+            for(location in observedMaps) {
+                val scope=candidates[location.key]?.place
+                if(canonical(location.graphId) && location.graphId !in blockedOwners && location.graphId !in duplicates &&
+                    scope==BacklinkPlace.NORMAL && scan.liveBlocked[location.key]==null && location.graphId !in scan.reservedIds) {
+                    extras.getOrPut(location.graphId) {linkedSetOf()}.add(location.title)
+                }
+            }
+            if(!registered.limited) for((id,file) in registered.files) {
+                owner.ensureActive()
+                if(!canonical(id)) {issues+=BacklinkIssue(BacklinkProblem.IDENTITY,file.name);continue}
+                val locations=observedById[id].orEmpty()
+                val reusedPosition=file.locations.any {position->position.available &&
+                    observedIdsAt[MapSaves.key(android.net.Uri.parse(position.uri))]?.any {it!=id}==true}
+                val mismatch=locations.isNotEmpty() && file.kind!="xmap" || reusedPosition
+                val failure=if(mismatch || id in blockedOwners) BacklinkProblem.IDENTITY else reader.registeredFileProblem(file)
+                if(failure!=null) {
+                    issues+=BacklinkIssue(failure,file.name);extras.remove(id)
+                    if(failure in setOf(BacklinkProblem.IDENTITY,BacklinkProblem.DUPLICATE,BacklinkProblem.LIMIT)) unavailableChoices+=id
+                    continue
+                }
+                if(id !in scan.reservedIds) extras.getOrPut(id) {linkedSetOf()}.apply {file.name?.takeIf {it.isNotBlank()}?.let {add(it.take(BacklinkBudget.LABEL_CHARS))}}
+            }
+            val choices=linkedMapOf<String,LinkedHashSet<String>>()
+            for((id,values) in names.toList()+extras.toList()) if(canonical(id) && id !in unavailableChoices) {
+                val old=choices.getOrPut(id) {linkedSetOf()}
+                old.addAll(values.take((8-old.size).coerceAtLeast(0)))
+            }
+            if(choices.size>NetworkFilter.MAX_FILES) {limited=true;issues+=BacklinkIssue(BacklinkProblem.LIMIT)}
+            fileChoices=choices.entries.take(NetworkFilter.MAX_FILES).map {LocalNetworkFile(it.key,it.value.toList())}
+        }
+        val extraFiles=extras.map {LocalNetworkFile(it.key,it.value.take(8))}
         retireFilterWork()
         val token=projectionGeneration;val controlVersion=actionGeneration;val selection=filter
         val observationVersion=MapDocuments.observationVersion()
@@ -160,32 +248,35 @@ internal class LocalFileNetworkController(
         fun commit(facts:NetworkFileFacts) {
             if(!accepted()) return
             val selected=NetworkFilterSelector.select(reachable,selection,facts)
+            val extraSelection=NetworkFilterSelector.selectFiles(extras.keys,selection,facts)
+            val unknown=selected.unknown+extraSelection.second
+            val roots=when(mode) {
+                NetworkBrowseMode.LOCAL->null
+                NetworkBrowseMode.FILES->centreFiles.map {id->fileChoices.firstOrNull {it.documentId==id} ?: LocalNetworkFile(id,emptyList())}
+                NetworkBrowseMode.LIBRARY->emptyList()
+            }
             val matches=selected.concepts.mapTo(hashSetOf()) {it.key}
             val context=selected.concepts.flatMap {expansion.origins[it.key]?.path.orEmpty()}.mapTo(linkedSetOf()) {
                 NetworkConceptKey(it.location.key,it.location.graphId,it.nodeId)
             }.apply {removeAll(matches)}
             val retained=reachable.filter {it.key in matches || it.key in context}
             val assembled=LocalNetworkAssembler.assemble(query,retained,(issues+facts.issues).distinct(),identities.size,
-                complete=!limited && issues.isEmpty() && facts.issues.isEmpty() && scan.omittedIssues==0 && selected.unknown.isEmpty(),
+                complete=!limited && issues.isEmpty() && facts.issues.isEmpty() && scan.omittedIssues==0 && unknown.isEmpty(),
                 omittedIssues=scan.omittedIssues,excludedMaps=scan.excludedMaps,limited=limited,budget=budget,
-                issuer=issuer,generation=controlVersion,origins=expansion.origins)
+                issuer=issuer,generation=controlVersion,origins=expansion.origins,rootFiles=roots,
+                extraFiles=extraFiles.filter {it.documentId in extraSelection.first})
             report=assembled.copy(filterActive=selection.active,
-                matchedFiles=if(selection.active) selected.matched else emptySet(),unknownFilterFiles=selected.unknown,
+                matchedFiles=if(selection.active) selected.matched+extraSelection.first else emptySet(),unknownFilterFiles=unknown,
                 filteredConcepts=selected.filteredConcepts,
-                contextConcepts=assembled.concepts.mapTo(hashSetOf()) {it.key}.intersect(context))
+                contextConcepts=assembled.concepts.mapTo(hashSetOf()) {it.key}.intersect(context),browseMode=mode,centreFiles=centreFiles)
         }
-        val ids=names.keys.filterTo(linkedSetOf()) {selection.fileIds?.contains(it)!=false}
+        val allIds=(names.keys+extras.keys).filterTo(linkedSetOf()) {selection.fileIds?.contains(it)!=false}
+        if(allIds.size>NetworkFilter.MAX_FILES) {limited=true;issues+=BacklinkIssue(BacklinkProblem.LIMIT)}
+        val ids=allIds.take(NetworkFilter.MAX_FILES).toSet()
         if(selection.kinds==null && selection.folder==null || ids.isEmpty() || selection.kinds?.isEmpty()==true) {
             commit(NetworkFileFacts(emptyMap()));return
         }
         // Only immutable rows and scalar discovery facts cross IO. No native source or PDF is opened.
-        val observedMaps=scan.graphs.mapNotNull {graph->graph.graphId?.let {id->
-            BacklinkLocation(graph.candidate.uri,graph.candidate.aliases.toSet(),graph.candidate.key,id,graph.candidate.name)
-        }}+ready.mapNotNull {(observation,_)->observation.document?.let {doc->
-            val candidate=candidates[observation.key]
-            BacklinkLocation(observation.uri,candidate?.aliases?.toSet() ?: observation.knownAliases,
-                observation.key,doc.id,candidate?.name ?: observation.uri.lastPathSegment.orEmpty())
-        }}
         filtering=true
         val pending=workScope.launch(start=CoroutineStart.LAZY) {
             try {
@@ -211,7 +302,7 @@ internal class LocalFileNetworkController(
     /** Controls are runtime query state. They neither mutate graphs nor share content history. */
     fun setExpanded(fileId:String,value:Boolean,expectedRevision:Long=filterRevision):Boolean {
         if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision ||
-            fileId==query.focusId) return false
+            browseMode==NetworkBrowseMode.LIBRARY || fileId in centreFiles) return false
         if(value && report?.files?.none {it.documentId==fileId}!=false) return false
         if((fileId in expandedFiles)==value) return true
         if(value && expandedFiles.size>=250) {problem=BacklinkProblem.LIMIT;return false}
@@ -220,10 +311,27 @@ internal class LocalFileNetworkController(
         actionGeneration++;problem=null;startScan();return true
     }
     fun collapseAll(expectedRevision:Long=filterRevision):Boolean {
-        if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision) return false
+        if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision ||
+            browseMode==NetworkBrowseMode.LIBRARY) return false
         if(expandedFiles.isEmpty()) return true
         expandedFiles=emptySet();actionGeneration++;problem=null;startScan();return true
     }
+    fun showLibrary(expectedRevision:Long=filterRevision)=changeScope(NetworkBrowseMode.LIBRARY,emptySet(),expectedRevision)
+    fun showCollection(ids:Set<String>,expectedRevision:Long=filterRevision):Boolean {
+        if(ids.isEmpty() || ids.size>250 || ids.any {id->fileChoices.none {it.documentId==id}}) return false
+        return changeScope(NetworkBrowseMode.FILES,ids,expectedRevision)
+    }
+    fun showLocal(expectedRevision:Long=filterRevision):Boolean {
+        if(!query.hasLocalFocus) return false
+        return changeScope(NetworkBrowseMode.LOCAL,setOf(query.focusId),expectedRevision)
+    }
+    private fun changeScope(mode:NetworkBrowseMode,centres:Set<String>,expectedRevision:Long):Boolean {
+        if(!current() || !querying || loading || filtering || stored==null || actionGeneration!=expectedRevision) return false
+        if(browseMode==mode && centreFiles==centres) return true
+        browseMode=mode;centreFiles=java.util.Collections.unmodifiableSet(LinkedHashSet(centres))
+        expandedFiles=emptySet();actionGeneration++;problem=null;startScan();return true
+    }
+    private fun canonical(id:String)=runCatching {java.util.UUID.fromString(id).toString()==id}.getOrDefault(false)
     private fun sameMembership(a:MapBacklinkMembership?,b:MapBacklinkMembership?):Boolean = when {
         a==null || b==null->a==null && b==null
         else->a.issuer===b.issuer && a.documentId==b.documentId && a.source==b.source

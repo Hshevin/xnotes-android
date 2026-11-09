@@ -125,6 +125,17 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         checkActive()
         return FileObservations(found.mapValues {(_,file)->ObservedFile(file.kind,file.name,file.locations.toList())},limited)
     }
+    /** Bounded last-registered inventory only; no file is opened or granted a new identity. */
+    internal fun knownAvailableFiles(limit:Int=10001,checkActive:()->Unit={}):FileObservations {
+        require(limit in 1..10001)
+        val ids=linkedSetOf<String>()
+        readableDatabase.rawQuery("SELECT d.id FROM documents d WHERE d.kind IN ('xnote','xcanvas','xmap') "+
+            "AND EXISTS(SELECT 1 FROM locations l WHERE l.document_id=d.id AND l.available=1) ORDER BY d.id LIMIT ?",
+            arrayOf(limit.toString())).use {cursor->while(cursor.moveToNext()) {checkActive();ids+=cursor.getString(0)}}
+        val overflow=ids.size>10000
+        val observed=fileObservations(ids.take(10000).toSet(),checkActive)
+        return FileObservations(observed.files,observed.limited || overflow)
+    }
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
     fun locations(id: String): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations WHERE document_id=? AND available=1 ORDER BY uri", arrayOf(id)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }

@@ -3,12 +3,18 @@ package com.xnotes.mindmap
 import java.util.UUID
 
 /** An exploration focus is data, independent of whichever native document is parked underneath it. */
-internal class NetworkQuery(val focusId:String,title:String,roots:List<String>) {
+internal enum class NetworkBrowseMode { LOCAL,FILES,LIBRARY }
+internal class NetworkQuery private constructor(val focusId:String,title:String,roots:List<String>,val hasLocalFocus:Boolean) {
+    constructor(focusId:String,title:String,roots:List<String>):this(focusId,title,roots,true)
     val title=title.take(BacklinkBudget.LABEL_CHARS)
     val roots:List<String> = java.util.Collections.unmodifiableList(roots.distinct())
     init {
         require(UUID.fromString(focusId).toString()==focusId)
         require(this.roots.size<=4096 && this.roots.all {it.isNotBlank() && it.length<=8192})
+    }
+    companion object {
+        // This ID names the runtime frame, never a source document or a native edit authority.
+        fun library(title:String,roots:List<String>)=NetworkQuery(UUID.randomUUID().toString(),title,roots,false)
     }
 }
 internal data class NetworkConceptKey(val locationKey:String,val graphId:String,val nodeId:String) {
@@ -42,7 +48,8 @@ internal data class LocalFileNetworkReport(val focusDocumentId:String,val files:
     val concepts:List<LocalNetworkConcept>,val issues:List<BacklinkIssue>,val checkedMaps:Int,val complete:Boolean,
     val omittedIssues:Int=0,val excludedMaps:Int=0,val limited:Boolean=false,
     val filterActive:Boolean=false,val matchedFiles:Set<String> = emptySet(),val unknownFilterFiles:Set<String> = emptySet(),
-    val filteredConcepts:Int=0,val contextConcepts:Set<NetworkConceptKey> = emptySet())
+    val filteredConcepts:Int=0,val contextConcepts:Set<NetworkConceptKey> = emptySet(),
+    val browseMode:NetworkBrowseMode=NetworkBrowseMode.LOCAL,val centreFiles:Set<String> = emptySet())
 
 /** A graph explanation proves both its connection to the focus and the specific source to inspect. */
 internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,val anchor:MapBacklinkRow,
@@ -56,7 +63,7 @@ internal class MapNetworkOpenRequest private constructor(val query:NetworkQuery,
     companion object {
         private fun coherent(query:NetworkQuery,anchor:MapBacklinkRow,target:MapBacklinkRow,origin:NetworkConceptOrigin?):Boolean {
             val local=when(origin?.kind) {
-                null->anchor.target.documentId==query.focusId
+                null->query.hasLocalFocus && anchor.target.documentId==query.focusId
                 NetworkOriginKind.SOURCE->anchor.target.documentId==origin.fileId
                 NetworkOriginKind.OWNER->target.location.graphId==origin.fileId && anchor.sourceId==target.sourceId && anchor.target==target.target
             }

@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import com.xnotes.core.util.DocKeys
 import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.storage.NotebookStorage
+import com.xnotes.storage.DocumentRegistry
 import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
@@ -213,7 +214,54 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             NetworkStoredGraph(graph.candidate,graph.graphId,graph.value.orEmpty(),graph.keys,graph.problem)
         },result.issues,result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
     }
+    /** Selected real roots are matched before evidence is charged, including their owned graphs. */
+    suspend fun scanSelectedNetwork(roots:Set<String>,expanded:Set<String>,live:List<MapDocumentObservation> = emptyList(),
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(read=budget)):NetworkLibraryScan {
+        val selected=roots.toSet();val files=expanded.toSet();var direct=0;var deeper=0
+        val result=scanProjected(live,continueAfterProjectionLimit=true,checkGraphIdentity=true) {doc,location,origin,conflict,blocked,active->
+            val found=projectSelectedNetworkWithin(doc,selected,files,location,origin,conflict,blocked,null,
+                (networkBudget.evidenceLimit-direct).coerceAtLeast(0),(networkBudget.evidenceLimit-deeper).coerceAtLeast(0),active)
+            for(concept in found.concepts) {
+                if(concept.location.graphId in selected || concept.members.any {it.target.documentId in selected}) direct+=concept.members.size
+                else deeper+=concept.members.size
+            }
+            Projection(found.concepts,found.limited)
+        }
+        return networkScan(result)
+    }
+    suspend fun scanLibraryNetwork(live:List<MapDocumentObservation> = emptyList(),
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(read=budget)):NetworkLibraryScan {
+        var evidence=0
+        val result=scanProjected(live,checkGraphIdentity=true) {doc,location,origin,conflict,blocked,active->
+            val found=projectLibraryNetworkWithin(doc,location,origin,conflict,blocked,null,
+                (networkBudget.evidenceLimit-evidence).coerceAtLeast(0),active)
+            evidence+=found.concepts.sumOf {it.members.size};Projection(found.concepts,found.limited)
+        }
+        return networkScan(result)
+    }
+    private fun networkScan(result:LibraryScan<List<NetworkConceptProjection>>)=NetworkLibraryScan(result.candidates,
+        result.graphs.map {NetworkStoredGraph(it.candidate,it.graphId,it.value.orEmpty(),it.keys,it.problem)},result.issues,
+        result.omittedIssues,result.excludedMaps,result.reservedIds,result.limited,result.liveBlocked)
+    private fun graphIdentityProblem(id:String,uri:Uri):BacklinkProblem? {
+        val registry=NotebookStorage.get(app).registry;val kind=registry.kindForId(id)
+        val here=registry.expectationAt(uri.toString())
+        if(kind!=null && kind!="xmap" || registry.expectationForId(id).requiresPages ||
+            here!=null && (here.documentId!=id || here.requiresPages)) return BacklinkProblem.IDENTITY
+        val known=registry.knownMapLocations(33,id).filter {it.available}.map {key(Uri.parse(it.uri))}.distinct()
+        return when {known.size>32->BacklinkProblem.LIMIT;known.size>1->BacklinkProblem.DUPLICATE;else->null}
+    }
+    /** Registered orphan locations are last-known hints; reserved/ambiguous positions are not usable orphans. */
+    internal fun registeredFileProblem(file:DocumentRegistry.ObservedFile):BacklinkProblem? {
+        val available=file.locations.filter {it.available}.distinctBy {key(Uri.parse(it.uri))}
+        if(available.size>32) return BacklinkProblem.LIMIT
+        if(available.size>1) return BacklinkProblem.DUPLICATE
+        if(available.isEmpty()) return BacklinkProblem.UNAVAILABLE
+        return when(runCatching {pathPlace(Uri.parse(available.single().uri))}.getOrNull()) {
+            BacklinkPlace.NORMAL->null;BacklinkPlace.TRASH->BacklinkProblem.TRASHED;else->BacklinkProblem.UNKNOWN_SCOPE
+        }
+    }
     private suspend fun <T> scanProjected(live:List<MapDocumentObservation>,continueAfterProjectionLimit:Boolean=false,
+        checkGraphIdentity:Boolean=false,
         projector:(MindMapDocument,BacklinkLocation,BacklinkOrigin,Boolean,BacklinkProblem?,()->Unit)->Projection<T>):LibraryScan<T> = withContext(Dispatchers.IO) {
         candidates.clear();issues.clear();reservedRoots.clear();reservedIds.clear()
         omitted=0;directories=0;entries=0;bytes=0;rows=0;limited=false;exhausted=false;projectionLimited=false
@@ -265,7 +313,9 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             val scope=snapshot.document?.id?.let(reservedIds::get) ?: when(candidate?.place) {
                 BacklinkPlace.NORMAL->null;BacklinkPlace.TRASH->BacklinkProblem.TRASHED;else->BacklinkProblem.UNKNOWN_SCOPE
             }
+            val identity=if(checkGraphIdentity) snapshot.document?.id?.let {graphIdentityProblem(it,snapshot.uri)} else null
             if(scope!=null) liveBlocked[snapshot.key]=scope
+            else if(identity!=null) liveBlocked[snapshot.key]=identity
             else if(candidate!=null && !snapshot.loading && !snapshot.creating && !snapshot.failed && snapshot.knownAliases.isNotEmpty()) MapSaves.lockFor(candidate.uri).withLock {
                 coroutine.ensureActive()
                 if(MapFiles.store(app,candidate.uri,checkActive={coroutine.ensureActive()},knownAliases=candidate.aliases).recoveryOutside(snapshot.knownAliases))
@@ -279,7 +329,13 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             if(candidate.key in liveKeys || candidate.place in setOf(BacklinkPlace.RESERVED,BacklinkPlace.TRASH)) continue
             if(exhausted) break
             try {
-                val graph=read(candidate,active,projector);graphs+=graph
+                var identity:BacklinkProblem?=null
+                val graph=read(candidate,active) {doc,location,origin,conflict,blocked,check->
+                    identity=if(checkGraphIdentity) graphIdentityProblem(doc.id,location.uri) else null
+                    projector(doc,location,origin,conflict,blocked ?: identity,check)
+                }
+                graphs+=if(identity==null) graph else graph.copy(problem=identity)
+                identity?.let {issue(it,candidate.name)}
                 if(graph.limited) {issue(BacklinkProblem.LIMIT);if(!continueAfterProjectionLimit) break}
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:BacklinkLimit) {limited=true;issue(BacklinkProblem.LIMIT);break}
@@ -387,6 +443,49 @@ internal class MapBacklinkLibrary(private val app:Context,private val roots:List
             if(isDirect) direct+=members.size else deeper+=members.size
         }
         return NetworkProjection(concepts,hitLimit)
+    }
+    internal fun projectSelectedNetwork(doc:MindMapDocument,roots:Set<String>,expanded:Set<String>,location:BacklinkLocation,
+        origin:BacklinkOrigin,conflict:Boolean,blocked:BacklinkProblem?=null,
+        membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?=null,
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(),checkActive:()->Unit={}):NetworkProjection =
+        projectSelectedNetworkWithin(doc,roots,expanded,location,origin,conflict,blocked,membership,
+            networkBudget.evidenceLimit,networkBudget.evidenceLimit,checkActive)
+    private fun projectSelectedNetworkWithin(doc:MindMapDocument,roots:Set<String>,expanded:Set<String>,location:BacklinkLocation,
+        origin:BacklinkOrigin,conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?,
+        maxDirect:Int,maxDeeper:Int,checkActive:()->Unit):NetworkProjection {
+        val concepts=mutableListOf<NetworkConceptProjection>();var direct=0;var deeper=0;var hitLimit=false
+        for(node in doc.nodes) {
+            checkActive();if(node.sources.isEmpty()) continue
+            var isDirect=doc.id in roots;var reachable=isDirect || doc.id in expanded
+            for(source in node.sources) {checkActive()
+                if(source.documentId in roots) {isDirect=true;reachable=true}
+                else if(source.documentId in expanded) reachable=true
+            }
+            if(!reachable) continue
+            if(node.sources.size>(if(isDirect) maxDirect-direct else maxDeeper-deeper)) {hitLimit=true;continue}
+            val members=node.sources.map {checkActive();projectMember(node,it,location,origin,conflict,blocked,membership)}
+            concepts+=NetworkConceptProjection(NetworkConceptKey(location.key,location.graphId,node.id),location,
+                members.first().nodeTitle,node.kind,members)
+            if(isDirect) direct+=members.size else deeper+=members.size
+        }
+        return NetworkProjection(concepts,hitLimit)
+    }
+    internal fun projectLibraryNetwork(doc:MindMapDocument,location:BacklinkLocation,origin:BacklinkOrigin,
+        conflict:Boolean,blocked:BacklinkProblem?=null,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?=null,
+        networkBudget:LocalNetworkBudget=LocalNetworkBudget(),checkActive:()->Unit={}):NetworkProjection =
+        projectLibraryNetworkWithin(doc,location,origin,conflict,blocked,membership,networkBudget.evidenceLimit,checkActive)
+    private fun projectLibraryNetworkWithin(doc:MindMapDocument,location:BacklinkLocation,origin:BacklinkOrigin,
+        conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?,
+        maxEvidence:Int,checkActive:()->Unit):NetworkProjection {
+        val concepts=mutableListOf<NetworkConceptProjection>();var count=0
+        for(node in doc.nodes) {
+            checkActive();if(node.sources.isEmpty()) continue
+            if(node.sources.size>maxEvidence-count) return NetworkProjection(concepts,true)
+            val members=node.sources.map {checkActive();projectMember(node,it,location,origin,conflict,blocked,membership)}
+            concepts+=NetworkConceptProjection(NetworkConceptKey(location.key,location.graphId,node.id),location,
+                members.first().nodeTitle,node.kind,members);count+=members.size
+        }
+        return NetworkProjection(concepts,false)
     }
     private fun projectMember(node:MapNode,source:MapSource,location:BacklinkLocation,origin:BacklinkOrigin,
         conflict:Boolean,blocked:BacklinkProblem?,membership:((String,String,MapSourceTarget)->MapBacklinkMembership?)?):MapBacklinkRow {
