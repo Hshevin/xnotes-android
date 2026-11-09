@@ -28,6 +28,8 @@ class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, 
     private val docFile = File(dir, "canvas.xcanvas")
     private val meta = JsonStore(File(dir, "canvas-session.json"))
 
+    init {runCatching {LegacySessionBodyCandidates.cleanup(dir)}}
+
     data class Metadata(val path:String?,val displayName:String?,val dirty:Boolean)
 
     /** Whether a canvas session exists, so the host knows which editor to restore into. */
@@ -40,22 +42,23 @@ class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, 
 
     /** A null body only refreshes metadata; canvas view changes still require a new body. */
     fun saveChecked(document:InfiniteDocument?,metadata:Metadata):LegacySessionWrite=runCatching {
+        LegacySessionBodyCandidates.cleanup(dir)
         if(document==null) {
             if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
             if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
         } else {
             check(dir.isDirectory || dir.mkdirs())
-            val tmp=File.createTempFile("canvas-",".xcanvas.tmp",dir)
+            val candidate=LegacySessionBodyCandidates.create(dir,"canvas-",".xcanvas.tmp")
             try {
-                FileOutputStream(tmp).use {output->
+                FileOutputStream(candidate.file).use {output->
                     codec.write(document,object:FilterOutputStream(output) {
                         override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
                         override fun close() {flush()}
                     })
                     output.fd.sync()
                 }
-                Files.move(tmp.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
-            } finally {tmp.delete()}
+                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
+            } finally {candidate.close()}
         }
         val json=JSONObject().put("dirty",metadata.dirty)
         metadata.path?.let {json.put("path",it)}

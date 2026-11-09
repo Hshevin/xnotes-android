@@ -31,6 +31,8 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
     private val metaFile = File(dir, "session.json")
     private val meta = JsonStore(metaFile)
 
+    init {runCatching {LegacySessionBodyCandidates.cleanup(dir)}}
+
     /** Captured separately from the body, so a view-only refresh never needs a live model. */
     data class Metadata(
         val path:String?,
@@ -73,22 +75,23 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
 
     /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
     fun saveChecked(document:Document?,metadata:Metadata):LegacySessionWrite=runCatching {
+        LegacySessionBodyCandidates.cleanup(dir)
         if(document==null) {
             if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
             if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
         } else {
             check(dir.isDirectory || dir.mkdirs())
-            val tmp=File.createTempFile("document-",".xnote.tmp",dir)
+            val candidate=LegacySessionBodyCandidates.create(dir,"document-",".xnote.tmp")
             try {
-                FileOutputStream(tmp).use {output->
+                FileOutputStream(candidate.file).use {output->
                     codec.write(document,object:FilterOutputStream(output) {
                         override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
                         override fun close() {flush()}
                     })
                     output.fd.sync()
                 }
-                Files.move(tmp.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
-            } finally {tmp.delete()}
+                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
+            } finally {candidate.close()}
         }
         val m=with(metadata) {
             val m = JSONObject()
@@ -133,5 +136,37 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
             m.optBoolean("zoomLocked", false),
             ViewOverridesJson.read(m),
         )
+    }
+}
+
+/** Shared by every legacy store instance, including aliases of the same private directory. */
+internal object LegacySessionBodyCandidates {
+    private val gate=Any()
+    private val active=hashSetOf<String>()
+
+    fun cleanup(directory:File)=synchronized(gate) {
+        for(file in directory.listFiles().orEmpty()) {
+            val candidate=file.name.startsWith("document-") && file.name.endsWith(".xnote.tmp") ||
+                file.name.startsWith("canvas-") && file.name.endsWith(".xcanvas.tmp")
+            if(candidate && file.isFile && file.canonicalPath !in active) file.delete()
+        }
+    }
+
+    // Register before cleanup can observe the new file; encoding itself never holds this gate.
+    fun create(directory:File,prefix:String,suffix:String):Candidate=synchronized(gate) {
+        val file=File.createTempFile(prefix,suffix,directory)
+        val key=file.canonicalPath
+        active.add(key)
+        Candidate(file,key)
+    }
+
+    class Candidate internal constructor(val file:File,private val key:String):AutoCloseable {
+        private var closed=false
+        override fun close()=synchronized(gate) {
+            if(!closed) {
+                closed=true
+                try {file.delete()} finally {active.remove(key)}
+            }
+        }
     }
 }
