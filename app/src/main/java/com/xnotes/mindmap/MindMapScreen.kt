@@ -54,8 +54,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             if(request!=null) sourceController.receive(request,uri)
         }
         var addFree by remember { mutableStateOf(false) }
-        var layoutMenu by remember { mutableStateOf(false) }
-        var proposed by remember { mutableStateOf<MindMapDocument?>(null) }
+        var layoutMenu by remember(graphEpoch) { mutableStateOf(false) }
+        var proposed by remember(graphEpoch) { mutableStateOf<MindMapDocument?>(null) }
+        var geometryChanged by remember(graphEpoch) { mutableStateOf(false) }
         val sourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             val request=pendingSourceRequest;pendingSourceRequest=null
             if(request!=null) {activeExistingSource=request;sourceController.receive(request,uri)}
@@ -293,7 +294,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
                     }
                 }
-                val problem = session.problemText()
+                val problem = if(geometryChanged && !session.limitError) R.string.graph_geometry_changed else session.problemText()
                 HorizontalDivider()
                 Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     when {
@@ -314,12 +315,13 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             v.documentEpoch=graphEpoch
                             v.documentRevision=session.contentRevision;v.nodeSelectionMode=nodeMode
                             v.expandedAncestors=session.navigationExpandedAncestors;v.visibilityRevision=session.visibilityRevision
-                            v.onGraphContact=presentationState::cancelPendingBacklinkFocus
+                            v.onGraphContact={geometryChanged=false;presentationState.cancelPendingBacklinkFocus()}
                             v.document = proposed ?: doc; v.dark = dark
                             if(session.selectedRelation!=null) v.selectedRelation=session.selectedRelation else v.setSelectedNodes(session.selectedNodes)
                             v.onCaptureNodes=session::captureNodes;v.onMoveNodes=session::moveNodes;v.onSelectNodes={capture,ids->session.selectNodes(capture,ids)}
                             v.contentDescription = context.getString(R.string.map_canvas_description)
-                            v.onSelect = { session.selected = it }; v.onSources={showSources(it)}; v.onEdit = ::editNode; v.onChange = { session.commit(it) }
+                            v.onSelect = { session.selected = it }; v.onSources={showSources(it)}; v.onEdit = ::editNode
+                            v.onChange = {next->geometryChanged=session.interactionEpoch!=graphEpoch || !session.commitNodeDrag(doc,next)}
                             v.onSelectRelation={session.selectRelation(it)};v.onEditRelation=::editExistingRelation
                         })
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
@@ -373,7 +375,10 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }},confirmButton={MapButton(R.string.cancel){layoutMenu=false}})
         proposed?.let { preview -> AlertDialog(onDismissRequest={proposed=null},title={Text(stringResource(R.string.graph_preview),fontSize=TextSize.heading)},
             text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
-            confirmButton={MapButton(R.string.map_done){session.commit(preview);proposed=null}},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
+            confirmButton={MapButton(R.string.map_done){
+                geometryChanged=session.interactionEpoch!=graphEpoch || !session.operate {latest->MapLayout.arrange(latest.copy(direction=preview.direction))}
+                proposed=null
+            }},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
         if(graphTools) session.document?.let { current->
             key(graphEpoch) {
                 GraphRelationsDialog(current,session.selected,{initial,next->

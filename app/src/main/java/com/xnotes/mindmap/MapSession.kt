@@ -541,6 +541,23 @@ class MapSession() : ViewModel() {
         val doc = document ?: return false
         return try { commit(block(doc)) } catch (_: IllegalArgumentException) { limitError = true; false }
     }
+    /** A native UP can arrive before AndroidView receives the actor's newly attached sources. */
+    internal fun commitNodeDrag(expected:MindMapDocument,next:MindMapDocument):Boolean {
+        if(!selectionReady() || next.id!=expected.id) return false
+        val latest=document ?: return false
+        val byId=latest.nodes.associateBy {it.id}
+        val refreshed=expected.copy(nodes=expected.nodes.map {node->
+            val actual=byId[node.id] ?: return false
+            node.copy(sources=actual.sources,primarySource=actual.primarySource)
+        },previewAssets=latest.previewAssets)
+        // Sources and their derived assets can merge; changed geometry/body/tree must be retried.
+        if(refreshed!=latest) return false
+        val merged=next.copy(nodes=next.nodes.map {node->
+            val actual=byId[node.id] ?: return false
+            node.copy(sources=actual.sources,primarySource=actual.primarySource)
+        },previewAssets=latest.previewAssets)
+        return commit(merged)
+    }
     /** Dialog drafts may outlive other edits; only the latest owner document is merged. */
     internal fun changeRelation(initial:MapRelation?,proposed:MapRelation?):RelationEditResult {
         if(closing || replacingDocument || inkContact) return RelationEditResult.Conflict

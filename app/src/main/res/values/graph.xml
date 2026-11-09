@@ -37,6 +37,7 @@
     <string name="graph_vertical">Downwards</string>
     <string name="graph_preview">Layout preview</string>
     <string name="graph_preview_notice">The canvas shows the proposed layout. Confirm to apply as one undo step; cancel to keep original positions. Free nodes stay in place.</string>
+    <string name="graph_geometry_changed">The map changed. Review it and try the move or layout again.</string>
     <string name="graph_status_unverified">Preview not verified</string>
     <string name="graph_status_current">Source verified</string>
     <string name="graph_status_stale">Preview needs refresh</string>

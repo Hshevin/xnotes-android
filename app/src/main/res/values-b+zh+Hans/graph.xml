@@ -37,6 +37,7 @@
     <string name="graph_vertical">向下展开</string>
     <string name="graph_preview">布局预览</string>
     <string name="graph_preview_notice">画布正在显示候选布局。确认后整次整理一步撤销，取消则保持原位置。自由节点保持原位。</string>
+    <string name="graph_geometry_changed">导图已变化，请检查后重新移动或整理布局。</string>
     <string name="graph_status_unverified">预览尚未校验</string>
     <string name="graph_status_current">来源已核实</string>
     <string name="graph_status_stale">预览需要刷新</string>

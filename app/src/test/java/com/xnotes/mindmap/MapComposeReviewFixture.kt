@@ -1,6 +1,8 @@
 package com.xnotes.mindmap
 
 import android.net.Uri
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
@@ -36,12 +38,14 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
         repeat(4) {
             Snapshot.sendApplyNotifications()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
-            WindowInspector.getGlobalWindowViews().forEach {view->
+            windowRoots().forEach {view->
                 view.measure(View.MeasureSpec.makeMeasureSpec(1800,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1400,View.MeasureSpec.EXACTLY))
                 view.layout(0,0,1800,1400)
                 view.viewTreeObserver.dispatchOnPreDraw()
             }
-            Thread.yield()
+            // Compose also schedules snapshot/frame work outside this virtual looper. Yielding
+            // alone can keep a whole-suite worker ahead of that work for every retry.
+            Thread.sleep(1)
         }
     }
     fun await(condition:()->Boolean) {
@@ -49,9 +53,22 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
         fail("Actual graph operation did not settle")
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup) (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    fun graph():MindMapView=WindowInspector.getGlobalWindowViews().flatMap(::views).filterIsInstance<MindMapView>().single()
+    private fun belongsToActivity(view:View):Boolean {
+        var context:Context?=view.context
+        val seen=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Context,Boolean>())
+        while(context!=null && seen.add(context)) {
+            if(context===activity) return true
+            context=(context as? ContextWrapper)?.baseContext
+        }
+        return false
+    }
+    private fun windowRoots():List<View> = (WindowInspector.getGlobalWindowViews()+activity.window.decorView).distinct().filter {root->
+        root.isAttachedToWindow && (belongsToActivity(root) || views(root).any(::belongsToActivity))
+    }
+    private fun ownedViews()=windowRoots().flatMap(::views).filter {it.isAttachedToWindow && belongsToActivity(it)}
+    fun graph():MindMapView=ownedViews().filterIsInstance<MindMapView>().single()
     private fun nodes(node:SemanticsNode):List<SemanticsNode> = listOf(node)+node.children.flatMap(::nodes)
-    private fun semantics():List<SemanticsNode> = WindowInspector.getGlobalWindowViews().flatMap(::views).mapNotNull {view->
+    private fun semantics():List<SemanticsNode> = ownedViews().mapNotNull {view->
         view.javaClass.methods.firstOrNull {it.name=="getSemanticsOwner" && it.parameterCount==0}?.invoke(view) as? SemanticsOwner
     }.flatMap {nodes(it.rootSemanticsNode)}
     fun clickAction(id:Int):()->Boolean {
