@@ -20,3 +20,7 @@
 - 仍失败：`PaneChromeHostTest.floatingToolbarInterceptsWindowStylusBeforeNativeContent` 在 `injectWindowStylus` 发生目标窗口 UID 不匹配的输入注入异常。尚未判定测试夹具或产品根因，本次不修改源码绕过失败。上次 `savedSplitReopensFilesOrderRatioAndBothViewports` 失败已随独立文档夹具修复通过；新增 EGL 用例在本次模拟器执行，但不代表目标 GPU 真机验收。
 - 实际 APK：`com.xnotes.movinkpad.branchtest.master` / `0.9.8-test-master-3` / versionCode 3，ARM64 Debug（debuggable），无 testOnly；与正式版包名不同。与 test2 签名一致，证书 SHA-256 `a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451`，验签及 16 KiB ZIP 页对齐通过。
 - 文件 `build/branch-tests/master-test3/XNotes-master-6f00c91b-test3-arm64.apk`，53,912,548 字节；SHA-256 `fe3a9bd876059817d3b872052a1d5ed6a6e2e34a1dbfea8b55d20306a4eaca59`，与 Gradle 输出逐字节一致。
+
+## 模拟器冒烟测试
+
+2026-11-08 在本机 Android 12 arm64 模拟器上覆盖安装本 APK 做冒烟测试：U-1 剪贴板提示与 U-4 新建画布直接打开确认生效，无崩溃；新发现的 T3-1～T3-3 见 [master-test3-emulator-smoke-2026-11-08.md](master-test3-emulator-smoke-2026-11-08.md)。

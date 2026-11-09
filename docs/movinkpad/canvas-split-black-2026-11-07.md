@@ -59,3 +59,7 @@
 真机验收应覆盖左右非均分退出、上下分屏、连续进出、前缓冲开/关、已有图片和不同笔种、退出后右侧新区域书写及撤销；记录设备、系统构建与安装版本。如果候选仍有黑区，再结合真实 Surface PixelCopy 和系统截图区分 buffer 内容与合成裁剪。已有 `scripts/capture-canvas-surface.sh` 可采集图层、尺寸及系统截图，但不具备 PixelCopy 能力。
 
 用户随后授权本地合入 `master`，原修复分支保留。合并前主分支仍是 `0b35d341`，没有需要整合的新应用改动，因此沿用上述候选源码的验证结果；本次合并不表示真机黑屏已验收。授权范围见 [一次性记录](authorization-history.md#2026-11-07-无限画布退出分屏黑区候选合并)。
+
+## 真机验收（2026-11-08）
+
+Release 98 在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 上通过，见 [真机验收记录](device-acceptance-release98-2026-11-08.md)。

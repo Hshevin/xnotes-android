@@ -73,7 +73,7 @@
 
 - 仅黑白：纸面、面板、菜单为纯白 #FFFFFF / 纯黑 #000000，夜间反转，选中态完全反转。允许中性灰阶（R = G = B）表现层级（次要文字、分隔线、填充、背景）；不用彩色强调色、渐变或装饰阴影。笔迹颜色与 PDF 属于内容，不受主题约束。
 - 页面上的工具标记（选框、套索、手柄、光标、参考线、文本框边框）须与页面形成对比，而非跟随主题：读取 `CanvasState.palette` / `TextEditHost.overlayPalette`，夜间模式下在 PDF 或浅色页面上改用黑色。无限画布同一视图混有黑纸与白图片，因此 `OverlayTessellator` 在每个标记下垫 1 px 反色描边；其深色取 (1, 1, 1)，因为夜间笔迹会把精确的 (0, 0, 0) 重绘为白色。
-- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。全界面视觉与真机验收待执行。
+- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。Release 98 已在 MovinkPad Pro 14 / Android 15 通过日夜间真机视觉验收，见 `docs/movinkpad/device-acceptance-release98-2026-11-08.md`。
 - 用户可见文字放入字符串资源：英文在 `values/`，相同的简体中文在 `values-b+zh+Hans/` 与 `values-zh-rCN/`。AI 界面文字在 `ai.xml`；`ai/` 后端消息经 `AiText.t(AiMsg…)` 与 `ai_messages.xml`；`storage/` 消息经 `StorageText.t(StorageMsg…)` 与 `storage_messages.xml`。持久化键（AI 轮次状态、默认会话标题）与面向模型的提示词保持不变，仅在显示时翻译。
 - 功能名称统一为「AI」，截图入口、浮窗和设置不再使用「问 AI」。
 
@@ -92,6 +92,8 @@
 - 更换模型只丢弃旧草稿、预览和异步请求，不把旧手势补交到新模型；旧事务由原拥有者收尾。见 `docs/movinkpad/reference-stable-capture-2026-11-09.md`。
 - 文件树仅为已确认存在子文件夹的节点显示展开箭头；共享文档关闭拥有者时保留另一侧首页的位置。
 - 分页和画布跨宿主重挂分别使用 `Editor.surfacesForAttach()`、`InfiniteEditor.surfacesForAttach()`：先归还暂存笔迹、断开旧回调并完成旧绘制器脱离，再替换绘制表面；保留文档、视口、撤销和用户前缓冲设置。不得以工具栏稳定代替重挂保护。见 `docs/movinkpad/split-wet-ink-2026-11-04.md`、`docs/movinkpad/canvas-split-black-2026-11-07.md`；显示及 GPU 结论须真机验证。
+
+- 新画布首帧上屏前保留菜单并隔离输入，保持宿主结构稳定；首次绘制与旧窗口回调不能错认新一代打开。见 `docs/movinkpad/canvas-open-flash-2026-11-08.md`。
 
 ## 存储、PDF 与迁移
 
@@ -113,6 +115,9 @@
 - PDF/模板和排版正文保持独立背景；多层实时笔迹按层序合成，不能直接置于顶层前缓冲，保留用户设置与重挂保护。
 - 使用绘画软件式常驻侧栏；按下名称或缩略图后超过系统阈值即可排序，取消不改模型，落下整次一步撤销；选择不占内容历史。
 - 缩略图只画单层内容，不混入纸张或 PDF；隐藏层保留预览。“不显示”时不计算边界或位图。异步渲染只读几何快照，翻页、关闭或版本变化取消旧任务，缓存不写入笔记格式。
+
+- 无限画布图层显隐只过滤绘制，隐藏层几何驻留；顺序使用包含隐藏层的 `DrawingLayers.stacked`。图层编辑、撤销重做与叠放变化经 `InfiniteEditor.syncScene` 在同一批次按差异更新，不重置场景；仅打开/替换文档整体重建。`replaceAll` 不得修改条目几何，几何编辑走 `onItemChanged`。
+- 无限画布的图层侧栏叠在画布上，不改变画布或湿墨表面尺寸；宽度经 `setSidebarCover` 合入视口内边距，不重新居中。见 `docs/movinkpad/canvas-flicker-fix-2026-11-08.md`。
 
 ## 思维导图
 

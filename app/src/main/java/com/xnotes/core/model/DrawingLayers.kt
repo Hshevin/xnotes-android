@@ -60,6 +60,13 @@ class DrawingLayers {
         val groups = items.groupBy { it.layerId ?: DEFAULT }
         return entries.filter { it.visible }.flatMap { groups[it.id].orEmpty() }
     }
+    /** Every layer's items in drawing order, hidden layers included, for a renderer that filters at draw time. */
+    fun stacked(items: List<CanvasItem>): List<CanvasItem> {
+        if (entries.size == 1) return items
+        val groups = items.groupBy { it.layerId ?: DEFAULT }
+        return entries.flatMap { groups[it.id].orEmpty() }
+    }
+    val hiddenIds: Set<String> get() = entries.filterNot { it.visible }.mapTo(HashSet()) { it.id }
     fun adopt(item: CanvasItem) {
         if (item.layerId == null || entries.none { it.id == (item.layerId ?: DEFAULT) }) item.layerId = activeId
     }

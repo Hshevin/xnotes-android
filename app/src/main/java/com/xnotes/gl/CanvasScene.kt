@@ -63,6 +63,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         /** Set for a placed image, which is drawn as a texture rather than as coloured triangles. */
         val image: ImageDrawSnapshot? = null,
         var sync: SyncMark? = null,
+        /** The item's drawing layer as last published; a hidden layer's records stay resident. */
+        var layer: String? = null,
     )
 
     /** An edit handed over from the main thread. */
@@ -80,6 +82,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
              * can fall between them and show one blank frame where the stroke should be.
              */
             val clearsWet: Boolean = false,
+            /** Snapshotted on the producer, which owns the model. */
+            val layer: String? = item.layerId,
         ) : Edit()
 
         /**
@@ -94,6 +98,12 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         class Remove(val item: CanvasItem) : Edit()
         class Order(val items: List<CanvasItem>, val activeLayerEnd: Int?) : Edit()
         class SyncChanged(val marks: List<Pair<CanvasItem, SyncMark?>>) : Edit()
+
+        /** Layers left out of drawing; their records stay resident, so showing one is one frame. */
+        class HiddenLayers(val ids: Set<String>) : Edit()
+
+        /** Items moved to another layer without new geometry. */
+        class Relayer(val layers: List<Pair<CanvasItem, String?>>) : Edit()
 
         /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
         class Reserve(val vertices: Long, val indices: Long) : Edit()
@@ -238,6 +248,20 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     /** Publish the document's z order; the scene draws back to front by it. */
     fun setOrder(items: List<CanvasItem>, activeLayerEnd: Int? = null) {
         post(Edit.Order(ArrayList(items), activeLayerEnd))
+    }
+
+    /**
+     * Leave the items of [ids] out of every frame without dropping their geometry. A visibility
+     * toggle is then a draw-time filter, the way a paint program recomposites cached layers,
+     * rather than a re-tessellation and re-upload of the whole document.
+     */
+    fun setHiddenLayers(ids: Set<String>) {
+        post(Edit.HiddenLayers(ids.toSet()))
+    }
+
+    /** Record the current layer of [items], whose triangles have not changed. */
+    fun relayer(items: List<CanvasItem>) {
+        if (items.isNotEmpty()) post(Edit.Relayer(items.map { it to it.layerId }))
     }
 
     /** Publish the in-progress stroke's triangles, or clear it when [mesh] is null. */
@@ -514,6 +538,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         val dot = frame.accent.withAlpha(150)
         for (record in records.values) {
+            if (hidden(record)) continue
             val mapped = Minimap.toPanel(record.bounds, extent, panel)
             // Everything reads as at least a dot, so a single thin stroke is not invisible.
             val w = mapped.w.coerceAtLeast(MINIMAP_DOT_PX)
@@ -542,7 +567,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         if (!store.bindForDraw(contextGen)) return
         store.bindAttributes(program)
         for (item in lifted) {
-            val record = records[item] ?: continue
+            val record = records[item]?.takeUnless(::hidden) ?: continue
             val bounds = liftAt.bounds(record.bounds)
             if (!bounds.intersects(view)) continue
             if (record.image != null) {
@@ -595,7 +620,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     ) {
         val shader = glowShader ?: return
         if (!glowTarget.ready) return
-        val glowing = lifted.mapNotNull { records[it] }
+        val glowing = lifted.mapNotNull { records[it]?.takeUnless(::hidden) }
             .filter { record -> record.parts.any { it.pass == InkPass.GLOW } }
         if (glowing.isEmpty()) {
             liftHaloKey = null
@@ -1105,6 +1130,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                         // Like every other record change, so a cache keyed on revision sees the fade.
                         revision++
                     }
+                    is Edit.HiddenLayers -> if (edit.ids != hiddenLayers) {
+                        hiddenLayers = edit.ids
+                        revision++
+                    }
+                    is Edit.Relayer -> {
+                        for ((item, layer) in edit.layers) records[item]?.layer = layer
+                        revision++
+                    }
                     is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                     is Edit.Reset -> applyReset(edit.binding)
                 }
@@ -1149,7 +1182,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             previousSource?.let(::removeImageSource)
             return
         }
-        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image, edit.sync)
+        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image, edit.sync, edit.layer)
         records[edit.item] = record
         val source = edit.image?.source
         if (previousSource !== source) {
@@ -1234,6 +1267,15 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     private var activeLayerEnd: Int? = null
 
+    /** Layers whose records are resident but not drawn. */
+    private var hiddenLayers: Set<String> = emptySet()
+
+    /** Document items always carry a layer; one without, such as a fading stroke, is never hidden. */
+    private fun hidden(record: Record): Boolean {
+        val layer = record.layer ?: return false
+        return hiddenLayers.isNotEmpty() && layer in hiddenLayers
+    }
+
     private fun applyOrder(items: List<CanvasItem>) {
         revision++
         for (i in items.indices) records[items[i]]?.z = i
@@ -1304,7 +1346,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         for (read in visible.indices) {
             val record = visible[read]
             if (write > 0 && record === visible[write - 1]) continue
-            if (isLifted(record.item)) continue
+            if (isLifted(record.item) || hidden(record)) continue
             visible[write] = record
             write++
         }
