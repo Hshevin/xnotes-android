@@ -1,3 +1,9 @@
+## D1 局部网络基础层（2026-11-09）
+
+新独立审核代理 review_network_plan 从最小上下文只读审核计划、实际接口、基础层实现和证据，不改文件／不派生／不运行构建。计划3 Required（native persist副作用、网络自身input票、边与成员独立预算）已A–C定稿；后两宿主项尚需实际实现审核，不当作已完成。
+
+基础层实现的CANCEL余流／active Escape由42042 10/3真实红、Back直接Activity分派由47490 13/3真实红证实；最窄修后全部原断言保留，普通可写路径不变。pinch事件补后续MOVE是SDK检测器启动序列更正，未放宽缩放断言。最终84411实际XML360套3834项0fail/error/skip、Android源码compile绿；15个frozen SHA全同，独立核对通过，基础层无剩余Required，可本地组件提交。Main/双Focus/Workspace/UI仍in_progress，不能宣称D1整体可用；Android/目标设备未运行。
+
 ## 来源侧栏反向引用（2026-11-09）
 
 独立计划与代码审核：review_input_plan，只读、不派生代理。三组真实引用、只读库／恢复赢家、live actor 覆盖、精确 focus／临时展开、单条移除、scope 拒写和取消隔离均已复核。必修全部闭合；不代表 Android 或设备验收。
