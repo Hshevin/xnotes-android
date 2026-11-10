@@ -313,6 +313,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Decode ownership follows document installation, not the replaceable native surfaces. */
     private var imageDecodeBinding: Any = Any()
+    internal val presentationModelIdentity:Any get()=imageDecodeBinding
 
     /** One low-priority thread decoding images, so a big photo never stalls a frame. */
     private val decodeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->

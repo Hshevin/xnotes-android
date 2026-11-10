@@ -23,7 +23,7 @@ internal sealed interface NativeReferenceResult {
 internal class NativeReferenceRequest private constructor(private val issuer:Any,internal val workspace:Editor,
     val target:NativeReferenceTarget,val kind:DocumentKind,val region:Rect?,val uri:String?,internal val displayName:String?,val keptOwner:Editor?,
     guardOwners:List<Editor>,internal val model:Document?,internal val page:Page?,internal val canvasModel:InfiniteDocument?,
-    private val valid:()->Boolean,private val active:()->Boolean) {
+    private val valid:()->Boolean,private val active:()->Boolean,internal val pagedDestination:Editor?) {
     val id:String=UUID.randomUUID().toString()
     val guardOwners:List<Editor> = java.util.Collections.unmodifiableList(ArrayList(guardOwners))
     private val cancelled=AtomicBoolean()
@@ -33,7 +33,8 @@ internal class NativeReferenceRequest private constructor(private val issuer:Any
     internal fun issuedBy(owner:Any)=issuer===owner
     companion object {
         internal fun observe(issuer:Any,workspace:Editor,target:NativeReferenceTarget,kind:DocumentKind,region:Rect?,uri:String?,name:String?,owner:Editor?,
-            guards:List<Editor>,model:Document?,page:Page?,canvasModel:InfiniteDocument?,valid:()->Boolean,active:()->Boolean)=
-            NativeReferenceRequest(issuer,workspace,target,kind,region,uri,name,owner,guards,model,page,canvasModel,valid,active)
+            guards:List<Editor>,model:Document?,page:Page?,canvasModel:InfiniteDocument?,valid:()->Boolean,active:()->Boolean,
+            pagedDestination:Editor?=null)=
+            NativeReferenceRequest(issuer,workspace,target,kind,region,uri,name,owner,guards,model,page,canvasModel,valid,active,pagedDestination)
     }
 }
