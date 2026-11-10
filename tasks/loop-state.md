@@ -1,11 +1,15 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，一Map＋分页核心 verified，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-map-navigation/xnotes；分支 codex/mind-map-map-navigation。2026-11-10 再按用户“在这个工作树基础上新建工作树继续”，从 mind-map-source-target 的实际 HEAD d0132a90eadb25ed77ba7f3f0f445691a880b13a 新建；34个未提交文件及验证资料完整复制，SHA-256／模式／状态一致，原树保持原样，独立复核通过。证据 tmp/worktree-migration-2026-11-10.json。构建及项目缓存独立为 /private/tmp/xnotes-mind-map-map-navigation-build、/private/tmp/xnotes-mind-map-map-navigation-cache。此前28文件迁移属于上一阶段，原历史保留。
+工作树：/Users/kita/.codex/worktrees/mind-map-pair-open/xnotes；分支 codex/mind-map-pair-open。用户本轮再次明确要求基于当前树新建；从 mind-map-map-navigation 的实际干净 HEAD 0f2ac93244911be1a6c913fa3704cd7fa146fcdc 创建并attach，新旧两树均保留。上一阶段最新原始日志/XML/输入证据已复制至本树忽略tmp并保SHA；更早阶段证据仍在原树。迁移记录 tmp/worktree-pair-migration-2026-11-10.json。新构建目录 /private/tmp/xnotes-mind-map-pair-open-build 与项目缓存 /private/tmp/xnotes-mind-map-pair-open-cache，独立于旧树。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：一Map＋分页文档真实双窗格核心（verified，已本地提交）
+## 当前阶段：Map＋NOTE 双文件打开（in_progress）
+
+计划 docs/movinkpad/map-pair-open-2026-11-10.md。目标是两份都准备后同步采用；新/已开/共享Native模型、Map实际actor、当前两侧保存与输入、晚IO和资源所有权按同一业务边界处理。上一阶段已提交、有效证据不为安心重跑；独立计划审核PASS，初读零blur及selected共享Map输入两Required已闭合；A Native staged、B Main/Backstage、C实际Map消费者tests并行，Root负责Map候选/原子采用与统一构建。先落编译stub与真实失败测试，再实现。运行构建：无。原14组范围保留，overall complete=false。
+
+## 已验证阶段：一Map＋分页文档真实双窗格核心（verified，已本地提交）
 
 e49d9273 clean起步，上轮为progress；旧Map来源243项不外推本片。当前真实Map+NOTE/PDF编辑／各自历史、实际焦点／HOLD松键／Back、方向比例交换、来源定位另一槽、页区域引用到已开actor、子Map关闭先父／根进Home／关Home移槽、配置保MapEntry及按原Native逻辑槽严格Session恢复已接。Canvas全窗后回Map+实际CanvasHome，明确Home权才保存替换／关闭；Original纯opaque departure票匹配才恢复原混合，否则安全单图且保新Native。单一movable MapScreen保picker；typed Native两阶段卸载与最后同步adopt不先退Map。
 
