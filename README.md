@@ -60,7 +60,7 @@
 
 原生 Kotlin 思维导图、文件关系网络及混合分屏的保存、显式重开和最后布局自动恢复已合入本地主线，尚未打包或发布。在首页「新建」菜单选择「新建思维导图」，创建独立的 `.xmap` 文件；打开后由主窗口承载编辑页，切换前等待两个窗格的笔和编辑事务结束，保留原文档与阅读位置，关闭图后返回原阅读工作区。
 
-验证边界：以下所有导图功能仅经 JVM 主机测试与 Android 测试源码编译验证，未打包，未在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机验收；真实 Android 事件、系统选择器／SAF、Surface／目标 GPU、PDFium 像素及书写、防掌触、大图性能均未验证。本批已接入最后布局的自动记录与冷恢复；真实 Android 进程终止、SAF 与目标设备效果仍待验，完整引用备份和双图等剩余工作见[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)。
+验证边界：以下所有导图功能仅经 JVM 主机测试与 Android 测试源码编译验证，未打包，未在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机验收；真实 Android 事件、系统选择器／SAF、Surface／目标 GPU、PDFium 像素及书写、防掌触、大图性能均未验证。本批已接入最后布局的自动记录与冷恢复；真实 Android 进程终止、SAF 与目标设备效果仍待验，完整引用备份和双图等剩余工作见[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-11.md)。
 
 当前源码的最后布局恢复会保留各窗格的视图设置与独立缩放锁定（包括同一文档的两个视图）。本地冷恢复记录新增 v3，仍读取 v1/v2；回退到不支持 v3 的旧构建时，旧构建会保留记录但无法自动恢复该布局。笔记正文格式不变。见[架构审核与回归记录](docs/movinkpad/architecture-audit-2026-11-10.md)。
 
@@ -125,7 +125,7 @@
 
 普通打开或调整布局后会自动保留最后呈现：单图、导图旁首页、导图＋笔记／PDF、分页文档与单独画布。恢复时先核对本机正文与身份；坏、未来版本或缺件保留恢复资料，可重试、查看资料或明确重置布局记录。仅没有新记录时使用旧会话恢复。此能力尚未打包，真实进程终止待设备验证。
 
-尚不支持：导图＋导图／同一导图双视图。混合布局完整进入全局网络／原件库再返回、预览体验、精确来源恢复与完整引用备份等仍在[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)中。
+尚不支持：导图＋导图／同一导图双视图。混合布局完整进入全局网络／原件库再返回、预览体验、精确来源恢复与完整引用备份等仍在[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-11.md)中。
 
 ### 保存、恢复资料与另存
 
@@ -160,7 +160,7 @@
 - [原生分屏替换与验证](docs/movinkpad/native-split-replacement-2026-11-10.md)
 - [混合分屏持久化阶段](docs/movinkpad/mixed-split-persistence-2026-11-10.md)
 - [冷恢复进展与本地合并](docs/movinkpad/mind-map-cold-progress-merge-2026-11-10.md)
-- [剩余工作与接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)
+- [剩余工作与接续计划](docs/movinkpad/mind-map-next-plan-2026-11-11.md)
 - [扩展规格与阶段进度](docs/movinkpad/graph-network-2026-11-06.md)
 - [来源预览阶段记录](docs/movinkpad/mind-map-source-preview-2026-11-09.md)
 - [全库与多文件网络记录](docs/movinkpad/file-network-overview-2026-11-09.md)

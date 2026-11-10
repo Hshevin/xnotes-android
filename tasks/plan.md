@@ -1,4 +1,4 @@
-当前导图接续计划（2026-11-10）：[剩余阶段与验收](../docs/movinkpad/mind-map-next-plan-2026-11-10.md)。下文早期计划保留历史语境，当前状态以该计划与[工作断点](loop-state.md)为准；未完成项不因合并而标完成。
+当前导图接续计划（2026-11-11）：[剩余阶段与验收](../docs/movinkpad/mind-map-next-plan-2026-11-11.md)。下文早期计划保留历史语境，当前状态以该计划与[工作断点](loop-state.md)为准；未完成项不因合并而标完成。
 
 2026-11-10 续作工作树codex/mind-map-original-network：原文网络整合及完整卡片/Reader往返已实现，302项相关主机测试及Android源码编译通过；独立证据复核通过。下一来源范围调整/换源，原完整14组不缩减；仅实现/验证/文档/本地提交。见docs/movinkpad/original-pdf-network-2026-11-10.md。
 
