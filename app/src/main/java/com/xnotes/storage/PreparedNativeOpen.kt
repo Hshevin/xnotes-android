@@ -29,6 +29,7 @@ internal class PreparedNativeOpen private constructor(
     private val observedCanvas:CanvasCodec.CompleteRead?=completeCanvas,
     private val completeNote:DocumentCodec.CompleteRead?=null,
     private val observedNote:DocumentCodec.CompleteRead?=completeNote,
+    private val recordingEvidence:com.xnotes.format.RecordingBodyEvidence?=null,
 ) : AutoCloseable {
     private class RecoveryBinding(val session:NativeWorkingSession,val read:NativeWorkingSession.Read,val id:String)
     @Volatile private var recoveryClaimed=false
@@ -69,6 +70,11 @@ internal class PreparedNativeOpen private constructor(
     @Synchronized fun adopt(document:InfiniteDocument) {
         checkReady();if(!same(document) || completeCanvas?.matches(document)==false) reject();adopted=true
     }
+    /** Available only after the actual prepared adoption; a live model cannot issue old-write proof. */
+    @Synchronized fun adoptedRecordingEvidence(document:Document):com.xnotes.format.RecordingBodyEvidence? =
+        recordingEvidence?.takeIf {!closed && adopted && same(document)}
+    @Synchronized fun adoptedRecordingEvidence(document:InfiniteDocument):com.xnotes.format.RecordingBodyEvidence? =
+        recordingEvidence?.takeIf {!closed && adopted && same(document)}
     /** Only the actual complete decoded model can seed a new reference's in-place save baseline. */
     @Synchronized fun completeCanvasOrigin(document:InfiniteDocument):Boolean =
         !closed && adopted && same(document) && observedCanvas?.matches(document)==true
@@ -436,9 +442,18 @@ internal class PreparedNativeOpen private constructor(
                     setOf(file.nameWithoutExtension)
                 } ?: emptySet()
                 lease=source.retainPdfForAdoption()
+                val recordingEvidence=if(!com.xnotes.ui.AudioRecovery.needsDurableEvidence(version.documentId)) null else try {
+                    com.xnotes.format.RecordingBodyEvidence.inspect(source.file,checkActive)}
+                    catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+                    catch(_:Exception) {null} // Ambiguous legacy audio remains readable, without cleanup authority.
+                require(recordingEvidence==null || recordingEvidence.bodySha256==version.sha256 && recordingEvidence.kind==version.kind &&
+                    recordingEvidence.documentId==version.documentId) {"Recording source evidence changed"}
+                // The proof and decoded body must both survive the final source-container verification.
+                if(note!=null) source.verify(note) else source.verify(requireNotNull(canvas))
                 checkActive()
                 return PreparedNativeOpen(version,bytes,note,canvas,assets,resources,ids,lease,
-                    completeCanvas=completeCanvas,observedCanvas=observedCanvas,completeNote=completeNote,observedNote=observedNote)
+                    completeCanvas=completeCanvas,observedCanvas=observedCanvas,completeNote=completeNote,observedNote=observedNote,
+                    recordingEvidence=recordingEvidence)
             } catch(error:Throwable) {
                 try {lease?.close()} catch(close:Throwable) {error.addSuppressed(close)}
                 try {if(!assets.deleteRecursively() && assets.exists()) error.addSuppressed(java.io.IOException("Cannot remove prepared document assets"))}

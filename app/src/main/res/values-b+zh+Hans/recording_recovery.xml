@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_recovery_title">录音恢复…</string>
+    <string name="recording_recovery_explanation">原始音频会保留到文档实际保存并包含它。加入录音属于尚未保存的修改；不确定时可保留供以后处理。</string>
+    <string name="recording_recovery_empty">没有待恢复的录音。</string>
+    <string name="recording_recovery_kept">原始录音已保留，可打开「录音恢复」选择处理方式。</string>
+    <string name="recording_recovery_invalid">录音资料无法读取，已予保留；未绑定的音频会单独列出。</string>
+    <string name="recording_recovery_missing">原始音频缺失或为空，恢复资料已保留。</string>
+    <string name="recording_recovery_target_changed">打开文档后可加入此音频；文档更换后不会接收旧的恢复请求。</string>
+    <string name="recording_recovery_present">文档中已有相同录音编号，核实实际保存的音频前将保留原件。</string>
+    <string name="recording_recovery_applying">此音频曾加入过文档，可能已被撤销或删除；仅在需要时明确恢复。</string>
+    <string name="recording_recovery_unbound">无法核实原文档，可将音频独立加入，不关联已有笔迹。</string>
+    <string name="recording_recovery_mismatch">这些资料属于其他文档或录音，可将音频独立加入。</string>
+    <string name="recording_recovery_pending">音频可恢复，并保留原有笔迹关联。</string>
+    <string name="recording_recovery_restore">恢复录音</string>
+    <string name="recording_recovery_separate">作为独立录音加入</string>
+    <string name="recording_recovery_keep">保留供以后处理</string>
+</resources>
