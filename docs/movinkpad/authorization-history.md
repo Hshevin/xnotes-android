@@ -225,3 +225,7 @@
 
 - 用户明确要求「先推送远端」。本次将当前本地 `master`（功能与计划基线 `860f7614`，含此前已合入的导图进展、冷恢复及结构修复）和本条授权记录推送至 `origin/master`；推送前读取远端最新状态，使用普通快进推送，保留现有历史。
 - 此次仅授权推送当前主线，不包含APK打包、设备安装或Release。验证沿用已记录的源码/主机结果；Android运行时及MovinkPad真机仍待验，详见[当前计划](mind-map-next-plan-2026-11-11.md)和[结构修复验证](architecture-refactor-2026-11-11.md)。
+
+## 2026-11-11 主线独立测试包与日志推送
+
+- 用户要求拉取更新并打包测试 APK，不覆盖正式版，自动推送打包日志。本轮快进到 `c1d6d5a5`，交付 `com.xnotes.movinkpad.branchtest.master` / versionCode 6，沿用原签名；已有 test5 更新为 test6，正式版独立。仅本地交付 APK、推送记录和日志，不上传 APK、不发布 GitHub Release、不安装用户设备；保留已有修改。
