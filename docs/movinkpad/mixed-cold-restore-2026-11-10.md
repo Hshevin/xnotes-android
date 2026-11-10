@@ -1,7 +1,7 @@
 # 混合分屏进程恢复（2026-11-10）
 
 用户要求：继续完整思维导图流程，先同步主线修复并保留已完成改动，再接混合布局的进程恢复。
-状态：已验证布局记录组件（JVM及源码编译）；完整启动恢复尚未接入，整体目标未完成。
+状态：已验证布局记录及受保护 NOTE 工作副本恢复、独立另存和录音恢复（JVM及源码编译）；混合布局自动启动恢复尚未接入，整体目标未完成。
 本轮边界：实现、相关编译／测试、文档及本地提交；按用户本次要求同步主线，不打包、安装、推送或发布。
 
 S3a0 verified；整体思维导图目标 active，complete=false。S1/S2 已提交至
@@ -80,7 +80,7 @@ Android测试源码实际编译通过，平台未运行。证据tmp/local-master
 旧常驻收集器。恢复只读准备、FIFO与Native协调已有边界优先复用，只补实际
 流程所需的Absent许可、完整资源转交和来源保护，不建立额外全局架构作为前置。
 
-## S3a1：可采用的受保护 NOTE 工作副本（待计划独审）
+## S3a1：可采用的受保护 NOTE 工作副本（verified，已本地提交）
 
 本片为实际冷恢复必需依赖：把 legacy NOTE 恢复分成只读准备／末读复核／
 同步采用，接现有 restoreSession 和 mixed 配置恢复；补原件写保护与另存交互。
@@ -162,28 +162,75 @@ marker协议测无path Native、Home/Absent/Invalid/未来/严格UTF8/预算、�
 取消、失败保旧文件与未知文件。相关 JVM、Android 测试源码编译，保存 raw
 XML/日志/前后 SHA，独立复核后分组本地提交；未运行的仪器与设备如实记录。
 
-## S3a1 尚未放行的细化草案
+## S3a1 已放行的最小实现边界
 
-独立只读检查给出的提交门草案：canonical session目录共享G，分别记录Native、
-legacy mutation、owner与queue accepted/settled代次。最终恢复票绑定最后一次
-已settled FIFO命令；Main在G内消费，核没有后发accepted命令、epoch不变、无
-Native intent/预约，且实际head仍确认不存在（任何文件/目录/link/坏head均拒）。
-Main不重hash大正文；证明要求所有私有legacy写清入口都封闭到G与FIFO。测试
-直接绕过这些入口改body不能冒称被纯内存epoch发现，实际head末查另行加固。
+阶段独审已确认复用 NativeRootState→WorkingSessionCache.state，无需新增全局G。
+Cache签发可消费Absent观察：canonical协调器、generation、无可发布latest且实际
+NOFOLLOW head不存在；Native intent/claim/完成、预约及受控legacy发布推进现有代次。
+legacy先在门外编码/同步独占候选，最终只在原RootState→Cache.state锁序核Absent
+并按固定步骤发布/清除。失败保已发布前缀与恢复资料，不逆向回滚或清对侧后续项。
+exact退休只清本票，成功Native出版仍保原isCurrent/proof语义。
 
-legacy先stage，G内只做有限rename/delete；所有Native预约/intent/claim/completion
-及实际head提交都需同门退票。建议锁序G→Queue.root、G→NativeRootState→
-WorkingCache.state，禁止持旧锁再取G；Prepared→G不得被任何G路径反取。
-回调、join、Deferred完成和资源释放均在门外。Native预约需显式退休，不得永久
-阻塞legacy。这只是候选设计，尚未经后片fresh审查，不可直接当实现授权通过。
+Queue为每个accepted操作和attach fence编号；恢复最后FIFO实读实际body+metadata
+SHA，等整项job（含结构化子任务）settled，再取得绑定原命令的票。Main仅在
+Queue.root→NativeRootState→Cache.state顺序消费，核仍是最新accepted命令与实际
+Absent，随后同一Main栈采用；不在锁内调用宿主/输入/资源回调。后发同owner命令
+同样退旧票，不只检测owner是否更换。
 
-录音候选为固定RecordRecoveryTarget＋checked私有sidecar Pending→Applying→
-Consumed事务。固定实际model/owner/adoption/keys/目录，durable Applying后才
-放置，实际成功正文证明后才Consumed和清原音频。重启Applying只以实际正文
-唯一rid＋登记音频SHA对账，不匹配/多匹配/冲突保原件并显式处理，不能自动
-重放删除或undo后的录音。旧sidecar路径/槽key不能补当前UUID冒充历史已核。
-M4A指纹需先持久登记，再替换item；所有异步结果核原目标与item归属。录音
-具体接口、实际正文成功证明接线及杀进程边界仍需独审，S3a0不解决这些问题。
+NOTE strict metadata精确要求dirty/zoom/scrollX/scrollY/zoomLocked五字段，path/name
+与12项平铺视图override可省略；严格类型/重复key/UTF8/有限数值/预算，不用旧
+JSONObject的强制转换。恢复专用readComplete以局部参数禁旧writer加载简化，原
+采样/压力/时间前缀保留；不改全局笔迹开关。独占解码目录和受管PDF租约在actual
+model采用后转交，取消只清自己。旧dirty=false和记忆路径始终不授原件写权。
+
+所有legacy NOTE恢复装actual-model sticky保护，正常保存和最后视图关闭导独立
+另存或明确放弃；成功新身份采用才清保护，取消/失败保资料，late C1仍dirty。
+关闭同一模型的另一共享视图只退视图，等待双方编码前缀且保实际owner与保护。
+旧split tuple不能将已恢复模型改为另一UUID/Missing。失败/错Hint恢复不提前结算
+sessionLoaded，同一Editor可重试。三类working capture与无路径新模型均走实际
+物理槽Absent保护，不开启半套Native producer。
+
+录音固定实际model/owner/adoption/key/目录，所有延迟、duration、peaks、remux和
+Discard Undo核同目标。raw留在recordings，Applying原子登记后才放置；actual已
+发布正文的唯一rid+已登记AAC/M4A SHA才可Committed并清原材料，place/dirty=false/
+元数据刷新均不构成回执。冷读证据来自本次实际不可变包、末核并成功采用，不能
+由新ownerToken或内存pill伪造。Applying重启不盲目重放Undo后的录音；legacy、
+orphan、冲突和坏资料保留且可显式恢复/独立加入/导出/放弃。独立另存通过本次
+实际candidate/version和同模型新UUID采用的窄mapping消费，不用后续新UUID猜旧记录。
+Discard Undo窗口排除候选且删除前核新引用，原录音临时文件名独占创建。
+没有待交付记录时不扫描整个正文来生成音频证据。
+
+## S3a1 实施与验证结果
+
+- 首批真实Editor旧行为RED：4项3失败，Native Cleared、未知head及dirty字符串均
+  错误采用；同目标保存用例已有其他preflight保护，原样green，不冒称其为RED。
+  1303输入前后同SHA，证据tmp/cold-note-behavior-red-authorized-*。
+- 统一接口/行为RED：7套22项18失败，1316完整输入同SHA。含旧writer/clear在
+  Native恢复旁错误写清及旧采样简化真实缺陷，也含新API scaffold尚未实现；不把
+  所有失败称旧UI回归。主/unit/Android Kotlin实际源码编译已通过，仪器未运行。
+  证据tmp/cold-adoption-red-*。
+- 实际NOTE缓存恢复→编辑→本地保存→独立另存新身份已经接通；取消/失败保保护与
+  原文件，late C1保dirty；同一Editor重试、共享两向关闭及旧split保护均验证。
+  录音覆盖恢复→SaveAs失败保原材料→重试成功新UUID→实际包音频SHA回执清理，
+  stale duration/peaks/remux/Undo、孤立资料与导出界面销毁均有实际主机用例。
+- 统一GREEN首轮39套414唯一项，3失败全部来自新fixture写成不支持的
+  assets/image.png，严格complete decoder正确拒绝。仅改该fixture两处为既有
+  assets/image-000.png，所有断言不变；整套PreparedProtectedNoteTest复验5/0。
+  用新整5替换旧整5，最终仍39套414唯一项，0失败/错误/跳过，不重复相加。
+- 1326项完整输入前后同SHA；green→recheck仅上述fixture变化，最终库存与当前SHA
+  一致。主程序/unit/Android Kotlin首轮均实际编译成功；复验unit实际编译、主与
+  Android为UP-TO-DATE。新增Android metadata4方法仅源码编译，从未执行仪器。
+- NOTE、平台、音频及导出生命周期delta源码独审PASS，无未闭合Required；独立
+  raw XML/完整库存/当前SHA/runner/init/命令/三套15资源key与双中文正文审核PASS。
+  LastPresentation原7文件SHA未变，既有39项证据复用、不计入此次414。
+- 原始证据tmp/cold-adoption-green-*、cold-adoption-fixture-recheck-*；汇总
+  tmp/cold-adoption-verified-summary.json，正式摘要见
+  evidence/mixed-protected-recovery-validation-2026-11-10.json。全部作业终态。
+  未打包、安装、推送或发布；真实Android/SAF/音频codec/杀进程/Surface/GPU与
+  MovinkPad Pro14 Android15 ProPen3未验。完整mixed冷启动仍待S3b，不称整体完成。
+
+本地代码提交：平台72469b44；音频日志6f849087、运行时/界面6b7a3cb4；
+严格准备与资产aef14975；实际Editor/Main接线5e3a322b。阶段文档另行提交。
 
 ## S3b：完整冷恢复与呈现生命周期（尚未实现）
 

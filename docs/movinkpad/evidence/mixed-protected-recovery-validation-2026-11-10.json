@@ -1,0 +1,45 @@
+{
+  "userRequest": "同步最新本地主线后继续完整思维导图流程，接安全工作副本恢复与录音交付",
+  "status": "verified JVM and source compilation; mixed Main cold bootstrap still pending",
+  "boundary": "implementation, related tests and local commits; no APK/install/push/release",
+  "sourceBase": "fe4a2cbf1b3c41ce5f1b4f65afc7785e1126c953",
+  "base": "fe4a2cbf1b3c41ce5f1b4f65afc7785e1126c953",
+  "tests": 414,
+  "suites": 39,
+  "unique": 414,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "inputs": 1326,
+  "inventoryCurrent": true,
+  "sourcePrefixes": [
+    "cold-adoption-green",
+    "cold-adoption-fixture-recheck"
+  ],
+  "onlyFixtureChanged": [
+    "app/src/test/java/com/xnotes/storage/PreparedProtectedNoteTest.kt"
+  ],
+  "replacement": "Replace the whole 5-case PreparedProtectedNoteTest suite; do not add it twice.",
+  "fixtureCause": "Unsupported assets/image.png was rejected by the correct complete decoder. Use existing assets/image-000.png path convention; all assertions unchanged.",
+  "sourceReviews": {
+    "note": "PASS after typed retry/shared close fixes",
+    "platform": "PASS",
+    "audio": "PASS including final export lifecycle delta"
+  },
+  "androidExecuted": false,
+  "androidNewMetadataMethods": 4,
+  "apk": false,
+  "push": false,
+  "evidenceReview": "PASS independent raw XML/input inventory/SHA/runner/init/resource audit",
+  "newJvmMethods": 69,
+  "sourceInputManifestSha256": "d9a9b7f643ec382d6dd157fa1793369b6a255a95744cf02a4e2ade1f46ccae83",
+  "codeCommits": [
+    "72469b4405f413229db44a7c1bf08e30eec578e2",
+    "6f849087850e6e9dc7ac207bfa10e179cb2a0ef7",
+    "6b7a3cb439596d65ad67c3a35c56becf3ec98d40",
+    "aef1497509816eb0cf80c754c51ac7e7e5c9be70",
+    "5e3a322b0588af8812dd226f62042d6977b8c967"
+  ],
+  "openRequired": [],
+  "fullGoalComplete": false
+}

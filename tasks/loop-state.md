@@ -16,11 +16,11 @@ move后written事实与末IO后current三Required；1300完整输入SHA和raw XM
 最新本地主线9cecd51b已同步；主/单元/Android测试源码编译及14项相关测试通过，
 布局记录7文件SHA未变，39组件证据复用。所有已知作业终态。
 
-下一S3a1：复用已有恢复只读准备、FIFO与Native协调边界，补受保护NOTE工作副本
-准备/采用、实际源权限/独立另存和可消费Absent许可；不先建立新全局协调架构。录音恢复actual model与durable交付要求仍未闭合，
-不能借S3a0通过启用半套Native producer或宣称Main冷启动完成。只读实现依赖检查
-进行中，完整计划须独审后再实现；整体active/complete=false。
+S3a1 verified（JVM/源码编译/独审；已本地提交72469b44/6f849087/6b7a3cb4/aef14975/5e3a322b）：实际NOTE工作副本恢复→编辑→本地保存→独立SaveAs已接，actual model sticky与原件零写、late C1、同Editor重试、共享两向关闭、旧split保护通过。录音固定目标/原材料持久交付/可操作菜单，以及实际恢复→另存失败→成功新UUID音频SHA回执、Discard/旧Undo/导出生命周期均通过。平台复用NativeRootState→Cache.state的Absent最终门、整Queue末票、三分支stage/partial保留与exact失败票退休，不开半套Native producer。
 
+39套414唯一相关项首轮3失败仅新图片fixture路径错误；生产正确拒非法素材，只改两处asset名后整5复验全绿，替换旧5后仍414/0fail/error/skip。1326完整输入前后/最终/当前SHA一致，green→recheck只有该fixture。主/unit/Android Kotlin首轮actual compile成功，recheck仅unit重编；Android新增4仅SOURCE，仪器/SAF/音频codec/杀进程/Surface/GPU/MovinkPad未跑。三源码独审与raw XML/库存SHA/runner/init/三资源组独审PASS，Required已闭合，原LastPresentation39模块证据复用不叠算。证据tmp/cold-adoption-{green,fixture-recheck}-*、-verified-summary.json/-final-inputs.json；正式evidence/mixed-protected-recovery-validation-2026-11-10.json。所有已知作业终态、作者冻结，无待用户回答。不打包/安装/推送/发布。
+
+下一S3b：真正自动mixed冷恢复与全部呈现checkpoint/Home gate；只读审核包tmp/mixed-cold-bootstrap-plan.md已准备，尚未计划独审，不准据此直接实施。现LastPresentation只有Home/Mixed；Home严格安全首页，非Mixed恢复需typed最小扩展，不能旧split/savedMapUri fallback掩盖。Map要沿同actor/journal实际load proof，NOTE本次cache成功票不能只join，保remembered fitWidth。独立计划审集中这些新风险，不重审已闭合S3a0/S3a1。原14组仍active/complete=false，Map+Map等未完成。
 ## 已验证阶段：已提交进展合入主线（verified）
 
 冲突保两侧修复，新增来源入口接事务唯一性／读权限回滚，schema未来版本断言
