@@ -4,10 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.xnotes.ui.Pane
-import com.xnotes.core.util.DocumentKind
-
-/** A hint for verifying an existing per-slot working session, never authority to save or reopen a file. */
-internal data class MapNativeRestoreHint(val documentId:String,val path:String?,val kind:DocumentKind)
+import com.xnotes.core.model.NativeRestoreHint
 
 /** Logical slots only: retaining this layout must never retain a native Editor or View. */
 internal data class MapSplitLayout(
@@ -33,7 +30,7 @@ internal class MapSplitPresentation {
     var layout by mutableStateOf<MapSplitLayout?>(null);private set
     var returnLayout by mutableStateOf<MapSplitLayout?>(null);private set
     var generation by mutableStateOf(0L);private set
-    var nativeHint by mutableStateOf<MapNativeRestoreHint?>(null);private set
+    var nativeHint by mutableStateOf<NativeRestoreHint?>(null);private set
 
     internal fun present(presentation:MapOpenPresentation) {
         when(presentation) {
@@ -56,7 +53,7 @@ internal class MapSplitPresentation {
         layout=null;nativeHint=null;generation++
     }
     internal fun clear() {if(layout!=null || returnLayout!=null || nativeHint!=null) {layout=null;returnLayout=null;nativeHint=null;generation++}}
-    fun rememberNativeHint(hint:MapNativeRestoreHint?):Boolean {
+    fun rememberNativeHint(hint:NativeRestoreHint?):Boolean {
         if(layout==null && returnLayout==null) return false
         nativeHint=hint;return true
     }

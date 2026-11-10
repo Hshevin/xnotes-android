@@ -8,7 +8,7 @@ import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.storage.NotebookStorage
 import kotlinx.coroutines.*
 import org.junit.Assert.*
@@ -41,7 +41,7 @@ class ProtectedCanvasSessionSourceTest {
             assertEquals(LegacySessionWrite.SAVED,CanvasSessionStore(directory,codec,assets).saveChecked(doc.snapshotForWrite(fixedItems=true),
                 CanvasSessionStore.Metadata("content://canvas/unverified","Original.xcanvas",false)))
         }
-        fun hint(doc:InfiniteDocument)=MapNativeRestoreHint(doc.identity.documentId,"content://canvas/unverified",DocumentKind.CANVAS)
+        fun hint(doc:InfiniteDocument)=NativeRestoreHint(doc.identity.documentId,"content://canvas/unverified",DocumentKind.CANVAS)
         fun bytes()=directory.listFiles().orEmpty().filter {it.isFile}.associate {it.name to it.readBytes().toList()}
     }
     private fun scenario(block:suspend (Fixture)->Unit)=runBlocking {withTimeout(10000) {
@@ -95,7 +95,7 @@ class ProtectedCanvasSessionSourceTest {
         val document=InfiniteDocument()
         assertEquals(LegacySessionWrite.SAVED,CanvasSessionStore(f.directory,f.codec,f.assets).saveChecked(document.snapshotForWrite(fixedItems=true),
             CanvasSessionStore.Metadata(null,"Unsaved",true)))
-        val load=f.source.prepare(MapNativeRestoreHint(document.identity.documentId,null,DocumentKind.CANVAS))
+        val load=f.source.prepare(NativeRestoreHint(document.identity.documentId,null,DocumentKind.CANVAS))
         assertTrue(load is ProtectedCanvasSessionLoad.Ready)
         (load as ProtectedCanvasSessionLoad.Ready).prepared.use {prepared->
             assertNull(prepared.body.document.path);assertTrue(prepared.body.document.dirty)

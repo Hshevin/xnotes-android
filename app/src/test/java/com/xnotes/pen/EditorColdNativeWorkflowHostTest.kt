@@ -9,7 +9,7 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapWorkspace
 import com.xnotes.platform.*
 import com.xnotes.ui.*
@@ -117,8 +117,8 @@ class EditorColdNativeWorkflowHostTest {
         val original=File(directory(f.editor),"document.xnote").readBytes()
         withContext(Dispatchers.Main) {
             val value=LastPresentation.Native(listOf(
-                ColdNativeSlot.Note(Pane.PRIMARY,MapNativeRestoreHint(first.identity.documentId,null,DocumentKind.NOTE)),
-                ColdNativeSlot.Note(Pane.SECONDARY,MapNativeRestoreHint(UUID.randomUUID().toString(),null,DocumentKind.NOTE))),
+                ColdNativeSlot.Note(Pane.PRIMARY,NativeRestoreHint(first.identity.documentId,null,DocumentKind.NOTE)),
+                ColdNativeSlot.Note(Pane.SECONDARY,NativeRestoreHint(UUID.randomUUID().toString(),null,DocumentKind.NOTE))),
                 ColdNativeLayout(Pane.SECONDARY,.35f,true,true))
             assertNull(f.editor.prepareColdNativePresentation(value) {true})
             assertFalse(f.editor.noteOpen);assertFalse(second.noteOpen)

@@ -3,7 +3,7 @@ package com.xnotes.pen
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
@@ -23,21 +23,77 @@ import org.robolectric.annotation.Config
 class ColdNativeValidationHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
 
-    private suspend fun seed(f:EditorPageCopyFixture):MapNativeRestoreHint {
-        (field(f.editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
+    private suspend fun seed(f:EditorPageCopyFixture,editor:Editor=f.editor):NativeRestoreHint {
+        (field(editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         val document=Document.blank().apply {dirty=false}
         withContext(Dispatchers.IO) {
-            val store=SessionStore(field(f.editor,"sessionDir") as File,f.codec,
+            val store=SessionStore(field(editor,"sessionDir") as File,f.codec,
                 File(f.root,"pdf").apply {mkdirs()},File(f.root,"assets").apply {mkdirs()})
             assertEquals(LegacySessionWrite.SAVED,store.saveChecked(document,
                 SessionStore.Metadata(null,null,false,1.0,0.0,0.0,false,ViewOverrides())))
         }
-        return MapNativeRestoreHint(document.identity.documentId,null,DocumentKind.NOTE)
+        return NativeRestoreHint(document.identity.documentId,null,DocumentKind.NOTE)
     }
 
     private fun rejected(value:LastPresentation.Native) {
         try {LastPresentationCodec.encode(value);fail("The persisted contract must reject this request")}
         catch(expected:IllegalArgumentException) { /* expected */ }
+    }
+
+    @Test fun retiringARequestAfterVerificationCannotAdoptItsPrivateModel()=runParkingScenario {f->
+        val hint=seed(f)
+        withContext(Dispatchers.Main) {
+            var current=true
+            val value=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,hint)),ColdNativeLayout(Pane.PRIMARY))
+            val prepared=requireNotNull(f.editor.prepareColdNativePresentation(value) {current})
+            try {
+                assertTrue(prepared.verify())
+                current=false
+                assertFalse(prepared.claimForAdoption())
+                assertFalse(f.editor.noteOpen)
+            } finally {prepared.close()}
+        }
+        assertEquals(0,f.writes.get())
+    }
+
+    @Test fun closingAnUnadoptedPreparationPreservesTheCacheForTheNextAttempt()=runParkingScenario {f->
+        val hint=seed(f)
+        val body=File(field(f.editor,"sessionDir") as File,"document.xnote")
+        val original=body.readBytes()
+        withContext(Dispatchers.Main) {
+            val value=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,hint)),ColdNativeLayout(Pane.PRIMARY))
+            val abandoned=requireNotNull(f.editor.prepareColdNativePresentation(value) {true})
+            abandoned.close();abandoned.close()
+            assertFalse(abandoned.verify());assertFalse(abandoned.claimForAdoption())
+            val next=requireNotNull(f.editor.prepareColdNativePresentation(value) {true})
+            try {
+                assertTrue(next.verify());assertTrue(next.claimForAdoption());next.applyAdoption()
+                assertFalse(next.claimForAdoption())
+                assertEquals(hint.documentId,f.editor.visibleDocumentId)
+                assertTrue(f.editor.requiresIndependentSave)
+            } finally {next.close()}
+        }
+        assertArrayEquals(original,body.readBytes());assertEquals(0,f.writes.get())
+    }
+
+    @Test fun changingTheSecondCacheAfterPreparationCannotAdoptEitherPane()=runParkingScenario {f->
+        val second=withContext(Dispatchers.Main) {f.editor.secondaryPane()}
+        val firstHint=seed(f);val secondHint=seed(f,second)
+        val firstBody=File(field(f.editor,"sessionDir") as File,"document.xnote")
+        val secondBody=File(field(second,"sessionDir") as File,"document.xnote")
+        val original=firstBody.readBytes()
+        withContext(Dispatchers.Main) {
+            val value=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,firstHint),
+                ColdNativeSlot.Note(Pane.SECONDARY,secondHint)),ColdNativeLayout(Pane.SECONDARY))
+            val prepared=requireNotNull(f.editor.prepareColdNativePresentation(value) {true})
+            try {
+                withContext(Dispatchers.IO) {secondBody.writeText("changed after preparation")}
+                assertFalse(prepared.verify())
+                assertFalse(f.editor.noteOpen);assertFalse(second.noteOpen)
+            } finally {prepared.close()}
+        }
+        assertArrayEquals(original,firstBody.readBytes())
+        assertEquals("changed after preparation",secondBody.readText());assertEquals(0,f.writes.get())
     }
 
     @Test fun outOfRangeSplitRatioIsRejectedBeforeAllocatingAnotherPane()=runParkingScenario {f->

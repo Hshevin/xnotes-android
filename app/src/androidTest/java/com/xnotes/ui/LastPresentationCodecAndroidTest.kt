@@ -3,7 +3,7 @@ package com.xnotes.ui
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapPresentationCamera
 import com.xnotes.mindmap.MapSplitLayout
 import com.xnotes.mindmap.MindMapView
@@ -92,7 +92,7 @@ class LastPresentationCodecAndroidTest {
     }
     private fun reject(change:(JSONObject)->Unit) {val value=wire();change(value);reject(value.toString())}
     private fun sample(path:String?):LastPresentation.Mixed=LastPresentation.Mixed(ColdMixedPresentation(
-        SplitSourceRef(mapId,"content://originals/map","Map"),MapNativeRestoreHint(noteId,path,DocumentKind.NOTE),
+        SplitSourceRef(mapId,"content://originals/map","Map"),NativeRestoreHint(noteId,path,DocumentKind.NOTE),
         MapSplitLayout(Pane.PRIMARY,Pane.SECONDARY,.31f,false,true),
         MapPresentationCamera(MindMapView.Viewport(1.5f,-24f,48f),1200,800,2f),
         Editor.ReadingPosition(1.25,17.0,27.0,ViewOverrides(mode=ViewingMode.COVER,verticalScroll=false,

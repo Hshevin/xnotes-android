@@ -49,6 +49,7 @@ import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.MarkupType
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageLayers
@@ -4702,9 +4703,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     private class CanvasSessionRestoreLoad(val request:Long,val state:com.xnotes.platform.ProtectedCanvasSessionLoad,
                                            val prepared:PreparedCanvasSessionRestore?=null)
-    internal suspend fun prepareCanvasSessionRestore(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?=null):PreparedCanvasSessionRestore?=
+    internal suspend fun prepareCanvasSessionRestore(expectedHint:NativeRestoreHint?=null):PreparedCanvasSessionRestore?=
         loadCanvasSessionRestore(expectedHint)?.prepared
-    private suspend fun loadCanvasSessionRestore(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?):CanvasSessionRestoreLoad? {
+    private suspend fun loadCanvasSessionRestore(expectedHint:NativeRestoreHint?):CanvasSessionRestoreLoad? {
         if(sessionLoaded || noteOpen || sessionSlotAdopted) return null
         val request=++sessionAdoptionSequence;val original=state.document
         val native=com.xnotes.platform.NativeWorkingSession(sessionDir,codec,canvasCodec,notebookStorage.pdfResources)
@@ -4721,27 +4722,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private class SessionRestoreLoad(val request:Long,val state:com.xnotes.platform.ProtectedNoteSessionLoad,
                                      val prepared:PreparedSessionRestore?=null)
-    internal class WorkingCheckpoint internal constructor(val hint:com.xnotes.mindmap.MapNativeRestoreHint,
+    internal class WorkingCheckpoint internal constructor(val hint:NativeRestoreHint,
         val noteView:ColdNativeView?,val canvasView:ColdCanvasView?,private val check:()->Boolean) {
         fun current()=check()
     }
     internal class PreparedNativePresentationCheckpoint internal constructor(val value:LastPresentation.Native,private val check:()->Boolean) {
         fun current()=check()
-    }
-    internal class PreparedColdNativePresentation internal constructor(
-        private val verifyBlock:suspend ()->Boolean,private val claimBlock:()->Boolean,
-        private val applyBlock:()->Unit,private val closeBlock:suspend ()->Unit,
-    ) {
-        private var claimed=false
-        private var adopted=false
-        private var closed=false
-        suspend fun verify():Boolean=!closed && !claimed && verifyBlock()
-        fun claimForAdoption():Boolean {
-            if(closed || claimed || !claimBlock()) return false
-            claimed=true;return true
-        }
-        fun applyAdoption() {check(!closed && claimed && !adopted);adopted=true;applyBlock()}
-        suspend fun close() {if(!closed) {closed=true;closeBlock()}}
     }
     private class WorkingCheckpointRead(val result:com.xnotes.platform.LegacyMutationResult,
         val sha:String?=null,val absent:com.xnotes.platform.LegacyAbsentObservation?=null)
@@ -4844,7 +4830,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             fun current()=stable() && jobs==Triple(noteWriteJob,canvasWriteJob,sessionWriteJob) &&
                 ownerJobs==Triple(owner.noteWriteJob,owner.canvasWriteJob,owner.sessionWriteJob) && sessionOwner.matchesForCheckpoint(fence,read.absent)
             if(!current()) return null
-            return WorkingCheckpoint(com.xnotes.mindmap.MapNativeRestoreHint(id,path,kind),noteView,canvasView,::current)
+            return WorkingCheckpoint(NativeRestoreHint(id,path,kind),noteView,canvasView,::current)
         }
         return null
     }
@@ -4879,69 +4865,58 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     internal suspend fun prepareColdNativePresentation(value:LastPresentation.Native,stillCurrent:()->Boolean):PreparedColdNativePresentation? {
         val root=sibling?.takeIf {it.secondary===this} ?: this
         if(root!==this) return root.prepareColdNativePresentation(value,stillCurrent)
-        // The persisted contract, checked before any pane is allocated or private cache is read.
-        if(!stillCurrent() || !LastPresentationContract.accepts(value)) return null
-        val slots=value.slots
-        if(slots.any {it.pane==Pane.SECONDARY}) secondaryPane()
-        fun editor(pane:Pane)=if(pane==Pane.PRIMARY) this else requireNotNull(secondary)
-        val identity=captureNativePresentationIdentity()
-        fun current()=stillCurrent() && matchesNativePresentationIdentity(identity) && hostParkingPanes().all {
-            !it.noteOpen && !it.sessionSlotAdopted && !it.sessionLoaded && !it.opening && !it.stylusInContact &&
-                !it.noteTransactionsPending(it.state.document) && it.infiniteOrNull?.hasPendingContentTransaction!=true
-        }
-        val preparedNotes=linkedMapOf<Pane,PreparedSessionRestore>()
-        val preparedCanvases=linkedMapOf<Pane,PreparedCanvasSessionRestore>()
-        var handedOff=false
-        suspend fun close()=withContext(kotlinx.coroutines.NonCancellable) {
-            for(prepared in preparedNotes.values) prepared.close()
-            for(prepared in preparedCanvases.values) prepared.close()
-        }
-        try {
-            if(!current()) return null
-            for(slot in slots) {
-                when(slot) {
-                    is ColdNativeSlot.Note->preparedNotes[slot.pane]=editor(slot.pane).prepareNoteSessionRestore(slot.hint) ?: return null
-                    is ColdNativeSlot.Canvas->preparedCanvases[slot.pane]=editor(slot.pane).prepareCanvasSessionRestore(slot.hint) ?: return null
-                    else->Unit // Home and borrowed views never read a private cache.
-                }
-                // Preparing is read-only but advances the slot's adoption request, so rebind below.
-                if(!stillCurrent()) return null
-            }
-            val preparedIdentity=captureNativePresentationIdentity()
-            fun preparedCurrent()=stillCurrent() && matchesNativePresentationIdentity(preparedIdentity) && hostParkingPanes().all {!it.noteOpen && !it.sessionLoaded}
-            val cap=PreparedColdNativePresentation(verifyBlock={
-                preparedCurrent() && preparedNotes.values.all {it.verify()} && preparedCanvases.values.all {it.verify()} && preparedCurrent()
-            },claimBlock={
-                preparedCurrent() && preparedNotes.values.all {it.claimForAdoption()} && preparedCanvases.values.all {it.claimForAdoption()}
-            },applyBlock={
-                // Every proof has been consumed before the first model or view changes.
-                for(slot in slots) when(slot) {
-                    is ColdNativeSlot.Note->requireNotNull(preparedNotes[slot.pane]).applyAdoption(slot.view)
-                    is ColdNativeSlot.Canvas->requireNotNull(preparedCanvases[slot.pane]).applyAdoption(slot.view)
-                    else->Unit
-                }
-                for(slot in slots.filterIsInstance<ColdNativeSlot.Shared>()) {
-                    val receiver=editor(slot.pane);receiver.attachSharedViewSettled(editor(slot.ownerPane))
-                    slot.view?.let {v->
-                        // The borrower's own lock; an older record without one keeps the attached pane's lock.
-                        v.zoomLocked?.let(receiver::installZoomLock)
-                        receiver.installViewOverrides(v.position.overrides)
-                        receiver.state.pendingInitialView=InitialView.Restore(v.position.zoom,v.position.x,v.position.y,v.fitWidth)
-                        receiver.state.didInitialFit=false
-                        if(receiver.state.viewportW>0) receiver.state.establishInitialView()
-                    }
-                }
-                splitRatio=value.layout.ratio;splitSideBySide=value.layout.sideBySide;splitReversed=value.layout.reversed
-                focusedPane=value.layout.focusedPane
-                for(ed in listOfNotNull(this,secondary)) ed.presentationChanged()
-            },closeBlock={close()})
-            handedOff=true;return cap
-        } finally {if(!handedOff) close()}
+        return NativeColdRestoreCoordinator(ColdRestoreHost()).prepare(value,stillCurrent)
     }
-    internal suspend fun prepareNoteSessionRestore(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?=null):PreparedSessionRestore? =
+    /** The root pane's operations for [NativeColdRestoreCoordinator]; each participant stays its own pane's restore. */
+    private inner class ColdRestoreHost:NativeColdRestoreCoordinator.Host {
+        private fun editor(pane:Pane)=if(pane==Pane.PRIMARY) this@Editor else requireNotNull(secondary)
+        override fun ensurePanes(slots:List<ColdNativeSlot>) {if(slots.any {it.pane==Pane.SECONDARY}) secondaryPane()}
+        override fun captureInitialProof():()->Boolean {
+            val identity=captureNativePresentationIdentity()
+            return {matchesNativePresentationIdentity(identity) && hostParkingPanes().all {
+                !it.noteOpen && !it.sessionSlotAdopted && !it.sessionLoaded && !it.opening && !it.stylusInContact &&
+                    !it.noteTransactionsPending(it.state.document) && it.infiniteOrNull?.hasPendingContentTransaction!=true
+            }}
+        }
+        override fun captureAdoptionProof():()->Boolean {
+            val identity=captureNativePresentationIdentity()
+            return {matchesNativePresentationIdentity(identity) && hostParkingPanes().all {!it.noteOpen && !it.sessionLoaded}}
+        }
+        override suspend fun prepareNote(slot:ColdNativeSlot.Note)=
+            editor(slot.pane).prepareNoteSessionRestore(slot.hint)?.let {prepared->participant(prepared::verify,prepared::claimForAdoption,
+                {prepared.applyAdoption(slot.view)},prepared::close)}
+        override suspend fun prepareCanvas(slot:ColdNativeSlot.Canvas)=
+            editor(slot.pane).prepareCanvasSessionRestore(slot.hint)?.let {prepared->participant(prepared::verify,prepared::claimForAdoption,
+                {prepared.applyAdoption(slot.view)},prepared::close)}
+        override fun attachShared(slot:ColdNativeSlot.Shared)=editor(slot.pane).adoptColdSharedView(editor(slot.ownerPane),slot.view)
+        override fun applyLayout(layout:ColdNativeLayout) {
+            splitRatio=layout.ratio;splitSideBySide=layout.sideBySide;splitReversed=layout.reversed
+            focusedPane=layout.focusedPane
+            for(ed in listOfNotNull(this@Editor,secondary)) ed.presentationChanged()
+        }
+        private fun participant(onVerify:suspend ()->Boolean,onClaim:()->Boolean,onApply:()->Unit,onClose:suspend ()->Unit)=
+            object:NativeColdRestoreCoordinator.Participant {
+                override suspend fun verify()=onVerify()
+                override fun claim()=onClaim()
+                override fun apply()=onApply()
+                override suspend fun close()=onClose()
+            }
+    }
+    private fun adoptColdSharedView(owner:Editor,view:ColdNativeView?) {
+        attachSharedViewSettled(owner)
+        view?.let {v->
+            // The borrower's own lock; an older record without one keeps the attached pane's lock.
+            v.zoomLocked?.let(::installZoomLock)
+            installViewOverrides(v.position.overrides)
+            state.pendingInitialView=InitialView.Restore(v.position.zoom,v.position.x,v.position.y,v.fitWidth)
+            state.didInitialFit=false
+            if(state.viewportW>0) state.establishInitialView()
+        }
+    }
+    internal suspend fun prepareNoteSessionRestore(expectedHint:NativeRestoreHint?=null):PreparedSessionRestore? =
         loadNoteSessionRestore(expectedHint)?.prepared
 
-    private suspend fun loadNoteSessionRestore(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?):SessionRestoreLoad? {
+    private suspend fun loadNoteSessionRestore(expectedHint:NativeRestoreHint?):SessionRestoreLoad? {
         if(sessionLoaded || noteOpen || sessionSlotAdopted) return null
         val request=++sessionAdoptionSequence
         val original=state.document
@@ -4959,7 +4934,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return SessionRestoreLoad(request,result)
     }
 
-    internal suspend fun restoreSession(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?) {
+    internal suspend fun restoreSession(expectedHint:NativeRestoreHint?) {
         if(sessionLoaded || noteOpen || sessionSlotAdopted) return
         if(expectedHint?.kind==DocumentKind.CANVAS) {
             val canvas=loadCanvasSessionRestore(expectedHint)?.prepared ?: return
@@ -13107,23 +13082,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Set only by the current mixed host; native-only recovery must not describe a Map slot. */
     internal var mixedPresentationActive:Boolean=false
 
-    internal fun nativeRestoreHint():com.xnotes.mindmap.MapNativeRestoreHint? {
+    internal fun nativeRestoreHint():NativeRestoreHint? {
         val owner=documentOwner
         if(!noteOpen || missingDocument!=null || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent()) return null
         return if(canvasOpen) {
             if(!owner.canvasOpen) return null
             val model=owner.infinite.document
-            com.xnotes.mindmap.MapNativeRestoreHint(model.identity.documentId,model.path,DocumentKind.CANVAS)
+            NativeRestoreHint(model.identity.documentId,model.path,DocumentKind.CANVAS)
         } else {
             if(owner.canvasOpen || state.document!==owner.state.document) return null
             val model=owner.state.document
-            com.xnotes.mindmap.MapNativeRestoreHint(model.identity.documentId,model.path,DocumentKind.NOTE)
+            NativeRestoreHint(model.identity.documentId,model.path,DocumentKind.NOTE)
         }
     }
-    private fun matchesRestoreIdentity(hint:com.xnotes.mindmap.MapNativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean =
+    private fun matchesRestoreIdentity(hint:NativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean =
         hint.documentId==documentId && hint.kind==kind &&
             (if(hint.path==null || path==null) hint.path==path else documentKey(hint.path)==documentKey(path))
-    internal fun matchesNativeRestoreHint(hint:com.xnotes.mindmap.MapNativeRestoreHint):Boolean {
+    internal fun matchesNativeRestoreHint(hint:NativeRestoreHint):Boolean {
         val actual=nativeRestoreHint() ?: return false
         return matchesRestoreIdentity(hint,actual.documentId,actual.path,actual.kind)
     }

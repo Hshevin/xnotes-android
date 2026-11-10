@@ -3,7 +3,7 @@ package com.xnotes.pen
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
@@ -33,7 +33,7 @@ class SharedColdViewHostTest {
                 SessionStore.Metadata(null,null,false,1.0,0.0,0.0,storedLock,ViewOverrides())))
         }
         val description=LastPresentation.Native(listOf(
-            ColdNativeSlot.Note(Pane.PRIMARY,MapNativeRestoreHint(document.identity.documentId,null,DocumentKind.NOTE),
+            ColdNativeSlot.Note(Pane.PRIMARY,NativeRestoreHint(document.identity.documentId,null,DocumentKind.NOTE),
                 ColdNativeView(Editor.ReadingPosition(1.0,0.0,0.0,ViewOverrides()),false,describedLock)),
             ColdNativeSlot.Shared(Pane.SECONDARY,Pane.PRIMARY)),ColdNativeLayout(Pane.SECONDARY))
         adopt(f,requireNotNull(LastPresentationCodec.parse(LastPresentationCodec.encode(description))) as LastPresentation.Native)

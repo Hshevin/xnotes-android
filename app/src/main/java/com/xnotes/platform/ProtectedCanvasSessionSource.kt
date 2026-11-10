@@ -4,7 +4,7 @@ import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.BundleSnapshot
 import com.xnotes.format.CanvasCodec
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.storage.PreparedProtectedCanvas
 import com.xnotes.storage.ProtectedCanvasIdentityMismatch
 import java.io.File
@@ -73,7 +73,7 @@ internal class ProtectedCanvasSessionSource(
     private val codec:CanvasCodec,private val assets:File,private val temporary:File,
 ) {
     private class Capture(val metadata:CanvasSessionStore.Metadata,val metadataHash:String,val bodyHash:String)
-    suspend fun prepare(hint:MapNativeRestoreHint?=null,checkActive:()->Unit={}):ProtectedCanvasSessionLoad {
+    suspend fun prepare(hint:NativeRestoreHint?=null,checkActive:()->Unit={}):ProtectedCanvasSessionLoad {
         val caller=currentCoroutineContext()
         val raw=AtomicReference<BundleSnapshot?>();val prepared=AtomicReference<PreparedCanvasSession?>()
         var accepted:LegacySessionQueue.Accepted<Any>?=null

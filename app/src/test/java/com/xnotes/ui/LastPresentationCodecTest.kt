@@ -4,7 +4,7 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapPresentationCamera
 import com.xnotes.mindmap.MapSplitLayout
 import com.xnotes.mindmap.MindMapView
@@ -16,7 +16,7 @@ import org.junit.Test
 
 internal fun coldMarkerSample(path:String?=null)=LastPresentation.Mixed(ColdMixedPresentation(
     SplitSourceRef(UUID.randomUUID().toString(),"content://originals/map","导图"),
-    MapNativeRestoreHint(UUID.randomUUID().toString(),path,DocumentKind.NOTE),
+    NativeRestoreHint(UUID.randomUUID().toString(),path,DocumentKind.NOTE),
     MapSplitLayout(Pane.PRIMARY,Pane.SECONDARY,.31f,false,true),
     MapPresentationCamera(MindMapView.Viewport(1.5f,-24f,48f),1200,800,2f),
     Editor.ReadingPosition(1.25,17.0,27.0,ViewOverrides(mode=ViewingMode.COVER,verticalScroll=false,

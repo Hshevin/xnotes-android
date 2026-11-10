@@ -4,7 +4,7 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapPresentationCamera
 import com.xnotes.mindmap.MapSplitLayout
 import com.xnotes.mindmap.MindMapView
@@ -115,12 +115,12 @@ internal object LastPresentationCodec {
     }
     private fun writeMap(value:SplitSourceRef)=JSONObject().put("kind","map").put("documentId",value.documentId).put("uri",value.uri)
         .also {json->value.title?.let {json.put("title",it)}}
-    private fun readHint(value:MarkerObject,kind:DocumentKind):MapNativeRestoreHint {
+    private fun readHint(value:MarkerObject,kind:DocumentKind):NativeRestoreHint {
         keys(value,setOf("kind","documentId","path"));require(string(value,"kind")==kind.name.lowercase())
         val path=required(value,"path").let {if(it==null) null else it as? String ?: error("Expected nullable path")}
-        return MapNativeRestoreHint(string(value,"documentId"),path,kind).also {LastPresentationContract.validateHint(it,kind)}
+        return NativeRestoreHint(string(value,"documentId"),path,kind).also {LastPresentationContract.validateHint(it,kind)}
     }
-    private fun writeHint(value:MapNativeRestoreHint)=JSONObject().put("kind",value.kind.name.lowercase())
+    private fun writeHint(value:NativeRestoreHint)=JSONObject().put("kind",value.kind.name.lowercase())
         .put("documentId",value.documentId).put("path",value.path ?: JSONObject.NULL)
     private fun readCamera(value:MarkerObject):MapPresentationCamera {
         keys(value,setOf("zoom","panX","panY","width","height","density"))

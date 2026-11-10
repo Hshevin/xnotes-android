@@ -1,7 +1,7 @@
 package com.xnotes.ui
 
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapPresentationCamera
 import java.util.UUID
 
@@ -30,7 +30,7 @@ internal object LastPresentationContract {
         require(UUID.fromString(value.documentId).toString()==value.documentId)
         text(value.uri);require(value.uri.isNotBlank());value.title?.let(::text)
     }
-    fun validateHint(value:MapNativeRestoreHint,kind:DocumentKind) {
+    fun validateHint(value:NativeRestoreHint,kind:DocumentKind) {
         require(value.kind==kind && UUID.fromString(value.documentId).toString()==value.documentId)
         value.path?.let {text(it);require(it.isNotBlank())}
     }

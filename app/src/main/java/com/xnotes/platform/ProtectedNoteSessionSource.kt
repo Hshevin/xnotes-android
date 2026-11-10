@@ -4,7 +4,7 @@ import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.BundleSnapshot
 import com.xnotes.format.DocumentCodec
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.storage.PdfResources
 import com.xnotes.storage.PreparedProtectedNote
 import java.io.File
@@ -80,7 +80,7 @@ internal class ProtectedNoteSessionSource(
     private val pdfDirectory:File,private val assets:File,private val temporary:File,
 ) {
     private class Capture(val metadata:SessionStore.Metadata,val metadataHash:String,val bodyHash:String)
-    suspend fun prepare(hint:MapNativeRestoreHint?=null,checkActive:()->Unit={}):ProtectedNoteSessionLoad {
+    suspend fun prepare(hint:NativeRestoreHint?=null,checkActive:()->Unit={}):ProtectedNoteSessionLoad {
         val caller=currentCoroutineContext()
         val raw=AtomicReference<BundleSnapshot?>()
         val prepared=AtomicReference<PreparedNoteSession?>()

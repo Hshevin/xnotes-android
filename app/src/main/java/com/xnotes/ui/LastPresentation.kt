@@ -1,13 +1,13 @@
 package com.xnotes.ui
 
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapPresentationCamera
 import com.xnotes.mindmap.MapSplitLayout
 
 /** A description of local recovery, never permission to read or save either original source. */
 internal data class ColdMixedPresentation(
     val map:SplitSourceRef,
-    val nativeHint:MapNativeRestoreHint,
+    val nativeHint:NativeRestoreHint,
     val layout:MapSplitLayout,
     val mapCamera:MapPresentationCamera?=null,
     val nativePosition:Editor.ReadingPosition?=null,
@@ -20,8 +20,8 @@ internal data class ColdNativeLayout(val focusedPane:Pane,val ratio:Float=.5f,
                                     val sideBySide:Boolean?=null,val reversed:Boolean=false)
 internal sealed interface ColdNativeSlot {
     val pane:Pane
-    data class Note(override val pane:Pane,val hint:MapNativeRestoreHint,val view:ColdNativeView?=null):ColdNativeSlot
-    data class Canvas(override val pane:Pane,val hint:MapNativeRestoreHint,val view:ColdCanvasView?=null):ColdNativeSlot
+    data class Note(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdNativeView?=null):ColdNativeSlot
+    data class Canvas(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdCanvasView?=null):ColdNativeSlot
     data class Home(override val pane:Pane):ColdNativeSlot
     data class Shared(override val pane:Pane,val ownerPane:Pane,val view:ColdNativeView?=null):ColdNativeSlot
 }

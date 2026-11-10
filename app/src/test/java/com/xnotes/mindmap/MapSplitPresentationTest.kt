@@ -1,5 +1,7 @@
 package com.xnotes.mindmap
 
+import com.xnotes.core.model.NativeRestoreHint
+
 import com.xnotes.ui.Pane
 import org.junit.Assert.*
 import org.junit.Test
@@ -45,7 +47,7 @@ class MapSplitPresentationTest {
 
     @Test fun nativeRestoreHintsSurviveParkingButCannotTurnAChangedSessionIntoAVisibleNativeDocument() {
         val presentation=MapSplitPresentation();presentation.present(MapOpenPresentation.Split(layout()))
-        val hint=MapNativeRestoreHint("native-id","content://notes/original",com.xnotes.core.util.DocumentKind.NOTE)
+        val hint=NativeRestoreHint("native-id","content://notes/original",com.xnotes.core.util.DocumentKind.NOTE)
         assertTrue(presentation.rememberNativeHint(hint))
         presentation.park();assertEquals(hint,presentation.nativeHint)
         assertTrue(presentation.nativeRestoreFailed());assertTrue(presentation.returnLayout!!.nativeHome)

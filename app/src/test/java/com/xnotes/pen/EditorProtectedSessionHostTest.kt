@@ -257,9 +257,9 @@ class EditorProtectedSessionHostTest {
     @Test fun aMismatchedHintDoesNotRetireTheSameEditorsLaterCorrectRestore()=scenario {f->
         val model=withContext(Dispatchers.IO) {seed(f)}
         withContext(Dispatchers.Main) {
-            f.editor.restoreSession(com.xnotes.mindmap.MapNativeRestoreHint(UUID.randomUUID().toString(),null,com.xnotes.core.util.DocumentKind.NOTE))
+            f.editor.restoreSession(com.xnotes.core.model.NativeRestoreHint(UUID.randomUUID().toString(),null,com.xnotes.core.util.DocumentKind.NOTE))
             assertFalse(f.editor.noteOpen)
-            f.editor.restoreSession(com.xnotes.mindmap.MapNativeRestoreHint(model.identity.documentId,null,com.xnotes.core.util.DocumentKind.NOTE))
+            f.editor.restoreSession(com.xnotes.core.model.NativeRestoreHint(model.identity.documentId,null,com.xnotes.core.util.DocumentKind.NOTE))
             assertTrue(f.editor.noteOpen);assertTrue(f.editor.requiresIndependentSave)
         }
     }

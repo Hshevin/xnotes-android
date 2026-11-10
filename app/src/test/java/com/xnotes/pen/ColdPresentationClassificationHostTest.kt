@@ -3,7 +3,7 @@ package com.xnotes.pen
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapWorkspace
 import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
@@ -117,7 +117,7 @@ class ColdPresentationClassificationHostTest {
     @Test fun failedTypedNativeStaysSafeOnRebindAndCanRetryTheSameEditorWithACorrectHint()=runParkingScenario {f->
         val document=seed(f)
         fun value(id:String)=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,
-            MapNativeRestoreHint(id,null,DocumentKind.NOTE))),ColdNativeLayout(Pane.PRIMARY))
+            NativeRestoreHint(id,null,DocumentKind.NOTE))),ColdNativeLayout(Pane.PRIMARY))
         write(f,value(UUID.randomUUID().toString()))
         val bootstrap=ColdPresentationBootstrap()
         host(f) {maps,_->

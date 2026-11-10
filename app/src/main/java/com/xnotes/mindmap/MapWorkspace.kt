@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import com.xnotes.R
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 import kotlinx.coroutines.CoroutineScope
@@ -114,7 +115,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     }
 
     private suspend fun restoreCold(ref:com.xnotes.ui.SplitSourceRef,camera:MapPresentationCamera?,
-        presentation:MapOpenPresentation,hint:MapNativeRestoreHint?,
+        presentation:MapOpenPresentation,hint:NativeRestoreHint?,
         prepareNative:(suspend (()->Boolean)->PreparedColdMixedNative?)?,stillCurrent:()->Boolean,
         beforeAdopt:()->Boolean):Boolean = coroutineScope {
         if(!active || current!=null || visible || splitPresentation.layout!=null || splitPresentation.returnLayout!=null)

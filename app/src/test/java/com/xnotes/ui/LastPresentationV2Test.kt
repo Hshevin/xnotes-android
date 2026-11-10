@@ -2,7 +2,7 @@ package com.xnotes.ui
 
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.mindmap.MapNativeRestoreHint
+import com.xnotes.core.model.NativeRestoreHint
 import com.xnotes.mindmap.MapSplitLayout
 import java.nio.file.Files
 import org.junit.Assert.*
@@ -10,8 +10,8 @@ import org.junit.Test
 import kotlinx.coroutines.runBlocking
 
 class LastPresentationV2Test {
-    private val note=MapNativeRestoreHint("22222222-2222-4222-8222-222222222222",null,DocumentKind.NOTE)
-    private val canvas=MapNativeRestoreHint("33333333-3333-4333-8333-333333333333",null,DocumentKind.CANVAS)
+    private val note=NativeRestoreHint("22222222-2222-4222-8222-222222222222",null,DocumentKind.NOTE)
+    private val canvas=NativeRestoreHint("33333333-3333-4333-8333-333333333333",null,DocumentKind.CANVAS)
     private val map=SplitSourceRef("11111111-1111-4111-8111-111111111111","content://map/one","Map")
     private val view=ColdNativeView(Editor.ReadingPosition(1.25,10.0,20.0,ViewOverrides()),true)
     private fun roundTrip(value:LastPresentation) {
