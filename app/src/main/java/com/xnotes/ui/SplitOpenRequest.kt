@@ -85,6 +85,39 @@ internal object SplitOpenCodec {
         return bytes
     }
 
+    /** Keep the native recent arrangement in its existing v2 wire format. */
+    fun encodeNative(request:NativeSplitOpenRequest):ByteArray {
+        val layout=request.layout
+        require(layout.ratio.isFinite() && layout.ratio in 0.18f..0.82f)
+        for(source in listOf(request.first,request.second)) {
+            require(source.uri.isNotBlank());validText(source.uri)
+            source.expectedId?.let {require(UUID.fromString(it).toString()==it)}
+        }
+        val json=JSONObject().put("format","xnotes-split").put("version",2)
+            .put("primaryOpen",true).put("secondOpen",true).put("primaryCanvas",false).put("secondCanvas",false)
+            .put("primaryPath",request.first.uri).put("secondPath",request.second.uri)
+            .put("ratio",layout.ratio.toDouble()).put("focused",layout.focused.name).put("reversed",layout.reversed)
+        request.first.expectedId?.let {json.put("primaryId",it)}
+        request.second.expectedId?.let {json.put("secondId",it)}
+        layout.sideBySide?.let {json.put("sideBySide",it)}
+        fun position(value:Editor.ReadingPosition?,prefix:String,zoom:String,x:String,y:String) {
+            if(value==null) return
+            require(value.zoom.isFinite() && value.zoom in .05..20.0 && value.x.isFinite() && value.y.isFinite())
+            val view=value.overrides
+            view.contrast?.let {require(it in 0..200)};view.invert?.let {require(it in 0..100)}
+            view.brightness?.let {require(it in 0..200)};view.sepia?.let {require(it in 0..200)}
+            view.rotation?.let {require(it in listOf(0,90,180,270))}
+            for(color in listOfNotNull(view.multiply,view.screen))
+                require(color.r in 0..255 && color.g in 0..255 && color.b in 0..255 && color.a==255)
+            json.put(zoom,value.zoom).put(x,value.x).put(y,value.y).put(prefix+"View",ViewOverridesJson.write(JSONObject(),view))
+        }
+        position(layout.firstPosition,"primary","primaryZoom","primaryX","primaryY")
+        position(layout.secondPosition,"second","zoom","x","y")
+        val bytes=json.toString().toByteArray(Charsets.UTF_8)
+        require(bytes.size<=MAX_BYTES)
+        return bytes
+    }
+
     /** Reject lenient token/comment syntax before either platform's recursive JSON parser runs. */
     internal fun checkJsonEnvelope(text:String) {
         require(text.length<=MAX_BYTES)
