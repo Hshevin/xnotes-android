@@ -4,7 +4,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
 import java.nio.channels.Channels
-import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
@@ -30,7 +29,7 @@ internal class SplitArrangementStore(private val filesDir:File,private val fileO
     fun readManaged(uri:String):SplitArrangementRead = try {
         val parsed=URI(uri)
         require(parsed.scheme=="file" && parsed.rawAuthority.isNullOrEmpty() && parsed.rawQuery==null && parsed.rawFragment==null)
-        val directory=directory(create=false)
+        val directory=SplitArrangementPaths.directory(filesDir,create=false)
         val original=File(parsed).absoluteFile
         val file=original.canonicalFile
         require(!Files.isSymbolicLink(original.toPath()) && file.parentFile==directory && file.extension=="xsplit")
@@ -38,45 +37,27 @@ internal class SplitArrangementStore(private val filesDir:File,private val fileO
     } catch(_:Exception) {SplitArrangementRead.Invalid}
 
     fun readRecent():SplitArrangementRead = try {
-        val file=File(root(),"saved-split.json")
-        require(file.canonicalFile==file)
+        val file=SplitArrangementPaths.recent(filesDir)
         read(file,allowLegacyFormat=true)
     } catch(_:Exception) {SplitArrangementRead.Invalid}
 
-    fun saveNamed(request:MixedSplitRequest,name:String):File? {
+    fun prepareNamed(request:MixedSplitRequest,name:String):PreparedSplitPublication? {
         var stage:Path?=null
-        var published:File?=null
         try {
             val bytes=SplitOpenCodec.encodeMixed(request)
-            val folder=directory(create=true)
+            val folder=SplitArrangementPaths.directory(filesDir,create=true)
             stage=Files.createTempFile(folder.toPath(),".split-",".pending")
             FileOutputStream(stage.toFile()).use {stream->stream.write(bytes);stream.fd.sync()}
-            val stem=fileStem(name)
-            // A collision is not authority to replace that file, including an unknown symlink.
-            for(sequence in 0 until 256) {
-                require(directory(create=false)==folder)
-                val candidate=File(folder,stem+(if(sequence==0) "" else "_$sequence")+".xsplit")
-                try {
-                    fileOps.createLink(candidate.toPath(),stage)
-                    published=candidate
-                    break
-                } catch(_:FileAlreadyExistsException) {continue}
-            }
+            return PreparedSplitPublication(filesDir,folder,stage,fileStem(name),fileOps)
         } catch(_:Exception) {
-            // A successful createLink is the commit; subsequent cleanup cannot revoke it.
-        } finally {
             stage?.let {owned->try {fileOps.deleteIfExists(owned)} catch(_:Exception) {}}
+            return null
         }
-        return published
     }
 
-    private fun root()=filesDir.canonicalFile.also {require(it.isDirectory)}
-    private fun directory(create:Boolean):File {
-        val directory=File(root(),"splits")
-        require(directory.canonicalFile==directory && !Files.isSymbolicLink(directory.toPath()))
-        if(create) Files.createDirectories(directory.toPath())
-        require(Files.isDirectory(directory.toPath(),NOFOLLOW_LINKS) || !create && Files.notExists(directory.toPath(),NOFOLLOW_LINKS))
-        return directory
+    fun saveNamed(request:MixedSplitRequest,name:String):File? {
+        val prepared=prepareNamed(request,name) ?: return null
+        return try {prepared.commit()} finally {prepared.close()}
     }
     private fun read(file:File,allowLegacyFormat:Boolean):SplitArrangementRead {
         val path=file.toPath()
@@ -94,5 +75,20 @@ internal class SplitArrangementStore(private val filesDir:File,private val fileO
             if(it.lastOrNull()?.isHighSurrogate()==true) it.dropLast(1) else it
         }
         return clean.ifBlank {"Split"}
+    }
+}
+
+/** These paths grant access only to app-private arrangement JSON, never to its source URIs. */
+internal object SplitArrangementPaths {
+    fun root(filesDir:File)=filesDir.canonicalFile.also {require(it.isDirectory)}
+    fun directory(filesDir:File,create:Boolean):File {
+        val directory=File(root(filesDir),"splits")
+        require(directory.canonicalFile==directory && !Files.isSymbolicLink(directory.toPath()))
+        if(create) Files.createDirectories(directory.toPath())
+        require(Files.isDirectory(directory.toPath(),NOFOLLOW_LINKS) || !create && Files.notExists(directory.toPath(),NOFOLLOW_LINKS))
+        return directory
+    }
+    fun recent(filesDir:File)=File(root(filesDir),"saved-split.json").also {
+        require(it.canonicalFile==it && !Files.isSymbolicLink(it.toPath()))
     }
 }
