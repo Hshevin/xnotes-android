@@ -782,9 +782,9 @@ class DocumentCodec(
         return ObservedRead(document,complete)
     }
     internal fun readComplete(input:InputStream,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
-        pdfStore:((InputStream)->File)?=null):CompleteRead {
+        pdfStore:((InputStream)->File)?=null,preserveInkSamples:Boolean=false):CompleteRead {
         var complete:CompleteRead?=null
-        readDocument(input,pdfDir,imageDir,timing,pdfStore,false,requireCompleteItems=true,onRead={doc,survived->
+        readDocument(input,pdfDir,imageDir,timing,pdfStore,false,requireCompleteItems=true,simplifyOnLoad=!preserveInkSamples,onRead={doc,survived->
             if(survived) complete=CompleteRead.capture(doc)
         })
         return requireNotNull(complete)
@@ -812,6 +812,7 @@ class DocumentCodec(
         pdfStore: ((InputStream) -> File)? = null,
         independentCopy:Boolean,
         requireCompleteItems:Boolean=false,
+        simplifyOnLoad:Boolean=true,
         onRead:((Document,Boolean)->Unit)?=null,
     ): Document {
         val created=ArrayList<File>()
@@ -994,7 +995,7 @@ class DocumentCodec(
             // Ink written before pen-up sample reduction shipped (writer < 43, or no writer field at
             // all) carries far more samples than the ribbon needs; compact it once at load. In-memory
             // only — the file shrinks whenever the user next edits and saves.
-            if (m.writer < SIMPLIFIED_SINCE && StrokeSimplify.enabled) {
+            if (simplifyOnLoad && m.writer < SIMPLIFIED_SINCE && StrokeSimplify.enabled) {
                 val compactStart = System.nanoTime()
                 doc.compactedOnLoad = true
                 for (page in doc.pages) {
