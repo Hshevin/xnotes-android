@@ -78,6 +78,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     var current by mutableStateOf<Entry?>(null);private set
     var visible by mutableStateOf(false);private set
     var opening by mutableStateOf(false);private set
+    internal var nativeSplitOperation by mutableStateOf(false);private set
     var failure by mutableStateOf<MapWorkspaceFailure?>(null);private set
 
     fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true},
@@ -85,12 +86,14 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         presentation:MapOpenPresentation=MapOpenPresentation.Single):Boolean {
         if(!active) return false
         val request=++generation
-        work?.cancel();openOperation=operation;opening=true;failure=null
+        val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=false
         fun valid()=active && generation==request && stillCurrent()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var incoming:MapDocumentLease?=null
             var adopted=false
             try {
+                previous.forEach {it.join()}
+                if(!valid()) {if(active && generation==request) failure=MapWorkspaceFailure.CHANGED;return@launch}
                 val prior=current
                 val reused=prior?.takeIf {it.lease.alive && MapSaves.key(it.uri)==MapSaves.key(uri)}
                 val lease=reused?.lease ?: MapDocuments.acquire(app,uri).also {incoming=it}
@@ -121,7 +124,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
             finally {
-                if(!adopted) withContext(NonCancellable+Dispatchers.Main.immediate) {incoming?.close()?.join()}
+                if(!adopted) withContext(NonCancellable+Dispatchers.Main.immediate) {incoming?.closeUnadoptedSource()?.join()}
                 if(generation==request) {opening=false;openOperation=null}
                 onFinished(adopted)
             }
@@ -139,7 +142,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(!active) return false
         val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
         val request=++generation
-        val previous=work;previous?.cancel();openOperation=operation;opening=true;failure=null
+        val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=false
         fun valid()=active && generation==request && current===origin && visible==originVisible &&
             splitPresentation.generation==layoutGeneration && stillCurrent()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
@@ -148,7 +151,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             var adopted=false
             var adoptedLease:MapDocumentLease?=null
             try {
-                previous?.join()
+                previous.forEach {it.join()}
                 if(!valid()) throw MapPairChanged()
                 val existing=MapDocuments.observations(app).singleOrNull {it.key==MapSaves.key(uri)}
                     ?.takeUnless {it.failed && it.document==null && !it.loading && !it.creating}
@@ -175,27 +178,9 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 val candidate=requireNotNull(native)
                 if(!valid() || !source.current() || !candidate.current()) throw MapPairChanged()
                 val replaced=ownedEntries().filter {it!==next}
-                for(entry in replaced) {
-                    while(entry.session.document!=null) {
-                        if(!valid() || !entry.lease.alive || !entry.session.canParkSourceNavigation) throw MapPairChanged()
-                        if(entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving) break
-                        when(val outcome=entry.session.saveAttempt().await()) {
-                            is MapSaveOutcome.Written->if(outcome.latest) break
-                            else->{failure=MapWorkspaceFailure.UNAVAILABLE;return@launch}
-                        }
-                    }
-                }
-                // These are transient map-only checks; no staged Native/Editor enters an Entry.
-                val leaves=replaced.map {entry->
-                    val document=entry.session.document;val revision=entry.session.contentRevision;val epoch=entry.session.interactionEpoch
-                    val check:()->Boolean={entry.lease.alive && entry.session.document===document &&
-                        entry.session.contentRevision==revision && entry.session.interactionEpoch==epoch &&
-                        (document==null || entry.session.canParkSourceNavigation &&
-                            (entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving))}
-                    check
-                }
+                val leavesReady=settleMapRetirement(replaced,::valid)
                 val applied=source.finish {
-                    if(!valid() || leaves.any {!it()} || !candidate.current()) false
+                    if(!valid() || !leavesReady() || !candidate.current()) false
                     else {
                         val mapPane=if(candidate.nativePane==com.xnotes.ui.Pane.PRIMARY) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
                         val focus=if(mapIsFirst) mapPane else candidate.nativePane
@@ -229,6 +214,81 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 } catch(error:Exception) {
                     android.util.Log.w("xnotes.map.pair","Pair preparation cleanup failed",error)
                 } finally {
+                    if(generation==request) {opening=false;openOperation=null}
+                    onFinished(adopted)
+                }
+            }
+        }
+        work=pending;acceptedOpens+=pending
+        pending.invokeOnCompletion {acceptedOpens-=pending;if(work===pending) work=null}
+        pending.start();return true
+    }
+
+    /** Called after both Native initial reads, before Native guard/save and the last source IO. */
+    private suspend fun settleMapRetirement(entries:List<Entry>,valid:()->Boolean):()->Boolean {
+        for(entry in entries) {
+            while(entry.session.document!=null) {
+                if(!valid() || !entry.lease.alive || !entry.session.canParkSourceNavigation) throw MapPairChanged()
+                if(entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving) break
+                when(val outcome=entry.session.saveAttempt().await()) {
+                    is MapSaveOutcome.Written->if(outcome.latest) break
+                    else->throw java.io.IOException("The map save was not published")
+                }
+            }
+        }
+        val checks=entries.map {entry->
+            val document=entry.session.document;val revision=entry.session.contentRevision;val epoch=entry.session.interactionEpoch
+            val check:()->Boolean={entry.lease.alive && entry.session.document===document &&
+                entry.session.contentRevision==revision && entry.session.interactionEpoch==epoch &&
+                (document==null || entry.session.canParkSourceNavigation &&
+                    (entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving))}
+            check
+        }
+        return {valid() && checks.all {it()}}
+    }
+
+    /** The Native preparation must call settleMaps after its two initial reads. */
+    internal fun replaceWithNativeSplit(
+        prepareNative:suspend (current:()->Boolean,settleMaps:suspend ()->Boolean)->com.xnotes.ui.PreparedNativeSplitOpen?,
+        stillCurrent:()->Boolean={true},operation:Any?=null,
+        onPresented:(com.xnotes.ui.PreparedNativeSplitOpen)->Unit={},onFinished:(Boolean)->Unit={}):Boolean {
+        if(!active) return false
+        val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
+        val request=++generation
+        val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=true
+        fun valid()=active && generation==request && current===origin && visible==originVisible &&
+            splitPresentation.generation==layoutGeneration && stillCurrent()
+        val pending=scope.launch(start=CoroutineStart.LAZY) {
+            var native:com.xnotes.ui.PreparedNativeSplitOpen?=null
+            var adopted=false
+            var mapProof:(()->Boolean)?=null
+            fun candidateCurrent()=valid() && mapProof?.invoke()!=false
+            try {
+                previous.forEach {it.join()}
+                if(!valid()) throw MapPairChanged()
+                val entries=ownedEntries()
+                suspend fun settleMaps():Boolean {
+                    if(!valid()) return false
+                    val ready=mapProof ?: settleMapRetirement(entries,::valid).also {mapProof=it}
+                    return ready()
+                }
+                native=prepareNative(::candidateCurrent,::settleMaps)
+                val candidate=native ?: run {if(valid()) failure=MapWorkspaceFailure.CHANGED;return@launch}
+                if(!valid() || mapProof?.invoke()!=true || !candidate.current()) throw MapPairChanged()
+                // No suspension or additional business veto between the two document adoption and
+                // retiring this presentation's own leases. Other Map owners keep their actor.
+                if(!candidate.commit()) throw MapPairChanged()
+                visited.clear();sourceFrames=emptyList();current=null;visible=false
+                splitPresentation.clear();adopted=true
+                retire(entries)
+                onPresented(candidate)
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:MapPairChanged) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.CHANGED}
+            catch(_:Exception) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
+            finally {
+                try {withContext(NonCancellable+Dispatchers.Main.immediate) {native?.close()}}
+                catch(error:Exception) {android.util.Log.w("xnotes.map.split","Native split preparation cleanup failed",error)}
+                finally {
                     if(generation==request) {opening=false;openOperation=null}
                     onFinished(adopted)
                 }
@@ -284,7 +344,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         return true
     }
     fun clearFailure() {failure=null}
-    fun cancelOpen() {generation++;val pending=work;work=null;openOperation=null;pending?.cancel();opening=false;failure=null}
+    fun cancelOpen() {generation++;val pending=work;work=null;openOperation=null;pending?.cancel();opening=false;failure=null;nativeSplitOperation=false}
     internal fun cancelOpen(operation:Any):Boolean {
         if(openOperation!==operation) return false
         cancelOpen();return true
@@ -384,6 +444,8 @@ internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entr
             Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
                 Row(Modifier.padding(Space.s8),horizontalArrangement=Arrangement.spacedBy(Space.s8),verticalAlignment=Alignment.CenterVertically) {
                     Text(stringResource(when {
+                        workspace.nativeSplitOperation && workspace.opening->R.string.native_split_opening
+                        workspace.nativeSplitOperation->R.string.native_split_open_failed
                         workspace.opening->R.string.map_loading
                         workspace.failure==MapWorkspaceFailure.CHANGED->R.string.native_open_changed
                         else->R.string.map_open_error
