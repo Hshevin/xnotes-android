@@ -38,8 +38,9 @@ internal class OriginalPdfLibraryState(context:Context,private val scope:Corouti
     var restoreRequest by mutableStateOf<RestoreRequest?>(null);private set
     var needsRestoreFile by mutableStateOf(false);private set
 
-    fun open():Boolean {
+    fun open(beforeAdopt:()->Boolean={true}):Boolean {
         if(!alive || visible) return false
+        if(!beforeAdopt()) return false
         lifetime++;visible=true;failure=null;records=emptyList();refresh();return true
     }
     fun close() {

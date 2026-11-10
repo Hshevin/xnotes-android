@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="last_presentation_invalid">无法读取上次的工作区记录。恢复资料已保留。</string>
+    <string name="last_presentation_unavailable">无法恢复上次的工作区。恢复资料已保留。</string>
+    <string name="last_presentation_retry">重试</string>
+    <string name="last_presentation_recovery">查看恢复资料</string>
+    <string name="last_presentation_reset">重置工作区记录</string>
+    <string name="last_presentation_reset_failed">工作区记录已变化或无法重置，请重试以读取最新记录。</string>
+</resources>

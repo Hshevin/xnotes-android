@@ -43,6 +43,7 @@ internal class MapSourceNavigator(
     private val guard:suspend (NativeReferenceRequest,()->Boolean)->MapSourceGuardResult,
     private val originalNavigator:OriginalPdfNavigator?=null,
     private val mapAccess:MapDocumentSourceAccess=MapDocumentSourceAccess(editor.view.context.applicationContext),
+    private val prepareParking:(suspend (()->Boolean)->(() -> Boolean)?)?=null,
     private val onOpened:(NativeReferenceResult.Opened,Boolean)->Unit={_,_->},
 ) {
     private var active=true
@@ -74,6 +75,7 @@ internal class MapSourceNavigator(
         }
         val token=++generation
         val originGeneration=workspace.sourceNavigationGeneration
+        editor.onPresentationIntent?.invoke()
         val splitGeneration=workspace.splitPresentation.generation
         val split=workspace.splitPresentation.layout
         entry.sourceReturn=null;nativeFailure=null;saveFailed=false;nativeReturning=false;nativeBusy=true
@@ -86,6 +88,7 @@ internal class MapSourceNavigator(
             entry.session.currentSourceNavigation(ticket)!=null
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var committed=false
+            var nativeHomeGate:com.xnotes.ui.PreparedHomeGate?=null
             val watcher=scope.launch {
                 while(isActive && generation==token && !committed) {
                     if(!valid()) {job?.cancel();break}
@@ -95,8 +98,11 @@ internal class MapSourceNavigator(
             try {
                 val target=ticket.target
                 val owner=currentCoroutineContext()[Job]!!
+                // Complete our own journal/cache publication before the first source observation.
+                val persisted=prepareParking?.invoke(::valid)
+                if(prepareParking!=null && persisted==null) {nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
                 if(target.scope==SourceScope.FILE) {
-                    when(openMapSource(entry,ticket,bookmark,token,::valid,{owner.ensureActive()}) {committed=true}) {
+                    when(openMapSource(entry,ticket,bookmark,token,::valid,persisted,{owner.ensureActive()}) {committed=true}) {
                         MapRoute.NOT_MAP->Unit
                         MapRoute.HANDLED->return@launch
                     }
@@ -129,7 +135,19 @@ internal class MapSourceNavigator(
                             MapSourceGuardResult.Changed->nativeFailure=NativeReferenceIssue.CHANGED
                             is MapSourceGuardResult.Ready->{
                                 if(!valid() || !native.current()) {if(current(entry,token)) nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
-                                val result=editor.openReference(native,decision.discarded,::valid) {opened->
+                                val finalCache=prepareParking?.invoke {valid() && native.current()}
+                                if(prepareParking!=null && finalCache==null) {nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
+                                val parking=editor.awaitMapSourceParking()
+                                if(parking==null || !valid() || !native.current()) {nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
+                                fun ready()=valid() && native.current() && parking.current() && finalCache?.invoke()!=false
+                                val provider=editor.preparePresentationDeparture
+                                nativeHomeGate=provider?.invoke(::ready)
+                                if(provider!=null && nativeHomeGate==null) {nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
+                                // The native opener installs its own request after this preparation.
+                                // Its final input/jobs proof supersedes this pre-open parking stamp.
+                                fun adoptionCurrent()=valid() && native.current() && finalCache?.invoke()!=false
+                                val result=editor.openReference(native,decision.discarded,::valid,
+                                    beforeAdopt={adoptionCurrent() && nativeHomeGate?.commit(::adoptionCurrent)!=false}) {opened->
                                     // Core checked valid immediately before adoption, with no suspension
                                     // before this callback. The map therefore has no new draft/pen to drop.
                                     committed=true
@@ -155,6 +173,7 @@ internal class MapSourceNavigator(
             catch(_:Exception) {if(!committed && current(entry,token)) nativeFailure=NativeReferenceIssue.UNAVAILABLE}
             finally {
                 watcher.cancel()
+                nativeHomeGate?.close()
                 if(generation==token) {
                     if(!committed) {
                         request?.cancel()
@@ -172,12 +191,14 @@ internal class MapSourceNavigator(
         owner.noteOpen && (if(owner.canvasOpen) owner.infinite.document.identity.documentId else owner.state.document.identity.documentId)==id
     }
     private suspend fun openMapSource(entry:MapWorkspace.Entry,ticket:MapSourceNavigationTicket,
-        bookmark:MapSourceReturnBookmark,token:Long,valid:()->Boolean,check:()->Unit,onAdopted:()->Unit):MapRoute {
+        bookmark:MapSourceReturnBookmark,token:Long,valid:()->Boolean,persisted:(()->Boolean)?,
+        check:()->Unit,onAdopted:()->Unit):MapRoute {
         when(val prepared=mapAccess.acquire(ticket.target,check)) {
             MapDocumentSourceAccess.Result.NotMap->return MapRoute.NOT_MAP
             is MapDocumentSourceAccess.Result.Failed->{if(current(entry,token)) nativeFailure=prepared.issue;return MapRoute.HANDLED}
             is MapDocumentSourceAccess.Result.Ready->{
                 val held=prepared.held
+                var homeGate:com.xnotes.ui.PreparedHomeGate?=null
                 try {
                     if(!valid()) return MapRoute.HANDLED
                     if(!entry.session.canParkSourceNavigation) {mapFeedback=R.string.graph_map_source_busy;return MapRoute.HANDLED}
@@ -185,12 +206,16 @@ internal class MapSourceNavigator(
                     val departure=entry.presentation.captureSourceDeparture(entry.session)
                     val parking=editor.awaitMapSourceParking()
                     if(parking==null || !valid()) {if(current(entry,token)) nativeFailure=NativeReferenceIssue.CHANGED;return MapRoute.HANDLED}
+                    val provider=editor.preparePresentationDeparture
+                    homeGate=provider?.invoke {valid() && persisted?.invoke()!=false && parking.current() && held.current()}
+                    if(provider!=null && homeGate==null) return MapRoute.HANDLED
                     var result=SourcePushResult.CHANGED
                     val adopted=held.finish(check) {incoming->
-                        if(!valid() || !parking.current()) false
+                        if(!valid() || persisted?.invoke()==false || !parking.current()) false
                         else if(nativeIdentityConflict(held.documentId)) {nativeFailure=NativeReferenceIssue.DUPLICATE;false}
                         else {
-                            result=workspace.pushSource(entry,incoming,held.title,bookmark,departure) {parking.current()}
+                            result=workspace.pushSource(entry,incoming,held.title,bookmark,departure,
+                                beforeAdopt={homeGate?.commit {valid() && persisted?.invoke()!=false && parking.current()}!=false}) {parking.current()}
                             (result==SourcePushResult.APPLIED || result==SourcePushResult.SELF).also {if(it) onAdopted()}
                         }
                     }
@@ -201,7 +226,9 @@ internal class MapSourceNavigator(
                             else->if(nativeFailure==null) nativeFailure=held.failure ?: NativeReferenceIssue.CHANGED
                         }
                     }
-                } finally {withContext(NonCancellable+Dispatchers.Main.immediate) {held.closeUnadopted().join()}}
+                } finally {withContext(NonCancellable+Dispatchers.Main.immediate) {
+                    try {homeGate?.close()} finally {held.closeUnadopted().join()}
+                }}
                 return MapRoute.HANDLED
             }
         }
@@ -214,28 +241,41 @@ internal class MapSourceNavigator(
         if(busy || !active || !workspace.visible || !workspace.isHostCurrent(binding)) return false
         val originGeneration=workspace.sourceNavigationGeneration
         val token=++generation
+        editor.onPresentationIntent?.invoke()
         nativeFailure=null;mapFeedback=null;saveFailed=false;nativeBusy=true;nativeReturning=true;pendingEntry=entry
         fun valid()=current(entry,token) && workspace.visible && workspace.sourceReturnToken===route &&
             workspace.sourceNavigationGeneration==originGeneration
         val pending=scope.launch(start=CoroutineStart.LAZY) {
+            var homeGate:com.xnotes.ui.PreparedHomeGate?=null
             try {
+                val persisted=prepareParking?.invoke(::valid)
+                if(prepareParking!=null && persisted==null) {mapFeedback=R.string.graph_map_source_busy;return@launch}
                 val proof=editor.awaitMapSourceParking()
                 if(!valid() || proof?.current()!=true) {if(current(entry,token)) nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
-                if(!workspace.returnSource(entry) {proof.current()}) mapFeedback=R.string.graph_map_source_busy
+                val provider=editor.preparePresentationDeparture
+                homeGate=provider?.invoke {valid() && persisted?.invoke()!=false && proof.current()}
+                if(provider!=null && homeGate==null) {mapFeedback=R.string.graph_map_source_busy;return@launch}
+                if(!workspace.returnSource(entry,beforeAdopt={homeGate?.commit {valid() && persisted?.invoke()!=false && proof.current()}!=false}) {
+                    persisted?.invoke()!=false && proof.current()
+                })
+                    mapFeedback=R.string.graph_map_source_busy
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(current(entry,token)) nativeFailure=NativeReferenceIssue.UNAVAILABLE}
-            finally {if(generation==token) {job=null;pendingEntry=null;nativeBusy=false;nativeReturning=false}}
+            finally {try {homeGate?.close()} finally {
+                if(generation==token) {job=null;pendingEntry=null;nativeBusy=false;nativeReturning=false}
+            }}
         }
         job=pending;pending.start();return true
     }
 
     /** Closing this view must not retire another lease's draft or put the shared actor in closing. */
-    fun closeEntry(entry:MapWorkspace.Entry,preserveRecovery:Boolean=false,onClosed:()->Boolean):Boolean {
+    fun closeEntry(entry:MapWorkspace.Entry,preserveRecovery:Boolean=false,onClosed:suspend ()->Boolean):Boolean {
         if(busy || !active || !workspace.visible || workspace.current!==entry || !workspace.isHostCurrent(binding)) return false
         if(workspace.canReturnSource) return returnToSourceMap()
         val originGeneration=workspace.sourceNavigationGeneration
         val epoch=entry.session.interactionEpoch
         val token=++generation
+        editor.onPresentationIntent?.invoke()
         nativeFailure=null;mapFeedback=null;saveFailed=false;nativeBusy=true;pendingEntry=entry
         fun valid()=current(entry,token) && workspace.visible && workspace.sourceNavigationGeneration==originGeneration &&
             workspace.sourceReturnToken==null && entry.session.interactionEpoch==epoch
@@ -285,6 +325,7 @@ internal class MapSourceNavigator(
         val originGeneration=workspace.sourceNavigationGeneration
         val epoch=entry.session.interactionEpoch
         val token=++generation
+        editor.onPresentationIntent?.invoke()
         nativeFailure=null;mapFeedback=null;saveFailed=false;nativeBusy=true;pendingEntry=entry
         fun valid()=current(entry,token) && workspace.sourceNavigationGeneration==originGeneration &&
             entry.session.interactionEpoch==epoch && stillCurrent()
@@ -344,7 +385,11 @@ internal class MapSourceNavigator(
         nativeFailure=null;saveFailed=false;nativeBusy=true;nativeReturning=true;returnOperation=operation
         fun valid()=current(entry,token) && entry.sourceReturn===bookmark && entry.session.canRestoreSourceReturn(bookmark)
         val accepted=workspace.open(entry.uri,entry.title,preparePresentation={
-            if(!valid()) null else editor.awaitHostParking()?.let {proof->({valid() && proof.current()})}
+            if(!valid()) null else {
+                val persisted=prepareParking?.invoke(::valid)
+                if(prepareParking!=null && persisted==null) null
+                else editor.awaitMapSourceParking()?.let {proof->({valid() && persisted?.invoke()!=false && proof.current()})}
+            }
         },stillCurrent={valid() && !workspace.visible},operation=operation,flushNativeOnPresent=entry.flushNativeOnPresent,onPresented={shown->
             if(current(entry,token) && shown===entry && entry.sourceReturn===bookmark) {
                 entry.skipNativePersistOnPresent=skipNativePersist

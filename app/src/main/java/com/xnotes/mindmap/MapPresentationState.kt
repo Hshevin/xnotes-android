@@ -29,6 +29,7 @@ class MapPresentationState internal constructor() {
     private var restoredView=WeakReference<MindMapView>(null)
     private var protectedCamera=false
     internal var restoreVersion by mutableStateOf(0L);private set
+    internal var ordinaryCameraVersion by mutableStateOf(0L);private set
     internal var sourceFocus by mutableStateOf<MapSourcePanelFocus?>(null);private set
     internal var pendingBacklinkFocus by mutableStateOf<MapBacklinkFocusTicket?>(null);private set
     internal var pendingFileRelationFocus by mutableStateOf<MapFileRelationFocusTicket?>(null);private set
@@ -55,7 +56,8 @@ class MapPresentationState internal constructor() {
         val viewport=view.viewport()
         if(!density.isFinite() || density<=0 || !viewport.zoom.isFinite() || viewport.zoom<=0 ||
             !viewport.panX.isFinite() || !viewport.panY.isFinite()) return false
-        camera=MapPresentationCamera(viewport,view.width,view.height,density)
+        val next=MapPresentationCamera(viewport,view.width,view.height,density)
+        if(camera!=next) {camera=next;ordinaryCameraVersion=Math.incrementExact(ordinaryCameraVersion)}
         return true
     }
     /** The caller waits for IME and actual layout stability. Each attached View restores once. */

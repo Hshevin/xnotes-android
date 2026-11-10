@@ -18,7 +18,7 @@ internal class PreparedNativeSplitOpen internal constructor(
     val focusedPane:Pane,
     keyHandoffs:List<Pair<Editor,Editor>>,
     private val check:()->Boolean,
-    private val adopt:()->Boolean,
+    private val adopt:(()->Boolean)->Boolean,
     private val release:suspend ()->Unit,
 ) {
     val firstPane:Pane get()=first.pane
@@ -27,8 +27,8 @@ internal class PreparedNativeSplitOpen internal constructor(
     private var consumed=false
     private var closed=false
     fun current()=!closed && !consumed && check()
-    fun commit():Boolean {
-        if(!current() || !adopt()) return false
+    fun commit(beforeAdopt:()->Boolean={true}):Boolean {
+        if(!current() || !adopt(beforeAdopt)) return false
         consumed=true;return true
     }
     suspend fun close() {if(!closed) {closed=true;release()}}

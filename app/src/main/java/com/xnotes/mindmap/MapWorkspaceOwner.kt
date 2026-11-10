@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 
 /** Configuration recreation transfers this one host lease; final Activity closure releases it. */
 internal class MapWorkspaceOwner(context:Context):ViewModel() {
+    val bootstrap=com.xnotes.ui.ColdPresentationBootstrap()
     val workspace=MapWorkspace(context.applicationContext,viewModelScope)
     val networks=FileNetworkWorkspace(context.applicationContext,viewModelScope)
     val originals=OriginalPdfWorkspace(context.applicationContext,viewModelScope)

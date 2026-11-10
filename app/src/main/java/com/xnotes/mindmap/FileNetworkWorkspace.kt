@@ -54,8 +54,9 @@ internal class FileNetworkWorkspace(context:Context,private val scope:CoroutineS
         visible=false;current?.presentation?.visible=false;host=null
         return true
     }
-    internal fun admit(binding:Any,query:NetworkQuery):Entry? {
+    internal fun admit(binding:Any,query:NetworkQuery,beforeAdopt:()->Boolean={true}):Entry? {
         if(!isHostCurrent(binding)) return null
+        if(!beforeAdopt()) return null
         val prior=current
         val same=prior?.takeIf {it.alive && it.query.focusId==query.focusId && it.query.title==query.title &&
             it.query.roots==query.roots && it.query.hasLocalFocus==query.hasLocalFocus}
@@ -65,8 +66,9 @@ internal class FileNetworkWorkspace(context:Context,private val scope:CoroutineS
         if(same==null) next.controller.refresh()
         return next
     }
-    internal fun show(binding:Any,entry:Entry):Boolean {
+    internal fun show(binding:Any,entry:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!current(binding,entry)) return false
+        if(!beforeAdopt()) return false
         entry.graphReturn=null;visible=true;resumeRequested=false;entry.presentation.visible=true
         return true
     }
@@ -77,8 +79,9 @@ internal class FileNetworkWorkspace(context:Context,private val scope:CoroutineS
     }
     internal fun returnEntry(map:MapWorkspace.Entry)=current?.takeIf {it.alive && it.graphReturn===map}
     fun retireGraphReturn() {current?.graphReturn=null}
-    fun close(binding:Any,entry:Entry):Boolean {
+    fun close(binding:Any,entry:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!current(binding,entry)) return false
+        if(!beforeAdopt()) return false
         current=null;visible=false;resumeRequested=false
         entry.alive=false;entry.graphReturn=null;entry.presentation.visible=false;entry.controller.close()
         return true

@@ -2852,6 +2852,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.publish()
     }
 
+    internal var onPresentationViewChanged:(()->Unit)?=null
     private fun onViewChanged() {
         if (screenshotMenu != null) screenshotMenu = interaction.captureRect?.let { viewport.contentToViewport(it) }
         toolOverlay.invalidate()
@@ -2864,6 +2865,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         refreshSelectionMenu()
         // The minimap maps everything drawn, so its extent moves with the content, not the view.
         view.contentBounds = document.contentBounds()
+        onPresentationViewChanged?.invoke()
     }
 
     fun refreshTitle() {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="last_presentation_invalid">The last workspace record cannot be read. Your recovery files have been kept.</string>
+    <string name="last_presentation_unavailable">The last workspace could not be restored. Your recovery files have been kept.</string>
+    <string name="last_presentation_retry">Retry</string>
+    <string name="last_presentation_recovery">View recovery files</string>
+    <string name="last_presentation_reset">Reset workspace record</string>
+    <string name="last_presentation_reset_failed">The workspace record changed or could not be reset. Retry to read the latest record.</string>
+</resources>
