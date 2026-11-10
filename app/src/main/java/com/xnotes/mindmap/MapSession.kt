@@ -566,6 +566,8 @@ class MapSession() : ViewModel() {
     private var acceptedSaves=0
     internal val hasUnconfirmedContent get()=inkContact || textDraft!=null || textRestore!=null || connectedDraft!=null
     /** Map-to-map parking observes runtime drafts; it never settles or retires another owner. */
+    /** Source bytes used by this actor's initial load; runtime edits never rewrite this observation. */
+    internal var loadedRawSha256:String?=null;private set
     internal val canParkSourceNavigation get()=!loading && !loadFailed && document!=null && !closing && !replacingDocument &&
         !hasUnconfirmedContent && !sourceTargetEditPickerBusy && targetEditController?.active!=true
     val recoverySafe get() = ::store.isInitialized && store.journalReady && durableRevision == revision
@@ -579,6 +581,7 @@ class MapSession() : ViewModel() {
                 store=MapFiles.store(app,uri,target(uri),knownAliases=knownAliases);store.open()
             } } }
             result.onSuccess {
+                loadedRawSha256=store.openedRawSha256
                 recoveryKeys=store.recoveryKeys
                 history = MapHistory(it.document); document = it.document; selected = it.document.initialSelection
                 reconcileNavigationReveal()

@@ -23,14 +23,17 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     private var journal=journals.first()
     private var expectedHash: String? = null
     @Volatile var journalReady = false; private set
+    /** Actual raw bytes observed by open(), independent of the recovery writer's baseline. */
+    @Volatile internal var openedRawSha256:String?=null;private set
     data class Opened(val document: MindMapDocument, val recovered: Boolean = false, val conflict: Boolean = false)
     data class Observed(val document:MindMapDocument,val recovered:Boolean,val conflict:Boolean,val remoteAvailable:Boolean,
         val remoteBytes:Long,val journalBytes:Long)
     private data class Inspection(val opened:Opened,val chosen:File,val expected:String?,val ready:Boolean,
-        val checkpoint:Boolean=false,val remoteAvailable:Boolean,val remoteBytes:Long,val journalBytes:Long)
+        val checkpoint:Boolean=false,val remoteAvailable:Boolean,val remoteBytes:Long,val journalBytes:Long,val rawSha256:String?)
 
     fun open(): Opened {
         val read=inspect({})
+        openedRawSha256=read.rawSha256
         journal=read.chosen;expectedHash=read.expected
         if(read.ready) journalReady=true
         if(read.checkpoint) checkpoint(read.opened.document,pending=false)
@@ -41,11 +44,16 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         val read=inspect(checkActive,readJournalBytes)
         return Observed(read.opened.document,read.opened.recovered,read.opened.conflict,read.remoteAvailable,read.remoteBytes,read.journalBytes)
     }
+    /** Pair adoption must also reject a foreign checkpoint that would not win over readable JSON. */
+    internal fun observeForIdentity(documentId:String,checkActive:()->Unit={}):Observed {
+        val read=inspect(checkActive,expectedDocumentId=documentId)
+        return Observed(read.opened.document,read.opened.recovered,read.opened.conflict,read.remoteAvailable,read.remoteBytes,read.journalBytes)
+    }
     /** A live editor must not claim to have inspected a newly discovered alias journal. */
     internal fun recoveryOutside(covered:Set<String>):Boolean = recoveryKeys.zip(journals).any {(key,file)->
         key !in covered && (file.exists() || staging(file).exists())
     }
-    private fun inspect(checkActive:()->Unit,readJournalBytes:(Int)->Unit={}):Inspection {
+    private fun inspect(checkActive:()->Unit,readJournalBytes:(Int)->Unit={},expectedDocumentId:String?=null):Inspection {
         checkActive()
         if(journals.any {staging(it).exists()}) throw MapRecoveryObservationException("Unfinished recovery checkpoint")
         val existing=journals.filter {it.exists()}
@@ -70,8 +78,10 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
             if(it is java.util.concurrent.CancellationException) throw it
             checkActive();throw MapRecoveryObservationException("Invalid recovery journal",it)
         } else null
+        if(expectedDocumentId!=null && saved!=null && saved.first.id!=expectedDocumentId)
+            throw MapRecoveryObservationException("Recovery checkpoint belongs to another mind map")
         fun result(opened:Opened,expected:String?,ready:Boolean,checkpoint:Boolean=false)=Inspection(opened,chosen,expected,ready,
-            checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes)
+            checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes,remoteHash)
         if (saved != null && saved.third) {
             val contentHash = hash(MapCodec.encode(saved.first))
             checkActive()

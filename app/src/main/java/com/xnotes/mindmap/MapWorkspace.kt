@@ -131,6 +131,114 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         pending.start()
         return true
     }
+    /** One final Main stack adopts Native, Map and layout after both independent preparations. */
+    internal fun openPair(uri:Uri,title:String,mapIsFirst:Boolean,
+        prepareNative:suspend ((()->Boolean))->com.xnotes.ui.PreparedPagedPairOpen?,
+        stillCurrent:()->Boolean={true},operation:Any?=null,
+        onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit={_,_->},onFinished:(Boolean)->Unit={}):Boolean {
+        if(!active) return false
+        val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
+        val request=++generation
+        val previous=work;previous?.cancel();openOperation=operation;opening=true;failure=null
+        fun valid()=active && generation==request && current===origin && visible==originVisible &&
+            splitPresentation.generation==layoutGeneration && stillCurrent()
+        val pending=scope.launch(start=CoroutineStart.LAZY) {
+            var incoming:MapDocumentLease?=null
+            var native:com.xnotes.ui.PreparedPagedPairOpen?=null
+            var adopted=false
+            var adoptedLease:MapDocumentLease?=null
+            try {
+                previous?.join()
+                if(!valid()) throw MapPairChanged()
+                val existing=MapDocuments.observations(app).singleOrNull {it.key==MapSaves.key(uri)}
+                    ?.takeUnless {it.failed && it.document==null && !it.loading && !it.creating}
+                if(existing?.creating==true || existing?.closing==true || existing?.replacing==true) throw MapPairChanged()
+                val access=MapPairAccess(app)
+                val initial=access.initial(uri)
+                if(!valid()) throw MapPairChanged()
+                val reused=ownedEntries().firstOrNull {it.lease.alive && MapSaves.key(it.uri)==MapSaves.key(uri)}
+                val lease=reused?.lease ?: MapDocuments.acquire(app,uri).also {incoming=it}
+                if(existing!=null && existing.session!==lease.session) throw MapPairChanged()
+                val loadEpoch=lease.session.interactionEpoch
+                snapshotFlow {lease.session.loading to lease.alive}.first {!it.first || !it.second}
+                if(!valid() || lease.session.interactionEpoch!=loadEpoch) throw MapPairChanged()
+                if(!lease.alive || lease.session.loadFailed || lease.session.document==null) {
+                    failure=MapWorkspaceFailure.UNAVAILABLE;return@launch
+                }
+                val requireLoadBaseline=existing?.document==null
+                if(existing!=null && existing.session===lease.session && existing.epoch!=lease.session.interactionEpoch)
+                    throw MapPairChanged()
+                val source=access.prepare(uri,lease,initial,requireLoadBaseline)
+                val next=reused ?: Entry(lease.uri,title,lease)
+                // Initial reads precede every blur/save guard in the Native preparation.
+                native=prepareNative(::valid) ?: run {failure=MapWorkspaceFailure.CHANGED;return@launch}
+                val candidate=requireNotNull(native)
+                if(!valid() || !source.current() || !candidate.current()) throw MapPairChanged()
+                val replaced=ownedEntries().filter {it!==next}
+                for(entry in replaced) {
+                    while(entry.session.document!=null) {
+                        if(!valid() || !entry.lease.alive || !entry.session.canParkSourceNavigation) throw MapPairChanged()
+                        if(entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving) break
+                        when(val outcome=entry.session.saveAttempt().await()) {
+                            is MapSaveOutcome.Written->if(outcome.latest) break
+                            else->{failure=MapWorkspaceFailure.UNAVAILABLE;return@launch}
+                        }
+                    }
+                }
+                // These are transient map-only checks; no staged Native/Editor enters an Entry.
+                val leaves=replaced.map {entry->
+                    val document=entry.session.document;val revision=entry.session.contentRevision;val epoch=entry.session.interactionEpoch
+                    val check:()->Boolean={entry.lease.alive && entry.session.document===document &&
+                        entry.session.contentRevision==revision && entry.session.interactionEpoch==epoch &&
+                        (document==null || entry.session.canParkSourceNavigation &&
+                            (entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving))}
+                    check
+                }
+                val applied=source.finish {
+                    if(!valid() || leaves.any {!it()} || !candidate.current()) false
+                    else {
+                        val mapPane=if(candidate.nativePane==com.xnotes.ui.Pane.PRIMARY) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
+                        val focus=if(mapIsFirst) mapPane else candidate.nativePane
+                        val layout=MapSplitLayout(mapPane,focus,.5f,null,(mapPane==com.xnotes.ui.Pane.PRIMARY)!=mapIsFirst)
+                        // commit's only false result is pre-mutation. No business veto follows it.
+                        if(!candidate.commit()) false else {
+                            visited.clear();sourceFrames=emptyList()
+                            visited[MapSaves.key(next.uri)]=next
+                            next.parkingCheck={false};next.sourceReturn=null
+                            next.flushNativeOnPresent=false;next.skipNativePersistOnPresent=false;next.presentation.visible=true
+                            splitPresentation.present(MapOpenPresentation.Split(layout))
+                            splitPresentation.rememberNativeHint(candidate.target.nativeRestoreHint())
+                            current=next;visible=true;adopted=true;adoptedLease=next.lease
+                            retire(replaced)
+                            onPresented(next,candidate)
+                            true
+                        }
+                    }
+                }
+                if(!applied && active && generation==request) failure=MapWorkspaceFailure.CHANGED
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:MapPairChanged) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.CHANGED}
+            catch(_:Exception) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
+            finally {
+                try {
+                    withContext(NonCancellable+Dispatchers.Main.immediate) {
+                        try {native?.close()} finally {
+                            incoming?.takeIf {it!==adoptedLease}?.closeUnadoptedSource()?.join()
+                        }
+                    }
+                } catch(error:Exception) {
+                    android.util.Log.w("xnotes.map.pair","Pair preparation cleanup failed",error)
+                } finally {
+                    if(generation==request) {opening=false;openOperation=null}
+                    onFinished(adopted)
+                }
+            }
+        }
+        work=pending;acceptedOpens+=pending
+        pending.invokeOnCompletion {acceptedOpens-=pending;if(work===pending) work=null}
+        pending.start();return true
+    }
+
     /** A successful synchronous handoff consumes incoming; every failure leaves it to its holder. */
     internal fun pushSource(origin:Entry,incoming:MapDocumentLease,title:String,bookmark:MapSourceReturnBookmark,
         departure:MapPresentationDeparture,parkingCheck:()->Boolean):SourcePushResult {
