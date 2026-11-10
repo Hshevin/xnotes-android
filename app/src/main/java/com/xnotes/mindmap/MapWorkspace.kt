@@ -15,8 +15,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
@@ -38,6 +42,7 @@ internal enum class MapWorkspaceFailure {UNAVAILABLE,CHANGED}
 /** Main-window document presentation. The existing broker remains the only map editing owner. */
 @MainThread
 internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
+    val splitPresentation=MapSplitPresentation()
     internal class Entry internal constructor(val uri:Uri,val title:String,val lease:MapDocumentLease,
         val presentation:MapPresentationState=MapPresentationState(),internal var parkingCheck:()->Boolean={true}) {
         val session get()=lease.session
@@ -76,7 +81,8 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     var failure by mutableStateOf<MapWorkspaceFailure?>(null);private set
 
     fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true},
-        operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={},flushNativeOnPresent:Boolean=true):Boolean {
+        operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={},flushNativeOnPresent:Boolean=true,
+        presentation:MapOpenPresentation=MapOpenPresentation.Single):Boolean {
         if(!active) return false
         val request=++generation
         work?.cancel();openOperation=operation;opening=true;failure=null
@@ -94,13 +100,13 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                     failure=MapWorkspaceFailure.UNAVAILABLE;return@launch
                 }
                 val ready=preparePresentation()
+                if(reused==null && visible && prior!=null && current===prior && prior.session.document!=null && !prior.session.canParkSourceNavigation) {
+                    failure=MapWorkspaceFailure.CHANGED;return@launch
+                }
                 // No suspension between the final physical-input proof and changing presentation.
                 if(!valid() || ready?.invoke()!=true) {
                     if(active && generation==request) failure=MapWorkspaceFailure.CHANGED
                     return@launch
-                }
-                if(reused==null && visible && prior!=null && current===prior && prior.session.document!=null && !prior.session.canParkSourceNavigation) {
-                    failure=MapWorkspaceFailure.CHANGED;return@launch
                 }
                 val next=reused ?: Entry(lease.uri,title,lease)
                 val replaced=if(reused==null) ownedEntries() else emptyList()
@@ -108,6 +114,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 visited[MapSaves.key(next.uri)]=next
                 next.parkingCheck=ready;next.flushNativeOnPresent=flushNativeOnPresent;next.skipNativePersistOnPresent=false
                 next.presentation.visible=true
+                splitPresentation.present(presentation)
                 current=next;visible=true;adopted=true
                 retire(replaced)
                 onPresented(next)
@@ -187,7 +194,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         !expected.session.hasUnconfirmedContent && !expected.session.closing && !expected.session.replacingDocument
     fun hide(expected:Entry):Boolean {
         if(!canHide(expected)) return false
-        cancelOpen();expected.presentation.visible=false;visible=false;return true
+        cancelOpen();splitPresentation.park();expected.presentation.visible=false;visible=false;return true
     }
     /** Real native callers re-prepare via open(); this fast path still checks its original proof. */
     fun show(expected:Entry):Boolean {
@@ -195,12 +202,37 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(!visible && !expected.parkingCheck()) {failure=MapWorkspaceFailure.CHANGED;return false}
         cancelOpen();expected.presentation.visible=true;visible=true;return true
     }
+    fun showSplit(expected:Entry,layout:MapSplitLayout):Boolean {
+        if(!active || current!==expected || !expected.lease.alive || !visible && !expected.parkingCheck() ||
+            !expected.session.canParkSourceNavigation) return false
+        cancelOpen();splitPresentation.present(MapOpenPresentation.Split(layout))
+        expected.presentation.visible=true;visible=true;return true
+    }
+    fun focusSplit(pane:com.xnotes.ui.Pane):Boolean {
+        val layout=splitPresentation.layout ?: return false
+        if(!active || pane!=layout.focusedPane && current?.session?.inkContact==true) return false
+        return splitPresentation.updateLayout {it.copy(focusedPane=pane)}
+    }
+    fun updateSplitLayout(transform:(MapSplitLayout)->MapSplitLayout):Boolean =
+        active && splitPresentation.updateLayout(transform)
+    fun removeSplitHome(mapPane:com.xnotes.ui.Pane):Boolean {
+        if(!active || current!=null || splitPresentation.layout?.mapPane!=mapPane) return false
+        cancelOpen();splitPresentation.clear();return true
+    }
     fun close(expected:Entry,preserveRecovery:Boolean=false):Job? {
+        return closeEntry(expected,preserveRecovery,keepSplit=false)
+    }
+    fun closeToHome(expected:Entry,preserveRecovery:Boolean=false):Job? {
+        if(splitPresentation.layout==null) return close(expected,preserveRecovery)
+        return closeEntry(expected,preserveRecovery,keepSplit=true)
+    }
+    private fun closeEntry(expected:Entry,preserveRecovery:Boolean,keepSplit:Boolean):Job? {
         if(!active || current!==expected) return null
         if(preserveRecovery && !expected.lease.hasOtherOwners &&
             (!expected.session.recoverySafe || !expected.session.canParkSourceNavigation)) return null
         val pending=acceptedOpens.toList();cancelOpen()
         val entries=ownedEntries();visited.clear();sourceFrames=emptyList();current=null;visible=false
+        if(!keepSplit) splitPresentation.clear()
         val released=retire(entries,expected.takeIf {preserveRecovery})+releases.toList()
         return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released.distinct().forEach {it.join()}}
     }
@@ -211,22 +243,35 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         hostBinding=null
         val pending=acceptedOpens.toList();work=null;pending.forEach {it.cancel()}
         val entries=ownedEntries();visited.clear();sourceFrames=emptyList();current=null;visible=false
+        splitPresentation.clear()
         val released=retire(entries)+releases.toList()
         return MapSaves.scope.launch {pending.forEach {it.cancelAndJoin()};released.distinct().forEach {it.join()}}.also {disposal=it}
     }
 }
+
+/** The main layout invokes this once, inside the actual map slot. */
+internal val LocalMapPaneContent=staticCompositionLocalOf<(@Composable ()->Unit)?> {null}
 
 /** Keep map pickers registered while its body is parked; never cover an on-top ink Surface. */
 @Composable
 internal fun MapWorkspaceHost(workspace:MapWorkspace,onClosed:(MapWorkspace.Entry)->Unit,
     hooks:((MapWorkspace.Entry)->MapHostHooks)?=null,nativeContent:@Composable ()->Unit) {
     val targetPicker=rememberSourceTargetPickerHost()
+    val latestClosed by rememberUpdatedState(onClosed)
+    val latestHooks by rememberUpdatedState(hooks)
+    val mapContent=remember(workspace) {movableContentOf {
+        workspace.current?.let {entry->key(entry) {
+            MindMapScreen(entry.session,entry.title,onClose={latestClosed(entry)},presentation=entry.presentation,
+                hostHooks=latestHooks?.invoke(entry))
+        }}
+    }}
     CompositionLocalProvider(LocalSourceTargetPickerHost provides targetPicker) {
     Box(Modifier.fillMaxSize()) {
-        if(!workspace.visible) nativeContent()
-        workspace.current?.let {entry->key(entry) {
-            MindMapScreen(entry.session,entry.title,onClose={onClosed(entry)},presentation=entry.presentation,hostHooks=hooks?.invoke(entry))
-        }}
+        val split=workspace.splitPresentation.layout!=null
+        CompositionLocalProvider(LocalMapPaneContent provides mapContent) {
+            if(split || !workspace.visible) nativeContent()
+            if(!split) mapContent()
+        }
         if(workspace.opening || workspace.visible && workspace.failure!=null) {
             Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
                 Row(Modifier.padding(Space.s8),horizontalArrangement=Arrangement.spacedBy(Space.s8),verticalAlignment=Alignment.CenterVertically) {
