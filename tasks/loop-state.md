@@ -1,11 +1,19 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，一Map＋分页核心 verified，整体仍 active。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，一Map＋分页核心、双选、Native替换及typed mixed显式保存／重开均verified并本地提交，整体仍active。
 工作树：/Users/kita/.codex/worktrees/mind-map-mixed-persistence/xnotes；分支 codex/mind-map-mixed-persistence。用户本轮再次明确要求基于当前树新建；从 pair-open 实际干净 HEAD d706ebd1104e34005bcb45f444243429f8551557 创建并 attach，新旧两树均保留。上一阶段87份日志/XML/输入及runner已复制至本树忽略tmp，逐文件SHA全等；更早证据仍在原树。迁移记录 tmp/worktree-mixed-migration-2026-11-10.json。新构建目录 /private/tmp/xnotes-mind-map-mixed-persistence-build 与项目缓存 /private/tmp/xnotes-mind-map-mixed-persistence-cache，独立于旧树。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：typed mixed 安排文件与存储（verified，已本地提交）
+## 当前阶段：S2 actual mixed 保存与显式打开（verified，已本地提交）
+
+S1完整本地提交a07fe380607d7c3b1cf7ee5174f8e65ffc29b5fa后干净继续。详细S2计划同阶段doc已独审PASS，双侧成功B actualSHA/final源票、双UUID唯一位置解析、recent claim/late-init/invalidexplicit、outer-holder取消/已发布事实验收均落实。44834统一RED59/34fail、1193unit范围输入同，是新接口占位/default旧路径适配，不冒称旧Main UI缺陷。81710编译scope遗漏0test/1263同；修Backstage Calls传递，独审源码Required闭合。22542相关50整suite385/3fail/1263同+AndroidSOURCE实际compile，三fail分别SourceVersion实例默认reference equality及两canonical路径比较，夹具逐scalar/physical path修，原发布重开断言保留。独立发现IO→Main取消覆盖gap，实际Main抽复用SplitPublicationAttempt且GateDispatcher直接测同helper，另case一次性/已发布事实。92280最后5整suite41全绿+三个compile实际执行，1265输入前后及当前SHA同；替换旧同4套39+新helper2，有效51套387唯一0fail/error/skip。所有临时stub已实现，独立源审/最终rawXML库存SHA/runner/init/新4资源key与双中文一致审核PASS，tmp/mixed-save-final-review.json。
+
+证据tmp/mixed-save-{red,related,green,final}各原始log/results/inputs/summary；有效汇总mixed-save-verified-summary.json与-final-inputs-verified.json。相对green只Main+两fixture变化、两helper/test新文件，Root/Native/Recent生产未为三fixture修改。所有作者冻结、已知Gradle作业终态，无用户待答。新Main Android4场景只源码compile，Android私有FS/系统/SAF/PDFium/Surface/GPU/MovinkPad Android15 ProPen3/性能均未运行；无APK/安装/推送/合并/发布。已按存储/Native/Map/UI本地提交1dc4a776／39ad1ced／ca5eb88d／87a422db／7e4d927d／2bb37d38，文档检查点随后提交，整体active/complete=false。
+
+下一S3：typed last presentation和recent分开，先prepare缓存与Map actor、再同步采用；未知legacy缓存不能用后读原件SHA授覆盖权，须sticky未核源保护与独立恢复另存。先读本阶段doc的S3说明与A既有只读设计，再写可验证计划并独审；不要为cold启用半套NativeWorkingSession producer。接着Map+Map/同图双视图、全局网络/原件库mixed返回及完整14组其他必需项。当前没有在途build，不重复跑已有效测试。
+
+## 已验证阶段：typed mixed 安排文件与存储（verified，已本地提交）
 
 上轮为progress：原生分屏替换已verified并提交d706ebd1。本轮按明确要求新树继续，整体目标不变。阶段计划 docs/movinkpad/mixed-split-persistence-2026-11-10.md 的S1已独审PASS：先统一v1/2与typed v3纯数据解析，以及私有新文件create-new发布；recent仅只读，不接Main/Editor/正文/cold。S2接实际两正文保存/原子打开前门，S3接cold工作副本与sticky未核源保护，均仍未完成。不能把Hint、缓存dirty=false或读取当前原件SHA当缓存正文的基线。
 
