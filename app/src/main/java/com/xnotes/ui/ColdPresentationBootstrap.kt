@@ -38,3 +38,10 @@ internal class ColdPresentationBootstrap {
     fun presented(value:LastPresentation) {completed=true;presentation=value;problem=null}
     fun clearProblem() {problem=null}
 }
+
+/** Front-door feedback; this does not grant a departure or bypass its final storage checks. */
+internal fun presentationEntryIssue(problem:ColdPresentationProblem?,mapVisible:Boolean=false):Int?=when {
+    problem==ColdPresentationProblem.INVALID->com.xnotes.R.string.last_presentation_open_blocked
+    mapVisible->com.xnotes.R.string.global_library_map_unsupported
+    else->null
+}

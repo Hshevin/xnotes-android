@@ -48,7 +48,19 @@ class ColdMainPresentationHostTest {
         lateinit var coordinator:ColdPresentationCoordinator
         lateinit var bootstrap:ColdPresentationBootstrap
         private var observer:Job?=null
-        private val store=LastPresentationStore(f.context.filesDir)
+        private val store=LastPresentationStore(f.context.filesDir,object:LastPresentationStore.FileOps {
+            override fun attributes(path:java.nio.file.Path):java.nio.file.attribute.BasicFileAttributes {
+                val actual=super.attributes(path)
+                return object:java.nio.file.attribute.BasicFileAttributes by actual {
+                    override fun creationTime()=actual.lastModifiedTime()
+                }
+            }
+            override fun openRead(path:java.nio.file.Path)=java.nio.file.Files.newInputStream(path)
+            override fun replace(stage:java.nio.file.Path,target:java.nio.file.Path) {
+                java.nio.file.Files.move(stage,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+            override fun deleteIfExists(path:java.nio.file.Path) {java.nio.file.Files.deleteIfExists(path)}
+        })
         init {
             val provider=object:ContentProvider() {
                 override fun onCreate()=true
@@ -75,7 +87,7 @@ class ColdMainPresentationHostTest {
             scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
             maps=MapWorkspace(f.context,scope);maps.bindHost(Any())
             bootstrap=ColdPresentationBootstrap()
-            coordinator=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+            coordinator=ColdPresentationCoordinator(f.editor,maps,bootstrap,store)
             coordinator.bindFrame {frame}
             val restored=coordinator.bootstrap()
             frame=ColdPresentationCoordinator.Frame(homePanes=(bootstrap.presentation as? LastPresentation.Native)?.slots
@@ -133,6 +145,70 @@ class ColdMainPresentationHostTest {
     private fun scenario(block:suspend (Host)->Unit)=runParkingScenario {f->
         val host=Host(f)
         try {block(host)} finally {withContext(NonCancellable+Dispatchers.Main) {host.finish()}}
+    }
+
+    @Test fun invalidLayoutBlocksDepartureAndTheFrontDoorExplainsTheRetainedRecord()=scenario {h->
+        val marker=File(h.f.context.filesDir,"last-presentation.json")
+        val bytes="{\"format\":\"xnotes-last-presentation\",\"version\":99,\"state\":\"home\"}".toByteArray()
+        marker.writeBytes(bytes)
+        assertFalse(h.attach(cold=true))
+        withContext(Dispatchers.Main) {
+            assertEquals(ColdPresentationProblem.INVALID,h.bootstrap.problem)
+            assertEquals(com.xnotes.R.string.last_presentation_open_blocked,presentationEntryIssue(h.bootstrap.problem))
+            assertEquals(com.xnotes.R.string.last_presentation_open_blocked,presentationEntryIssue(h.bootstrap.problem,mapVisible=true))
+            assertNull(h.coordinator.prepareDeparture {true})
+            assertFalse(h.maps.visible)
+        }
+        assertArrayEquals(bytes,marker.readBytes())
+    }
+
+    @Test fun visibleMapsHaveAnExplicitGlobalLibraryLimitWithoutBlockingOrdinaryMapReplacement() {
+        assertEquals(com.xnotes.R.string.global_library_map_unsupported,presentationEntryIssue(null,mapVisible=true))
+        assertNull(presentationEntryIssue(null))
+        assertNull(presentationEntryIssue(ColdPresentationProblem.UNAVAILABLE))
+    }
+
+    @Test fun homeCanOpenLibraryThenNetworkThenMapThroughTheActualDepartureCoordinator()=scenario {h->
+        h.attach()
+        val binding=Any()
+        val networks=FileNetworkWorkspace(h.f.context,h.scope)
+        val library=OriginalPdfLibraryState(h.f.context,h.scope)
+        lateinit var network:LocalNetworkCoordinator
+        val original=h.file.readBytes()
+        try {
+            withContext(Dispatchers.Main) {
+                h.maps.bindHost(binding);networks.bindHost(binding)
+                assertTrue(presentOriginalPdfLibrary(h.f.editor,library,prepareParking={valid->
+                    h.coordinator.checkpointOutgoing(valid,localOnly=true)?.let {proof->({proof.current()})}
+                }) {true})
+                assertTrue(library.visible)
+                library.close()
+                network=LocalNetworkCoordinator(h.f.editor,h.maps,networks,binding,h.scope,prepareParking={valid->
+                    h.coordinator.checkpointOutgoing(valid)?.let {proof->({proof.current()})}
+                })
+                assertTrue(network.openLibrary(requireNotNull(LibraryNetworkLaunchRequest.capture("Library",emptyList()) {true})))
+            }
+            h.waitFor {networks.visible && !network.busy}
+            withContext(Dispatchers.Main) {assertTrue(network.close(requireNotNull(networks.current)))}
+            h.waitFor {!networks.visible && !network.busy}
+            val opened=CompletableDeferred<Boolean>()
+            withContext(Dispatchers.Main) {
+                assertTrue(h.maps.open(h.uri,"Map",preparePresentation={
+                    h.coordinator.checkpointOutgoing({true})?.let {checkpoint->
+                        h.f.editor.awaitMapSourceParking()?.let {parking->({checkpoint.current() && parking.current()})}
+                    }
+                },onFinished={opened.complete(it)}))
+            }
+            h.waitFor {opened.isCompleted}
+            assertTrue(opened.await())
+            withContext(Dispatchers.Main) {
+                assertTrue(h.maps.visible)
+                assertEquals(h.document,h.maps.current!!.session.document)
+            }
+            assertArrayEquals(original,h.file.readBytes())
+        } finally {withContext(Dispatchers.Main) {
+            library.dispose();networks.dispose()
+        }}
     }
 
     @Test fun changingOnlyViewOverridesPublishesTheNewColdRestoreView()=scenario {h->

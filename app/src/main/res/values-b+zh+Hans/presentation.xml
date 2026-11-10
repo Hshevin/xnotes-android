@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="last_presentation_open_blocked">上次工作区记录损坏或版本不受支持。请先查看恢复资料，再使用“重置工作区记录”后打开。记录已保留。</string>
+    <string name="global_library_map_unsupported">显示思维导图时暂不支持打开此库，请先关闭思维导图。</string>
+
     <string name="last_presentation_invalid">无法读取上次的工作区记录。恢复资料已保留。</string>
     <string name="last_presentation_unavailable">无法恢复上次的工作区。恢复资料已保留。</string>
     <string name="last_presentation_retry">重试</string>

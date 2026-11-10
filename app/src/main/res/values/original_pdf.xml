@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="original_pdf_library_open_failed">Could not open the original PDF library. Your current workspace was kept. Please try again.</string>
     <string name="original_pdf_library_title">Original PDFs</string>
     <string name="original_pdf_library_notice">Retained originals remain available when annotation notes are deleted. Removing an original here keeps references and their last previews.</string>
     <string name="original_pdf_backup_notice">A map copy does not include these PDFs or the information needed to restore their references. Full reference backup is not available yet.</string>

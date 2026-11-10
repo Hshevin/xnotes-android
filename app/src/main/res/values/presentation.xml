@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="last_presentation_open_blocked">The last workspace record is damaged or uses an unsupported version. Check the recovery files, then use “Reset workspace record” before opening. The record has been kept.</string>
+    <string name="global_library_map_unsupported">This library cannot open while a mind map is displayed. Close the mind map first.</string>
+
     <string name="last_presentation_invalid">The last workspace record cannot be read. Your recovery files have been kept.</string>
     <string name="last_presentation_unavailable">The last workspace could not be restored. Your recovery files have been kept.</string>
     <string name="last_presentation_retry">Retry</string>

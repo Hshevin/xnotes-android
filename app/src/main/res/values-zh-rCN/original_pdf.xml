@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="original_pdf_library_open_failed">无法打开原 PDF 原件库，已保留当前工作区。请重试。</string>
     <string name="original_pdf_library_title">原 PDF 原件库</string>
     <string name="original_pdf_library_notice">保留的原文不随批注笔记删除。在此删除原文后，图中的引用和最后预览仍保留。</string>
     <string name="original_pdf_backup_notice">导图副本不包含这些原 PDF 及恢复引用所需的资料，完整引用备份尚未提供。</string>

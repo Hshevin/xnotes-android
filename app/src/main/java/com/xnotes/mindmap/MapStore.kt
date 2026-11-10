@@ -11,7 +11,6 @@ import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption.READ
 import java.nio.file.attribute.BasicFileAttributes
-import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 
 interface MapTarget {
@@ -22,7 +21,10 @@ class MapConflict : IOException()
 internal class MapRecoveryObservationException(message:String,cause:Throwable?=null):IOException(message,cause)
 
 /** Caller serializes operations. A durable private journal precedes every external write. */
-class MapStore(directory: File, key: String, private val target: MapTarget, legacyKeys:Set<String> = emptySet()) {
+class MapStore internal constructor(directory: File, key: String, private val target: MapTarget, legacyKeys:Set<String>,
+    private val attributes:(File)->BasicFileAttributes) {
+    constructor(directory:File,key:String,target:MapTarget,legacyKeys:Set<String> = emptySet()):
+        this(directory,key,target,legacyKeys,{Files.readAttributes(it.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)})
     internal val recoveryKeys:Set<String> = java.util.Collections.unmodifiableSet(linkedSetOf(key).apply {addAll(legacyKeys)})
     private val journals=recoveryKeys.map {File(directory,hash(it.toByteArray())+".json")}
     private var journal=journals.first()
@@ -30,7 +32,8 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     @Volatile var journalReady = false; private set
     /** Actual raw bytes observed by open(), independent of the recovery writer's baseline. */
     @Volatile internal var openedRawSha256:String?=null;private set
-    internal data class JournalFingerprint(val key:Any?,val created:FileTime,val size:Long,val sha256:String)
+    // File identity survives our writes; the body digest detects changes independently.
+    internal data class JournalFingerprint(val key:Any,val size:Long,val sha256:String)
     internal data class JournalHead(val exists:Boolean,val fingerprint:JournalFingerprint?)
     /** Actual first-read bytes plus only the deterministic reconciliation performed by this open. */
     internal class RecoveryLoadProof internal constructor(
@@ -263,7 +266,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         val staging=staging(journal)
         checkActive()
         if(!staging.createNewFile()) throw IOException("Unfinished recovery checkpoint")
-        val owned=Files.readAttributes(staging.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+        val owned=attributes(staging)
         var synced=false
         try {
             FileOutputStream(staging).use {out->
@@ -271,7 +274,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
                 while(offset<data.size) {checkActive();val count=minOf(8192,data.size-offset);out.write(data,offset,count);offset+=count}
                 out.fd.sync();synced=true
             }
-            val expected=knownHeads?.let {JournalHead(true,JournalFingerprint(owned.fileKey(),owned.creationTime(),data.size.toLong(),hash(data)))}
+            val expected=knownHeads?.let {JournalHead(true,JournalFingerprint(requireNotNull(owned.fileKey()),data.size.toLong(),hash(data)))}
             if(expected!=null && readJournal(staging,checkActive,decode=false).head!=expected)
                 throw MapRecoveryObservationException("Checkpoint stage changed")
             Files.move(staging.toPath(), journal.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
@@ -320,25 +323,25 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         return readJournal(file,checkActive,readBytes=readBytes).checkpoint
     }
     private fun sameFile(file:File,expected:BasicFileAttributes):Boolean=try {
-        val actual=Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
-        actual.isRegularFile && actual.fileKey()==expected.fileKey() && actual.creationTime()==expected.creationTime()
+        val actual=attributes(file)
+        actual.isRegularFile && expected.fileKey()!=null && actual.fileKey()==expected.fileKey()
     } catch(_:Exception) {false}
     private fun readJournal(file:File,checkActive:()->Unit,decode:Boolean=true,readBytes:(Int)->Unit={}):JournalRead {
         checkActive()
-        val before=try {Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)}
+        val before=try {attributes(file)}
             catch(_:NoSuchFileException) {return JournalRead(null,absentHead)}
-        if(!before.isRegularFile) throw MapRecoveryObservationException("Recovery checkpoint is not a regular file")
+        if(!before.isRegularFile || before.fileKey()==null) throw MapRecoveryObservationException("Recovery checkpoint is not a regular file")
         if(before.size()>MapCodec.MAX_BYTES) return JournalRead(null,JournalHead(true,null))
         val bytes=Files.newInputStream(file.toPath(),READ,NOFOLLOW_LINKS).use {input->MapCodec.readBytes(object:FilterInputStream(input) {
             override fun read():Int {checkActive();return super.read().also {if(it>=0) readBytes(1)}}
             override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length).also {if(it>0) readBytes(it)}}
         })}
         checkActive()
-        val after=Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
-        if(!after.isRegularFile || before.fileKey()!=after.fileKey() || before.creationTime()!=after.creationTime() ||
+        val after=attributes(file)
+        if(!after.isRegularFile || before.fileKey()!=after.fileKey() ||
             before.size()!=after.size() || bytes.size.toLong()!=after.size() || before.lastModifiedTime()!=after.lastModifiedTime())
             throw MapRecoveryObservationException("Recovery checkpoint changed while reading")
-        val head=JournalHead(true,JournalFingerprint(after.fileKey(),after.creationTime(),bytes.size.toLong(),hash(bytes)))
+        val head=JournalHead(true,JournalFingerprint(requireNotNull(after.fileKey()),bytes.size.toLong(),hash(bytes)))
         if(!decode) return JournalRead(null,head)
         val checkpoint=try {
             val j=JSONObject(String(bytes,Charsets.UTF_8))

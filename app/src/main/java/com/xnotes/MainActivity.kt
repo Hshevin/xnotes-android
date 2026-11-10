@@ -1672,20 +1672,28 @@ private fun EditorScreen(
 
     var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
     fun openOriginalLibrary() {
+        com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)?.let {
+            editor.message=context.getString(it);return
+        }
         if(originalLibraryLaunch!=null || originalLibrary.visible || originals.current!=null || maps.visible || networks.visible) return
         coldPresentation?.retireIntent()
         val launch=Any();originalLibraryLaunch=launch
         val current=captureMapHost()
         scope.launch {
             try {
-                presentOriginalPdfLibrary(editor,originalLibrary,prepareParking=::prepareSourceParking,intentAlreadyAccepted=true) {
+                val shown=presentOriginalPdfLibrary(editor,originalLibrary,prepareParking=::prepareSourceParking,intentAlreadyAccepted=true) {
                     originalLibraryLaunch===launch && current() && originals.current==null && !maps.visible && !networks.visible
                 }
+                if(!shown && originalLibraryLaunch===launch && current() && editor.message==null)
+                    editor.message=context.getString(R.string.original_pdf_library_open_failed)
             } finally {if(originalLibraryLaunch===launch) originalLibraryLaunch=null}
         }
     }
 
     fun openMap(uri:String,title:String=stemOf(uri),flushNativeOnPresent:Boolean=true,requestedPane:Editor?=null) {
+        com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem)?.let {
+            editor.message=context.getString(it);return
+        }
         if(!maps.isHostCurrent(mapBinding) || originals.current!=null || originalLibrary.visible) return
         val layout=maps.splitPresentation.layout
         if(requestedPane!=null) {
@@ -2198,7 +2206,9 @@ private fun EditorScreen(
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
                 onOpenOriginalPdfs = ::openOriginalLibrary,
                 onOpenNetwork = {
-                    if(!networkCoordinator.busy) {
+                    val issue=com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)
+                    if(issue!=null) editor.message=context.getString(issue)
+                    else if(!networkCoordinator.busy) {
                         val request=com.xnotes.mindmap.LibraryNetworkLaunchRequest.capture(
                             context.getString(R.string.network_library_title),editor.workspaceRoots(),captureMapHost())
                         libraryNetworkLaunch=request

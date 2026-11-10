@@ -49,6 +49,7 @@
 
 - 运行相关单元测试与 Android 事件测试。模拟器或 JVM 结果不代表目标设备兼容；硬件验收单独记录设备、系统版本、笔型号和结果。
 - 平台行为不同的回归（如 Android `org.json` 与 JVM 测试依赖对 `JSONObject.NULL` 的处理差异）需保留仪器测试，不能用 JVM 结果替代。
+- 文件实体身份与内容版本分开验证；不得把 `creationTime` 当跨平台稳定身份（Android 可能回退为 mtime）。存储发布须保留 Android 实际文件系统测试，覆盖自身创建／写入／替换及失败清理；Robolectric 的 SDK 配置不能证明主机 NIO 与 Android 行为相同。
 - 涉及前缓冲、Surface 重挂或 GPU 的显示修复，区分源码验证与目标 GPU 真机验证。
 - 未运行的验证明确标记，不宣称通过。
 

@@ -14,7 +14,6 @@ import java.nio.file.StandardOpenOption.CREATE_NEW
 import java.nio.file.StandardOpenOption.READ
 import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.BasicFileAttributes
-import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -36,6 +35,7 @@ internal class LastPresentationObservation internal constructor(
 internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=SystemFileOps) {
     internal class Ticket internal constructor(internal val root:Any,internal val epoch:Any)
     internal interface FileOps {
+        fun attributes(path:Path):BasicFileAttributes = Files.readAttributes(path,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
         fun openRead(path:Path):InputStream
         fun replace(stage:Path,target:Path)
         fun deleteIfExists(path:Path)
@@ -51,7 +51,9 @@ internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=S
         val gate=Any()
         val intent=AtomicReference(Intent())
     }
-    private data class Identity(val key:Any,val created:FileTime)
+    // Android may report mtime as creationTime; our own writes must not replace identity.
+    // Content freshness is checked separately by size/hash and before/after read timestamps.
+    private data class Identity(val key:Any)
     private data class Fingerprint(val identity:Identity?,val size:Long,val sha256:String?)
     private data class Head(val read:LastPresentationRead,val fingerprint:Fingerprint?)
     internal abstract class Candidate {
@@ -193,7 +195,7 @@ internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=S
     private fun fingerprint(path:Path):Fingerprint? = try {readFile(path)?.first} catch(_:Exception) {null}
     private fun readFile(path:Path):Pair<Fingerprint,ByteArray>? {
         if(!rootCurrent() || path.parent!=directory || path.toFile().canonicalFile.toPath()!=path) return null
-        val attributes=Files.readAttributes(path,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+        val attributes=fileOps.attributes(path)
         val id=identity(attributes) ?: return null
         if(!attributes.isRegularFile || attributes.size() !in 0..LastPresentationCodec.MAX_BYTES.toLong()) return null
         val bytes=fileOps.openRead(path).use {input->
@@ -212,20 +214,21 @@ internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=S
             }
             output.toByteArray()
         }
-        val after=Files.readAttributes(path,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+        val after=fileOps.attributes(path)
         if(!after.isRegularFile || identity(after)!=id || after.size()!=attributes.size() || bytes.size.toLong()!=after.size() ||
             attributes.lastModifiedTime()!=after.lastModifiedTime() || !rootCurrent()) return null
         return Fingerprint(id,bytes.size.toLong(),hash(bytes)) to bytes
     }
 
+    private fun identity(attributes:BasicFileAttributes):Identity?=attributes.fileKey()?.let {Identity(it)}
+    private fun identity(path:Path,directory:Boolean=false):Identity? = try {
+        val attributes=fileOps.attributes(path)
+        if(if(directory) attributes.isDirectory else attributes.isRegularFile) identity(attributes) else null
+    } catch(_:Exception) {null}
+
     private companion object {
         val roots=ConcurrentHashMap<String,Root>()
         val absent=Fingerprint(null,0,null)
         fun hash(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}
-        fun identity(attributes:BasicFileAttributes):Identity?=attributes.fileKey()?.let {Identity(it,attributes.creationTime())}
-        fun identity(path:Path,directory:Boolean=false):Identity? = try {
-            val attributes=Files.readAttributes(path,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
-            if(if(directory) attributes.isDirectory else attributes.isRegularFile) identity(attributes) else null
-        } catch(_:Exception) {null}
     }
 }
