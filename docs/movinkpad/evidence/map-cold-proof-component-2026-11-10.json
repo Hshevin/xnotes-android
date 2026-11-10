@@ -1,0 +1,104 @@
+{
+  "stage": "S3b Map cold proof component only",
+  "base": "e452fb2f",
+  "validationPrefix": "tmp/cold-bootstrap-components",
+  "fullRunExit": 1,
+  "fullRunFailures": 3,
+  "selectedCases": [
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "readableForeignRawCannotBeHiddenByOwnRecovery"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "proofUsesTheActualRawAndJournalAndRejectsLaterSameLengthBytes"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "ownPendingJournalCanPrepareWhileRawIsUnavailable"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "laterNonwinningCheckpointAndSameByteReplacementBothInvalidateTheProof"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "foreignPublishedCheckpointHiddenByOwnPendingIsRejectedBeforePromotion"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "normalizingAnAlreadyWrittenPendingCannotRebindToLaterRawBytes"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "incompleteStageCleanupAndAlreadyWrittenCheckpointBothHaveUsableDerivedProofs"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "aNormalActorCannotLaunderTheForeignPublishedUuidItAlreadyPromotedOver"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "cancellationOfTheFinalReadonlyProofLeavesAllRecoveryBytesAlone"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdLoadProofTest",
+      "name": "ownCompleteStageIsPromotedAndTheProofTracksOnlyThatKnownMove"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdAccessTest",
+      "name": "aChangedJournalCannotBeAdoptedAsTheOldActorsOriginalRecovery"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdAccessTest",
+      "name": "cancellationDuringTheFinalProviderReadOnlyReleasesThisPreparationsLease"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdAccessTest",
+      "name": "ordinaryColdOpenTransfersTheCanonicalLeaseOnlyAfterFinalRead"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdAccessTest",
+      "name": "anUnadoptedColdLeaseCannotReleaseAnotherOwnerOrRebaseItsLoadedRaw"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapColdAccessTest",
+      "name": "itsOwnPendingJournalCanRestoreWhenTheRawIsMissingWithoutRecreatingIt"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "providerWriteFailureStillReturnsTheActualLatestLocalJournalTicketWithoutRetryingIt"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "failedLocalJournalNeverReturnsATicketOrTouchesTheOriginal"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "aNewBodyOrAcceptedSaveImmediatelyRetiresTheOldActualTicket"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "cleanBodyRequiresAnActualDurableReadAndNeverWritesTheOriginal"
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "checkpointWaitsForTheActualAcceptedSaveAndDoesNotIssueAnotherOriginalWrite"
+    }
+  ],
+  "selectedUniqueTests": 20,
+  "selectedFailures": 0,
+  "sourceInputs": {
+    "app/src/main/java/com/xnotes/mindmap/MapColdAccess.kt": "05bb65e2b7bfef334a2f08e9fa43b52d29dd3535c7f88c3a8d16fca703327c35",
+    "app/src/main/java/com/xnotes/mindmap/MapStore.kt": "16e11e92deb9b0c91f30b03c9f5ae401e78efb622818fb86531aa71f71b2eda8",
+    "app/src/main/java/com/xnotes/mindmap/MapSession.kt": "8741ab65fbdab41b8ff362acb4a548eeed321c2bf6c84d91a5ab14ce47dc5bad",
+    "app/src/main/java/com/xnotes/mindmap/MapDocuments.kt": "6966e50293640e6f7e9806a86aa4cc079ec6480a35f8b8209405cec748e8578e",
+    "app/src/test/java/com/xnotes/mindmap/MapColdLoadProofTest.kt": "def3394f3956ac89e763615eac6716be1e93c4d2a5948d484e924b1971fd22ad",
+    "app/src/test/java/com/xnotes/mindmap/MapColdAccessTest.kt": "a1f602165003459cbce07bd34051d2e795a3af48833b17b42a9578441ec6fc35",
+    "app/src/test/java/com/xnotes/mindmap/MapRecoveryCheckpointTest.kt": "5e8e4758c278771e3ef2e693659b121b679e0c6dacc2f51f713221122f2bd107"
+  },
+  "allRunInputsUnchanged": true,
+  "fullRunInputCount": 1346,
+  "independentSourceReview": "cold_components_source_review: no Required in scoped Map/Canvas/Last source; no runtime verification",
+  "boundary": "Other Editor/Main S3b integration remains in progress; no APK, install, push, merge or release. Android/device/process-kill not executed."
+}

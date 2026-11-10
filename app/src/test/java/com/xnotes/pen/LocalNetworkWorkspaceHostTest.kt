@@ -150,6 +150,9 @@ class LocalNetworkWorkspaceHostTest {
             assertSame(model,f.native.editor.state.document);assertFalse(f.native.editor.noteOpen)
             f.panel=false // Only the initial composition depends on the homepage request.
             assertTrue(f.networks.current(f.binding,entry));assertTrue(f.coordinator.close(entry))
+        }
+        f.await {!f.coordinator.busy}
+        withContext(Dispatchers.Main) {
             assertFalse(f.networks.visible);assertFalse(f.native.editor.noteOpen)
         }
         assertEquals(0,f.native.writes.get())

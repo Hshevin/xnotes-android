@@ -84,20 +84,23 @@ internal class OriginalPdfWorkspace(context:Context,private val scope:CoroutineS
         if(visible) resumeRequested=true
         visible=false;host=null;return true
     }
-    internal fun admit(binding:Any,read:OriginalPdfAccess.Read,returnTo:Return):Entry? {
+    internal fun admit(binding:Any,read:OriginalPdfAccess.Read,returnTo:Return,beforeAdopt:()->Boolean={true}):Entry? {
         if(!isHostCurrent(binding) || visible || !read.current()) return null
+        if(!beforeAdopt()) return null
         val previous=current
         val next=Entry(read,returnTo)
         current=next;visible=true;resumeRequested=false
         previous?.retire()
         return next
     }
-    internal fun show(binding:Any,entry:Entry):Boolean {
+    internal fun show(binding:Any,entry:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!current(binding,entry)) return false
+        if(!beforeAdopt()) return false
         visible=true;resumeRequested=false;return true
     }
-    internal fun close(binding:Any,entry:Entry):Boolean {
+    internal fun close(binding:Any,entry:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!isHostCurrent(binding) || current!==entry) return false
+        if(!beforeAdopt()) return false
         current=null;visible=false;resumeRequested=false;entry.retire();return true
     }
     fun dispose():Job {

@@ -21,6 +21,8 @@ internal class CanvasRegionCopyAttempt(val uri:String,val name:String,val intent
     val capturedRevision:Long,val identity:BundleIdentity) {
     var pending:com.xnotes.storage.NativeCreationPending?=null
     var published:com.xnotes.storage.NativeSourceVersion?=null
+    var recordingEvidence:com.xnotes.format.RecordingBodyEvidence?=null
+    var recordingPublication:AudioRecovery.Published?=null
 }
 
 /** One fixed world rectangle on one actual Canvas owner; it never retains selected objects. */

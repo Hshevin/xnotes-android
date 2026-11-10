@@ -74,38 +74,12 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
     }
 
     /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
-    fun saveChecked(document:Document?,metadata:Metadata):LegacySessionWrite=runCatching {
-        LegacySessionBodyCandidates.cleanup(dir)
-        if(document==null) {
-            if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
-            if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
-        } else {
-            check(dir.isDirectory || dir.mkdirs())
-            val candidate=LegacySessionBodyCandidates.create(dir,"document-",".xnote.tmp")
-            try {
-                FileOutputStream(candidate.file).use {output->
-                    codec.write(document,object:FilterOutputStream(output) {
-                        override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
-                        override fun close() {flush()}
-                    })
-                    output.fd.sync()
-                }
-                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
-            } finally {candidate.close()}
-        }
-        val m=with(metadata) {
-            val m = JSONObject()
-                .put("dirty", dirty)
-                .put("zoom", zoom)
-                .put("scrollX", scrollX)
-                .put("scrollY", scrollY)
-                .put("zoomLocked", zoomLocked)
-            path?.let {m.put("path",it)}
-            displayName?.let {m.put("displayName",it)}
-            ViewOverridesJson.write(m,viewOverrides)
-        }
-        if(meta.writeChecked(m)) LegacySessionWrite.SAVED else LegacySessionWrite.FAILED
-    }.getOrDefault(LegacySessionWrite.FAILED)
+    internal fun prepareMutation(document:Document?,metadata:Metadata):PreparedLegacySessionMutation=
+        PreparedLegacySessionMutation.prepareNote(dir,codec,document,metadata)
+
+    /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
+    fun saveChecked(document:Document?,metadata:Metadata):LegacySessionWrite=
+        publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareNote(dir,codec,document,metadata,clearCanvas=false)}.legacyWrite()
 
     /** Discard any saved session (document + sidecar), so the next launch restores nothing.
      *  Used when the app is left with no note open, so a closed note isn't kept on disk. */
@@ -114,11 +88,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
     }
 
     /** Keep the sidecar when the body cannot be removed, so a failed clear does not detach it. */
-    fun clearChecked():Boolean=runCatching {
-        Files.deleteIfExists(docFile.toPath())
-        Files.deleteIfExists(metaFile.toPath())
-        true
-    }.getOrDefault(false)
+    fun clearChecked():Boolean=publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareNoteClear(dir)} is LegacyMutationResult.Published
 
     /** Load the saved session, or null when there is none or it can't be read. */
     fun load(): Snapshot? {
@@ -161,12 +131,22 @@ internal object LegacySessionBodyCandidates {
     }
 
     class Candidate internal constructor(val file:File,private val key:String):AutoCloseable {
+        private val identity=Files.readAttributes(file.toPath(),java.nio.file.attribute.BasicFileAttributes::class.java,
+            java.nio.file.LinkOption.NOFOLLOW_LINKS).fileKey()
         private var closed=false
+        internal fun ownsFile():Boolean=runCatching {
+            val actual=Files.readAttributes(file.toPath(),java.nio.file.attribute.BasicFileAttributes::class.java,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)
+            actual.isRegularFile && identity!=null && actual.fileKey()==identity
+        }.getOrDefault(false)
+        /** Releasing registration must never delete a foreign replacement at this pathname. */
+        internal fun unregister()=synchronized(gate) {if(!closed) {closed=true;active.remove(key)};Unit}
         override fun close()=synchronized(gate) {
             if(!closed) {
                 closed=true
-                try {file.delete()} finally {active.remove(key)}
+                try {if(ownsFile()) Files.deleteIfExists(file.toPath())} finally {active.remove(key)}
             }
+            Unit
         }
     }
 }

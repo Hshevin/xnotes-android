@@ -2130,6 +2130,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override fun freshRecordingId(): Int = com.xnotes.core.audio.RecordingIds.next(document.items)
 
+    /** The paged owner supplies its actual session lease and adoption guard. */
+    internal var recordingRecoveryTargetProvider:(()->RecordingRecoveryTarget?)?=null
+    override fun recordingRecoveryTarget():RecordingRecoveryTarget? {
+        recordingRecoveryTargetProvider?.let {return it()}
+        val model=document;val id=model.identity.documentId
+        return RecordingRecoveryTarget(this,model,model.snapshotOwnerToken,com.xnotes.core.util.DocumentKind.CANVAS,id,
+            setOf(recordingKey),recordingDir,recordingTitle,
+            {document===model && model.identity.documentId==id},
+            {rid->model.items.filterIsInstance<com.xnotes.core.model.AudioItem>().filter {it.rid==rid}},
+            {item->model.containsRef(item)})
+    }
+
     override fun placeRecording(audio: com.xnotes.core.model.AudioData, name: String, rid: Int) = placeAudio(audio, name, rid)
 
     override fun recordingMoved(item: com.xnotes.core.model.AudioItem, audio: com.xnotes.core.model.AudioData) {
@@ -2142,14 +2154,16 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Place recordings a crash left behind for this canvas, once it has a size to place them in the middle of. */
     fun recoverRecordings(fromSession: Boolean, tries: Int = 0) {
-        mainHandler.postDelayed({
-            if (view.width <= 0 || view.height <= 0) {
-                if (tries < 40) recoverRecordings(fromSession, tries + 1)
-                return@postDelayed
-            }
-            val keys = listOfNotNull(document.path?.let { "canvas|$it" }, "canvas-session".takeIf { fromSession })
-            AudioRecording.recover(this, keys)
-        }, 250L)
+        val captured=recordingRecoveryTarget() ?: return
+        val target=captured.withKeys(captured.keys+listOfNotNull("canvas-session".takeIf {fromSession}))
+        fun retry(attempt:Int) {
+            mainHandler.postDelayed({
+                if(!target.isCurrent()) return@postDelayed
+                if(view.width<=0 || view.height<=0) {if(attempt<40) retry(attempt+1);return@postDelayed}
+                AudioRecording.recover(target)
+            },250L)
+        }
+        retry(tries)
     }
 
     override fun recordingMessage(text: String, action: Pair<String, () -> Unit>?) {
@@ -2838,6 +2852,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.publish()
     }
 
+    internal var onPresentationViewChanged:(()->Unit)?=null
     private fun onViewChanged() {
         if (screenshotMenu != null) screenshotMenu = interaction.captureRect?.let { viewport.contentToViewport(it) }
         toolOverlay.invalidate()
@@ -2850,6 +2865,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         refreshSelectionMenu()
         // The minimap maps everything drawn, so its extent moves with the content, not the view.
         view.contentBounds = document.contentBounds()
+        onPresentationViewChanged?.invoke()
     }
 
     fun refreshTitle() {

@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +45,7 @@ internal fun InsertButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val recording = AudioRecording.session
+    val context=LocalContext.current
     Box {
         ToolbarIcon(XnotesIcons.paperclip, stringResource(R.string.insert), active = expanded) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -63,8 +65,12 @@ internal fun InsertButton(
                 },
             ) { expanded = false; onRecord() }
             InsertMenuRow(XnotesIcons.music, stringResource(R.string.audio_from_file)) { expanded = false; onAudioFromFile() }
+            InsertMenuRow(XnotesIcons.mic,stringResource(R.string.recording_recovery_title)) {
+                expanded=false;AudioRecovery.init(context);AudioRecovery.open(owner)
+            }
         }
         popups()
+        RecordingRecoveryDialog(owner)
     }
     val playback = AudioPlayback.session
     when {

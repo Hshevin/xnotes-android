@@ -23,6 +23,8 @@ import kotlin.math.sqrt
 
 /** What a recording needs from the editor it was started in. */
 interface RecordOwner {
+    /** Exact current adoption for work that may finish after the document is replaced. */
+    fun recordingRecoveryTarget(): RecordingRecoveryTarget? = null
     /** A recording id nothing in this editor's document uses yet. */
     fun freshRecordingId(): Int
 
@@ -57,6 +59,8 @@ interface AudioHost : AudioOwner, RecordOwner
 object AudioRecording {
 
     class Session(val owner: RecordOwner, val rid: Int, val name: String, val file: File) {
+        internal val target=owner.recordingRecoveryTarget()
+        internal var recoveryId:String?=null
         /** Recorded seconds, for the chip; it changes once a second. */
         var seconds by mutableIntStateOf(0)
             internal set
@@ -92,13 +96,15 @@ object AudioRecording {
     /** How long a discarded recording can still be had back. */
     private const val UNDO_MS = 15_000L
 
-    /** A recording left behind whose note never opened again is let go after this long. */
-    private const val KEEP_LEFT_MS = 30L * 24 * 60 * 60 * 1000
-
     private var app: Context? = null
     private var recorder: AudioRecorder? = null
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "audio-remux") }
+    internal var recoveryExecutor:java.util.concurrent.Executor=worker
+    internal var readDuration:(File)->Int?=AudioFiles::durationOf
+    internal var remux:(File,File)->Boolean=AudioRemux::toM4a
+    internal var readPeaks:(File,Int,((ByteArray?)->Unit))->Unit=com.xnotes.platform.AudioPeaks::readLater
+    private val recovering=hashSetOf<String>()
     private var ticks = 0
     private var discarded: Session? = null
     private val forget = Runnable { dropDiscarded() }
@@ -123,12 +129,16 @@ object AudioRecording {
 
     fun init(context: Context) {
         app = context.applicationContext
-        val cutoff = System.currentTimeMillis() - KEEP_LEFT_MS
-        for (f in dir(context).listFiles().orEmpty()) if (f.lastModified() < cutoff) f.delete()
+        AudioRecovery.init(context)
     }
 
     /** Where recordings in progress are written; nothing else lives there. */
     fun dir(context: Context): File = File(context.filesDir, "recordings").apply { mkdirs() }
+    internal fun newRecordingFile(context:Context,now:Long):File=File.createTempFile("rec-$now-",".aac",dir(context))
+    internal fun recoveryFileProtected(file:File):Boolean {
+        val key=file.canonicalPath
+        return session?.file?.canonicalPath==key || discarded?.file?.canonicalPath==key
+    }
 
     /** Start recording for [owner]. False, with a message, when the microphone cannot be had. */
     fun start(owner: RecordOwner): Boolean {
@@ -137,7 +147,9 @@ object AudioRecording {
         AudioPlayback.close()
         dropDiscarded()
         val now = System.currentTimeMillis()
-        val file = File(dir(ctx), "rec-$now.aac")
+        val file = runCatching {newRecordingFile(ctx,now)}.getOrNull() ?: run {
+            owner.recordingMessage(ctx.getString(R.string.err_record_failed));return false
+        }
         val r = AudioRecorder(ctx, file)
         if (!r.start()) {
             file.delete()
@@ -146,8 +158,14 @@ object AudioRecording {
         }
         recorder = r
         val s = Session(owner, owner.freshRecordingId(), defaultName(ctx, now), file)
+        if(s.target?.isCurrent()!=true || !writeSidecar(s, owner.recordingKey)) {
+            r.stop();recorder=null
+            // A failed initial journal may leave useful AAC bytes: the recovery menu lists orphans.
+            if(file.length()==0L) file.delete()
+            owner.recordingMessage(ctx.getString(R.string.err_record_failed))
+            return false
+        }
         session = s
-        writeSidecar(s, owner.recordingKey)
         ticks = 0
         RecordingService.start(ctx)
         main.removeCallbacks(tick)
@@ -200,8 +218,8 @@ object AudioRecording {
     fun discard() {
         val s = end() ?: return
         dropDiscarded()
-        // Not found again after a crash: it was thrown away, the file only waits for Undo.
-        sidecarOf(s.file).delete()
+        // The raw file is reserved for Undo; recovery cannot claim it during this window.
+        recoveryCandidate(s)?.let {AudioRecovery.store?.discardMetadata(it)}
         discarded = s
         main.postDelayed(forget, UNDO_MS)
         val ctx = app ?: return
@@ -216,7 +234,7 @@ object AudioRecording {
     /** The moment an item [owner] adds now is given: while it records there and is not paused. */
     fun markFor(owner: RecordOwner): com.xnotes.core.model.SyncMark? {
         val s = session ?: return null
-        if (s.owner !== owner || s.paused) return null
+        if (s.owner !== owner || s.paused || s.target?.isCurrent()!=true) return null
         return com.xnotes.core.model.SyncMark(s.rid, s.elapsedMs().coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
     }
 
@@ -239,10 +257,18 @@ object AudioRecording {
         discarded = null
         if (session != null) return dropFile(s)
         val ctx = app ?: return
+        if(s.target?.isCurrent()!=true) {
+            // The old Undo action has no authority over a replacement model. Keep the raw orphan.
+            s.owner.recordingMessage(ctx.getString(R.string.recording_recovery_kept),
+                ctx.getString(R.string.recording_recovery_title) to {AudioRecovery.open(s.owner)})
+            return
+        }
         recorder = null
         s.paused = true
+        if(!writeSidecar(s, s.owner.recordingKey)) {
+            s.owner.recordingMessage(ctx.getString(R.string.err_record_failed));return
+        }
         session = s
-        writeSidecar(s, s.owner.recordingKey)
         RecordingService.start(ctx)
     }
 
@@ -261,39 +287,47 @@ object AudioRecording {
 
     private fun place(s: Session) {
         val duration = s.accumulated.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        if (!s.file.exists() || s.file.length() == 0L || duration <= 0) return dropFile(s)
-        val adts = moveOut(s.file, s.owner.recordingDir) ?: return
-        sidecarOf(s.file).delete()
-        val item = s.owner.placeRecording(AudioData(adts, "aac", duration, peaksOf(s)), s.name, s.rid) ?: return
-        toM4a(s.owner, item, adts)
+        val target=s.target
+        val candidate=recoveryCandidate(s)
+        if(!s.file.isFile || s.file.length()==0L || duration<=0 || target==null || candidate==null || !target.isCurrent()) return
+        if(target.recordings(s.rid).isNotEmpty()) return problem(target)
+        val adts=copyOut(s.file,target.directory) ?: return problem(target)
+        val record=runCatching {AudioRecovery.store?.applying(candidate,target.kind,target.documentId,s.rid,
+            com.xnotes.format.BundleMigration.hash(adts),target.ownerToken)}.getOrNull()
+        if(record==null || !target.isCurrent()) {adts.delete();return}
+        val item=runCatching {target.owner.placeRecording(AudioData(adts,"aac",duration,peaksOf(s)),s.name,s.rid)}.getOrNull()
+            ?: return problem(target)
+        toM4a(target,item,adts,record.id)
     }
 
-    /** Moved beside the note's other assets, so the recordings folder only ever holds ones in progress. */
-    private fun moveOut(file: File, dir: File): File? {
+    /** Keep the original name until durable body acknowledgement; a hard link avoids copying on Stop. */
+    private fun copyOut(file: File, dir: File): File? {
         val adts = runCatching { File.createTempFile("aud", ".aac", dir) }.getOrNull() ?: return null
-        if (!file.renameTo(adts)) {
-            if (runCatching { file.copyTo(adts, overwrite = true) }.isFailure) {
-                adts.delete()
-                return null
-            }
-            file.delete()
+        val copied=runCatching {
+            adts.delete()
+            try {java.nio.file.Files.createLink(adts.toPath(),file.toPath())}
+            catch(_:Exception) {java.io.FileOutputStream(adts).use {out->file.inputStream().use {it.copyTo(out)};out.fd.sync()}}
+        }.isSuccess
+        if(!copied) {
+            adts.delete();return null
         }
         return adts
     }
 
     /** Copy [adts] into an .m4a off the main thread, and hand it to [item] if it still plays from [adts]. */
-    private fun toM4a(owner: RecordOwner, item: AudioItem, adts: File) {
-        worker.execute {
-            val m4a = File.createTempFile("aud", null, adts.parentFile)
-            val ok = AudioRemux.toM4a(adts, m4a)
-            val exact = if (ok) AudioFiles.durationOf(m4a) else null
+    private fun toM4a(target:RecordingRecoveryTarget,item:AudioItem,adts:File,recordId:String,lineage:MutableSet<File> = mutableSetOf(adts)) {
+        recoveryExecutor.execute {
+            val m4a = runCatching {File.createTempFile("aud", null, adts.parentFile)}.getOrNull() ?: return@execute
+            val ok = runCatching {remux(adts, m4a)}.getOrDefault(false)
+            val exact = if (ok) readDuration(m4a) else null
+            val registered=ok && exact!=null && runCatching {AudioRecovery.store?.register(recordId,com.xnotes.format.BundleMigration.hash(m4a))==true}.getOrDefault(false)
             main.post {
-                // The .aac left behind goes with the launch purge.
-                if (!ok || exact == null || item.audio.file !== adts) {
+                if (!registered || exact == null || !target.isCurrent() || !target.holds(item) || item.audio.file !== adts) {
                     m4a.delete()
                     return@post
                 }
-                owner.recordingMoved(item, AudioData(m4a, "m4a", exact, item.audio.peaks))
+                lineage.add(m4a)
+                target.owner.recordingMoved(item, AudioData(m4a, "m4a", exact, item.audio.peaks))
             }
         }
     }
@@ -303,62 +337,75 @@ object AudioRecording {
      * been pressed when it ended: where the view is, with the ink written during it still tied to it.
      * [keys] are the names that document goes by; a recording still going is never touched.
      */
-    fun recover(owner: RecordOwner, keys: List<String>) {
-        val ctx = app ?: return
-        val live = session?.file
-        val dir = dir(ctx)
-        for (side in dir.listFiles { f -> f.name.endsWith(SIDECAR) }.orEmpty()) {
-            val o = runCatching { org.json.JSONObject(side.readText()) }.getOrNull()
-            if (o == null) {
-                side.delete()
-                continue
-            }
-            if (o.optString("key") !in keys) continue
-            val file = File(dir, o.optString("file"))
-            if (file == live) continue
-            side.delete()
-            if (!file.exists() || file.length() == 0L) {
-                file.delete()
-                continue
-            }
-            val rid = o.optInt("rid", 0)
-            val name = o.optString("name").ifBlank { ctx.getString(R.string.recording) }
-            val adts = moveOut(file, owner.recordingDir) ?: continue
-            worker.execute {
-                val duration = AudioFiles.durationOf(adts)
-                main.post {
-                    if (duration == null || duration <= 0) {
-                        adts.delete()
-                        return@post
-                    }
-                    val audio = AudioData(adts, "aac", duration, ByteArray(0))
-                    val item = owner.placeRecording(audio, name, rid) ?: return@post
-                    com.xnotes.platform.AudioPeaks.readLater(adts, duration) { peaks ->
-                        main.post {
-                            if (item.audio.file === adts || item.audio.peaks.isEmpty()) {
-                                owner.recordingMoved(item, item.audio.withPeaks(peaks ?: ByteArray(AudioData.PEAK_BINS) { 40 }))
-                            }
+    fun recover(owner:RecordOwner,keys:List<String>) {owner.recordingRecoveryTarget()?.let {recover(it.withKeys(keys.toSet()))}}
+
+    fun recover(target:RecordingRecoveryTarget) {
+        if(!target.isCurrent()) return
+        for(candidate in AudioRecovery.candidates()) {
+            val r=candidate.record ?: continue
+            if(candidate.problem==null && r.phase==RecordingRecoveryStore.Phase.Pending && r.key in target.keys &&
+                r.kind==target.kind && r.documentId==target.documentId && target.recordings(r.rid).isEmpty())
+                prepareRecovery(target,candidate,r.rid)
+        }
+    }
+
+    internal fun recoverExplicit(target:RecordingRecoveryTarget,candidate:RecordingRecoveryStore.Candidate,separate:Boolean=false) {
+        if(!target.isCurrent()) return problem(target)
+        if(candidate.raw?.let(::recoveryFileProtected)==true) return
+        val r=candidate.record
+        val same=r!=null && r.targetKind==target.kind && r.targetId==target.documentId
+        val rid=if(!separate && same) r!!.targetRid else target.owner.freshRecordingId()
+        prepareRecovery(target,candidate,rid)
+    }
+
+    private fun prepareRecovery(target:RecordingRecoveryTarget,candidate:RecordingRecoveryStore.Candidate,rid:Int) {
+        if(!target.isCurrent() || candidate.raw?.let(::recoveryFileProtected)==true || target.recordings(rid).isNotEmpty() || !recovering.add(candidate.id)) return
+        AudioRecovery.busy=true
+        recoveryExecutor.execute {
+            val source=candidate.raw
+            val adts=if(source?.isFile==true && source.length()>0L) copyOut(source,target.directory) else null
+            val duration=adts?.let {runCatching {readDuration(it)}.getOrNull()}
+            val sha=adts?.let {runCatching {com.xnotes.format.BundleMigration.hash(it)}.getOrNull()}
+            main.post {
+                if(adts==null || duration==null || duration<=0 || sha==null || !target.isCurrent() || target.recordings(rid).isNotEmpty()) {
+                    adts?.delete();finishRecovery(candidate.id);problem(target);return@post
+                }
+                // Durable Applying precedes placement. A restart never guesses whether an absent pill was undone.
+                recoveryExecutor.execute {
+                    val record=runCatching {AudioRecovery.store?.applying(candidate,target.kind,target.documentId,rid,sha,target.ownerToken)}.getOrNull()
+                    main.post placed@{
+                        if(record==null || !target.isCurrent() || target.recordings(rid).isNotEmpty()) {
+                            adts.delete();finishRecovery(candidate.id);problem(target);return@placed
                         }
+                        val name=candidate.record?.name ?: source?.nameWithoutExtension.orEmpty()
+                        val item=runCatching {target.owner.placeRecording(AudioData(adts,"aac",duration,ByteArray(0)),name,rid)}.getOrNull()
+                        finishRecovery(candidate.id)
+                        if(item==null) {adts.delete();problem(target);return@placed}
+                        val lineage=mutableSetOf(adts)
+                        readPeaks(adts,duration) {peaks->main.post {
+                            if(target.isCurrent() && target.holds(item) && item.audio.file in lineage && item.audio.peaks.isEmpty())
+                                target.owner.recordingMoved(item,item.audio.withPeaks(peaks ?: ByteArray(AudioData.PEAK_BINS) {40}))
+                        }}
+                        toM4a(target,item,adts,record.id,lineage)
                     }
-                    toM4a(owner, item, adts)
                 }
             }
         }
     }
-
-    private const val SIDECAR = ".json"
-
-    private fun sidecarOf(file: File) = File(file.parentFile, file.nameWithoutExtension + SIDECAR)
+    private fun finishRecovery(id:String) {recovering.remove(id);AudioRecovery.busy=recovering.isNotEmpty();AudioRecovery.refresh()}
+    private fun problem(target:RecordingRecoveryTarget) {
+        val ctx=app ?: return
+        if(target.isCurrent()) target.owner.recordingMessage(ctx.getString(R.string.recording_recovery_kept),
+            ctx.getString(R.string.recording_recovery_title) to {AudioRecovery.open(target.owner)})
+    }
 
     /** What finds the recording again if the app dies under it: its note, its id, its name. */
-    private fun writeSidecar(s: Session, key: String) {
-        val o = org.json.JSONObject()
-            .put("key", key)
-            .put("file", s.file.name)
-            .put("rid", s.rid)
-            .put("name", s.name)
-        runCatching { sidecarOf(s.file).writeText(o.toString()) }
+    private fun writeSidecar(s: Session,key:String):Boolean {
+        val target=s.target
+        val record=AudioRecovery.store?.create(s.file,key,s.name,s.rid,target?.kind,target?.documentId) ?: return false
+        s.recoveryId=record.id;return true
     }
+    private fun recoveryCandidate(s:Session)=AudioRecovery.store?.list()?.firstOrNull {it.record?.id==s.recoveryId}
 
     private fun peaksOf(s: Session): ByteArray {
         val n = s.levelCount
@@ -375,8 +422,9 @@ object AudioRecording {
     }
 
     private fun dropFile(s: Session) {
-        s.file.delete()
-        sidecarOf(s.file).delete()
+        val candidate=recoveryCandidate(s)
+        if(candidate!=null) AudioRecovery.store?.discard(candidate)
+        else AudioRecovery.store?.deleteIfUnreferenced(s.file) ?: s.file.delete()
     }
 
     private fun notifyChange() {

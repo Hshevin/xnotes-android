@@ -1,3 +1,5 @@
+当前导图接续计划（2026-11-10）：[剩余阶段与验收](../docs/movinkpad/mind-map-next-plan-2026-11-10.md)。下文早期计划保留历史语境，当前状态以该计划与[工作断点](loop-state.md)为准；未完成项不因合并而标完成。
+
 2026-11-10 续作工作树codex/mind-map-original-network：原文网络整合及完整卡片/Reader往返已实现，302项相关主机测试及Android源码编译通过；独立证据复核通过。下一来源范围调整/换源，原完整14组不缩减；仅实现/验证/文档/本地提交。见docs/movinkpad/original-pdf-network-2026-11-10.md。
 
 2026-11-09 D2c：无文档首页→全库→指定多文件中心→筛选／具体来源打开→同网络返回已实现，89相关用例及Android测试源码编译通过，真实平台未运行。继续显式用户关联和将文件加入可保存关系画布；其他原需求保留。见docs/movinkpad/file-network-overview-2026-11-09.md。

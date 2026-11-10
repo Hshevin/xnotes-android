@@ -8,7 +8,7 @@
 
 最新本地覆盖更新：[0.9.8 / Release 98 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release98-arm64.apk)，沿用正式包名与签名，包含 AI 模板文字 / 图像模型自选，以及无限画布退出分屏黑屏修复；三键、黑白界面、图层、分屏湿墨与黑屏、单份 PDF 重新关联已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。见 [打包与验证记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
 
-最新主线独立测试版：[master test4 ARM64 APK](build/branch-tests/master-test4/XNotes-master-711470e8-test4-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，数据独立。包含进入画布时等待首帧、纸面颜色覆盖等闪烁候选修复，目标设备效果待确认。见 [打包记录](docs/movinkpad/master-test4-2026-11-08.md)。
+最新主线独立测试版：[master test5 ARM64 APK](build/branch-tests/master-test5/XNotes-master-fdc1f0fe-test5-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，数据独立。包含图层侧栏覆盖画布及图层增量更新，新增调整的目标设备效果待确认。见 [打包记录](docs/movinkpad/master-test5-2026-11-08.md)。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 
@@ -60,7 +60,7 @@
 
 原生 Kotlin 思维导图、文件关系网络及混合分屏的保存与显式重开已合入本地主线，尚未打包或发布。在首页「新建」菜单选择「新建思维导图」，创建独立的 `.xmap` 文件；打开后由主窗口承载编辑页，切换前等待两个窗格的笔和编辑事务结束，保留原文档与阅读位置，关闭图后返回原阅读工作区。
 
-验证边界：以下所有导图功能仅经 JVM 主机测试与 Android 测试源码编译验证，未打包，未在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机验收；真实 Android 事件、系统选择器／SAF、Surface／目标 GPU、PDFium 像素及书写、防掌触、大图性能均未验证。完整引用闭环与冷启动混合布局恢复尚未完成。
+验证边界：以下所有导图功能仅经 JVM 主机测试与 Android 测试源码编译验证，未打包，未在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机验收；真实 Android 事件、系统选择器／SAF、Surface／目标 GPU、PDFium 像素及书写、防掌触、大图性能均未验证。本批已接入最后布局的自动记录与冷恢复；真实 Android 进程终止、SAF 与目标设备效果仍待验，完整引用备份和双图等剩余工作见[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)。
 
 ### 基础编辑
 
@@ -121,7 +121,9 @@
 - 应用内保存的笔记／PDF 分屏、最近分屏和双选两份笔记可替换当前导图工作区：先核实两份文件和旧文档保存状态再一起切换，缺件、坏文件或取消不会先关闭原文档；录音中的文档需先结束录音。
 - 「保存分屏」在两份内容实际保存成功后发布安排，Saved／最近分屏可显式重开并恢复比例、方向、交换、焦点与阅读位置。混合安排使用 `.xsplit` v3，仍可读取 v1—v2 普通笔记分屏；首页或停放布局不作为完整安排保存。
 
-尚不支持：进程冷启动后自动恢复混合布局，以及导图＋导图／同一导图双视图。
+普通打开或调整布局后会自动保留最后呈现：单图、导图旁首页、导图＋笔记／PDF、分页文档与单独画布。恢复时先核对本机正文与身份；坏、未来版本或缺件保留恢复资料，可重试、查看资料或明确重置布局记录。仅没有新记录时使用旧会话恢复。此能力尚未打包，真实进程终止待设备验证。
+
+尚不支持：导图＋导图／同一导图双视图。混合布局完整进入全局网络／原件库再返回、预览体验、精确来源恢复与完整引用备份等仍在[接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)中。
 
 ### 保存、恢复资料与另存
 
@@ -130,6 +132,8 @@
 - 笔记与画布保存时校验页面身份与来源版本，失败保留资料与未保存状态；已写入的版本不会自动回滚，「放弃修改」只放弃之后的新修改。打开文件先完整读取和验证再替换工作区；保存后重新打开会读取刚写入的版本。
 - 分页笔记的首次保存／另存按独立文档发布：已启用引用的副本取得新的页编号，原引用仍指向原文件；保存期间新增的内容保留为未保存修改。PDF 沿用共享原件并保留原始字节。
 - 首页导航的「恢复资料」可逐页预览窗格保留的笔记／画布资料并保存独立副本，原资料和当前文档保持不变；写后失败可「继续此副本」，重启后可「继续未完成的副本…」明确选择原目标。
+- 本地源码恢复的旧分页／画布工作副本可继续编辑；保存时先另存独立文件，避免仅凭记忆路径覆盖原件。取消或失败保留恢复内容；关闭同一文档的另一视图会保留实际文档。画布另存后可继续编辑和普通保存；关闭受保护副本时须明确另存或放弃。此保护与自动布局恢复尚未打包。
+- 本地源码在插入菜单提供「录音恢复…」：可明确恢复、作为独立录音加入、导出原始音频或保留以后处理。原始音频保留至文档实际保存并包含它；已加入但未确认保存的录音不会在重启后擅自重放。
 
 ### 详细记录
 
@@ -153,6 +157,8 @@
 - [双文件打开与验证](docs/movinkpad/map-pair-open-2026-11-10.md)
 - [原生分屏替换与验证](docs/movinkpad/native-split-replacement-2026-11-10.md)
 - [混合分屏持久化阶段](docs/movinkpad/mixed-split-persistence-2026-11-10.md)
+- [冷恢复进展与本地合并](docs/movinkpad/mind-map-cold-progress-merge-2026-11-10.md)
+- [剩余工作与接续计划](docs/movinkpad/mind-map-next-plan-2026-11-10.md)
 - [扩展规格与阶段进度](docs/movinkpad/graph-network-2026-11-06.md)
 - [来源预览阶段记录](docs/movinkpad/mind-map-source-preview-2026-11-09.md)
 - [全库与多文件网络记录](docs/movinkpad/file-network-overview-2026-11-09.md)

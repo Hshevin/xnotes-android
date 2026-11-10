@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 internal class LocalNetworkCoordinator(private val editor:Editor,private val maps:MapWorkspace,
     private val networks:FileNetworkWorkspace,private val binding:Any,private val scope:CoroutineScope,
     private val captureHost:()->(()->Boolean)={ {true} },private val onStarting:()->Unit={},
+    private val prepareParking:(suspend (()->Boolean)->(() -> Boolean)?)?=null,
     private val onShown:()->Unit={}) {
     private var active=true
     private var generation=0L
@@ -36,14 +37,14 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
     private fun hostCurrent()=active && maps.isHostCurrent(binding) && networks.isHostCurrent(binding)
     fun open(request:LocalNetworkLaunchRequest):Boolean {
         if(!hostCurrent() || busy || maps.visible || networks.visible || !request.current()) return false
-        return present(request.context,{request.current() && !maps.visible && !networks.visible}) {
-            networks.admit(binding,request.query)!=null
+        return present(request.context,{request.current() && !maps.visible && !networks.visible}) {beforeAdopt->
+            networks.admit(binding,request.query,beforeAdopt)!=null
         }
     }
     fun openLibrary(request:LibraryNetworkLaunchRequest):Boolean {
         if(!hostCurrent() || busy || maps.visible || networks.visible || !request.current()) return false
-        return present(request,{request.current() && !maps.visible && !networks.visible}) {
-            networks.admit(binding,request.query)!=null
+        return present(request,{request.current() && !maps.visible && !networks.visible}) {beforeAdopt->
+            networks.admit(binding,request.query,beforeAdopt)!=null
         }
     }
     fun openCanvas(entry:FileNetworkWorkspace.Entry,request:NetworkCanvasOpenRequest):Boolean {
@@ -58,9 +59,11 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
         fun current()=hostCurrent() && generation==token && networks.current(binding,entry) && networks.visible &&
             maps.current===prior && (prior==null || maps.canHide(prior)) && host() && input.current() && request.current()
         onStarting()
-        val started=maps.open(request.uri,request.title,preparePresentation={
-            val proof=if(current()) editor.awaitHostParking() else null
-            if(proof==null || !current() || !proof.current()) null else ({current() && proof.current()})
+        val started=maps.open(request.uri,request.title,preparePresentation=prepare@{
+            val persisted=prepareParking?.invoke(::current)
+            if(prepareParking!=null && persisted==null) return@prepare null
+            val proof=if(current()) editor.awaitMapSourceParking() else null
+            if(proof==null || !current() || !proof.current()) null else ({current() && persisted?.invoke()!=false && proof.current()})
         },stillCurrent=::current,operation=operation,flushNativeOnPresent=false,
             onPresented={map->networks.parkForMap(binding,entry,map)},onFinished={shown->
                 if(generation==token) {
@@ -81,23 +84,26 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
                     (from.lease.hasOtherOwners || from.session.canParkSourceNavigation)
                 else maps.canHide(from)
         if(!valid()) {owner=entry;problem=BacklinkProblem.BUSY;return false}
-        return present(entry,::valid,pureMapParking=closeMap) {
-            if(from!=null) {
-                if(closeMap) {if(maps.close(from,preserveRecovery=preserveMapRecovery)==null) return@present false}
-                else if(!maps.hide(from)) return@present false
-            }
-            networks.show(binding,entry)
+        return present(entry,::valid,pureMapParking=closeMap) {beforeAdopt->
+            networks.show(binding,entry,beforeAdopt={
+                when {
+                    from==null->beforeAdopt()
+                    closeMap->maps.close(from,preserveRecovery=preserveMapRecovery,beforeAdopt=beforeAdopt)!=null
+                    else->maps.hide(from,beforeAdopt)
+                }
+            })
         }
     }
-    private fun present(expectedOwner:Any,origin:()->Boolean,pureMapParking:Boolean=false,commit:()->Boolean):Boolean {
+    private fun present(expectedOwner:Any,origin:()->Boolean,pureMapParking:Boolean=false,commit:(()->Boolean)->Boolean):Boolean {
         val host=captureHost()
         if(!host()) return false
-        onStarting();maps.cancelOpen()
+        onStarting();editor.onPresentationIntent?.invoke();maps.cancelOpen()
         val mapGeneration=maps.sourceNavigationGeneration
         val token=++generation;owner=expectedOwner;problem=null;busy=true
         fun current()=hostCurrent() && generation==token && maps.sourceNavigationGeneration==mapGeneration && origin() && host()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var committed=false
+            var homeGate:com.xnotes.ui.PreparedHomeGate?=null
             val watcher=scope.launch {
                 while(isActive && generation==token && !committed) {
                     if(!current()) {problem=BacklinkProblem.CHANGED;work?.cancel();break}
@@ -105,22 +111,31 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
                 }
             }
             try {
-                val proof=if(!current()) null else if(pureMapParking) editor.awaitMapSourceParking() else editor.awaitHostParking()
+                val persisted=prepareParking?.invoke(::current)
+                if(prepareParking!=null && persisted==null) {problem=BacklinkProblem.CHANGED;return@launch}
+                val proof=if(!current()) null else editor.awaitMapSourceParking()
                 if(proof==null || !current() || !proof.current()) {
                     if(hostCurrent() && generation==token) problem=BacklinkProblem.CHANGED
                     return@launch
                 }
-                // Same Main dispatch: the fresh physical-input proof directly guards adoption.
-                if(commit()) {committed=true;onShown()} else problem=BacklinkProblem.CHANGED
+                val provider=editor.preparePresentationDeparture
+                homeGate=provider?.invoke {current() && persisted?.invoke()!=false && proof.current()}
+                if(provider!=null && homeGate==null) {problem=BacklinkProblem.CHANGED;return@launch}
+                if(commit {homeGate?.commit {current() && persisted?.invoke()!=false && proof.current()}!=false}) {
+                    committed=true;onShown()
+                } else problem=BacklinkProblem.CHANGED
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(!committed && hostCurrent() && generation==token) problem=BacklinkProblem.UNAVAILABLE}
-            finally {watcher.cancel();if(generation==token) {work=null;busy=false}}
+            finally {watcher.cancel();try {homeGate?.close()} finally {if(generation==token) {work=null;busy=false}}}
         }
         work=pending;pending.start();return true
     }
     fun close(entry:FileNetworkWorkspace.Entry):Boolean {
         if(!hostCurrent() || networks.current!==entry || !networks.visible) return false
-        cancel();return networks.close(binding,entry)
+        cancel()
+        return present(entry,{networks.current(binding,entry) && networks.visible},pureMapParking=true) {beforeAdopt->
+            networks.close(binding,entry,beforeAdopt)
+        }
     }
     fun cancel() {generation++;work?.cancel();work=null;canvasOperation?.let {maps.cancelOpen(it)};canvasOperation=null;busy=false;owner=null;problem=null}
     fun dispose() {cancel();active=false}

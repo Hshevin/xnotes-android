@@ -37,7 +37,9 @@ internal class WorkingSessionCache(
     class Invalid(cause:Throwable?=null):IOException("Invalid working session cache",cause)
     class Conflict:IOException("Working session cache changed before publication")
 
-    sealed class Request protected constructor(internal val coordinator:Any,val generation:Long)
+    sealed class Request protected constructor(internal val coordinator:Any,val generation:Long) {
+        internal var published=false // guarded by the coordinator; accepted IO cannot be undone by close
+    }
     class WriteRequest internal constructor(
         coordinator:Any,generation:Long,internal val owner:Any,
         val kind:Kind,val documentId:String,val contentVersion:Long,val metadataJson:String,
@@ -98,6 +100,47 @@ internal class WorkingSessionCache(
     }
     fun reserveClear():ClearRequest=synchronized(state) {ClearRequest(state,nextGeneration()).also {state.latest=it}}
     fun isCurrent(request:Request):Boolean=synchronized(state) {request.coordinator===state && state.latest===request}
+    /** Retire only an abandoned exact ticket, without deleting its durable publication proof. */
+    fun retire(request:Request)=synchronized(state) {
+        if(request.coordinator===state && state.latest===request && !request.published) {nextGeneration();state.latest=null}
+    }
+    internal class AbsentObservation internal constructor(internal val coordinator:Any,internal val generation:Long)
+    /** A codec-free view of the existing coordinator, not a second publication lock. */
+    internal class LegacyBoundary private constructor(private val root:File,private val state:Coordinator) {
+        private val head=File(root,"head.json")
+        private fun absent():Boolean {
+            require(root.canonicalFile==root && !Files.isSymbolicLink(root.toPath()))
+            return try {
+                Files.readAttributes(head.toPath(),java.nio.file.attribute.BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+                false
+            } catch(_:NoSuchFileException) {true}
+        }
+        private fun isProtected()=state.latest!=null || state.observedHeadHash!=null || !absent()
+        private fun advance() {check(state.generation<Long.MAX_VALUE);state.generation++}
+        fun observe():AbsentObservation?=synchronized(state) {
+            if(isProtected()) null else {state.observed=true;AbsentObservation(state,state.generation)}
+        }
+        fun isCurrent(observation:AbsentObservation):Boolean=synchronized(state) {
+            observation.coordinator===state && observation.generation==state.generation && !isProtected()
+        }
+        fun consume(observation:AbsentObservation):Boolean=synchronized(state) {
+            if(observation.coordinator!==state || observation.generation!=state.generation || isProtected()) false
+            else {advance();true}
+        }
+        fun publish(observation:AbsentObservation,mutation:PreparedLegacySessionMutation):LegacyMutationResult=synchronized(state) {
+            when {
+                isProtected()->LegacyMutationResult.ProtectedRecovery
+                observation.coordinator!==state || observation.generation!=state.generation->LegacyMutationResult.Changed
+                else->mutation.preflightBounded() ?: run {advance();mutation.executeBounded()}
+            }
+        }
+        companion object {
+            internal fun create(directory:File):LegacyBoundary {
+                val root=directory.canonicalFile
+                return LegacyBoundary(root,coordinator(root.path))
+            }
+        }
+    }
     /** Domain intent registration calls this before publishing its new in-memory boundary.
      * No filesystem, body or application callback runs under this short coordinator lock. */
     fun invalidateReservations()=synchronized(state) {nextGeneration();state.latest=null}
@@ -154,6 +197,7 @@ internal class WorkingSessionCache(
                     Files.move(headTemp.toPath(),headFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
                     state.observedHeadHash=sha(bytes)
                     state.committed=Proof(request.owner,state.observedHeadHash!!,next,request.generation)
+                    request.published=true
                     true
                 }
             }
@@ -191,7 +235,7 @@ internal class WorkingSessionCache(
                     if(checkedHead().hash!=initial.hash) throw Conflict()
                     verifyHeadCandidate(temp,bytes)
                     Files.move(temp.toPath(),headFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
-                    state.observedHeadHash=sha(bytes);state.committed=null;true
+                    state.observedHeadHash=sha(bytes);state.committed=null;request.published=true;true
                 }
             }
             return Publication(request,published)

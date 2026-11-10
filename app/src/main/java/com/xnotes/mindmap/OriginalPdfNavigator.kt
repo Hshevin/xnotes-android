@@ -15,6 +15,7 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
     private val networks:FileNetworkWorkspace,private val originals:OriginalPdfWorkspace,
     private val binding:Any,private val scope:CoroutineScope,
     private val captureHost:()->(()->Boolean)={ {true} },private val onStarting:()->Unit={},
+    private val prepareParking:(suspend (()->Boolean)->(() -> Boolean)?)?=null,
     private val onPresented:()->Unit={}) {
     private var active=true
     private var generation=0L
@@ -36,11 +37,11 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
             ticket.target.scope!=SourceScope.PDF_ORIGINAL) return false
         return open(ticket.target,source=true,
             valid={maps.current===entry && maps.visible && maps.canHide(entry) && entry.session.currentSourceNavigation(ticket)!=null},
-            commit={read->
+            commit={read,beforeAdopt->
                 // Both mutations are guarded on the same Main dispatch; no native pane is adopted.
                 if(!maps.canHide(entry)) false else {
                     val nativeIdentity=if(maps.splitPresentation.layout!=null) editor.captureNativePresentationIdentity() else null
-                    val shown=originals.admit(binding,read,OriginalPdfWorkspace.Return.Map(entry,bookmark,nativeIdentity))
+                    val shown=originals.admit(binding,read,OriginalPdfWorkspace.Return.Map(entry,bookmark,nativeIdentity),beforeAdopt)
                     if(shown==null) false else {
                         check(maps.hide(entry));entry.sourceReturn=bookmark;true
                     }
@@ -52,34 +53,42 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
             target.scope!=SourceScope.PDF_ORIGINAL || !stillCurrent()) return false
         return open(target,source=false,
             valid={!maps.visible && !networks.visible && stillCurrent()},
-            commit={read->originals.admit(binding,read,OriginalPdfWorkspace.Return.Library)!=null})
+            commit={read,beforeAdopt->originals.admit(binding,read,OriginalPdfWorkspace.Return.Library,beforeAdopt)!=null})
     }
     private fun open(target:MapSourceTarget,source:Boolean,valid:()->Boolean,
-        commit:(OriginalPdfAccess.Read)->Boolean,onFailure:()->Unit={}):Boolean {
+        commit:(OriginalPdfAccess.Read,()->Boolean)->Boolean,onFailure:()->Unit={}):Boolean {
         val host=captureHost();if(!host()) return false
         onStarting()
+        editor.onPresentationIntent?.invoke()
         val token=++generation;val previous=originals.current
         sourceOperation=source;failure=null;returning=false;busy=true
         fun current()=hostCurrent() && generation==token && originals.current===previous && !originals.visible && valid() && host()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var read:OriginalPdfAccess.Read?=null;var committed=false
+            var homeGate:com.xnotes.ui.PreparedHomeGate?=null
             try {
                 if(!current()) return@launch
+                val persisted=prepareParking?.invoke(::current)
+                if(prepareParking!=null && persisted==null) {failure=NativeReferenceIssue.CHANGED;return@launch}
                 val requestJob=currentCoroutineContext()[Job]!!
                 val loaded=withContext(Dispatchers.IO) {originals.access.open(target) {requestJob.ensureActive()}.also {read=it}}
                 if(!current() || !loaded.current()) {if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED;return@launch}
-                val proof=if(source && maps.splitPresentation.layout!=null) editor.awaitMapSourceParking() else editor.awaitHostParking()
+                val proof=editor.awaitMapSourceParking()
                 if(proof==null || !current() || !proof.current() || !loaded.current()) {
                     if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED
                     return@launch
                 }
-                committed=commit(loaded)
+                val provider=editor.preparePresentationDeparture
+                homeGate=provider?.invoke {current() && persisted?.invoke()!=false && proof.current() && loaded.current()}
+                if(provider!=null && homeGate==null) {failure=NativeReferenceIssue.CHANGED;return@launch}
+                committed=commit(loaded) {homeGate?.commit {current() && persisted?.invoke()!=false && proof.current() && loaded.current()}!=false}
                 if(committed) {read=null;onPresented()} else failure=NativeReferenceIssue.CHANGED
             } catch(cancelled:CancellationException) {throw cancelled}
-            catch(_:Exception) {if(hostCurrent() && generation==token) failure=NativeReferenceIssue.UNAVAILABLE}
+            catch(_:Exception) {if(!committed && hostCurrent() && generation==token) failure=NativeReferenceIssue.UNAVAILABLE}
             finally {
-                withContext(NonCancellable+Dispatchers.IO) {read?.closeAndAwait()}
-                if(generation==token) {work=null;busy=false;if(!committed) onFailure()}
+                try {withContext(NonCancellable) {
+                    try {homeGate?.close()} finally {withContext(Dispatchers.IO) {read?.closeAndAwait()}}
+                }} finally {if(generation==token) {work=null;busy=false;if(!committed) onFailure()}}
             }
         }
         work=pending;pending.start();return true
@@ -88,7 +97,7 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
         val entry=originals.current ?: return false
         if(busy || !hostCurrent() || originals.visible || maps.visible || networks.visible || !originals.resumeRequested) return false
         return parkAndCommit(entry,source=entry.returnTo is OriginalPdfWorkspace.Return.Map,
-            valid={!originals.visible && !maps.visible && !networks.visible && entry.current()}) {originals.show(binding,entry)}
+            valid={!originals.visible && !maps.visible && !networks.visible && entry.current()}) {beforeAdopt->originals.show(binding,entry,beforeAdopt)}
     }
     fun returnToMap():Boolean {
         val shown=originals.current ?: return false
@@ -109,8 +118,11 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
             maps.current===entry && !maps.visible && networks.visible==false && entry.lease.alive && entry.sourceReturn===bookmark &&
             (!restoreSplit || editor.matchesNativePresentationIdentity(requireNotNull(identity))) && host()
         val accepted=maps.open(entry.uri,entry.title,preparePresentation={
-            if(!valid()) null else (if(restoreSplit) editor.awaitMapSourceParking() else editor.awaitHostParking())
-                ?.let {proof->({valid() && proof.current()})}
+            if(!valid()) null else {
+                val persisted=prepareParking?.invoke(::valid)
+                if(prepareParking!=null && persisted==null) null
+                else editor.awaitMapSourceParking()?.let {proof->({valid() && persisted?.invoke()!=false && proof.current()})}
+            }
         },stillCurrent=::valid,operation=operation,flushNativeOnPresent=false,onPresented={actual->
             if(validAfterMapPresentation(shown,entry,actual,token)) {
                 // This return parks all native owners, including dirty NOTE panes.
@@ -134,8 +146,8 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
     fun closeLibrary():Boolean {
         val entry=originals.current ?: return false
         if(busy || !hostCurrent() || entry.returnTo!==OriginalPdfWorkspace.Return.Library || maps.visible || networks.visible) return false
-        return parkAndCommit(entry,source=false,valid={!maps.visible && !networks.visible}) {
-            originals.close(binding,entry)
+        return parkAndCommit(entry,source=false,valid={!maps.visible && !networks.visible}) {beforeAdopt->
+            originals.close(binding,entry,beforeAdopt)
         }
     }
     fun close():Boolean=when(originals.current?.returnTo) {
@@ -143,19 +155,27 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
         OriginalPdfWorkspace.Return.Library->closeLibrary()
         null->false
     }
-    private fun parkAndCommit(entry:OriginalPdfWorkspace.Entry,source:Boolean,valid:()->Boolean,commit:()->Boolean):Boolean {
+    private fun parkAndCommit(entry:OriginalPdfWorkspace.Entry,source:Boolean,valid:()->Boolean,commit:(()->Boolean)->Boolean):Boolean {
         val host=captureHost();if(!host()) return false
         onStarting()
+        editor.onPresentationIntent?.invoke()
         val token=++generation;sourceOperation=source;failure=null;busy=true;returning=true
         fun current()=hostCurrent() && generation==token && originals.current===entry && valid() && host()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
+            var homeGate:com.xnotes.ui.PreparedHomeGate?=null
             try {
-                val proof=if(current()) editor.awaitHostParking() else null
-                if(proof!=null && current() && proof.current() && commit()) onPresented()
+                val persisted=prepareParking?.invoke(::current)
+                if(prepareParking!=null && persisted==null) {failure=NativeReferenceIssue.CHANGED;return@launch}
+                val proof=if(current()) editor.awaitMapSourceParking() else null
+                if(proof==null || !current() || !proof.current()) {if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED;return@launch}
+                val provider=editor.preparePresentationDeparture
+                homeGate=provider?.invoke {current() && persisted?.invoke()!=false && proof.current()}
+                if(provider!=null && homeGate==null) {failure=NativeReferenceIssue.CHANGED;return@launch}
+                if(commit {homeGate?.commit {current() && persisted?.invoke()!=false && proof.current()}!=false}) onPresented()
                 else if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED
             } catch(cancelled:CancellationException) {throw cancelled}
             catch(_:Exception) {if(hostCurrent() && generation==token) failure=NativeReferenceIssue.UNAVAILABLE}
-            finally {if(generation==token) {work=null;busy=false;returning=false}}
+            finally {try {homeGate?.close()} finally {if(generation==token) {work=null;busy=false;returning=false}}}
         }
         work=pending;pending.start();return true
     }

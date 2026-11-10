@@ -117,6 +117,12 @@ internal object MapDocuments {
         return true
     }
     @MainThread fun acquire(context:Context,uri:Uri,knownAliases:Set<String> = emptySet()):MapDocumentLease {
+        return acquireActual(context,uri,knownAliases,null)
+    }
+    @MainThread internal fun acquireForCold(context:Context,uri:Uri,expectedDocumentId:String,
+        knownAliases:Set<String> = emptySet()):MapDocumentLease = acquireActual(context,uri,knownAliases,expectedDocumentId)
+
+    private fun acquireActual(context:Context,uri:Uri,knownAliases:Set<String>,expectedDocumentId:String?):MapDocumentLease {
         val app=context.applicationContext
         val key=key(app,uri)
         var entry=entries[key]
@@ -126,7 +132,7 @@ internal object MapDocuments {
         }
         if(entry==null) {
             entry=Entry(key,app,uri);entries[key]=entry;inventoryChanged(key)
-            entry.session.open(app,uri,knownAliases)
+            entry.session.open(app,uri,knownAliases,expectedDocumentId)
         }
         return lease(entry)
     }

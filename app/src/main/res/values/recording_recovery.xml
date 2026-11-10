@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_recovery_title">Recording recovery…</string>
+    <string name="recording_recovery_explanation">Original audio stays here until a saved document contains it. Adding it is an unsaved edit. Keep it for later if you are unsure.</string>
+    <string name="recording_recovery_empty">No recordings need recovery.</string>
+    <string name="recording_recovery_kept">The original recording was kept. Open recording recovery to choose what to do.</string>
+    <string name="recording_recovery_invalid">The recording details are unreadable. They have been kept; any unbound audio is listed separately.</string>
+    <string name="recording_recovery_missing">The original audio is missing or empty. Its recovery details have been kept.</string>
+    <string name="recording_recovery_target_changed">Open a document to add this audio. A changed document cannot receive an older recovery request.</string>
+    <string name="recording_recovery_present">This recording ID is already in the document. The original is kept until the saved audio is verified.</string>
+    <string name="recording_recovery_applying">This audio was previously added. It may have been undone or removed; restore it only if you want it back.</string>
+    <string name="recording_recovery_unbound">The original document cannot be verified. You can add the audio separately without linking existing ink.</string>
+    <string name="recording_recovery_mismatch">These details belong to another document or recording. You can add the audio separately.</string>
+    <string name="recording_recovery_pending">The audio is ready to restore with its original ink association.</string>
+    <string name="recording_recovery_restore">Restore recording</string>
+    <string name="recording_recovery_separate">Add as separate recording</string>
+    <string name="recording_recovery_keep">Keep for later</string>
+</resources>

@@ -33,11 +33,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal enum class MapWorkspaceFailure {UNAVAILABLE,CHANGED}
+
+/** Request-scoped Native preparation; its owner keeps all decoding and adoption details. */
+internal class PreparedColdMixedNative(
+    private val check:()->Boolean,
+    private val verifyPrepared:suspend ()->Boolean,
+    private val adopt:()->Boolean,
+    private val release:suspend ()->Unit,
+) {
+    fun current()=check()
+    suspend fun verify()=current() && verifyPrepared() && current()
+    fun commit()=current() && adopt()
+    suspend fun close()=release()
+}
 
 /** Main-window document presentation. The existing broker remains the only map editing owner. */
 @MainThread
@@ -59,6 +74,8 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     private var openOperation:Any?=null
     private val acceptedOpens=mutableSetOf<Job>()
     private var hostBinding:Any?=null
+    internal var onPresentationIntent:(()->Unit)?=null
+    internal var prepareHostDeparture:(suspend (()->Boolean)->com.xnotes.ui.PreparedHomeGate?)?=null
     private var disposal:Job?=null
     private val visited=linkedMapOf<String,Entry>()
     private var sourceFrames by mutableStateOf<List<MapSourceNavigationFrame>>(emptyList())
@@ -81,15 +98,93 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     internal var nativeSplitOperation by mutableStateOf(false);private set
     var failure by mutableStateOf<MapWorkspaceFailure?>(null);private set
 
+    /** Cold restore uses the actual Map load proof and a protected local Native cache together. */
+    internal suspend fun restoreColdMixed(value:com.xnotes.ui.ColdMixedPresentation,
+        prepareNative:suspend (()->Boolean)->PreparedColdMixedNative?,stillCurrent:()->Boolean={true},
+        beforeAdopt:()->Boolean={true}):Boolean =
+        restoreCold(value.map,value.mapCamera,MapOpenPresentation.Split(value.layout),value.nativeHint,
+            prepareNative,stillCurrent,beforeAdopt)
+
+    /** A Home slot is explicit; neither a parked NOTE nor a Canvas cache is read here. */
+    internal suspend fun restoreColdMapOnly(value:com.xnotes.ui.LastPresentation.MapOnly,
+        stillCurrent:()->Boolean={true},beforeAdopt:()->Boolean={true}):Boolean {
+        if(value.homeLayout?.nativeHome==false) return false
+        return restoreCold(value.map,value.camera,value.homeLayout?.let {MapOpenPresentation.Split(it)}
+            ?: MapOpenPresentation.Single,null,null,stillCurrent,beforeAdopt)
+    }
+
+    private suspend fun restoreCold(ref:com.xnotes.ui.SplitSourceRef,camera:MapPresentationCamera?,
+        presentation:MapOpenPresentation,hint:MapNativeRestoreHint?,
+        prepareNative:(suspend (()->Boolean)->PreparedColdMixedNative?)?,stillCurrent:()->Boolean,
+        beforeAdopt:()->Boolean):Boolean = coroutineScope {
+        if(!active || current!=null || visible || splitPresentation.layout!=null || splitPresentation.returnLayout!=null)
+            return@coroutineScope false
+        val layoutGeneration=splitPresentation.generation
+        val request=++generation
+        val previous=acceptedOpens.toList();work?.cancel();openOperation=null;opening=true;failure=null;nativeSplitOperation=false
+        fun valid()=active && generation==request && current==null && !visible &&
+            splitPresentation.generation==layoutGeneration && stillCurrent()
+        val pending=async(start=CoroutineStart.LAZY) {
+            var map:MapColdAccess.Held?=null
+            var native:PreparedColdMixedNative?=null
+            var adopted=false
+            try {
+                previous.forEach {it.join()}
+                if(!valid()) return@async false
+                map=MapColdAccess(app).prepare(ref,::valid) ?: return@async false
+                val held=requireNotNull(map)
+                if(!valid() || !held.current()) return@async false
+                if(prepareNative!=null) {
+                    native=prepareNative(::valid) ?: return@async false
+                    if(!requireNotNull(native).verify()) return@async false
+                }
+                if(!valid() || !held.current() || native?.current()==false) return@async false
+                val next=Entry(held.uri,held.title,held.lease)
+                // The camera only touches this still-private presentation before either model is adopted.
+                if(!next.presentation.applyArrangementCamera(next.session,camera)) return@async false
+                held.finish {lease->
+                    if(!valid() || lease!==next.lease || native?.current()==false || !beforeAdopt()) false
+                    else if(native?.commit()==false) false
+                    else {
+                        visited.clear();sourceFrames=emptyList();visited[MapSaves.key(next.uri)]=next
+                        next.parkingCheck={false};next.flushNativeOnPresent=false;next.skipNativePersistOnPresent=false
+                        next.presentation.visible=true
+                        splitPresentation.present(presentation)
+                        splitPresentation.rememberNativeHint(hint)
+                        current=next;visible=true;adopted=true
+                        true
+                    }
+                }
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {false}
+            finally {
+                withContext(NonCancellable+Dispatchers.Main.immediate) {
+                    try {native?.close()} finally {map?.closeUnadopted()?.join()}
+                }
+                if(generation==request) {
+                    opening=false;openOperation=null
+                    if(!adopted) failure=MapWorkspaceFailure.UNAVAILABLE
+                }
+            }
+        }
+        work=pending;acceptedOpens+=pending
+        pending.invokeOnCompletion {acceptedOpens-=pending;if(work===pending) work=null}
+        pending.start();pending.await()
+    }
+
     fun open(uri:Uri,title:String,preparePresentation:suspend ()->(()->Boolean)?={ {true} },stillCurrent:()->Boolean={true},
         operation:Any?=null,onPresented:(Entry)->Unit={},onFinished:(Boolean)->Unit={},flushNativeOnPresent:Boolean=true,
-        presentation:MapOpenPresentation=MapOpenPresentation.Single):Boolean {
+        presentation:MapOpenPresentation=MapOpenPresentation.Single,
+        prepareDeparture:(suspend (()->Boolean)->com.xnotes.ui.PreparedHomeGate?)?=prepareHostDeparture,
+        commitPresentation:((()->Boolean)->Boolean)?=null,intentAlreadyAccepted:Boolean=false):Boolean {
         if(!active) return false
+        if(!intentAlreadyAccepted) onPresentationIntent?.invoke()
         val request=++generation
         val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=false
         fun valid()=active && generation==request && stillCurrent()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var incoming:MapDocumentLease?=null
+            var departure:com.xnotes.ui.PreparedHomeGate?=null
             var adopted=false
             try {
                 previous.forEach {it.join()}
@@ -106,8 +201,17 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 if(reused==null && visible && prior!=null && current===prior && prior.session.document!=null && !prior.session.canParkSourceNavigation) {
                     failure=MapWorkspaceFailure.CHANGED;return@launch
                 }
+                if(prepareDeparture!=null) {
+                    departure=prepareDeparture(::valid)
+                    if(departure==null) {if(active && generation==request) failure=MapWorkspaceFailure.CHANGED;return@launch}
+                }
                 // No suspension between the final physical-input proof and changing presentation.
                 if(!valid() || ready?.invoke()!=true) {
+                    if(active && generation==request) failure=MapWorkspaceFailure.CHANGED
+                    return@launch
+                }
+                val beforeAdopt={departure?.commit(::valid)!=false}
+                if((commitPresentation?.invoke(beforeAdopt) ?: beforeAdopt())!=true) {
                     if(active && generation==request) failure=MapWorkspaceFailure.CHANGED
                     return@launch
                 }
@@ -124,7 +228,9 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {if(active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
             finally {
-                if(!adopted) withContext(NonCancellable+Dispatchers.Main.immediate) {incoming?.closeUnadoptedSource()?.join()}
+                withContext(NonCancellable+Dispatchers.Main.immediate) {
+                    try {departure?.close()} finally {if(!adopted) incoming?.closeUnadoptedSource()?.join()}
+                }
                 if(generation==request) {opening=false;openOperation=null}
                 onFinished(adopted)
             }
@@ -147,6 +253,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit,onFinished:(Boolean)->Unit,
         savedRequest:com.xnotes.ui.MixedSplitRequest?=null):Boolean {
         if(!active) return false
+        onPresentationIntent?.invoke()
         val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
         val request=++generation
         val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=false
@@ -155,6 +262,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var incoming:MapDocumentLease?=null
             var native:com.xnotes.ui.PreparedPagedPairOpen?=null
+            var departure:com.xnotes.ui.PreparedHomeGate?=null
             var adopted=false
             var adoptedLease:MapDocumentLease?=null
             try {
@@ -191,6 +299,11 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 if(!valid() || !source.current() || !candidate.current()) throw MapPairChanged()
                 val replaced=ownedEntries().filter {it!==next}
                 val leavesReady=settleMapRetirement(replaced,::valid)
+                val departureProvider=prepareHostDeparture
+                if(departureProvider!=null) {
+                    departure=departureProvider {valid() && leavesReady() && candidate.current()}
+                    if(departure==null) throw MapPairChanged()
+                }
                 val applied=source.finish {
                     if(!valid() || !leavesReady() || !candidate.current()) false
                     else {
@@ -203,7 +316,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                         val layout=MapSplitLayout(mapPane,focus,saved?.ratio ?: .5f,saved?.sideBySide,
                             (mapPane==com.xnotes.ui.Pane.PRIMARY)!=mapFirst)
                         // commit's only false result is pre-mutation. No business veto follows it.
-                        if(!candidate.commit()) false else {
+                        if(!candidate.commit(beforeAdopt={departure?.commit {valid() && leavesReady() && candidate.current()}!=false})) false else {
                             visited.clear();sourceFrames=emptyList()
                             visited[MapSaves.key(next.uri)]=next
                             next.parkingCheck={false};next.sourceReturn=null
@@ -225,9 +338,9 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             finally {
                 try {
                     withContext(NonCancellable+Dispatchers.Main.immediate) {
-                        try {native?.close()} finally {
+                        try {native?.close()} finally {try {departure?.close()} finally {
                             incoming?.takeIf {it!==adoptedLease}?.closeUnadoptedSource()?.join()
-                        }
+                        }}
                     }
                 } catch(error:Exception) {
                     android.util.Log.w("xnotes.map.pair","Pair preparation cleanup failed",error)
@@ -337,6 +450,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         stillCurrent:()->Boolean={true},operation:Any?=null,
         onPresented:(com.xnotes.ui.PreparedNativeSplitOpen)->Unit={},onFinished:(Boolean)->Unit={}):Boolean {
         if(!active) return false
+        onPresentationIntent?.invoke()
         val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
         val request=++generation
         val previous=acceptedOpens.toList();work?.cancel();openOperation=operation;opening=true;failure=null;nativeSplitOperation=true
@@ -344,6 +458,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             splitPresentation.generation==layoutGeneration && stillCurrent()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var native:com.xnotes.ui.PreparedNativeSplitOpen?=null
+            var departure:com.xnotes.ui.PreparedHomeGate?=null
             var adopted=false
             var mapProof:(()->Boolean)?=null
             fun candidateCurrent()=valid() && mapProof?.invoke()!=false
@@ -359,9 +474,14 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 native=prepareNative(::candidateCurrent,::settleMaps)
                 val candidate=native ?: run {if(valid()) failure=MapWorkspaceFailure.CHANGED;return@launch}
                 if(!valid() || mapProof?.invoke()!=true || !candidate.current()) throw MapPairChanged()
+                val departureProvider=prepareHostDeparture
+                if(departureProvider!=null) {
+                    departure=departureProvider {candidateCurrent() && candidate.current()}
+                    if(departure==null) throw MapPairChanged()
+                }
                 // No suspension or additional business veto between the two document adoption and
                 // retiring this presentation's own leases. Other Map owners keep their actor.
-                if(!candidate.commit()) throw MapPairChanged()
+                if(!candidate.commit(beforeAdopt={departure?.commit {candidateCurrent() && candidate.current()}!=false})) throw MapPairChanged()
                 visited.clear();sourceFrames=emptyList();current=null;visible=false
                 splitPresentation.clear();adopted=true
                 retire(entries)
@@ -370,7 +490,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             catch(_:MapPairChanged) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.CHANGED}
             catch(_:Exception) {if(!adopted && active && generation==request) failure=MapWorkspaceFailure.UNAVAILABLE}
             finally {
-                try {withContext(NonCancellable+Dispatchers.Main.immediate) {native?.close()}}
+                try {withContext(NonCancellable+Dispatchers.Main.immediate) {try {native?.close()} finally {departure?.close()}}}
                 catch(error:Exception) {android.util.Log.w("xnotes.map.split","Native split preparation cleanup failed",error)}
                 finally {
                     if(generation==request) {opening=false;openOperation=null}
@@ -385,7 +505,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
 
     /** A successful synchronous handoff consumes incoming; every failure leaves it to its holder. */
     internal fun pushSource(origin:Entry,incoming:MapDocumentLease,title:String,bookmark:MapSourceReturnBookmark,
-        departure:MapPresentationDeparture,parkingCheck:()->Boolean):SourcePushResult {
+        departure:MapPresentationDeparture,beforeAdopt:()->Boolean={true},parkingCheck:()->Boolean):SourcePushResult {
         if(!active || !visible || current!==origin || !origin.lease.alive || !incoming.alive ||
             origin.session.currentSourceNavigation(bookmark.source)==null || !departure.current(origin.presentation,origin.session) ||
             bookmark.source.target.scope!=SourceScope.FILE || incoming.session.document?.id!=bookmark.source.target.documentId)
@@ -398,6 +518,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(self && incoming.session!==origin.session) return SourcePushResult.CHANGED
         if(!self && (sourceFrames.size>=64 || pooled==null && visited.size>=16)) return SourcePushResult.LIMIT
         if(!parkingCheck()) return SourcePushResult.CHANGED
+        if(!beforeAdopt()) return SourcePushResult.CHANGED
         cancelOpen()
         if(self) {
             origin.presentation.closeSources();origin.parkingCheck=parkingCheck;origin.skipNativePersistOnPresent=true
@@ -414,12 +535,13 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         return SourcePushResult.APPLIED
     }
     /** Returning parks both actual map actors; it never closes one or forces a save. */
-    internal fun returnSource(expected:Entry,parkingCheck:()->Boolean):Boolean {
+    internal fun returnSource(expected:Entry,beforeAdopt:()->Boolean={true},parkingCheck:()->Boolean):Boolean {
         val frame=sourceFrames.lastOrNull() ?: return false
         val origin=frame.origin
         if(!active || !visible || current!==expected || frame.destination!==expected || !expected.lease.alive || !origin.lease.alive ||
             visited[MapSaves.key(origin.uri)]!==origin || !expected.session.canParkSourceNavigation || !origin.session.canParkSourceNavigation ||
             !parkingCheck()) return false
+        if(!beforeAdopt()) return false
         cancelOpen();sourceFrames=sourceFrames.dropLast(1)
         expected.presentation.parkSourcePanel();expected.presentation.visible=false;expected.parkingCheck={false}
         origin.parkingCheck=parkingCheck;origin.skipNativePersistOnPresent=true;origin.presentation.visible=true
@@ -444,19 +566,22 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     }
     internal fun canHide(expected:Entry)=active && current===expected && expected.lease.alive &&
         !expected.session.hasUnconfirmedContent && !expected.session.closing && !expected.session.replacingDocument
-    fun hide(expected:Entry):Boolean {
+    fun hide(expected:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!canHide(expected)) return false
+        if(!beforeAdopt()) return false
         cancelOpen();splitPresentation.park();expected.presentation.visible=false;visible=false;return true
     }
     /** Real native callers re-prepare via open(); this fast path still checks its original proof. */
-    fun show(expected:Entry):Boolean {
+    fun show(expected:Entry,beforeAdopt:()->Boolean={true}):Boolean {
         if(!active || current!==expected || !expected.lease.alive) return false
         if(!visible && !expected.parkingCheck()) {failure=MapWorkspaceFailure.CHANGED;return false}
+        if(!beforeAdopt()) return false
         cancelOpen();expected.presentation.visible=true;visible=true;return true
     }
-    fun showSplit(expected:Entry,layout:MapSplitLayout):Boolean {
+    fun showSplit(expected:Entry,layout:MapSplitLayout,beforeAdopt:()->Boolean={true}):Boolean {
         if(!active || current!==expected || !expected.lease.alive || !visible && !expected.parkingCheck() ||
             !expected.session.canParkSourceNavigation) return false
+        if(!beforeAdopt()) return false
         cancelOpen();splitPresentation.present(MapOpenPresentation.Split(layout))
         expected.presentation.visible=true;visible=true;return true
     }
@@ -465,23 +590,25 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         if(!active || pane!=layout.focusedPane && current?.session?.inkContact==true) return false
         return splitPresentation.updateLayout {it.copy(focusedPane=pane)}
     }
-    fun updateSplitLayout(transform:(MapSplitLayout)->MapSplitLayout):Boolean =
-        active && splitPresentation.updateLayout(transform)
-    fun removeSplitHome(mapPane:com.xnotes.ui.Pane):Boolean {
+    fun updateSplitLayout(beforeAdopt:()->Boolean={true},transform:(MapSplitLayout)->MapSplitLayout):Boolean =
+        active && splitPresentation.updateLayout(beforeAdopt,transform)
+    fun removeSplitHome(mapPane:com.xnotes.ui.Pane,beforeAdopt:()->Boolean={true}):Boolean {
         if(!active || current!=null || splitPresentation.layout?.mapPane!=mapPane) return false
+        if(!beforeAdopt()) return false
         cancelOpen();splitPresentation.clear();return true
     }
-    fun close(expected:Entry,preserveRecovery:Boolean=false):Job? {
-        return closeEntry(expected,preserveRecovery,keepSplit=false)
+    fun close(expected:Entry,preserveRecovery:Boolean=false,beforeAdopt:()->Boolean={true}):Job? {
+        return closeEntry(expected,preserveRecovery,keepSplit=false,beforeAdopt=beforeAdopt)
     }
-    fun closeToHome(expected:Entry,preserveRecovery:Boolean=false):Job? {
-        if(splitPresentation.layout==null) return close(expected,preserveRecovery)
-        return closeEntry(expected,preserveRecovery,keepSplit=true)
+    fun closeToHome(expected:Entry,preserveRecovery:Boolean=false,beforeAdopt:()->Boolean={true}):Job? {
+        if(splitPresentation.layout==null) return close(expected,preserveRecovery,beforeAdopt)
+        return closeEntry(expected,preserveRecovery,keepSplit=true,beforeAdopt=beforeAdopt)
     }
-    private fun closeEntry(expected:Entry,preserveRecovery:Boolean,keepSplit:Boolean):Job? {
+    private fun closeEntry(expected:Entry,preserveRecovery:Boolean,keepSplit:Boolean,beforeAdopt:()->Boolean):Job? {
         if(!active || current!==expected) return null
         if(preserveRecovery && !expected.lease.hasOtherOwners &&
             (!expected.session.recoverySafe || !expected.session.canParkSourceNavigation)) return null
+        if(!beforeAdopt()) return null
         val pending=acceptedOpens.toList();cancelOpen()
         val entries=ownedEntries();visited.clear();sourceFrames=emptyList();current=null;visible=false
         if(!keepSplit) splitPresentation.clear()

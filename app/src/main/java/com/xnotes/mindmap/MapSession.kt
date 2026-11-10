@@ -23,6 +23,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/** One actual recovery checkpoint of one immutable actor body; current() performs no IO. */
+internal class MapRecoveryCheckpoint internal constructor(val documentId:String,val uri:Uri,private val check:()->Boolean) {
+    @androidx.annotation.MainThread fun current():Boolean=check()
+}
+
 internal object MapSaves {
     // Writes survive an Activity being stopped or destroyed. Each document owns its serialization lock.
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -568,20 +573,25 @@ class MapSession() : ViewModel() {
     /** Map-to-map parking observes runtime drafts; it never settles or retires another owner. */
     /** Source bytes used by this actor's initial load; runtime edits never rewrite this observation. */
     internal var loadedRawSha256:String?=null;private set
+    internal var loadedRecoveryProof:MapStore.RecoveryLoadProof?=null;private set
+    /** IO-only comparison under the canonical URI mutex, never a new writer baseline. */
+    internal fun verifyColdLoad(proof:MapStore.RecoveryLoadProof,checkActive:()->Unit={})=
+        ::store.isInitialized && store.verifyOpenedRecovery(proof,checkActive)
     internal val canParkSourceNavigation get()=!loading && !loadFailed && document!=null && !closing && !replacingDocument &&
         !hasUnconfirmedContent && !sourceTargetEditPickerBusy && targetEditController?.active!=true
     val recoverySafe get() = ::store.isInitialized && store.journalReady && durableRevision == revision
 
-    fun open(context: Context, uri: Uri, knownAliases:Set<String> = emptySet()) {
+    fun open(context: Context, uri: Uri, knownAliases:Set<String> = emptySet(),expectedDocumentId:String?=null) {
         if (opened) return
         opened = true; app = context.applicationContext;storedUri=uri
         lock = MapSaves.lockFor(uri)
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { lock.withLock { runCatching {
-                store=MapFiles.store(app,uri,target(uri),knownAliases=knownAliases);store.open()
+                store=MapFiles.store(app,uri,target(uri),knownAliases=knownAliases);store.open(expectedDocumentId)
             } } }
             result.onSuccess {
                 loadedRawSha256=store.openedRawSha256
+                loadedRecoveryProof=store.openedRecoveryProof
                 recoveryKeys=store.recoveryKeys
                 history = MapHistory(it.document); document = it.document; selected = it.document.initialSelection
                 reconcileNavigationReveal()
@@ -656,7 +666,8 @@ class MapSession() : ViewModel() {
         debounce = viewModelScope.launch { delay(350); save() }
     }
     /** [overwrite] is the explicit conflict choice to keep this version over the destination's. */
-    internal fun saveAttempt(overwrite:Boolean=false):Deferred<MapSaveOutcome> {
+    internal fun saveAttempt(overwrite:Boolean=false):Deferred<MapSaveOutcome> = enqueueSaveAttempt(overwrite,false)
+    private fun enqueueSaveAttempt(overwrite:Boolean,localOnly:Boolean):Deferred<MapSaveOutcome> {
         debounce?.cancel()
         val expectedHistory=history
         val epoch=connectedEpoch
@@ -675,18 +686,22 @@ class MapSession() : ViewModel() {
                 val version=revision
                 val result=withContext(Dispatchers.IO) {lock.withLock {
                     if(version!=revision || connectedEpoch!=epoch || replacingDocument) null
-                    else runCatching {if(overwrite) store.overwriteAndVerify(doc) else store.saveAndVerify(doc)}.also {
+                    else runCatching {
+                        if(localOnly) {store.retainForRecovery(doc);null}
+                        else if(overwrite) store.overwriteAndVerify(doc) else store.saveAndVerify(doc)
+                    }.also {
                         if(store.journalReady) durableRevision=version
                     }
                 }} ?: return@async MapSaveOutcome.Changed(version)
-                if(result.isSuccess) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
+                if(result.isSuccess && !localOnly) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
                 val latest=history===expectedHistory && connectedEpoch==epoch && revision==version && !replacingDocument
                 result.fold({sourceSha256->
+                    if(localOnly) return@fold MapSaveOutcome.Checkpointed(version,latest)
                     if(latest) {dirty=false;saveFailed=false;recovered=false;conflict=false}
                     MapSaveOutcome.Written(version,latest,sourceSha256)
                 },{error->
                     if(error is java.util.concurrent.CancellationException) throw error
-                    if(latest) {saveFailed=true;conflict=error is MapConflict}
+                    if(latest) {saveFailed=true;if(!localOnly) conflict=error is MapConflict}
                     when {
                         error is MapConflict -> MapSaveOutcome.Conflict(version,store.journalReady,error)
                         store.journalReady -> MapSaveOutcome.Retained(version,latest,error)
@@ -695,6 +710,48 @@ class MapSession() : ViewModel() {
                 })
             } finally {acceptedSaves--;saving=acceptedSaves>0 || replacingDocument}
         }.also {saveTail=it;it.start()}
+    }
+    /** Local recovery success is separate from whether the configured original accepted a write. */
+    @androidx.annotation.MainThread
+    internal suspend fun awaitRecoveryCheckpoint(localOnly:Boolean=false,stillCurrent:()->Boolean={true}):MapRecoveryCheckpoint? {
+        if(!::store.isInitialized || !::storedUri.isInitialized || !stillCurrent() || !canParkSourceNavigation) return null
+        val expectedHistory=history ?: return null
+        val doc=document ?: return null
+        val version=revision;val epoch=connectedEpoch
+        fun sameBody()=stillCurrent() && history===expectedHistory && document===doc && revision==version &&
+            connectedEpoch==epoch && canParkSourceNavigation
+        fun localSuccess(result:MapSaveOutcome)=result.capturedRevision==version && when(result) {
+            is MapSaveOutcome.Written->result.latest
+            is MapSaveOutcome.Checkpointed->result.latest
+            is MapSaveOutcome.Retained->result.latest
+            is MapSaveOutcome.Conflict->result.retained
+            else->false
+        }
+        try {
+            // Wait the actual accepted prefix, including a later link accepted while awaiting it.
+            var settled:MapSaveOutcome?=null
+            while(true) {
+                val accepted=saveTail
+                settled=accepted?.await()
+                if(!sameBody()) return null
+                if(saveTail===accepted) break
+            }
+            // Do not repeatedly retry the provider for a retained journal on every camera change.
+            // recoverySafe is only a reason to perform the actual read below, never the proof.
+            if(dirty && settled?.capturedRevision==version && !localSuccess(requireNotNull(settled))) return null
+            val observedDurable=!dirty || settled?.let(::localSuccess)==true || loadedRecoveryProof!=null && recoverySafe
+            if(!observedDurable) {
+                val result=enqueueSaveAttempt(false,localOnly).await()
+                if(!sameBody() || result.capturedRevision!=version) return null
+                if(!localSuccess(result)) return null
+            }
+            if(!sameBody() || saving) return null
+            val coroutine=currentCoroutineContext();val check={coroutine.ensureActive()}
+            val proof=withContext(Dispatchers.IO) {lock.withLock {store.observeRecoveryDurability(doc,check)}} ?: return null
+            if(!sameBody() || saving || !store.recoveryDurabilityCurrent(proof)) return null
+            return MapRecoveryCheckpoint(doc.id,storedUri) {sameBody() && !saving && store.recoveryDurabilityCurrent(proof)}
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(_:Exception) {return null}
     }
     fun save(onClosed:(()->Unit)?=null,overwrite:Boolean=false) {
         if(replacingDocument || document==null) return

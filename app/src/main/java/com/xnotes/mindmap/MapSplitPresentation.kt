@@ -65,11 +65,11 @@ internal class MapSplitPresentation {
         layout=layout?.copy(nativeHome=true);returnLayout=returnLayout?.copy(nativeHome=true)
         generation++;return true
     }
-    fun updateLayout(transform:(MapSplitLayout)->MapSplitLayout):Boolean {
+    fun updateLayout(beforeAdopt:()->Boolean={true},transform:(MapSplitLayout)->MapSplitLayout):Boolean {
         val current=layout ?: return false
         val next=transform(current).normalized()
         if(next.mapPane!=current.mapPane) return false
-        if(next!=current) {layout=next;generation++}
+        if(next!=current) {if(!beforeAdopt()) return false;layout=next;generation++}
         return true
     }
 }
