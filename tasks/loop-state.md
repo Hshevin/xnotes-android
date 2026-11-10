@@ -1,6 +1,6 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：完整思维导图原14组保留，overall complete=false；持续开发仍paused，当前执行用户新授权的剩余计划＋全部当前进展本地合并。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
+目标：完整思维导图原14组保留，overall complete=false；本次剩余计划＋全部当前进展本地合并已完成，持续开发保持paused。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
 工作树：当前聊天附加的 mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master9cecd51b，保留已验证的布局记录组件39812473/7dc75587及其文档8c8a4c84。此前草稿快照3520e964仍保留；构建/cache独立于其他工作树。历史同步与验证见阶段记录，机器路径仅保存在忽略的tmp运行记录中。
 授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户最新明确要求“先停一下，我检查一下你的工作”，已暂停；之后须按用户继续指令恢复。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
@@ -412,3 +412,14 @@ Root只补docs/README/tasks，不再改源码。此前Map/Last/Readonly/Canvas/M
 精确持续计划 docs/movinkpad/mind-map-next-plan-2026-11-10.md，合并/验收记录
  docs/movinkpad/mind-map-cold-progress-merge-2026-11-10.md；原14组未完成，后续仍暂停。
 当前无构建作业；未APK／安装／推送／发布，真实Android／SAF／杀进程／GPU／目标设备未验。
+
+## 最新交接点：计划与全部进展已合入本地主线（2026-11-10）
+
+master本地合并0c1682c7（父9cecd51b／e9a48daa）；源码f3890bbb及全部前置
+组件／S3a0／S3a1和计划已包含。507套4750唯一主机用例全过，Android源码实际
+编译，源码／最终证据独审PASS。合并后仅补README/docs/tasks，app源码和1350
+验证输入未变。保留开发分支／工作树；无构建作业、无残留必修、无待用户回答。
+用户本次要求的计划与合并已完成，原14组整体仍未完成，后续开发保持paused。
+下一工作按 docs/movinkpad/mind-map-next-plan-2026-11-10.md 的R1以后及R0
+更广入口／实际平台验收继续；先读当前README／AGENTS／本断点，不重复旧阶段。
+本次不APK／安装／推送／发布；仪器／SAF／真实杀进程／Surface／GPU／MovinkPad未验。

@@ -287,7 +287,7 @@ MapColdAccess、MapStore、MapSession、MapDocuments 及其三套新用例通过
 [evidence/map-cold-proof-component-2026-11-10.json](evidence/map-cold-proof-component-2026-11-10.json)。
 本片允许先保存 Map 组件进度，不代表 Main 自动恢复或完整 S3b 已完成。
 
-## S3b 本批集成完成并准备本地合并
+## S3b 本批集成完成并已本地合并
 
 本批普通自动记录／冷恢复、typed Native／Shared／Canvas、真实本机正文成功票、
 Canvas独立另存与实际UI保存／放弃路径、最后采用门、Map journal-only停车及旧占位
@@ -297,3 +297,5 @@ Android测试源码实际编译通过，1350项KT／Java／XML与Gradle配置SHA
 后续原14组未完成项见[接续计划](mind-map-next-plan-2026-11-10.md)。
 本阶段不将JVM丢全runtime后的重建当成Android实际杀进程、Surface或GPU证明；
 更广入口组合、系统选择器／SAF、真实音频与MovinkPad验收继续保留。
+
+本批已本地合并master `0c1682c7`，保留开发分支。源码／验证及剩余计划见上述本轮记录。
