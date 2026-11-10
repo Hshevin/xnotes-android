@@ -82,4 +82,23 @@ class ViewStateStoreTest {
         val entry = json.read().getJSONObject("auth|doc")
         assertEquals(setOf("zoom", "scrollX", "scrollY"), entry.keys().asSequence().toSet())
     }
+
+    @Test fun fitWidthFlagRoundTripsAndIsAbsentByDefault() {
+        val json = store()
+        ViewStateStore(json).put("auth|fit", 1.25, 0.0, 300.0, ViewOverrides(), fitWidth = true)
+        ViewStateStore(json).put("auth|free", 2.0, 10.0, 20.0, ViewOverrides())
+
+        val reloaded = ViewStateStore(json)
+        assertEquals(true, reloaded.get("auth|fit")!!.fitWidth)
+        assertEquals(false, reloaded.get("auth|free")!!.fitWidth)
+        // Only the fitted entry carries the key, so files written before the flag stay byte-compatible.
+        assertEquals(true, json.read().getJSONObject("auth|fit").getBoolean("fitWidth"))
+        assertEquals(setOf("zoom", "scrollX", "scrollY"), json.read().getJSONObject("auth|free").keys().asSequence().toSet())
+    }
+
+    @Test fun legacyEntryWithoutFitWidthReadsAsFree() {
+        val json = store()
+        json.write(JSONObject().put("auth|old", JSONObject().put("zoom", 2.0).put("scrollX", 5.0).put("scrollY", 7.0)))
+        assertEquals(false, ViewStateStore(json).get("auth|old")!!.fitWidth)
+    }
 }
