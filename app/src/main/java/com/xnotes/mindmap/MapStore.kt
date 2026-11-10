@@ -6,7 +6,12 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.FilterInputStream
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption.READ
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 
 interface MapTarget {
@@ -25,21 +30,69 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     @Volatile var journalReady = false; private set
     /** Actual raw bytes observed by open(), independent of the recovery writer's baseline. */
     @Volatile internal var openedRawSha256:String?=null;private set
+    internal data class JournalFingerprint(val key:Any?,val created:FileTime,val size:Long,val sha256:String)
+    internal data class JournalHead(val exists:Boolean,val fingerprint:JournalFingerprint?)
+    /** Actual first-read bytes plus only the deterministic reconciliation performed by this open. */
+    internal class RecoveryLoadProof internal constructor(
+        internal val issuer:Any,val documentId:String,internal val rawSha256:String?,
+        internal val originalHeads:Map<File,JournalHead>,internal val reconciledHeads:Map<File,JournalHead>,
+    )
+    @Volatile internal var openedRecoveryProof:RecoveryLoadProof?=null;private set
+    @Volatile private var durabilityEpoch:Any=Any()
+    /** This describes actual recoverable content, never the original-file overwrite baseline. */
+    internal class RecoveryDurabilityProof internal constructor(
+        internal val issuer:Any,internal val epoch:Any,val documentId:String,
+        internal val rawSha256:String?,internal val heads:Map<File,JournalHead>,
+    )
     data class Opened(val document: MindMapDocument, val recovered: Boolean = false, val conflict: Boolean = false)
     data class Observed(val document:MindMapDocument,val recovered:Boolean,val conflict:Boolean,val remoteAvailable:Boolean,
         val remoteBytes:Long,val journalBytes:Long)
     private data class Inspection(val opened:Opened,val chosen:File,val expected:String?,val ready:Boolean,
-        val checkpoint:Boolean=false,val remoteAvailable:Boolean,val remoteBytes:Long,val journalBytes:Long,val rawSha256:String?)
+        val checkpoint:Boolean=false,val remoteAvailable:Boolean,val remoteBytes:Long,val journalBytes:Long,val rawSha256:String?,
+        val heads:Map<File,JournalHead>,val pending:Map<File,Triple<MindMapDocument,String,Boolean>?>,val identitiesMatch:Boolean) {
+        val provable get()=heads.values.all {!it.exists || it.fingerprint!=null}
+    }
+    private data class JournalRead(val checkpoint:Triple<MindMapDocument,String,Boolean>?,val head:JournalHead)
 
-    fun open(): Opened {
-        val read=inspect({})
-        reconcileStaging()
+    fun open(expectedDocumentId:String?=null): Opened {
+        durabilityEpoch=Any()
+        openedRecoveryProof=null
+        val read=inspect({},expectedDocumentId=expectedDocumentId)
+        if(expectedDocumentId!=null && !read.provable) throw MapRecoveryObservationException("Unverifiable recovery checkpoint")
+        val reconciled=if(read.provable) read.heads.toMutableMap().also {reconcileOpened(read,it)} else null
+        if(reconciled==null) reconcileStaging()
         openedRawSha256=read.rawSha256
         journal=read.chosen;expectedHash=read.expected
         if(read.ready) journalReady=true
-        if(read.checkpoint) checkpoint(read.opened.document,pending=false)
+        if(read.checkpoint) checkpoint(read.opened.document,pending=false,knownHeads=reconciled)
+        if(reconciled!=null && read.identitiesMatch) openedRecoveryProof=RecoveryLoadProof(this,read.opened.document.id,read.rawSha256,
+            read.heads.toMap(),reconciled.toMap())
         return read.opened
     }
+    /** Read-only final comparison. A later observation must never replace an actor's first load. */
+    internal fun verifyOpenedRecovery(proof:RecoveryLoadProof,checkActive:()->Unit={}):Boolean {
+        if(proof.issuer!==this || openedRecoveryProof!==proof) return false
+        return try {
+            val read=inspect(checkActive,expectedDocumentId=proof.documentId)
+            checkActive()
+            read.provable && read.rawSha256==proof.rawSha256 && read.heads==proof.reconciledHeads &&
+                read.opened.document.id==proof.documentId
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(_:Exception) {false}
+    }
+    /** Caller holds the URI mutex. Only this actual read can prove a clean body's durability. */
+    internal fun observeRecoveryDurability(document:MindMapDocument,checkActive:()->Unit={}):RecoveryDurabilityProof? {
+        val epoch=Any().also {durabilityEpoch=it}
+        return try {
+            val read=inspect(checkActive,expectedDocumentId=document.id)
+            checkActive()
+            if(!read.provable || !read.identitiesMatch || read.opened.document!=document || durabilityEpoch!==epoch) null
+            else RecoveryDurabilityProof(this,epoch,document.id,read.rawSha256,read.heads.toMap())
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(_:Exception) {null}
+    }
+    /** Pure memory check; writes or a newer actual durability observation retire the old ticket. */
+    internal fun recoveryDurabilityCurrent(proof:RecoveryDurabilityProof)=proof.issuer===this && proof.epoch===durabilityEpoch
     /** Indexing sees the same recovery winner without changing a writer's baseline or either file. */
     fun observe(checkActive:()->Unit={},readJournalBytes:(Int)->Unit={}):Observed {
         val read=inspect(checkActive,readJournalBytes)
@@ -57,27 +110,39 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     private fun inspect(checkActive:()->Unit,readJournalBytes:(Int)->Unit={},expectedDocumentId:String?=null):Inspection {
         checkActive()
         var journalBytes=0L
+        val heads=linkedMapOf<File,JournalHead>()
+        val pending=linkedMapOf<File,Triple<MindMapDocument,String,Boolean>?>()
+        val inspectedIds=linkedSetOf<String>()
         val savedByFile=journals.associateWith {file->
-            val staged=staging(file).takeIf {it.exists()}?.let {
-                readCheckpoint(it,checkActive) {count->journalBytes+=count;readJournalBytes(count)}
+            fun read(at:File):JournalRead=readJournal(at,checkActive) {count->journalBytes+=count;readJournalBytes(count)}.also {
+                heads[at]=it.head
+                it.checkpoint?.first?.id?.let(inspectedIds::add)
+                if(expectedDocumentId!=null && it.checkpoint?.first?.id?.let {id->id!=expectedDocumentId}==true)
+                    throw MapRecoveryObservationException("Recovery checkpoint belongs to another mind map")
             }
+            val stage=read(staging(file));pending[file]=stage.checkpoint
+            // Even a complete stage cannot hide a foreign valid published checkpoint.
+            val published=read(file)
             // A complete staging file is the next checkpoint for this same serialized writer.
             // An incomplete one cannot supersede the last published recovery journal.
-            staged ?: if(file.exists()) readCheckpoint(file,checkActive) {count->journalBytes+=count;readJournalBytes(count)}
+            stage.checkpoint ?: if(published.head.exists) published.checkpoint
                 ?: throw MapRecoveryObservationException("Invalid recovery journal") else null
         }
         val existing=journals.filter {savedByFile[it]!=null}
         if(existing.size>1) throw MapRecoveryObservationException("Conflicting recovery journals")
         val chosen=existing.singleOrNull() ?: journals.first()
-        val remote=try {target.read()} catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        val remote=try {target.read().clone()} catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
             catch(_:Exception) {checkActive();null}
         checkActive()
         val remoteHash = remote?.let(::hash)
         val saved=savedByFile[chosen]
-        if(expectedDocumentId!=null && saved!=null && saved.first.id!=expectedDocumentId)
-            throw MapRecoveryObservationException("Recovery checkpoint belongs to another mind map")
+        val decoded = remote?.let { runCatching { MapCodec.decode(it) }.getOrNull() }
+        decoded?.id?.let(inspectedIds::add)
+        if(expectedDocumentId!=null && decoded!=null && decoded.id!=expectedDocumentId)
+            throw MapRecoveryObservationException("Raw file belongs to another mind map")
         fun result(opened:Opened,expected:String?,ready:Boolean,checkpoint:Boolean=false)=Inspection(opened,chosen,expected,ready,
-            checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes,remoteHash)
+            checkpoint,remote!=null,remote?.size?.toLong() ?: 0L,journalBytes,remoteHash,heads,pending,
+            inspectedIds.all {it==opened.document.id})
         if (saved != null && saved.third) {
             val contentHash = hash(MapCodec.encode(saved.first))
             checkActive()
@@ -86,7 +151,6 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
             }
             return result(Opened(saved.first,recovered=true,conflict=remoteHash!=saved.second),saved.second,true)
         }
-        val decoded = remote?.let { runCatching { MapCodec.decode(it) }.getOrNull() }
         checkActive()
         if (decoded == null && saved != null) {
             return result(Opened(saved.first,recovered=true,conflict=true),saved.second,true)
@@ -97,6 +161,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
 
     /** A new copy may claim only a readable, empty destination without any earlier recovery work. */
     fun create(doc:MindMapDocument,checkActive:()->Unit={}) {
+        durabilityEpoch=Any()
         checkActive()
         val bytes=MapCodec.encode(doc)
         checkActive()
@@ -123,6 +188,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     }
 
     fun save(doc: MindMapDocument) {
+        durabilityEpoch=Any()
         journalReady = false
         val bytes = MapCodec.encode(doc) // validate before touching either copy
         checkpoint(doc, pending = true)
@@ -165,6 +231,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
      * destination. An unreadable destination throws before the journal is touched, so it is kept.
      */
     fun discardRecovery(): Opened {
+        durabilityEpoch=Any()
         val remote = target.read()
         val doc = MapCodec.decode(remote)
         for(file in journals.flatMap {listOf(it,staging(it))}) {
@@ -176,9 +243,10 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         return Opened(doc)
     }
 
-    private fun checkpoint(doc: MindMapDocument, pending: Boolean,checkActive:()->Unit={}) {
+    private fun checkpoint(doc: MindMapDocument, pending: Boolean,checkActive:()->Unit={},knownHeads:MutableMap<File,JournalHead>?=null) {
         checkActive()
-        reconcileStaging(checkActive)
+        if(knownHeads==null) reconcileStaging(checkActive)
+        else if(!headsMatch(knownHeads,checkActive)) throw MapRecoveryObservationException("Recovery changed during open")
         val data = JSONObject().put("baseHash", requireNotNull(expectedHash))
             .put("pending", pending).put("document", MapCodec.toJson(doc)).toString().toByteArray(Charsets.UTF_8)
         // Envelope adds a small fixed overhead to the document's size.
@@ -187,6 +255,7 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         val staging=staging(journal)
         checkActive()
         if(!staging.createNewFile()) throw IOException("Unfinished recovery checkpoint")
+        val owned=Files.readAttributes(staging.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
         var synced=false
         try {
             FileOutputStream(staging).use {out->
@@ -194,12 +263,35 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
                 while(offset<data.size) {checkActive();val count=minOf(8192,data.size-offset);out.write(data,offset,count);offset+=count}
                 out.fd.sync();synced=true
             }
+            val expected=knownHeads?.let {JournalHead(true,JournalFingerprint(owned.fileKey(),owned.creationTime(),data.size.toLong(),hash(data)))}
+            if(expected!=null && readJournal(staging,checkActive,decode=false).head!=expected)
+                throw MapRecoveryObservationException("Checkpoint stage changed")
             Files.move(staging.toPath(), journal.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             journalReady = true
+            knownHeads?.let {it[journal]=requireNotNull(expected);it[staging]=absentHead}
         } finally {
             // This invocation owns the incomplete file. A fully synced checkpoint remains
             // recovery material if its atomic move fails; earlier staging files are never ours.
-            if(!synced) staging.delete()
+            if(!synced && sameFile(staging,owned)) staging.delete()
+        }
+    }
+    /** Compare against the first inspect; rereads only veto, and never establish a new baseline. */
+    private fun headsMatch(heads:Map<File,JournalHead>,checkActive:()->Unit={}):Boolean =
+        heads.all {(file,head)->checkActive();readJournal(file,checkActive,decode=false).head==head}
+
+    private fun reconcileOpened(read:Inspection,heads:MutableMap<File,JournalHead>) {
+        if(!headsMatch(heads)) throw MapRecoveryObservationException("Recovery changed during open")
+        for(file in journals) {
+            val stage=staging(file)
+            val before=requireNotNull(heads[stage])
+            if(!before.exists) continue
+            if(readJournal(stage,{},decode=false).head!=before || readJournal(file,{},decode=false).head!=heads[file])
+                throw MapRecoveryObservationException("Recovery changed during reconciliation")
+            if(read.pending[file]!=null) {
+                Files.move(stage.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
+                heads[file]=before
+            } else check(stage.delete() || !stage.exists()) {"Cannot remove an incomplete recovery checkpoint"}
+            heads[stage]=absentHead
         }
     }
     /** Only the serialized editing owner cleans/promotes checkpoints; indexing stays read-only. */
@@ -217,22 +309,40 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
     }
     /** I/O, cancellation and read-budget failures propagate; only invalid bytes are discardable. */
     private fun readCheckpoint(file:File,checkActive:()->Unit,readBytes:(Int)->Unit={}):Triple<MindMapDocument,String,Boolean>? {
+        return readJournal(file,checkActive,readBytes=readBytes).checkpoint
+    }
+    private fun sameFile(file:File,expected:BasicFileAttributes):Boolean=try {
+        val actual=Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+        actual.isRegularFile && actual.fileKey()==expected.fileKey() && actual.creationTime()==expected.creationTime()
+    } catch(_:Exception) {false}
+    private fun readJournal(file:File,checkActive:()->Unit,decode:Boolean=true,readBytes:(Int)->Unit={}):JournalRead {
         checkActive()
-        if(file.length()>MapCodec.MAX_BYTES) return null
-        val bytes=file.inputStream().use {input->MapCodec.readBytes(object:FilterInputStream(input) {
+        val before=try {Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)}
+            catch(_:NoSuchFileException) {return JournalRead(null,absentHead)}
+        if(!before.isRegularFile) throw MapRecoveryObservationException("Recovery checkpoint is not a regular file")
+        if(before.size()>MapCodec.MAX_BYTES) return JournalRead(null,JournalHead(true,null))
+        val bytes=Files.newInputStream(file.toPath(),READ,NOFOLLOW_LINKS).use {input->MapCodec.readBytes(object:FilterInputStream(input) {
             override fun read():Int {checkActive();return super.read().also {if(it>=0) readBytes(1)}}
             override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length).also {if(it>0) readBytes(it)}}
         })}
         checkActive()
-        return try {
+        val after=Files.readAttributes(file.toPath(),BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+        if(!after.isRegularFile || before.fileKey()!=after.fileKey() || before.creationTime()!=after.creationTime() ||
+            before.size()!=after.size() || bytes.size.toLong()!=after.size() || before.lastModifiedTime()!=after.lastModifiedTime())
+            throw MapRecoveryObservationException("Recovery checkpoint changed while reading")
+        val head=JournalHead(true,JournalFingerprint(after.fileKey(),after.creationTime(),bytes.size.toLong(),hash(bytes)))
+        if(!decode) return JournalRead(null,head)
+        val checkpoint=try {
             val j=JSONObject(String(bytes,Charsets.UTF_8))
             val base=j.get("baseHash").also {require(it is String && (it==ABSENT || it.matches(Regex("[0-9a-f]{64}"))))} as String
             val pending=j.get("pending").also {require(it is Boolean)} as Boolean
             Triple(MapCodec.fromJson(j.getJSONObject("document")),base,pending)
         } catch(_:org.json.JSONException) {null} catch(_:IllegalArgumentException) {null}
+        return JournalRead(checkpoint,head)
     }
     private fun staging(file:File)=File(file.parentFile,file.name+".pending")
     companion object {
+        private val absentHead=JournalHead(false,null)
         /** Base for a destination that could not be read; never equal to a content hash. */
         private const val ABSENT = "absent"
         private fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

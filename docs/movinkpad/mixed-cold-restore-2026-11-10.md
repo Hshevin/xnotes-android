@@ -1,7 +1,7 @@
 # 混合分屏进程恢复（2026-11-10）
 
 用户要求：继续完整思维导图流程，先同步主线修复并保留已完成改动，再接混合布局的进程恢复。
-状态：已验证布局记录及受保护 NOTE 工作副本恢复、独立另存和录音恢复（JVM及源码编译）；混合布局自动启动恢复尚未接入，整体目标未完成。
+状态：已验证布局记录及受保护 NOTE 工作副本恢复、独立另存和录音恢复（JVM及源码编译）；混合布局自动启动恢复接线中，尚未完成端到端验证；整体目标未完成。
 本轮边界：实现、相关编译／测试、文档及本地提交；按用户本次要求同步主线，不打包、安装、推送或发布。
 
 S3a0 verified；整体思维导图目标 active，complete=false。S1/S2 已提交至
@@ -250,3 +250,39 @@ Discard Undo窗口排除候选且删除前核新引用，原录音临时文件�
   producer完整迁移仍按原契约做，不能用legacy head旁路原件保存授权。
 
 完整14组、Map+Map/同图双视图、网络/原件库mixed往返等继续必需。
+
+## S3b：实际自动启动与全部呈现切换（in_progress）
+
+本阶段独立计划审核已通过。严格 Home 安全首页与 MapOnly（可含 Map＋Home
+槽布局）分开；v2 增加 Native/Shared/Canvas typed 描述及显式 fitWidth，继续
+严格读 v1，未来版本和坏资料保持 Invalid。Map 的首次实际读取凭据与后来
+本机正文持久化凭据分开，期望永久 UUID 在整理日志前核对；末验复用同一
+actor/lease。Canvas 新准备入口只在实际 Native Absent 后读取旧槽，保持
+raw 字节、严格 metadata、原始 UUID 和独占资产寿命，不授原件写权限。
+
+当前正在完成 Editor 的实际本地 B 成功票、Canvas 恢复后独立另存保护、双
+Native 全许可后统一采用，以及 Main 普通布局自动记录、冷启动、离开门和
+停车资料保留。不能把仅显式 SaveSplit 路径当作此片验收。
+
+首个真实行为 RED 为 `cold-bootstrap-protocol-red`：18 唯一项均失败。此前
+两次仅编译失败、0 测试，不算行为 RED。最近组件运行
+`cold-bootstrap-components` 终态 exit 1，100 唯一项中 97 通过、3 失败，
+1346 完整源码／资源／构建输入前后 SHA 一致。Map 20 与 LastPresentation
+47 全过；Canvas 15 中 1 项新夹具使用 speedStrength=0，writer 未写时间值，
+已仅改夹具为非零，待重验；Main 两项实际新流程因 working checkpoint 尚未
+实现而超时。主程序、unit 与 Android 测试源码实际编译通过。此结果不构成
+S3b verified；后续端到端验证及独立审核完成后再更新验收与本地提交。
+
+Android 新旧严格 JSON 合同已接仪器 runner，新增 V2 null path、显式 null
+拒绝与 shared 单 owner 合同仍仅待源码验证。未运行 Android 仪器、系统
+DocumentsUI、真实进程终止、Surface/GPU 或目标 MovinkPad 验收。没有打包、
+安装、推送或发布。本地 master 仍为 `9cecd51b`，已包含在开发分支中。
+
+### S3b Map 准备组件已验证，宿主集成仍进行中
+
+MapColdAccess、MapStore、MapSession、MapDocuments 及其三套新用例通过
+限定组件验收：实际 raw XML 中 20 唯一用例全过，7 个源码／测试文件的
+当前 SHA 与该次固定输入一致；限定源码独审无 Required。原 components
+整轮仍是 100 项／3 失败，不将它改记为全绿。独立证据见
+[evidence/map-cold-proof-component-2026-11-10.json](evidence/map-cold-proof-component-2026-11-10.json)。
+本片允许先保存 Map 组件进度，不代表 Main 自动恢复或完整 S3b 已完成。
