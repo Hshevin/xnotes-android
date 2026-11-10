@@ -1,7 +1,7 @@
 # 混合分屏进程恢复（2026-11-10）
 
 用户要求：继续完整思维导图流程，先同步主线修复并保留已完成改动，再接混合布局的进程恢复。
-状态：已验证布局记录及受保护 NOTE 工作副本恢复、独立另存和录音恢复（JVM及源码编译）；混合布局自动启动恢复接线中，尚未完成端到端验证；整体目标未完成。
+状态：已验证布局记录、NOTE／Canvas受保护工作副本、普通布局自动记录与冷恢复（JVM及源码编译）；实际Android与目标设备待验，完整目标未完成。
 本轮边界：实现、相关编译／测试、文档及本地提交；按用户本次要求同步主线，不打包、安装、推送或发布。
 
 S3a0 verified；整体思维导图目标 active，complete=false。S1/S2 已提交至
@@ -232,7 +232,7 @@ Discard Undo窗口排除候选且删除前核新引用，原录音临时文件�
 本地代码提交：平台72469b44；音频日志6f849087、运行时/界面6b7a3cb4；
 严格准备与资产aef14975；实际Editor/Main接线5e3a322b。阶段文档另行提交。
 
-## S3b：完整冷恢复与呈现生命周期（尚未实现）
+## S3b：原计划与验收约束（实现结果见后续记录）
 
 - Map冷准备须允许自身有效恢复日志，绑定实际加载的 raw/journal 指纹和UUID，
   不把后来另一份文件或新journal当旧actor基线；Native与Map都就绪才同步采用。
@@ -286,3 +286,14 @@ MapColdAccess、MapStore、MapSession、MapDocuments 及其三套新用例通过
 整轮仍是 100 项／3 失败，不将它改记为全绿。独立证据见
 [evidence/map-cold-proof-component-2026-11-10.json](evidence/map-cold-proof-component-2026-11-10.json)。
 本片允许先保存 Map 组件进度，不代表 Main 自动恢复或完整 S3b 已完成。
+
+## S3b 本批集成完成并准备本地合并
+
+本批普通自动记录／冷恢复、typed Native／Shared／Canvas、真实本机正文成功票、
+Canvas独立另存与实际UI保存／放弃路径、最后采用门、Map journal-only停车及旧占位
+离开保护已接入。源码Required已闭合。最终507套4750唯一主机用例全绿，主／unit／
+Android测试源码实际编译通过，1350项KT／Java／XML与Gradle配置SHA前后及当前同。
+详细修复、验证范围和本次合并事实见[本轮记录](mind-map-cold-progress-merge-2026-11-10.md)，
+后续原14组未完成项见[接续计划](mind-map-next-plan-2026-11-10.md)。
+本阶段不将JVM丢全runtime后的重建当成Android实际杀进程、Surface或GPU证明；
+更广入口组合、系统选择器／SAF、真实音频与MovinkPad验收继续保留。

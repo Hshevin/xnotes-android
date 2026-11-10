@@ -1,0 +1,313 @@
+{
+  "stage": "Cold presentation integration and authorized local merge",
+  "masterBefore": "9cecd51bfed49628e3e33bd6bc8c86322c05f4f9",
+  "validationPrefix": "tmp/cold-merge-verified-full",
+  "exit": 0,
+  "suites": 507,
+  "tests": 4750,
+  "unique": 4750,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "inputScope": "main/unit/Android Kotlin, Java, XML and Gradle configuration; binary/native inputs not inventoried",
+  "inputCount": 1350,
+  "inputsUnchanged": true,
+  "inventorySha256": "deedc2a9accb842e9c1fc1e5055cf0af2c7bfccab843dc5c60d06515d6ab7b31",
+  "runnerSha256": "92ea5f5f5cab962152e7104c3ff487ef146ffa20452db28fade9e0ead47c0ccb",
+  "initSha256": "e73a30b634b7f62d771c9b3fe8e118324434c5c3cc95ec8da8a0c86b341f4d08",
+  "testCaseSetSha256": "d65710dfbf0167f2bf61ff6d8bc5dff80d2051f0d859f9c7079c802e8b1d4573",
+  "rawXmlFiles": 507,
+  "compileTasks": [
+    "> Task :app:compileDebugShaders NO-SOURCE",
+    "> Task :app:compileDebugKotlin",
+    "> Task :app:compileDebugJavaWithJavac UP-TO-DATE",
+    "> Task :app:compileDebugAndroidTestKotlin",
+    "> Task :app:compileDebugUnitTestKotlin",
+    "> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE",
+    "> Task :app:testDebugUnitTest"
+  ],
+  "actualWorkflowCases": [
+    {
+      "class": "com.xnotes.NativeSavePickerRouteHostTest",
+      "name": "cancelledOrFailedCanvasPickerKeepsTheActualModelAndIndependentSaveGuard",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.NativeSavePickerRouteHostTest",
+      "name": "aSaveQueuedBehindAnOldWriterAndOpenCannotSaveTheReplacementCanvas",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.NativeSavePickerRouteHostTest",
+      "name": "protectedCanvasUsesTheMainPickerCanvasSuffixAndActualDestinationWriter",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "providerWriteFailureStillReturnsTheActualLatestLocalJournalTicketWithoutRetryingIt",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "failedLocalJournalNeverReturnsATicketOrTouchesTheOriginal",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "aNewBodyOrAcceptedSaveImmediatelyRetiresTheOldActualTicket",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "cleanBodyRequiresAnActualDurableReadAndNeverWritesTheOriginal",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "failedLocalParkingPreservesAnExistingSourceConflictAndThePreviousJournal",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "localParkingDoesNotAcceptAnExternalBodyAsAnOverwriteBaseline",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "parkingRetainsTheActualDirtyBodyWithoutAttemptingTheOriginalAndLaterSaveStillUsesItsOldBase",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.mindmap.MapRecoveryCheckpointTest",
+      "name": "checkpointWaitsForTheActualAcceptedSaveAndDoesNotIssueAnotherOriginalWrite",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdMainPresentationHostTest",
+      "name": "mapBesideHomeAutomaticallyColdRestoresItsSlotsWithoutReadingTheParkedNoteCache",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdMainPresentationHostTest",
+      "name": "originalLibraryHomeGateFailurePreservesTheActualPairAndExistingMarker",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdMainPresentationHostTest",
+      "name": "ordinaryPairWithoutSaveSplitPublishesActualEditedBodiesAndColdRestoresBothWithNullNotePath",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdMainPresentationHostTest",
+      "name": "closingMapKeepsTheActualHomeSlotNativeIdentityAndMixedLayoutOnColdOpen",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdPresentationClassificationHostTest",
+      "name": "absentIsTheOnlyColdClassificationThatReadsTheLegacySession",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdPresentationClassificationHostTest",
+      "name": "invalidAndFutureMarkersPreserveTheCacheWithoutLegacyFallbackOnHostRebind",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdPresentationClassificationHostTest",
+      "name": "explicitHomeRemainsSafeAcrossAHostRebindEvenWithACompleteLegacyCache",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.ColdPresentationClassificationHostTest",
+      "name": "failedTypedNativeStaysSafeOnRebindAndCanRetryTheSameEditorWithACorrectHint",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorColdNativeWorkflowHostTest",
+      "name": "aProtectedCanvasCanSaveAnIndependentCopyWithoutWritingItsRememberedSource",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorColdNativeWorkflowHostTest",
+      "name": "anAbsentLegacySplitWithOnlyMissingPanesCanLeaveForHomeANewNoteOrAnActualFile",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorColdNativeWorkflowHostTest",
+      "name": "boundSaveAsDoesNotMistakeItsOwnWriterForAnExternalOwnerAndPreservesLateC1",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorColdNativeWorkflowHostTest",
+      "name": "aBadSecondNativeCacheCannotPartiallyAdoptTheFirst",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorWorkingCheckpointHostTest",
+      "name": "aFailedPrivateMetadataPublicationDoesNotBecomeSuccessWhenTheJobSettles",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorWorkingCheckpointHostTest",
+      "name": "cancellingAWaitingCheckpointDoesNotCommitOrCancelTheLiveStroke",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorWorkingCheckpointHostTest",
+      "name": "laterQueueCommandAndAnUnknownNativeHeadCannotReuseAnOldSuccess",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.EditorWorkingCheckpointHostTest",
+      "name": "actualEditedBodyIsDurableAndViewOnlyCheckpointReusesItsBody",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "closingTheMapBeforeReturningToTheNetworkRetiresItsNativeProofAcrossHostRebinding",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "selectedFilesBecomeAnEditableSavedCanvasAndReturnToTheOriginalNetworkAfterReopening",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "replacingTheParkedMapRetiresItsOldNativeProofAndNetworkReturn",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "aNetworkWaitsForTheRealPenAndOwnsItsQueryAfterTheSidebarAndReadPageChange",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "returningFromTheRealMapPreservesItsActorAndRefusesAnUnconfirmedTextDraft",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "anOldHostOrClosedPanelCannotAdoptAfterNativeParkingFinishes",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "cancellingTheLibraryHandoffWhileThePenIsDownRetainsTheNativeStrokeAndNeverOpensLater",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "aNetworkMapPresentationDoesNotFlushEitherDirtyNativeDocument",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "theActualViewModelRetainsOnlyThePureNetworkEntryUntilANewHostParksItsOwnNativeOwners",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "class": "com.xnotes.pen.LocalNetworkWorkspaceHostTest",
+      "name": "theHomepageCanOpenAndCloseALibraryWithoutAnOpenDocumentOrAnInventedNativeContext",
+      "failure": null,
+      "error": null,
+      "skipped": false
+    }
+  ],
+  "sourceReview": "PASS; no remaining Required across scoped components, Main/workspace, Editor/Canvas and final stale-owner delta",
+  "androidInstrumentationExecuted": false,
+  "targetDeviceVerified": false,
+  "realProcessKillVerified": false,
+  "apkBuilt": false,
+  "installed": false,
+  "pushed": false,
+  "released": false,
+  "fullFourteenGroupGoalComplete": false,
+  "independentEvidenceAudit": "PASS; raw XML headers and every suite/case match summary; all previous 4749 cases retained plus one race; 1350 current input hashes and key set, runner/init hashes, resources and instrumentation registration match",
+  "inventoryTypes": {
+    "kt": 1212,
+    "java": 30,
+    "xml": 103,
+    "gradleKts": 3,
+    "properties": 2
+  },
+  "androidRegisteredContracts": {
+    "LastPresentationCodecAndroidTest": 11,
+    "ProtectedNoteMetadataAndroidTest": 4,
+    "ProtectedCanvasMetadataAndroidTest": 4
+  },
+  "integratedSourceCommit": "f3890bbb9943f5166424d6bd3e086c58e822e658"
+}

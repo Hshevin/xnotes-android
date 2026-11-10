@@ -1,8 +1,8 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整思维导图需求继续推进，active，overall complete=false。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
+目标：完整思维导图原14组保留，overall complete=false；持续开发仍paused，当前执行用户新授权的剩余计划＋全部当前进展本地合并。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
 工作树：当前聊天附加的 mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master9cecd51b，保留已验证的布局记录组件39812473/7dc75587及其文档8c8a4c84。此前草稿快照3520e964仍保留；构建/cache独立于其他工作树。历史同步与验证见阶段记录，机器路径仅保存在忽略的tmp运行记录中。
-授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户当前明确继续已撤销原暂停请求。
+授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户最新明确要求“先停一下，我检查一下你的工作”，已暂停；之后须按用户继续指令恢复。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
 ## 当前阶段：S3a0 最后呈现协议与存储（verified，已本地提交）
@@ -20,7 +20,12 @@ S3a1 verified（JVM/源码编译/独审；已本地提交72469b44/6f849087/6b7a3
 
 39套414唯一相关项首轮3失败仅新图片fixture路径错误；生产正确拒非法素材，只改两处asset名后整5复验全绿，替换旧5后仍414/0fail/error/skip。1326完整输入前后/最终/当前SHA一致，green→recheck只有该fixture。主/unit/Android Kotlin首轮actual compile成功，recheck仅unit重编；Android新增4仅SOURCE，仪器/SAF/音频codec/杀进程/Surface/GPU/MovinkPad未跑。三源码独审与raw XML/库存SHA/runner/init/三资源组独审PASS，Required已闭合，原LastPresentation39模块证据复用不叠算。证据tmp/cold-adoption-{green,fixture-recheck}-*、-verified-summary.json/-final-inputs.json；正式evidence/mixed-protected-recovery-validation-2026-11-10.json。所有已知作业终态、作者冻结，无待用户回答。不打包/安装/推送/发布。
 
-下一S3b：真正自动mixed冷恢复与全部呈现checkpoint/Home gate；只读审核包tmp/mixed-cold-bootstrap-plan.md已准备，尚未计划独审，不准据此直接实施。现LastPresentation只有Home/Mixed；Home严格安全首页，非Mixed恢复需typed最小扩展，不能旧split/savedMapUri fallback掩盖。Map要沿同actor/journal实际load proof，NOTE本次cache成功票不能只join，保remembered fitWidth。独立计划审集中这些新风险，不重审已闭合S3a0/S3a1。原14组仍active/complete=false，Map+Map等未完成。
+S3b in_progress（Map组件已限定本地提交f8a96745）：独立计划审核已通过，Map＋Home明确为MapOnly(homeLayout)，Home为严格安全首页，v2新增实际typed Native/Shared/Canvas且不得开启半套producer。Map首次load proof/UUID先验/actor lease及本机durable checkpoint已实现；Canvas Native-first只读准备与完整资产已实现；Last V2与actual head/root observation已实现。当前主要工作是Editor实际成功B的working checkpoint、Canvas独立另存/原件保护、双Native全部claim再统一adopt，以及Main普通自动记录/冷启动/离开门/parked资料保留，不局限显式SaveSplit。
+
+本阶段行为RED tmp/cold-bootstrap-protocol-red：18唯一18失败；前两次只编译失败0测试，不算行为红。最近components终态exit1：11套100唯一、97过3失败，1346完整输入前后同；Map20和Last47全过，Canvas15中1个新夹具未写t（speedStrength=0）已仅改夹具待复验，Main2条实际普通producer→丢全runtime→bootstrap因checkpoint尚stub超时。主/unit/Android源码实际编译通过；Android仪器及真实杀进程未执行。所有构建终态；Main/Editor作者继续实现，root独占构建/提交，冻结组件独立源码审核进行中。S3a1的414历史证据仍保留，不当成本阶段当前源码全部通过。新增平台只读检查不consume/advance，避免纯视图重记反复编码正文；相关3用例及新增2 Android V2合同待统一验证。master仍9cecd51b且为当前HEAD祖先，无未同步主线提交。
+
+S3b宿主独审发现5项Required，Main作者定点修：Invalid/failed null在retained重绑误进旧fallback；普通Native来源未传Home gate；独立原PDF库入口无提前gate；安排异步读与初始外部分享前门退cold过晚；Retry成功后Native.Home未交Main Compose状态。Root已新增8条真实Editor/Bootstrap缓存与marker测试，Main原2条继续闭环；统一构建尚未开始。另补Map本机journal-only checkpoint，复用同saveTail、显式Checkpointed且不触original/expectedHash，2条actualSession用例待验，源码复审中；纯来源停车不能跳过Map实际正文凭据，也不能强制写原件。Map已提交20项证据保持历史不改写，新delta需新证据。
+
 ## 已验证阶段：已提交进展合入主线（verified）
 
 冲突保两侧修复，新增来源入口接事务唯一性／读权限回滚，schema未来版本断言
@@ -372,3 +377,38 @@ Root统一全部Gradle/本地提交。source_loop_audit负责本阶段backend/�
 真实selection/capture菜单→共用PageToMap source adapter→已有/新图、已有/新概念→保存重开→严格region PNG/EMPTY/历史图→明确Canvas kind→真实attach稳定定位/对比轮廓/输入取消→同图返回。clean来源只读；dirty显式保存必须strict原版本原位发布，不走弱stamp/fork通用路径。正在核正常Canvas自动保存版本观察的最小衔接，避免routine autosaved B被误当未知并反复重开。
 
 计划审阅已要求：误导文件名不决定Canvas类型；v1—4 exact source/lastPreview raw路径拒新scope；同Rect清空保旧PNG须明确历史图，不能只靠target不同。源码实现等保存方案结论处理完毕后开始；无本阶段运行作业。
+
+## 最新暂停断点（用户检查工作，2026-11-10）
+
+用户明确要求暂停，已停止Main/Editor/源码审核三个协作代理；暂停时没有在途构建。
+最新本地提交f8a96745仅为已验证Map冷准备组件；后续S3b宿主、Canvas、V2扩展、
+working checkpoint和新增测试仍在工作树，未提交，尚未统一编译/验证，不代表完成。
+本地master9cecd51b已经是HEAD祖先，没有遗漏的新增主线提交。原分支与草稿保留。
+
+宿主独审5项Required处于修复中，尚无修复后PASS。最后新发现待处理：journal-only
+Map checkpoint失败共用分支会把已有source conflict清为false；应保原冲突状态，补
+实际初始conflict＋本机journal失败回归，暂停后未修改。Map新localOnly delta与Root
+8条host/3条只读平台/2条Android V2及Map2条用例都待统一验证；不能引用上次100
+项结果为当前新增源码背书。恢复时先核作者停笔后的实际源码与编译占位、当前SHA，
+不要重启重复构建或将未验证改动自动提交。未打包、安装、推送、合并或发布。
+
+## 当前操作：写剩余计划并合并当前全部进展（2026-11-10）
+
+用户最新明确授权：写清接下来工作，然后全部合并本地master。本轮只处理现有改动的
+必要收尾／缺陷修复／验证／独审／本地提交与合并，不在合并前展开全部后续功能。
+主线工作树已核干净，master9cecd51b已在开发分支祖先。Main与Editor作者仅恢复
+各自收尾；Root统一构建提交；独立计划审计核真实缺口，避免把已实现功能重复计划。
+Map本机checkpoint失败保source conflict的新实际回归已写，生产修复待行为验证。
+完整后续开发保持暂停，本轮合并完成后停在可检查状态；不打包／安装／推送／发布。
+
+## 本次合并前终验（verified，2026-11-10）
+
+本批全部源码冻结，cold-merge-verified-full终态0：507套4750唯一主机用例，0失败／
+错误／跳过；主／unit／Android测试源码均actual compile，test actual执行，无过滤。
+1350个KT／Java／XML与Gradle配置库存前后/最终当前SHA相同；原4749项全部保留，
+新增1项Canvas迟到请求归属回归。源码Required及最终证据独审PASS，无残留必修。
+Root只补docs/README/tasks，不再改源码。此前Map/Last/Readonly/Canvas/Maplocal
+组件已分批本地提交，余Main/Editor完整接线＋宿主回归准备本地提交并合入master。
+精确持续计划 docs/movinkpad/mind-map-next-plan-2026-11-10.md，合并/验收记录
+ docs/movinkpad/mind-map-cold-progress-merge-2026-11-10.md；原14组未完成，后续仍暂停。
+当前无构建作业；未APK／安装／推送／发布，真实Android／SAF／杀进程／GPU／目标设备未验。
