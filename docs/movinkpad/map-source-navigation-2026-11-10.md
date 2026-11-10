@@ -35,7 +35,7 @@ Main关闭先走Entry／lease级hook，不调用全局Session.save(onClosed)来�
 
 ## 迁移、验证与复核
 
-基线为d0132a90eadb25ed77ba7f3f0f445691a880b13a。按用户要求创建 `/Users/kita/.codex/worktrees/mind-map-map-navigation/xnotes`、分支 `codex/mind-map-map-navigation`，复制source-target树34个未提交文件和证据。SHA-256／模式／Git状态逐项一致，独立复核通过；原树及原分支保留原样。迁移证据 `tmp/worktree-migration-2026-11-10.json`。
+基线为d0132a90eadb25ed77ba7f3f0f445691a880b13a。按用户要求创建 `<工作树 mind-map-map-navigation>/xnotes`、分支 `codex/mind-map-map-navigation`，复制source-target树34个未提交文件和证据。SHA-256／模式／Git状态逐项一致，独立复核通过；原树及原分支保留原样。迁移证据 `tmp/worktree-migration-2026-11-10.json`。
 
 新树构建目录与项目缓存分别为 `/private/tmp/xnotes-mind-map-map-navigation-build`、`/private/tmp/xnotes-mind-map-map-navigation-cache`，与原树隔离；JDK21、Gradle8.13、AGP8.12.3、SDK36。仅运行compileDebugKotlin、testDebugUnitTest及compileDebugAndroidTestKotlin，无assemble或安装。
 

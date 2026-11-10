@@ -6,7 +6,7 @@
 
 ## 独立工作基线
 
-- 分支 `codex/canvas-split-black`，工作树 `/Users/kita/.codex/worktrees/canvas-split-black/xnotes`。
+- 分支 `codex/canvas-split-black`，工作树 `<工作树 canvas-split-black>/xnotes`。
 - 起点为本地 master `0b35d341`，构建配置 0.9.8 / versionCode 96。用户只确认正式发布版，没有直接读取其设备安装信息，不将基线配置冒充实际安装版本。
 - 原 `codex/render-lifecycle` 工作树与分支保持原样，其中已有未提交的 RenderDiagnostics 改动未携带、暂存或覆盖。
 - 本分支不包含渲染重构的 P0/P1；不将正式版反馈记作重构候选的测试结果，也不沿用该分支旧的打包测试授权。

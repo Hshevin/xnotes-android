@@ -6,7 +6,7 @@
 
 ## 工作位置
 
-当前主线树 `/Users/kita/Documents/ChatGPT/笔记/xnotes`，分支 `master`。来源为c97f58f9、主线原ef6ffa29；保留原开发分支。冷恢复草稿仍在 `/Users/kita/.codex/worktrees/mind-map-cold-restore/xnotes`，未经验证未合入；10文件SHA未改。后续恢复开发前须先核对主线整合后的接口，不能沿旧基线假设覆盖主线修复。
+当前主线树 `<仓库根>`，分支 `master`。来源为c97f58f9、主线原ef6ffa29；保留原开发分支。冷恢复草稿仍在 `<工作树 mind-map-cold-restore>/xnotes`，未经验证未合入；10文件SHA未改。后续恢复开发前须先核对主线整合后的接口，不能沿旧基线假设覆盖主线修复。
 
 先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
 

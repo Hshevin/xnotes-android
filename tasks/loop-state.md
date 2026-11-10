@@ -1,7 +1,7 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：按完整思维导图需求继续推进，active，overall complete=false。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
-工作树：/Users/kita/.codex/worktrees/mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master8d12bacf与实际拉取origin/master8ee33799，基线61ba44c3594081c389049090f154b0d297c2a4f8；草稿先保独立stash 3520e9648b6b20fa4da9459411267de7c14a9536，源代码／测试／计划8文件逐SHA恢复，README采用较新主线说明，当前检查点合并双方记录。构建/cache仍独立为/private/tmp/xnotes-mind-map-cold-restore-build与-cache。
+工作树：当前聊天附加的 mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master9cecd51b，保留已验证的布局记录组件39812473/7dc75587及其文档8c8a4c84。此前草稿快照3520e964仍保留；构建/cache独立于其他工作树。历史同步与验证见阶段记录，机器路径仅保存在忽略的tmp运行记录中。
 授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户当前明确继续已撤销原暂停请求。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
@@ -13,8 +13,11 @@ move后written事实与末IO后current三Required；1300完整输入SHA和raw XM
 独立审计一致。证据tmp/cold-marker-green-*及verified-summary.json，主题记录
  docs/movinkpad/mixed-cold-restore-2026-11-10.md。全部已知构建终态。
 
-下一S3a1：受保护NOTE工作副本分阶段准备/采用、真实源权限/另存、Native共享
-提交门和owner/queue代次末票。录音恢复actual model与durable交付要求仍未闭合，
+最新本地主线9cecd51b已同步；主/单元/Android测试源码编译及14项相关测试通过，
+布局记录7文件SHA未变，39组件证据复用。所有已知作业终态。
+
+下一S3a1：复用已有恢复只读准备、FIFO与Native协调边界，补受保护NOTE工作副本
+准备/采用、实际源权限/独立另存和可消费Absent许可；不先建立新全局协调架构。录音恢复actual model与durable交付要求仍未闭合，
 不能借S3a0通过启用半套Native producer或宣称Main冷启动完成。只读实现依赖检查
 进行中，完整计划须独审后再实现；整体active/complete=false。
 

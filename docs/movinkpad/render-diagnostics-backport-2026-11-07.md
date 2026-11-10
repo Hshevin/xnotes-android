@@ -6,7 +6,7 @@
 
 ## 来源与基线
 
-复用独立工作树 `/Users/kita/.codex/worktrees/render-lifecycle/xnotes`，从本地 `master` 的 `986781e5` 建立 `codex/render-diagnostics-backport`。原 `codex/render-lifecycle` 源码保存点 `0f963ab6` 保留，不从该分支整文件覆盖主线。
+复用独立工作树 `<工作树 render-lifecycle>/xnotes`，从本地 `master` 的 `986781e5` 建立 `codex/render-diagnostics-backport`。原 `codex/render-lifecycle` 源码保存点 `0f963ab6` 保留，不从该分支整文件覆盖主线。
 
 - 诊断：取 `ae3cdd99` 的观察接线，连同 `34a6c262`、`b96616bb` 的 context／Surface 失效修正；已保存为 `b500aa1a`。
 - 捕获：取 `5d03b4b1` 的 SurfaceCapture、回归与 debug 窗口夹具，适配主线的原生 View 退休；已保存为 `217531ee`。

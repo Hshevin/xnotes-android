@@ -12,7 +12,8 @@ import org.json.JSONObject
  */
 class ViewStateStore(private val store: JsonStore) {
 
-    class View(val zoom: Double, val scrollX: Double, val scrollY: Double, val overrides: ViewOverrides)
+    /** [fitWidth]: the view was riding the fit-width magnet, so a viewport of another width refits rather than reusing [zoom]. */
+    class View(val zoom: Double, val scrollX: Double, val scrollY: Double, val overrides: ViewOverrides, val fitWidth: Boolean = false)
 
     private val views: MutableMap<String, View> = load()
 
@@ -26,6 +27,7 @@ class ViewStateStore(private val store: JsonStore) {
                 e.optDouble("scrollX", 0.0),
                 e.optDouble("scrollY", 0.0),
                 ViewOverridesJson.read(e),
+                e.optBoolean("fitWidth", false), // absent on every entry written before the flag existed
             )
         }
         return out
@@ -35,8 +37,8 @@ class ViewStateStore(private val store: JsonStore) {
     fun get(key: String): View? = views[key]
 
     @Synchronized
-    fun put(key: String, zoom: Double, scrollX: Double, scrollY: Double, overrides: ViewOverrides) {
-        views[key] = View(zoom, scrollX, scrollY, overrides)
+    fun put(key: String, zoom: Double, scrollX: Double, scrollY: Double, overrides: ViewOverrides, fitWidth: Boolean = false) {
+        views[key] = View(zoom, scrollX, scrollY, overrides, fitWidth)
         store.write(toJson())
     }
 
@@ -73,6 +75,7 @@ class ViewStateStore(private val store: JsonStore) {
         val o = JSONObject()
         for ((k, v) in views) {
             val e = JSONObject().put("zoom", v.zoom).put("scrollX", v.scrollX).put("scrollY", v.scrollY)
+            if (v.fitWidth) e.put("fitWidth", true) // written only when set, so older files read back unchanged
             o.put(k, ViewOverridesJson.write(e, v.overrides))
         }
         return o

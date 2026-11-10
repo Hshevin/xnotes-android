@@ -2,7 +2,7 @@
 
 用户要求：审查 `codex/mind-map` 相对 `master` 的已提交改动（17 个提交，约 94 个文件、+5.8k 行），随后要求直接在思维导图工作树上修改审查发现的问题，并写清文档方便后续 Codex 交接。
 状态：已实现第 1、3、4、5、6、7、8 项修复；第 2 项属设计取舍，未改，待用户决定；第 9 项未改。编译与全量 JVM 测试通过（JDK 21，2828 项，0 失败／错误／跳过）；Android 仪器测试源码编译通过，未运行；目标设备未验证。
-本轮边界：只在 `/Users/kita/.codex/worktrees/mind-map/xnotes`（分支 `codex/mind-map`）修改并本地提交；不打包、安装、推送、合并或发布。思维导图整体目标仍为暂停状态（见 `tasks/loop-state.md`），本轮只修审查问题，不推进 B2b2 等后续阶段。
+本轮边界：只在 `<工作树 mind-map>/xnotes`（分支 `codex/mind-map`）修改并本地提交；不打包、安装、推送、合并或发布。思维导图整体目标仍为暂停状态（见 `tasks/loop-state.md`），本轮只修审查问题，不推进 B2b2 等后续阶段。
 
 ## 审查来源
 
@@ -70,5 +70,5 @@
 ## 测试与验证
 
 - 新增 JVM：`MapStorageTest` 5 项（重开后冲突仍阻止普通保存、保留当前版本后续保存恢复正常、覆盖损坏目标、改用文件版本后恢复正常保存且不写目标、目标不可读时保留日志）；`ReferenceCodecTest` 改写 1 项（锚定源部分抢救：略去 1 个对象、页面保留、ID 不相交、可写出重开）并新增 2 项（legacy 部分抢救、未知版本仍拒绝）；`MindMapTest` 1 项（三种方向下独立主题子节点布局，主题位置不变）。
-- 命令：`JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home ANDROID_HOME=/Users/kita/Library/Android/sdk ./gradlew --offline -I tmp/build-mind-map.gradle --project-cache-dir /private/tmp/xnotes-mind-map-cache :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest`，输出在 `/private/tmp/xnotes-mind-map-build/`，日志 `tmp/review-fixes-full.log`：2828 项，0 失败／错误／跳过。
+- 命令：`JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home ANDROID_HOME=$ANDROID_HOME ./gradlew --offline -I tmp/build-mind-map.gradle --project-cache-dir /private/tmp/xnotes-mind-map-cache :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest`，输出在 `/private/tmp/xnotes-mind-map-build/`，日志 `tmp/review-fixes-full.log`：2828 项，0 失败／错误／跳过。
 - 未运行：Android 仪器测试、真实 SAF、目标设备（MovinkPad Pro 14 / Android 15 / Pro Pen 3）。
