@@ -5,7 +5,17 @@
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：Map＋NOTE 双文件打开（verified，已本地提交）
+## 当前阶段：原生分屏替换导图工作区（verified，已本地提交）
+
+上轮为progress：Map＋NOTE双选已verified并提交327463b9，当前阶段以该干净HEAD继续。新阶段 docs/movinkpad/native-split-replacement-2026-11-10.md 已实现并独审PASS：应用内saved Native .xsplit／recent／显式NOTE2，从mixed／单图／MapHome／parked／普通Native及Home统一双候选、mandatory全旧Map退休证明、Native末IO与同Main双采用；失败保原工作区，启动Missing恢复未改。retained集合／samecanonical共享／actual槽映射／HOLD与原key接收者、active录音拒绝及旧播放退休、纯会话／视口／布局成功持久化均接线。所有作者已冻结、已知作业终态，无用户待答。
+
+2563是真旧frontdoor RED1/1fail(坏second竟成功)，1176 scoped输入同SHA。33343相关41套298全PASS+Android SOURCEcompile，1248输入同。实现审3Required及Root fresh-shared keepPeer缺口，94778真实5case4fail精确命中；selection怀疑因reset后段完整而按误报闭合且稳定case PASS，production未为它改。25112最后9整suite85全过+AndroidSOURCE，1248前后及当前SHA同；用85替换旧同9套80，最终41套303唯一0fail/error/skip。独立rawXML／完整库存／SHA审计PASS，三套资源12keys一致双中文正文同。证据tmp/native-split-verified-summary.json、-final-inputs-verified.json与各red/related/boundary-red/final原始XML/log/inputs；runtime tmp/native-split-replacement-runtime.json。构建/cache为/private/tmp/xnotes-mind-map-native-split-replacement-build及-cache，未与其他tree/variant混用。
+
+源码、相关编译／测试、文档及独立复核已完成，Native候选/Root协调/Main入口与事件已分组本地提交06589e1b／56855a89／62ff28bd，文档检查点随后提交，不打包APK/安装/推送/合并/发布。Android新增2场景与已有Main入口只源码compile，真实Android/SAF/PDFium/录音设备/Surface/GPU/目标设备/性能未验；不能以Host替代。
+
+下一：typed Map＋NOTE mixed .xsplit保存／恢复／进程冷恢复，然后Map+Map／同图双视图、全局网络／原件库mixed停车返回。Canvas反向列表、精确权限／移动／回收站／重复ID恢复、完整引用备份、主要预览／页缩略、同级插入／边缘平移等完整14组均持续必需，overall complete=false。
+
+## 已验证阶段：Map＋NOTE 双文件打开（verified，已本地提交）
 
 计划与阶段记录 docs/movinkpad/map-pair-open-2026-11-10.md。本轮按用户要求新树续作，迁移78份上一阶段最新证据逐文件SHA同、旧树仍干净；先前独审通过后实现。真实首页双选及槽内Home的Map＋NOTE两顺序、fresh/retained/shared Native、Map真实actor/visited新root、HOLD/Key原代次/实际View焦点交接已接；候选不先改模型/布局，Map初始/实际load/最终SHA及恢复/身份域核实，Native同源重读及final域票跨Map IO。正常退出owner已成功blur/save不回滚，retained只自然等。原14组范围和overall complete=false保留。
 
