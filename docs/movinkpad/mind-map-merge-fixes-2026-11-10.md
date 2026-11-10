@@ -51,7 +51,7 @@
 
 ```sh
 JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home \
-ANDROID_HOME=/Users/kita/Library/Android/sdk \
+ANDROID_HOME=$ANDROID_HOME \
 ./gradlew --offline --no-daemon -I tmp/build-mind-map.gradle \
   --project-cache-dir /private/tmp/xnotes-mind-map-cache \
   :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin

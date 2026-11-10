@@ -1,6 +1,6 @@
 # 导图与分页文档：双文件打开（2026-11-10）
 
-状态：verified（源码／相关主机验证及 Android 测试源码编译；平台与设备未验）；独立实现及最终证据审核 PASS，无剩余 Required。独立计划审核 PASS（初读／blur边界、selected共享Map输入两项 Required 已闭合）；基线 0f2ac93244911be1a6c913fa3704cd7fa146fcdc。工作树 `/Users/kita/.codex/worktrees/mind-map-pair-open/xnotes`，分支 `codex/mind-map-pair-open`。从上一工作树的完整已提交成果新建，旧树保持不变。完整14组需求仍 active；本片只实现恰一 Map 与一 NOTE（含批注 PDF 笔记）的一次双文件打开。
+状态：verified（源码／相关主机验证及 Android 测试源码编译；平台与设备未验）；独立实现及最终证据审核 PASS，无剩余 Required。独立计划审核 PASS（初读／blur边界、selected共享Map输入两项 Required 已闭合）；基线 0f2ac93244911be1a6c913fa3704cd7fa146fcdc。工作树 `<工作树 mind-map-pair-open>/xnotes`，分支 `codex/mind-map-pair-open`。从上一工作树的完整已提交成果新建，旧树保持不变。完整14组需求仍 active；本片只实现恰一 Map 与一 NOTE（含批注 PDF 笔记）的一次双文件打开。
 
 ## 可观察结果
 
