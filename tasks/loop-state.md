@@ -1,11 +1,23 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，整体仍 active。
+目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，一Map＋分页核心 verified，整体仍 active。
 工作树：/Users/kita/.codex/worktrees/mind-map-map-navigation/xnotes；分支 codex/mind-map-map-navigation。2026-11-10 再按用户“在这个工作树基础上新建工作树继续”，从 mind-map-source-target 的实际 HEAD d0132a90eadb25ed77ba7f3f0f445691a880b13a 新建；34个未提交文件及验证资料完整复制，SHA-256／模式／状态一致，原树保持原样，独立复核通过。证据 tmp/worktree-migration-2026-11-10.json。构建及项目缓存独立为 /private/tmp/xnotes-mind-map-map-navigation-build、/private/tmp/xnotes-mind-map-map-navigation-cache。此前28文件迁移属于上一阶段，原历史保留。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：Map整文件来源打开与返回（verified，已本地提交）
+## 当前阶段：一Map＋分页文档真实双窗格核心（verified，已本地提交）
+
+e49d9273 clean起步，上轮为progress；旧Map来源243项不外推本片。当前真实Map+NOTE/PDF编辑／各自历史、实际焦点／HOLD松键／Back、方向比例交换、来源定位另一槽、页区域引用到已开actor、子Map关闭先父／根进Home／关Home移槽、配置保MapEntry及按原Native逻辑槽严格Session恢复已接。Canvas全窗后回Map+实际CanvasHome，明确Home权才保存替换／关闭；Original纯opaque departure票匹配才恢复原混合，否则安全单图且保新Native。单一movable MapScreen保picker；typed Native两阶段卸载与最后同步adopt不先退Map。
+
+独立计划2Required及实现5组Required均闭合：Canvas／Original分策略、子Map父优先；shared只免保存不免当前笔输入；Original原native票、CanvasHome actual writer/恢复资料、精确槽Hint rawSession adopt前核、import/open/preferences及Entry为空Home的saved/pair所有入口守卫。Main原Native-native HOLD释放广播保留，Map raw不经native latch／Samsung改写；外部导入在active/parked mixed保pending直到真正退出。源码独审及最后资源／证据独审PASS，无剩余Required。
+
+73043真实RED4项3fail（1162输入同）；27757实现36/2fail（1164同），C页契约与取消夹具修正。9377相关30套193/5fail（1168同，Android作者独立excluded）；64397三整suite28全PASS（1234同），Android夹具protected onNewIntent调用编译失败；10998仅改为Instrumentation.callActivityOnNewIntent后Android SOURCE实际compile通过、0测试task／case（1234同）。失败XML全部保留：latch触摸隔离、shared accepted clear、Canvas pending保留不能普通retry、Original race真实accepted IO屏障，未削关键断言。
+
+有效结果按整suite替换旧3套25→新3套28：30套196唯一case，0失败／错误／跳过。独立从原始XML与provenance重建一致；production/resources/build在9377后未变，仅三unit测试与一Android夹具改；1234项（app/src内KT/Java/XML1229＋构建配置5）当前SHA全同。证据tmp/map-native-verified-summary.json、tmp/map-native-final-inputs-verified.json、各prefix-results/input/log；runtime tmp/map-native-split-runtime.json。Android新增5项仅源码编译，未运行仪器；所有作业终态、作者冻结，无APK／安装／推送／合并／发布。README／AGENTS已同步；代码与测试本地提交 365791af／c28b7431／25f6f395／97f4b1cc／aa677bb6／089da1ce／2566425b／cd9b47b8，文档提交随后见HEAD。
+
+下一必需小片：一次选择两文件的Map组合／原生saved split替换mixed需要原子预备／采用，不能先改一侧再失败；接着typed混合.xsplit／进程恢复、Map+Map／同图双视图，及全局网络／原件库的mixed停车返回。当前这些入口明确pending并保当前工作区，不冒称完整双窗格完成。Canvas反向列表、精确恢复、完整引用备份、主要来源大图／页缩略、同级插入／边缘平移等完整14组持续active／overall complete=false。真实Android/SAF/PDFium/Surface/GPU/MovinkPad设备与性能未运行，不能以Host替代。
+
+## 已验证阶段：Map整文件来源打开与返回（verified，已本地提交）
 
 d0132a90 clean 起步；本阶段在原 source-target 树实现，按用户新要求完整复制34文件到当前新树，原树未变。来源行与单来源双击→实际Map编辑／撤销／保存→全部Entry／actor退休后的真正冷开→逐跳返回已实现。A→B→C、self／cycle、既有dirty actor、canonical别名、容量16文件／64帧、逐跳camera、配置与旧host／晚IO、原生／独立原文子往返均有相关Host覆盖。Map→Map不额外保存停放Native；Map正常autosave／显式保存继续。
 
