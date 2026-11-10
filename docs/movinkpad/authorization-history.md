@@ -229,3 +229,8 @@
 ## 2026-11-11 主线独立测试包与日志推送
 
 - 用户要求拉取更新并打包测试 APK，不覆盖正式版，自动推送打包日志。本轮快进到 `c1d6d5a5`，交付 `com.xnotes.movinkpad.branchtest.master` / versionCode 6，沿用原签名；已有 test5 更新为 test6，正式版独立。仅本地交付 APK、推送记录和日志，不上传 APK、不发布 GitHub Release、不安装用户设备；保留已有修改。
+
+## 2026-11-11 导图入口与文件身份修复推送
+
+- 用户明确要求「直接推送到远端」。本次授权将本地 `master` 的修复提交 `0d6e3765` 及本条授权记录普通快进推送至 `origin/master`，保留远端历史。
+- 主体修复 4,783 项 JVM 回归通过，审查补充 14 项定向回归通过，Android 测试源码编译通过；实际 Android 运行与目标设备待验。详见[修复记录](presentation-file-identity-fix-2026-11-11.md)。本次不打包、安装或发布 Release。
