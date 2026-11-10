@@ -1,11 +1,19 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：按完整持续需求继续实现，active，overall complete=false。D2d2 verified 并提交 4373587d；Canvas 整文件来源已 verified 并本地提交 4f413d16；Canvas 区域来源 verified；分页区域来源 verified；原PDF独立原文 verified；原文网络整合 verified并本地提交，来源范围调整／换源 verified并本地提交，Map整文件来源打开／返回 verified，一Map＋分页核心 verified，整体仍 active。
-工作树：/Users/kita/.codex/worktrees/mind-map-pair-open/xnotes；分支 codex/mind-map-pair-open。用户本轮再次明确要求基于当前树新建；从 mind-map-map-navigation 的实际干净 HEAD 0f2ac93244911be1a6c913fa3704cd7fa146fcdc 创建并attach，新旧两树均保留。上一阶段最新原始日志/XML/输入证据已复制至本树忽略tmp并保SHA；更早阶段证据仍在原树。迁移记录 tmp/worktree-pair-migration-2026-11-10.json。新构建目录 /private/tmp/xnotes-mind-map-pair-open-build 与项目缓存 /private/tmp/xnotes-mind-map-pair-open-cache，独立于旧树。
+工作树：/Users/kita/.codex/worktrees/mind-map-mixed-persistence/xnotes；分支 codex/mind-map-mixed-persistence。用户本轮再次明确要求基于当前树新建；从 pair-open 实际干净 HEAD d706ebd1104e34005bcb45f444243429f8551557 创建并 attach，新旧两树均保留。上一阶段87份日志/XML/输入及runner已复制至本树忽略tmp，逐文件SHA全等；更早证据仍在原树。迁移记录 tmp/worktree-mixed-migration-2026-11-10.json。新构建目录 /private/tmp/xnotes-mind-map-mixed-persistence-build 与项目缓存 /private/tmp/xnotes-mind-map-mixed-persistence-cache，独立于旧树。
 授权：代码、相关编译／测试、文档、本地提交。用户于 2026-11-10 明确允许从原工作树新建工作树继续，替代之前“复用原树”限制。未打包 APK、安装、推送、合并或发布。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：原生分屏替换导图工作区（verified，已本地提交）
+## 当前阶段：typed mixed 安排文件与存储（verified，已本地提交）
+
+上轮为progress：原生分屏替换已verified并提交d706ebd1。本轮按明确要求新树继续，整体目标不变。阶段计划 docs/movinkpad/mixed-split-persistence-2026-11-10.md 的S1已独审PASS：先统一v1/2与typed v3纯数据解析，以及私有新文件create-new发布；recent仅只读，不接Main/Editor/正文/cold。S2接实际两正文保存/原子打开前门，S3接cold工作副本与sticky未核源保护，均仍未完成。不能把Hint、缓存dirty=false或读取当前原件SHA当缓存正文的基线。
+
+S1已实现，production仅两新文件，Main/Editor/正文/恢复生产行为未改。11301新API scaffold RED26/14fail，不冒称旧UI真实缺陷；97062首绿32+AndroidSOURCE，11794仅修测试nullable warning后13全绿。独审发现Android lenient词法引号绕过depth32；25045原scanner仅暴露预检方法、真实RED1/1fail（首payload失败，未跑后两个）。改严格字符串escape/literal边界与词法后，24013最终3整suite33唯一0fail/error/skip（codec15/store13/legacy5）+AndroidSOURCE实际compile通过，1253项KT/Java/XML与5构建配置前后及当前SHA同；最终整套覆盖旧轮，不叠用例。独立源审Required闭合、rawXML/库存/runner/init/命令审计PASS，tmp/mixed-persistence-final-review.json；原始prefix red/final/recheck/boundary-red/guard-final均保留。Android新增5方法仅源码编译，Android私有FS/系统/SAF/PDFium/Surface/GPU/目标设备未跑，JVM FS硬链接/并发/故障注入已真跑。
+
+runner tmp/run-mixed-persistence-check.py 与 build-mixed-persistence.gradle，隔离目录如上。所有已知作业终态，作者冻结，无用户待答，不打包/安装/推送/合并/发布。代码/测试已本地提交6726c8ec／8da30d1e／19c17096，文档检查点随后提交。下一S2：actual Native成功publication/Map本次saveAttempt，prepared descriptor先stage后Main最后proof+create-new发布，统一Native/mixed recent writer与Main前门、保存结果分级；S3 cold仍独立且必需。
+
+## 已验证阶段：原生分屏替换导图工作区（verified，已本地提交）
 
 上轮为progress：Map＋NOTE双选已verified并提交327463b9，当前阶段以该干净HEAD继续。新阶段 docs/movinkpad/native-split-replacement-2026-11-10.md 已实现并独审PASS：应用内saved Native .xsplit／recent／显式NOTE2，从mixed／单图／MapHome／parked／普通Native及Home统一双候选、mandatory全旧Map退休证明、Native末IO与同Main双采用；失败保原工作区，启动Missing恢复未改。retained集合／samecanonical共享／actual槽映射／HOLD与原key接收者、active录音拒绝及旧播放退休、纯会话／视口／布局成功持久化均接线。所有作者已冻结、已知作业终态，无用户待答。
 

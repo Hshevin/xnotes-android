@@ -170,3 +170,7 @@
 ## 2026-11-10：在原文网络工作树基础上新建范围编辑续作树
 
 - 用户明确要求“在这个工作树基础上新建工作树继续”。以 `mind-map-original-network/xnotes` 的实际提交 `8254f3b751db1a7e15f557c1dd3ea0115ae921ed` 新建托管工作树 `mind-map-source-target/xnotes`，本地分支 `codex/mind-map-source-target`。28个未提交文件及已有验证记录完整复制，逐文件SHA-256、模式与Git差异清单一致；原工作树保留不改，续作只在新树。此授权仅创建本次工作树，继续既有实现／编译测试／文档／本地提交边界，不扩展为打包、安装、推送、合并或发布。
+
+## 2026-11-10：在双文件打开工作树基础上新建混合持久化续作树
+
+- 用户明确要求“那你在这个工作树基础上新建工作树继续”。通过 create_worktree 从 `mind-map-pair-open/xnotes` 的干净提交 `d706ebd1104e34005bcb45f444243429f8551557` 创建并绑定 `mind-map-mixed-persistence/xnotes`，本地分支 `codex/mind-map-mixed-persistence`。上一阶段87份原始验证文件复制至新树忽略 tmp，逐文件 SHA 相同；原工作树保持干净，不归档、不改动。继续既有实现、相关编译／测试、文档与本地提交；不授权打包、安装、推送、合并或发布。
