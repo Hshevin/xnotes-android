@@ -4,12 +4,16 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.provider.DocumentsContract
+import android.widget.FrameLayout
 import com.xnotes.MainActivity
 import com.xnotes.MixedInputBinding
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.core.tools.Tool
 import com.xnotes.ui.Editor
 import com.xnotes.ui.Pane
+import com.xnotes.ui.NativeSplitSource
+import com.xnotes.ui.NativeSplitOpenLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -175,5 +179,95 @@ class MainPairKeyOwnerHostTest {
             assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP,code=KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY)))
             assertFalse(StylusButtonLatch().heldWith(0));assertTrue(child.keys.isEmpty())
         } finally {f.editor.setPenShortcuts(old)}
+    }
+
+    @Test fun aNativeSplitCommitKeepsTheAcceptedHoldOnItsActualRetainedOwner()=scenario {activity,f,child->
+        withContext(Dispatchers.IO) {f.seed(f.retry)}
+        val uri=DocumentsContract.buildDocumentUri(f.authority,"retry").toString()
+        val old=bind(f.editor)
+        try {
+            f.editor.selectTool(Tool.PEN)
+            assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+            val model=f.editor.state.document;val history=f.editor.history;val token=f.editor.penInputOwnerToken
+            var guarded=false
+            val cap=f.editor.prepareNativePairOpen(NativeSplitSource(f.sourceUri,"source.xnote"),NativeSplitSource(uri,"retry.xnote"),
+                guardOwners={owners,current->assertTrue(current());assertTrue(owners.isEmpty());guarded=true;emptySet()})
+            assertNotNull(cap)
+            try {
+                assertTrue(guarded)
+                val handoff=activity.prepareNativeKeyHandoffs(cap!!.keyHandoffs)
+                assertTrue(cap.commit());handoff()
+                assertSame(f.editor,cap.first);assertTrue(cap.second.noteOpen);assertSame(model,f.editor.state.document)
+                assertSame(history,f.editor.history);assertSame(token,f.editor.penInputOwnerToken)
+                assertEquals(Tool.ERASER,f.editor.tool);assertEquals(Tool.PEN,f.editor.toolbarTool)
+                assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+                assertEquals(Tool.PEN,f.editor.tool);assertTrue(child.keys.isEmpty())
+            } finally {cap?.close()}
+        } finally {f.editor.setPenShortcuts(old)}
+    }
+
+    @Test fun aFailedSecondNativeReadDoesNotRetireAnAcceptedPress()=scenario {activity,f,child->
+        withContext(Dispatchers.IO) {f.retry.writeText("invalid NOTE")}
+        val uri=DocumentsContract.buildDocumentUri(f.authority,"retry").toString()
+        val old=bind(f.editor)
+        try {
+            f.editor.selectTool(Tool.PEN)
+            assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+            val model=f.editor.state.document;val token=f.editor.penInputOwnerToken
+            var guarded=false
+            assertNull(f.editor.prepareNativePairOpen(NativeSplitSource(f.sourceUri,"source.xnote"),NativeSplitSource(uri,"retry.xnote"),
+                guardOwners={_,_->guarded=true;emptySet()}))
+            assertFalse(guarded);assertSame(model,f.editor.state.document);assertSame(token,f.editor.penInputOwnerToken)
+            assertEquals(Tool.ERASER,f.editor.tool)
+            assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+            assertEquals(Tool.PEN,f.editor.tool);assertTrue(child.keys.isEmpty())
+        } finally {f.editor.setPenShortcuts(old)}
+    }
+
+    @Test fun aFocusedSharedNativePeerInheritsTheOwnersAcceptedHoldWithoutAnotherDown() {
+        for(keepPeer in listOf(false,true)) scenario {activity,f,child->
+            val peer=f.editor.secondaryPane()
+            if(keepPeer) assertTrue(peer.openSharedView(f.editor))
+            val old=bind(f.editor)
+            val holder=FrameLayout(activity)
+            activity.window.setContentView(holder,ViewGroup.LayoutParams(-1,-1))
+            holder.addView(child,FrameLayout.LayoutParams(1,1))
+            holder.addView(f.editor.surfacesForAttach(),FrameLayout.LayoutParams(500,1000))
+            if(keepPeer) holder.addView(peer.surfacesForAttach(),FrameLayout.LayoutParams(500,1000).apply {leftMargin=500})
+            fun layoutWindow() {
+                activity.window.decorView.measure(View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY))
+                activity.window.decorView.layout(0,0,1000,1000)
+            }
+            try {
+                f.editor.selectTool(Tool.PEN);peer.selectTool(Tool.PAN)
+                f.editor.view.isFocusableInTouchMode=true;layoutWindow()
+                assertTrue(f.editor.view.requestFocus());assertTrue(f.editor.view.hasFocus())
+                assertSame(f.editor,f.editor.active)
+                assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+                assertEquals(Tool.ERASER,f.editor.tool);assertEquals(Tool.PAN,peer.tool)
+                val model=f.editor.state.document;val history=f.editor.history
+                val cap=f.editor.prepareNativePairOpen(NativeSplitSource(f.sourceUri,"source.xnote"),
+                    NativeSplitSource(f.sourceUri,"source.xnote"),NativeSplitOpenLayout(focused=Pane.SECONDARY),
+                    guardOwners={owners,current->assertTrue(current());assertTrue(owners.isEmpty());emptySet()})
+                assertNotNull(cap)
+                try {
+                    assertSame(f.editor,cap!!.first);assertSame(peer,cap.second)
+                    val handoff=activity.prepareNativeKeyHandoffs(cap.keyHandoffs)
+                    assertTrue(cap.commit());handoff()
+                    if(!keepPeer) holder.addView(peer.surfacesForAttach(),FrameLayout.LayoutParams(500,1000).apply {leftMargin=500})
+                    peer.view.isFocusableInTouchMode=true;layoutWindow()
+                    assertTrue(peer.view.requestFocus());assertTrue(peer.view.hasFocus())
+                    assertSame(peer,f.editor.active);assertSame(f.editor,peer.documentOwner)
+                    assertSame(model,peer.state.document);assertSame(history,f.editor.history)
+                    assertEquals("shared peer inherits HOLD (keepPeer=$keepPeer)",Tool.ERASER,peer.tool)
+                    assertEquals(Tool.PAN,peer.toolbarTool);assertEquals(Tool.PEN,f.editor.toolbarTool)
+                    assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+                    assertEquals(Tool.PEN,f.editor.tool);assertEquals(Tool.PAN,peer.tool)
+                    assertEquals(Tool.PEN,f.editor.toolbarTool);assertEquals(Tool.PAN,peer.toolbarTool)
+                    assertTrue(child.keys.isEmpty())
+                } finally {cap?.close()}
+            } finally {holder.removeAllViews();f.editor.setPenShortcuts(old)}
+        }
     }
 }

@@ -5,9 +5,11 @@
     <string name="mixed_split_save_unsupported">Saving a map and note split is not supported yet. Save each document separately.</string>
     <string name="mixed_split_map_pair_unsupported">Two maps cannot share split view yet. Choose a note or PDF.</string>
     <string name="mixed_split_busy">Finish the current gesture or edit before changing panes.</string>
-    <string name="mixed_split_pair_pending">To replace this workspace, select a map and a note together in a file browser. Opening another note-only split here is not supported yet.</string>
+    <string name="mixed_split_pair_pending">Select two notes, or a map and a note, in a file browser, then tap Open side by side.</string>
     <string name="mixed_split_replace_saved_pending">Close the current map before opening a saved split. Replacing a map workspace with a saved split is not supported yet.</string>
     <string name="mixed_split_restore_native_home">The note session for this pane could not be verified. The map remains open; choose a note to continue.</string>
     <string name="mixed_split_import_pending">This file is waiting to import. Close split view first.</string>
     <string name="mixed_pair_open_failed">Could not open these files together. Your current workspace is still available.</string>
+    <string name="native_split_opening">Opening split view…</string>
+    <string name="native_split_open_failed">Could not open this split view. Your current workspace is still available.</string>
 </resources>

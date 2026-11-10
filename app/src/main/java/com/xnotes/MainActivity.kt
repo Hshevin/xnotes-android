@@ -630,6 +630,7 @@ private fun EditorScreen(
     var homeFocus by remember { mutableStateOf<com.xnotes.ui.Pane?>(null) }
     var mainMenu by remember { mutableStateOf(false) }
     var pairOperation by remember {mutableStateOf<Any?>(null)}
+    var nativeFocusGeneration by remember {mutableStateOf(0L)}
     var parkedDocuments by remember { mutableStateOf<Pair<Any?, Any?>?>(null) }
     val documentsNow = (if (editor.canvasOpen) editor.infinite.document else editor.state.document) to
         editor.secondary?.let { if (it.canvasOpen) it.infinite.document else it.state.document }
@@ -1340,18 +1341,51 @@ private fun EditorScreen(
         }
     }
 
-    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor.OpenDiscard> = emptySet()) {
-        if(kindOf(uriStr)==com.xnotes.core.util.DocumentKind.SPLIT && (hasMixedPresentation() || maps.current!=null)) {
-            editor.message=context.getString(R.string.mixed_split_replace_saved_pending);return
+    fun openNativeSplit(prepare:suspend (()->Boolean,
+        suspend (List<Editor>,()->Boolean)->Set<Editor.OpenDiscard>?)->com.xnotes.ui.PreparedNativeSplitOpen?) {
+        if(!maps.isHostCurrent(mapBinding) || guardState.current!=null || originals.current!=null || originalLibrary.visible || networks.visible) {
+            editor.message=context.getString(R.string.mixed_split_busy);return
         }
+        val operation=Any();pairOperation=operation
+        val hostCurrent=captureMapHost(allowedGuardTag=operation)
+        fun current()=pairOperation===operation && hostCurrent()
+        var applyKeys:(()->Unit)?=null
+        val accepted=maps.replaceWithNativeSplit(prepareNative={valid,settleMaps->
+            prepare({valid() && current()}) {owners,ready->
+                if(!valid() || !current() || !ready() || !settleMaps()) null
+                else guardPairOwners(owners,operation) {ready() && valid() && current()}
+            }?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
+        },stillCurrent=::current,operation=operation,onPresented={_->
+            // The coordinator has adopted both native views and retired only its Map route.
+            applyKeys?.invoke();applyKeys=null
+            editor.mixedPresentationActive=false
+            editor.persistNativeSplitPresentation()
+            mapActivity?.let {activity->if(activity.mixedInput===mixedInput) {activity.mixedInput=null;mixedRouter.clear()}}
+            networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+            savedMapUri=null;savedMapTitle=""
+            paneHomes=emptyMap();paneHomeViews=emptyMap();homeFocus=null;mainMenu=false
+            nativeFocusGeneration++
+        },onFinished={shown->
+            applyKeys=null
+            if(pairOperation===operation) {
+                pairOperation=null
+                if(!shown && maps.failure!=null) editor.message=context.getString(R.string.native_split_open_failed)
+            }
+        })
+        if(!accepted) {
+            if(pairOperation===operation) pairOperation=null
+            editor.message=context.getString(R.string.native_split_open_failed)
+        }
+    }
+    fun openNativeSplitFile(uri:String?=null) = openNativeSplit {valid,guard->
+        editor.prepareNativeSplitFile(uri,stillCurrent=valid,guardOwners=guard)
+    }
+    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor.OpenDiscard> = emptySet()) {
+        if(kindOf(uriStr)==com.xnotes.core.util.DocumentKind.SPLIT) {openNativeSplitFile(uriStr);return}
         val retainedMap=maps.current
         val hostCurrent=captureMapHost()
         fun launchOpen(mapProof:()->Boolean) {scope.launch {
-            val kind = com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)) ?: "")
-            if (kind == com.xnotes.core.util.DocumentKind.SPLIT) {
-                if(retainedMap!=null) {editor.message=context.getString(R.string.mixed_split_replace_saved_pending);return@launch}
-                if (editor.openSplitFile(uriStr, explicitlyDiscarded)) { paneHomes = emptyMap(); mainMenu = false }
-            } else editor.openSingleFromHome(uriStr, displayNameOf(resolver, Uri.parse(uriStr)), explicitlyDiscarded,
+            editor.openSingleFromHome(uriStr, displayNameOf(resolver, Uri.parse(uriStr)), explicitlyDiscarded,
                 stillCurrent={hostCurrent() && mapProof()},onAdopted={
                     if(retainedMap!=null) {maps.close(retainedMap);sourceNavigator.retire();savedMapUri=null;savedMapTitle=""}
                     else maps.splitPresentation.clear()
@@ -1419,26 +1453,11 @@ private fun EditorScreen(
             }
             return
         }
-        if(hasMixedPresentation() || maps.current!=null) {
-            editor.message=context.getString(R.string.mixed_split_pair_pending);return
-        }
-        guardedAll {
-        editor.secondaryPane()
-        scope.launch {
-            // Either picked file may already be open in the other pane: settle both before reading.
-            for (current in editor.openPanes.map { it.documentOwner }.distinct()) {
-                if (current.visibleDocumentUri != null && !current.flushSplitDocument()) return@launch
-            }
-            val first = openInto(editor, firstUri) ?: return@launch
-            val second = first.sibling ?: return@launch
-            val opened = openInto(second, secondUri)
-            if (opened == null) editor.message = context.getString(R.string.err_open_second)
-            editor.splitRatio = 0.5f
-            editor.splitReversed = first !== editor
-            editor.focusPane(first.pane)
-            paneHomes = emptyMap()
-            mainMenu = false
-        }
+        val previousLayout=maps.splitPresentation.layout ?: maps.splitPresentation.returnLayout
+        val layout=com.xnotes.ui.NativeSplitOpenLayout(sideBySide=previousLayout?.sideBySide ?: editor.splitSideBySide)
+        openNativeSplit {valid,guard->
+            editor.prepareNativePairOpen(com.xnotes.ui.NativeSplitSource(firstUri,names[0]),
+                com.xnotes.ui.NativeSplitSource(secondUri,names[1]),layout=layout,stillCurrent=valid,guardOwners=guard)
         }
     }
 
@@ -1925,6 +1944,7 @@ private fun EditorScreen(
                 onSelectView = { if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it) },
                 allowSplits = target == null,
                 allowMapPairs = true,
+                allowNativePairs = true,
                 initialDocument = target?.let { paneHomes[it.pane] },
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
                 onOpenOriginalPdfs = ::openOriginalLibrary,
@@ -1947,7 +1967,9 @@ private fun EditorScreen(
                 },
                 onImportPdf = { importPdfPane = target; importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri ->
-                    if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) {
+                    val kind=com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty())
+                    if(kind==com.xnotes.core.util.DocumentKind.SPLIT) openNativeSplitFile(uri)
+                    else if (kind == com.xnotes.core.util.DocumentKind.MIND_MAP) {
                         openMap(uri,requestedPane=target)
                     } else if (target == null) guardedAll { discarded -> openTreeFile(uri, discarded) }
                     else guarded(target) {
@@ -1985,16 +2007,8 @@ private fun EditorScreen(
                     mainMenu = false
                     }
                 },
-                onOpenSplitFile = { uri ->
-                    if(hasMixedPresentation() || maps.current!=null) editor.message=context.getString(R.string.mixed_split_replace_saved_pending)
-                    else guardedAll { discarded -> openTreeFile(uri,discarded) }
-                },
-                onRestoreSplit = {
-                    if(maps.current!=null || hasMixedPresentation())
-                        editor.message=context.getString(R.string.mixed_split_replace_saved_pending)
-                    else if (editor.inSplit) { paneHomes = emptyMap(); mainMenu = false }
-                    else guardedAll { discarded -> scope.launch { if (editor.openSplitFile(explicitlyDiscarded = discarded)) { paneHomes = emptyMap(); mainMenu = false } } }
-                },
+                onOpenSplitFile = ::openNativeSplitFile,
+                onRestoreSplit = {openNativeSplitFile()},
                 onPickRoot = { browsePickerPane = target; pickRootLauncher.launch(null) },
                 onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
                 onSaveCopyFile = ::launchStoredCopy,
@@ -2126,7 +2140,8 @@ private fun EditorScreen(
                         .onFailure { editor.message = context.getString(R.string.err_share_image) }
                 },
                 onOpenFile = { pane, uri ->
-                    if(kindOf(uri)==com.xnotes.core.util.DocumentKind.MIND_MAP)
+                    if(kindOf(uri)==com.xnotes.core.util.DocumentKind.SPLIT) openNativeSplitFile(uri)
+                    else if(kindOf(uri)==com.xnotes.core.util.DocumentKind.MIND_MAP)
                         openMap(uri,requestedPane=pane.takeIf {editor.inSplit})
                     else scope.launch { openInto(pane, uri) }
                 },
@@ -2191,7 +2206,8 @@ private fun EditorScreen(
             val mixedHost=mixedLayout?.let {MixedSplitHostState(maps,mixedInput,
                 onPickMap={maps.current?.let {entry->sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}}},
                 onCloseMap={maps.current?.let {entry->sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}}})}
-            if (!mainMenu) SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null },mixed=mixedHost) { pane ->
+            if (!mainMenu) SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null },mixed=mixedHost,
+                nativeFocusGeneration=nativeFocusGeneration) { pane ->
                 BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(com.xnotes.ui.theme.LocalPalette.current.bg.toComposeColor())) {
                     val configuration = android.content.res.Configuration(LocalConfiguration.current).apply {
                         screenWidthDp = maxWidth.value.toInt()
@@ -2552,7 +2568,7 @@ private fun Editor.toolbarDocuments(): Set<com.xnotes.core.tools.ToolbarDocument
 
 @Composable
 internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit,
-    mixed:MixedSplitHostState?=null, home: @Composable (Editor) -> Unit) {
+    mixed:MixedSplitHostState?=null,nativeFocusGeneration:Long=0, home: @Composable (Editor) -> Unit) {
     val mixedLayout=mixed?.workspace?.splitPresentation?.layout
     val mapContent=com.xnotes.mindmap.LocalMapPaneContent.current
     val shownHomes=homes + listOfNotNull(mixedLayout?.takeIf {it.nativeHome}?.nativePane)
@@ -2702,6 +2718,7 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
             } else androidx.compose.runtime.key(pane,pane.canvasOpen) {EditorPane(
                 editor=pane,app=editor,actions=actions,closable=split,
                 onTitleDrag=onTitleDrag,onTitleDrop=onTitleDrop,onDocumentFocus=onDocumentFocus,
+                focusGeneration=nativeFocusGeneration,
                 paneFocused=mixedLayout?.let {it.focusedPane==pane.pane},
                 onPaneFocus=mixed?.let {host->{target->host.input.focus(com.xnotes.pen.MixedInputRouter.Target(target.pane,kind));Unit}},
                 toolbarDocuments=mixed?.let {setOf(com.xnotes.core.tools.ToolbarDocument.MAP,
@@ -2822,6 +2839,7 @@ private fun EditorPane(
     onTitleDrag: (Editor, Offset, Offset) -> Unit,
     onTitleDrop: (Boolean) -> Unit,
     onDocumentFocus: () -> Unit,
+    focusGeneration:Long=0,
     paneFocused:Boolean?=null,
     onPaneFocus:((Editor)->Unit)?=null,
     toolbarDocuments:Set<com.xnotes.core.tools.ToolbarDocument>?=null,
@@ -2855,7 +2873,7 @@ private fun EditorPane(
     fun focusPane() {onDocumentFocus();if(onPaneFocus!=null) onPaneFocus(editor) else app.focusPane(editor.pane)}
     SideEffect { editor.openInPane = { uri -> actions.onOpenFile(editor, uri) } }
     // This pane owns the keyboard while it is the focused one; (re)grab it as that changes.
-    LaunchedEffect(focused, editor.noteOpen) {
+    LaunchedEffect(focused, editor.noteOpen,focusGeneration) {
         if (focused && editor.noteOpen) runCatching { focusRequester.requestFocus() }
     }
     var titleOrigin by remember(editor) { mutableStateOf(Offset.Zero) }

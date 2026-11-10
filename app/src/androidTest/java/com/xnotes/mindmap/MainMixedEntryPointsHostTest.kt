@@ -160,23 +160,48 @@ class MainMixedEntryPointsHostTest {
         await("normal import resumes after layout removal") {main {pending(s.activity)==null && s.native.pendingImport?.uri==source.toString()}}
     }
 
-    @Test fun rootMapHomeRejectsSavedOpenRestoreAndPairBeforeChangingAnyNativeSlot()=scenario(savedFixture=true) {s->
+    private fun replaceFromSavedBrowser(s:Scene,restore:Boolean,closeMapFirst:Boolean) {
         val model=main {s.native.state.document};val history=main {s.native.history}
-        click(s.activity.getString(R.string.map_close))
-        await("actual root close enters Map Home") {main {s.maps.current==null && s.maps.splitPresentation.layout!=null}}
+        if(closeMapFirst) {
+            click(s.activity.getString(R.string.map_close))
+            await("actual root close enters Map Home") {main {s.maps.current==null && s.maps.splitPresentation.layout!=null}}
+        }
         click(s.activity.getString(R.string.toolbar_home))
-        await("actual main menu parks Map Home") {main {s.maps.splitPresentation.layout==null && s.maps.splitPresentation.returnLayout!=null}}
+        await("actual main menu parks the mixed layout") {main {s.maps.splitPresentation.layout==null && s.maps.splitPresentation.returnLayout!=null}}
         val parked=main {s.maps.splitPresentation.returnLayout}
         click(s.activity.getString(R.string.split_workspace))
-        fun unchanged()=main {
-            assertNull(s.maps.current);assertNull(s.maps.splitPresentation.layout);assertEquals(parked,s.maps.splitPresentation.returnLayout)
-            assertTrue(s.native.noteOpen);assertSame(model,s.native.state.document);assertSame(history,s.native.history)
+        if(restore) {
+            click(s.activity.getString(R.string.split_choose_pair))
+            await("empty pair chooser points to file selection") {shown(s.activity.getString(R.string.mixed_split_pair_pending))}
+            main {assertEquals(parked,s.maps.splitPresentation.returnLayout);assertSame(model,s.native.state.document)}
+            click(s.activity.getString(R.string.split_restore_recent))
+        } else click(requireNotNull(s.savedFile).nameWithoutExtension)
+        await("actual saved native split replaces mixed presentation") {main {
+            s.maps.current==null && !s.maps.visible && s.maps.splitPresentation.layout==null &&
+                s.maps.splitPresentation.returnLayout==null && s.native.openPanes.size==2 &&
+                s.native.openPanes.all {it.view.isShown && it.view.width>0} && graph(s.activity)==null
+        }}
+        main {
+            assertSame(model,s.native.state.document);assertSame(history,s.native.history)
+            assertSame(s.native,s.native.secondary!!.documentOwner)
         }
-        click(s.activity.getString(R.string.split_choose_pair))
-        await("pair is explicitly deferred") {shown(s.activity.getString(R.string.mixed_split_pair_pending))};unchanged()
-        click(s.activity.getString(R.string.split_restore_recent))
-        await("saved restore is explicitly deferred") {shown(s.activity.getString(R.string.mixed_split_replace_saved_pending))};unchanged()
-        click(requireNotNull(s.savedFile).nameWithoutExtension)
-        await("saved file open is explicitly deferred") {shown(s.activity.getString(R.string.mixed_split_replace_saved_pending))};unchanged()
+        // Actual Window dispatch after adoption must reach the native pane without a new touch.
+        var saves=0
+        val actions=main {s.native.keyActions}
+        try {
+            main {
+                s.native.keyActions=Editor.KeyActions(save={saves++})
+                assertTrue(s.activity.dispatchKeyEvent(KeyEvent(1000,1001,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_S,0,KeyEvent.META_CTRL_ON)))
+            }
+            await("native keyboard focus after saved split adoption") {main {saves==1}}
+        } finally {main {s.native.keyActions=actions}}
+    }
+
+    @Test fun rootMapHomeCanRestoreSavedNativeViewsWithoutReplacingTheRetainedOwner()=scenario(savedFixture=true) {s->
+        replaceFromSavedBrowser(s,restore=true,closeMapFirst=true)
+    }
+
+    @Test fun parkedLiveMapCanOpenASavedSplitFileThroughTheActualMainBrowser()=scenario(savedFixture=true) {s->
+        replaceFromSavedBrowser(s,restore=false,closeMapFirst=false)
     }
 }

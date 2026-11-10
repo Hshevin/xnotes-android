@@ -29,4 +29,14 @@ class SplitPairSelectionTest {
         assertNull(splitPairSelection(listOf(map,note.copy(name="sketch.xcanvas"))))
         assertNull(splitPairSelection(listOf(note,map.copy(name="saved.xsplit"))))
     }
+
+    @Test fun aPaneHomeCanAllowWholeWorkspaceNativePairsWithoutExposingMapPairs() {
+        val other=note.copy(name="second.xnote",documentUri="content://library/second")
+        assertEquals(listOf(note.documentUri,other.documentUri),
+            splitPairSelection(listOf(note,other),allowNativePairs=true,allowMapPairs=false))
+        assertNull(splitPairSelection(listOf(note,map),allowNativePairs=true,allowMapPairs=false))
+        assertNull(splitPairSelection(listOf(note,other),allowNativePairs=false,allowMapPairs=true))
+        assertEquals(listOf(map.documentUri,note.documentUri),
+            splitPairSelection(listOf(map,note),allowNativePairs=false,allowMapPairs=true))
+    }
 }

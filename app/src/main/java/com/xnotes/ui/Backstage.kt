@@ -216,6 +216,8 @@ fun Backstage(
     allowSplits: Boolean = true,
     /** A map pair replaces the whole workspace, including when selected from a slot Home. */
     allowMapPairs: Boolean = allowSplits,
+    /** Two notes selected here also replace the whole workspace, rather than nesting a split. */
+    allowNativePairs: Boolean = allowSplits,
     initialDocument: String? = null,
     backEnabled: Boolean = true,
     onChooseSplitPair: () -> Unit = {},
@@ -253,6 +255,7 @@ fun Backstage(
         openSplit = onOpenSplitEntries,
         chooseSplitPair = onChooseSplitPair, openSplitFile = onOpenSplitFile, restoreSplit = onRestoreSplit,
         allowMapPairs = allowMapPairs,
+        allowNativePairs = allowNativePairs,
         openBeside = onOpenBeside,
         exportPdfs = onExportPdfs,
         importTemplate = onImportTemplate,
@@ -964,6 +967,7 @@ private class ExplorerCalls(
     val exportFilePdf: (String) -> Unit,
     val openSplit: (BrowseEntry, BrowseEntry) -> Unit,
     val allowMapPairs: Boolean,
+    val allowNativePairs: Boolean,
     val chooseSplitPair: () -> Unit,
     val openSplitFile: (String) -> Unit,
     val restoreSplit: () -> Unit,
@@ -1918,10 +1922,10 @@ private fun ExplorerSection(
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
                     if (selection.size == 1) ExplorerIcon(XnotesIcons.edit, stringResource(R.string.rename), fg) { renaming = selection.first(); selection.clear() }
-                    val pair = splitPairSelection(selection)
+                    val pair = splitPairSelection(selection,allowNativePairs=calls.allowSplits || calls.allowNativePairs,
+                        allowMapPairs=calls.allowSplits || calls.allowMapPairs)
                     val pairFiles=pair?.map {uri->files.first {it.documentUri==uri}}
-                    val mapPair=pairFiles?.any {DocumentKind.ofName(it.name)==DocumentKind.MIND_MAP}==true
-                    if ((calls.allowSplits || calls.allowMapPairs && mapPair) && pairFiles != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) {
+                    if (pairFiles != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) {
                         val first=pairFiles[0];val second=pairFiles[1]
                         selection.clear();calls.openSplit(first,second)
                     }
