@@ -40,5 +40,6 @@ class MapHostHooks internal constructor(
     internal val embedded:Boolean=false,
     internal val focused:()->Boolean={true},
     internal val requestFocus:()->Boolean={true},
+    internal val keyboardFocusGeneration:Long=0,
     internal val splitDocument:(()->Unit)?=null,
 )

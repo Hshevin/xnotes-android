@@ -211,7 +211,11 @@ fun Backstage(
     onBackup: (export: Boolean) -> Unit = {},
     /** Two picked files are to be opened together, one per pane of a split view. */
     onOpenSplit: (String, String) -> Unit = { _, _ -> },
+    /** Captured entries keep selection order and routing hints fixed across asynchronous opens. */
+    onOpenSplitEntries: (BrowseEntry, BrowseEntry) -> Unit = { first,second -> onOpenSplit(first.documentUri,second.documentUri) },
     allowSplits: Boolean = true,
+    /** A map pair replaces the whole workspace, including when selected from a slot Home. */
+    allowMapPairs: Boolean = allowSplits,
     initialDocument: String? = null,
     backEnabled: Boolean = true,
     onChooseSplitPair: () -> Unit = {},
@@ -246,8 +250,9 @@ fun Backstage(
         shareFiles = onShareFiles,
         saveCopyFile = onSaveCopyFile,
         exportFilePdf = onExportFilePdf,
-        openSplit = onOpenSplit,
+        openSplit = onOpenSplitEntries,
         chooseSplitPair = onChooseSplitPair, openSplitFile = onOpenSplitFile, restoreSplit = onRestoreSplit,
+        allowMapPairs = allowMapPairs,
         openBeside = onOpenBeside,
         exportPdfs = onExportPdfs,
         importTemplate = onImportTemplate,
@@ -957,7 +962,8 @@ private class ExplorerCalls(
     val shareFiles: (List<String>) -> Unit,
     val saveCopyFile: (String) -> Unit,
     val exportFilePdf: (String) -> Unit,
-    val openSplit: (String, String) -> Unit,
+    val openSplit: (BrowseEntry, BrowseEntry) -> Unit,
+    val allowMapPairs: Boolean,
     val chooseSplitPair: () -> Unit,
     val openSplitFile: (String) -> Unit,
     val restoreSplit: () -> Unit,
@@ -1912,8 +1918,13 @@ private fun ExplorerSection(
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
                     if (selection.size == 1) ExplorerIcon(XnotesIcons.edit, stringResource(R.string.rename), fg) { renaming = selection.first(); selection.clear() }
-                    val pair = files.map { it.documentUri }.distinct().takeIf { it.size == 2 && files.size == selection.size && files.all { e -> DocumentKind.ofName(e.name) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS) } }
-                    if (calls.allowSplits && pair != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) { selection.clear(); calls.openSplit(pair[0], pair[1]) }
+                    val pair = splitPairSelection(selection)
+                    val pairFiles=pair?.map {uri->files.first {it.documentUri==uri}}
+                    val mapPair=pairFiles?.any {DocumentKind.ofName(it.name)==DocumentKind.MIND_MAP}==true
+                    if ((calls.allowSplits || calls.allowMapPairs && mapPair) && pairFiles != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) {
+                        val first=pairFiles[0];val second=pairFiles[1]
+                        selection.clear();calls.openSplit(first,second)
+                    }
                     ExplorerIcon(XnotesIcons.moveToFolder, stringResource(R.string.move_to_folder), fg) { moving = selection.toList() }
                     ExplorerIcon(XnotesIcons.copy, stringResource(R.string.copy), fg) { clipboard = ClipItem(selection.toList(), false); selection.clear() }
                     SelectionDivider()

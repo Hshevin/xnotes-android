@@ -199,6 +199,28 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         val palette = LocalPalette.current
         val enlarged=editing?.let { id -> session.document?.nodes?.any {it.id==id && it.kind==NodeKind.INK} } == true
+        val paneFocused=hostHooks?.focused?.invoke()!=false
+        val keyboardReady=cameraReady && editing==null && textDraft==null && textRestore==null &&
+            session.connectedDraft==null && !navigationBusy && !session.closing && !session.replacingDocument
+        DisposableEffect(view,paneFocused,keyboardReady,hostHooks?.keyboardFocusGeneration) {
+            val graph=view
+            if(graph==null || !paneFocused || !keyboardReady) onDispose {}
+            else {
+                val takeFocus=Runnable {
+                    if(presentationState.visible && hostHooks?.focused?.invoke()!=false && graph===view &&
+                        graph.isAttachedToWindow && graph.isEnabled && graph.width>0 && graph.height>0 &&
+                        editing==null && session.textDraft==null && session.textRestore==null && session.connectedDraft==null &&
+                        !session.closing && !session.replacingDocument) graph.requestFocus()
+                }
+                val listener=object:android.view.View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v:android.view.View) {graph.post(takeFocus)}
+                    override fun onViewDetachedFromWindow(v:android.view.View) {graph.removeCallbacks(takeFocus)}
+                }
+                graph.addOnAttachStateChangeListener(listener)
+                graph.post(takeFocus)
+                onDispose {graph.removeCallbacks(takeFocus);graph.removeOnAttachStateChangeListener(listener)}
+            }
+        }
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
           CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null || session.replacingDocument || navigationBusy)) {
             Column(Modifier.fillMaxSize().then(if(hostHooks?.embedded==true) Modifier

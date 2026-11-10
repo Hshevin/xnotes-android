@@ -5,8 +5,9 @@
     <string name="mixed_split_save_unsupported">暂不支持保存导图与笔记的分屏文件，请分别保存文档。</string>
     <string name="mixed_split_map_pair_unsupported">暂不支持两份导图分屏，请选择笔记或 PDF。</string>
     <string name="mixed_split_busy">请先结束当前手势或编辑，再调整窗格。</string>
-    <string name="mixed_split_pair_pending">导图与笔记分屏时，请在窗格文件首页选择导图。暂不支持一次选择这两个文件。</string>
+    <string name="mixed_split_pair_pending">要替换当前工作区，请在文件首页同时选择导图和笔记。暂不支持直接在此打开另一组纯笔记分屏。</string>
     <string name="mixed_split_replace_saved_pending">请先关闭当前导图，再打开已保存的分屏。暂不支持直接用分屏文件替换导图工作区。</string>
     <string name="mixed_split_restore_native_home">无法核实此窗格原来的笔记会话。导图仍保留，请重新选择笔记。</string>
     <string name="mixed_split_import_pending">文件等待导入，请先关闭双窗格。</string>
+    <string name="mixed_pair_open_failed">无法一起打开这两个文件，当前工作区仍保留。</string>
 </resources>
