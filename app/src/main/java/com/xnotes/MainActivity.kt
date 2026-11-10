@@ -1008,7 +1008,7 @@ private fun EditorScreen(
     fun saveOrPrompt() {
         val target = editor.active
         val uri = target.currentUri
-        if (uri == null) { launchSaveAs(target); return }
+        if (uri == null || target.requiresIndependentSave) { launchSaveAs(target); return }
         // The write is off the main thread now, so the Save-As fallback fires from its callback.
         val original=if(!target.canvasOpen) target.discardForOpen() else null
         target.saveToThen(uri) {ok->if(!ok && original?.sameModel()==true) launchSaveAs(target)}
@@ -1025,8 +1025,8 @@ private fun EditorScreen(
             // A canvas keeps its own autosave, and dirty/autosaveUri describe the paged buffer
             // underneath it, so asking about those here would prompt over a note nobody is looking at.
             target.canvasOpen -> action()
-            target.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
-            target.dirty -> guardState.current=GuardRequest(target,action,onDiscard,onStopped,sourceNavigation,stillCurrent)
+            target.autosaveUri != null && !target.requiresIndependentSave -> action() // autosaved notes are flushed on doc-swap; no prompt
+            target.dirty || target.requiresIndependentSave -> guardState.current=GuardRequest(target,action,onDiscard,onStopped,sourceNavigation,stillCurrent)
             else -> action()
         }
     }
@@ -2443,7 +2443,7 @@ private fun EditorScreen(
                     if(!guardState.consume(request)) return@TextButton
                     if(!request.current() || !request.discard.applies()) {changed();return@TextButton}
                     val uri = guarded.currentUri
-                    if (uri != null) {
+                    if (uri != null && !guarded.requiresIndependentSave) {
                         // Off-thread: what the prompt was guarding runs once the bytes have landed.
                         guarded.saveToThen(uri) {ok->
                             if(ok) saved() else request.stop(NativeActionStop.FAILED)
@@ -2457,7 +2457,10 @@ private fun EditorScreen(
                 androidx.compose.foundation.layout.Row {
                     androidx.compose.material3.TextButton(onClick = {
                         if(!guardState.consume(request)) return@TextButton
-                        if(request.current() && request.discard.applies()) {request.onDiscard(request.discard);request.proceed()}
+                        if(request.current() && request.discard.applies()) {
+                            guarded.authorizeRecoveredDiscard(request.discard)
+                            request.onDiscard(request.discard);request.proceed()
+                        }
                         else changed()
                     }) {
                         androidx.compose.material3.Text(stringResource(R.string.discard))
