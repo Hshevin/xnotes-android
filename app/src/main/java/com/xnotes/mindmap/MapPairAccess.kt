@@ -69,7 +69,8 @@ internal class MapPairAccess(context:Context) {
         return Disk(hash(bytes),identity.ticket,identity.domain)
     }
 
-    @MainThread suspend fun prepare(uri:Uri,lease:MapDocumentLease,initial:Initial,requireLoadBaseline:Boolean):Held {
+    @MainThread suspend fun prepare(uri:Uri,lease:MapDocumentLease,initial:Initial,requireLoadBaseline:Boolean,
+        expectedPublicationSha256:String?=null):Held {
         val session=lease.session
         val document=session.document ?: throw MapPairChanged()
         val epoch=session.interactionEpoch;val revision=session.contentRevision
@@ -80,6 +81,7 @@ internal class MapPairAccess(context:Context) {
         val coroutine=currentCoroutineContext();val check={coroutine.ensureActive()}
         val disk=MapSaves.lockFor(uri).withLock {withContext(Dispatchers.IO) {inspect(uri,document.id,covered,check)}}
         if(!current() || document.id!=initial.id || disk.sha!=initial.sha256 ||
+            expectedPublicationSha256!=null && (initial.sha256!=expectedPublicationSha256 || disk.sha!=expectedPublicationSha256) ||
             requireLoadBaseline && session.loadedRawSha256!=initial.sha256 ||
             !disk.identity.current() || !disk.domain.current()) throw MapPairChanged()
         return Held(uri,lease,document,epoch,revision,serial,covered,disk)

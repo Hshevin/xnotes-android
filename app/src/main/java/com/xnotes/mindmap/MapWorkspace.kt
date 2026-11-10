@@ -138,7 +138,14 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
     internal fun openPair(uri:Uri,title:String,mapIsFirst:Boolean,
         prepareNative:suspend ((()->Boolean))->com.xnotes.ui.PreparedPagedPairOpen?,
         stillCurrent:()->Boolean={true},operation:Any?=null,
-        onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit={_,_->},onFinished:(Boolean)->Unit={}):Boolean {
+        onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit={_,_->},onFinished:(Boolean)->Unit={}):Boolean =
+        openPairPrepared(uri,title,mapIsFirst,{_,valid->prepareNative(valid)},stillCurrent,operation,onPresented,onFinished)
+
+    private fun openPairPrepared(requestedUri:Uri,requestedTitle:String,mapIsFirst:Boolean,
+        prepareNative:suspend (com.xnotes.ui.MixedSplitRequest?,()->Boolean)->com.xnotes.ui.PreparedPagedPairOpen?,
+        stillCurrent:()->Boolean,operation:Any?,
+        onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit,onFinished:(Boolean)->Unit,
+        savedRequest:com.xnotes.ui.MixedSplitRequest?=null):Boolean {
         if(!active) return false
         val origin=current;val originVisible=visible;val layoutGeneration=splitPresentation.generation
         val request=++generation
@@ -153,11 +160,16 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             try {
                 previous.forEach {it.join()}
                 if(!valid()) throw MapPairChanged()
+                val restored=savedRequest?.let {SavedMixedSplitResolver(app).resolve(it)}
+                if(!valid()) throw MapPairChanged()
+                val uri=restored?.map?.uri?.let(Uri::parse) ?: requestedUri
+                val title=restored?.map?.title ?: requestedTitle
                 val existing=MapDocuments.observations(app).singleOrNull {it.key==MapSaves.key(uri)}
                     ?.takeUnless {it.failed && it.document==null && !it.loading && !it.creating}
                 if(existing?.creating==true || existing?.closing==true || existing?.replacing==true) throw MapPairChanged()
                 val access=MapPairAccess(app)
                 val initial=access.initial(uri)
+                if(restored!=null && initial.id!=restored.map.documentId) throw MapPairChanged()
                 if(!valid()) throw MapPairChanged()
                 val reused=ownedEntries().firstOrNull {it.lease.alive && MapSaves.key(it.uri)==MapSaves.key(uri)}
                 val lease=reused?.lease ?: MapDocuments.acquire(app,uri).also {incoming=it}
@@ -174,7 +186,7 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                 val source=access.prepare(uri,lease,initial,requireLoadBaseline)
                 val next=reused ?: Entry(lease.uri,title,lease)
                 // Initial reads precede every blur/save guard in the Native preparation.
-                native=prepareNative(::valid) ?: run {failure=MapWorkspaceFailure.CHANGED;return@launch}
+                native=prepareNative(restored,::valid) ?: run {failure=MapWorkspaceFailure.CHANGED;return@launch}
                 val candidate=requireNotNull(native)
                 if(!valid() || !source.current() || !candidate.current()) throw MapPairChanged()
                 val replaced=ownedEntries().filter {it!==next}
@@ -183,14 +195,20 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
                     if(!valid() || !leavesReady() || !candidate.current()) false
                     else {
                         val mapPane=if(candidate.nativePane==com.xnotes.ui.Pane.PRIMARY) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
-                        val focus=if(mapIsFirst) mapPane else candidate.nativePane
-                        val layout=MapSplitLayout(mapPane,focus,.5f,null,(mapPane==com.xnotes.ui.Pane.PRIMARY)!=mapIsFirst)
+                        val saved=restored?.layout
+                        val focus=if(saved==null) {
+                            if(mapIsFirst) mapPane else candidate.nativePane
+                        } else if(saved.focusedPane==saved.mapPane) mapPane else candidate.nativePane
+                        val mapFirst=if(saved==null) mapIsFirst else (saved.mapPane==com.xnotes.ui.Pane.PRIMARY)!=saved.reversed
+                        val layout=MapSplitLayout(mapPane,focus,saved?.ratio ?: .5f,saved?.sideBySide,
+                            (mapPane==com.xnotes.ui.Pane.PRIMARY)!=mapFirst)
                         // commit's only false result is pre-mutation. No business veto follows it.
                         if(!candidate.commit()) false else {
                             visited.clear();sourceFrames=emptyList()
                             visited[MapSaves.key(next.uri)]=next
                             next.parkingCheck={false};next.sourceReturn=null
                             next.flushNativeOnPresent=false;next.skipNativePersistOnPresent=false;next.presentation.visible=true
+                            if(restored!=null) next.presentation.applyArrangementCamera(next.session,restored.mapCamera)
                             splitPresentation.present(MapOpenPresentation.Split(layout))
                             splitPresentation.rememberNativeHint(candidate.target.nativeRestoreHint())
                             current=next;visible=true;adopted=true;adoptedLease=next.lease
@@ -222,6 +240,72 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         work=pending;acceptedOpens+=pending
         pending.invokeOnCompletion {acceptedOpens-=pending;if(work===pending) work=null}
         pending.start();return true
+    }
+
+    internal fun openSavedPair(request:com.xnotes.ui.MixedSplitRequest,
+        prepareNative:suspend (com.xnotes.ui.NativeSplitSource,com.xnotes.ui.Editor.ReadingPosition,()->Boolean)->com.xnotes.ui.PreparedPagedPairOpen?,
+        stillCurrent:()->Boolean={true},operation:Any?=null,
+        onPresented:(Entry,com.xnotes.ui.PreparedPagedPairOpen)->Unit={_,_->},onFinished:(Boolean)->Unit={}):Boolean =
+        openPairPrepared(Uri.parse(request.map.uri),request.map.title.orEmpty(),
+            (request.layout.mapPane==com.xnotes.ui.Pane.PRIMARY)!=request.layout.reversed,
+            prepareNative={resolved,valid->
+                val saved=requireNotNull(resolved)
+                prepareNative(com.xnotes.ui.NativeSplitSource(saved.native.uri,saved.native.title,saved.native.documentId),saved.nativePosition,valid)
+            },stillCurrent=stillCurrent,operation=operation,onPresented=onPresented,onFinished=onFinished,savedRequest=request)
+
+    internal suspend fun prepareMixedArrangementSave(
+        prepareNative:suspend (com.xnotes.ui.Pane,()->Boolean)->com.xnotes.ui.PreparedMixedNoteArrangementSave?,
+        stillCurrent:()->Boolean={true},
+    ):PreparedMixedArrangementSave? {
+        val entry=current ?: return null
+        val layout=splitPresentation.layout ?: return null
+        val epoch=entry.session.interactionEpoch
+        val routeGeneration=generation;val layoutGeneration=splitPresentation.generation
+        val documentId=entry.session.document?.id ?: return null
+        fun actorReady()=MapDocuments.observations(app).any {it.session===entry.session && it.key==MapSaves.key(entry.uri) &&
+            !it.creating && !it.failed && !it.closing && !it.replacing && !it.loading}
+        fun routeCurrent()=active && current===entry && visible && !opening && generation==routeGeneration &&
+            entry.lease.alive && entry.session.interactionEpoch==epoch && entry.session.document?.id==documentId &&
+            splitPresentation.layout==layout && splitPresentation.generation==layoutGeneration && !layout.nativeHome &&
+            stillCurrent() && actorReady() && entry.session.canParkSourceNavigation
+        if(!routeCurrent()) return null
+        try {
+            val native=prepareNative(layout.nativePane,::routeCurrent) ?: return null
+            if(!routeCurrent() || !native.current() || native.nativePane!=layout.nativePane) return null
+            // Even a shared actor needs this operation's actual successful save, not the lease retirement waiver.
+            val written=entry.session.saveAttempt().await() as? MapSaveOutcome.Written ?: return null
+            val sha=written.sourceSha256 ?: return null
+            if(!written.latest || !routeCurrent() || !native.current() || entry.session.dirty || entry.session.saving) return null
+            val document=entry.session.document ?: return null
+            val revision=entry.session.contentRevision
+            if(written.capturedRevision!=revision) return null
+            val access=MapPairAccess(app)
+            val initial=access.initial(entry.uri)
+            if(!routeCurrent() || !native.current() || initial.id!=documentId || initial.sha256!=sha) return null
+            val source=access.prepare(entry.uri,entry.lease,initial,requireLoadBaseline=false,expectedPublicationSha256=sha)
+            val request=com.xnotes.ui.MixedSplitRequest(
+                com.xnotes.ui.SplitSourceRef(documentId,entry.uri.toString(),entry.title),native.source,layout,
+                entry.presentation.arrangementCamera(entry.session),native.position)
+            // Encoding here also rejects unrepresentable current view settings before a stage is created.
+            com.xnotes.ui.SplitOpenCodec.encodeMixed(request)
+            fun current()=routeCurrent() && native.current() && source.current() && entry.session.document===document &&
+                entry.session.contentRevision==revision && !entry.session.dirty && !entry.session.saving
+            if(!current()) return null
+            return PreparedMixedArrangementSave(request,listOfNotNull(entry.title,native.source.title).joinToString(" + "),::current) {commit->
+                if(!current()) null else {
+                    val nativeSource=native.verifySource()
+                    if(nativeSource==null || !current() || !nativeSource()) null else {
+                        var published:java.io.File?=null
+                        source.finish {
+                            if(!current() || !nativeSource()) false
+                            else {published=commit();published!=null}
+                        }
+                        published
+                    }
+                }
+            }
+        } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+        catch(_:Exception) {return null}
     }
 
     /** Called after both Native initial reads, before Native guard/save and the last source IO. */

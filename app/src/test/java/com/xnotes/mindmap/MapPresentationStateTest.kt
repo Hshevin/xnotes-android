@@ -69,6 +69,24 @@ class MapPresentationStateTest {
         second.panText(21f,-13f);val moved=second.viewport()
         assertFalse(state.restore(session,second));assertEquals(moved,second.viewport())
     }
+    @Test fun savedArrangementExportsOnlyTheNormalCameraAndRestoresItWithoutOldSourceFocusOrHistory()=scenario {session,context->
+        val state=MapPresentationState();val view=graph(session,context)
+        view.zoomBy(1.3f);view.panText(83f,-27f);state.synchronize(session)
+        assertTrue(state.capture(session,view))
+        val saved=requireNotNull(state.arrangementCamera(session))
+        assertEquals(view.viewport(),saved.viewport)
+        state.sourcesFor="n"
+        session.operate {it.update("n") {node->node.copy(text="B")}}
+        val document=session.document;val revision=session.contentRevision;val selected=session.selected
+        val undo=session.canUndo;val redo=session.canRedo
+        val next=MapPresentationState();next.synchronize(session);next.sourcesFor="n"
+        assertTrue(next.applyArrangementCamera(session,saved));assertNull(next.sourcesFor);assertNull(next.sourceFocus)
+        val replacement=graph(session,context,750,500)
+        assertTrue(next.restore(session,replacement))
+        assertEquals(center(view).x,center(replacement).x,.001);assertEquals(center(view).y,center(replacement).y,.001)
+        assertSame(document,session.document);assertEquals(revision,session.contentRevision);assertEquals(selected,session.selected)
+        assertEquals(undo,session.canUndo);assertEquals(redo,session.canRedo)
+    }
     @Test fun anImeOrUnstableTextCameraCannotReplaceTheNormalCameraAndImeDoesNotConsumeItsRestore()=scenario {session,context->
         val state=MapPresentationState();val first=graph(session,context)
         first.zoomBy(1.3f);first.panText(61f,42f)

@@ -163,4 +163,17 @@ class MapPresentationState internal constructor() {
         return applySourceReturn(session,bookmark)
     }
     internal fun consumeSourceFocus(token:Any) {if(sourceFocus?.token===token) sourceFocus=null}
+    /** A source-panel/IME camera cannot replace this ordinary, already captured bookmark. */
+    internal fun arrangementCamera(session:MapSession):MapPresentationCamera? {
+        synchronize(session)
+        return camera?.copy()
+    }
+    /** Saved arrangements restore presentation only; no source request or selection is resurrected. */
+    internal fun applyArrangementCamera(session:MapSession,saved:MapPresentationCamera?):Boolean {
+        synchronize(session)
+        if(!graphCurrent(session) || !session.canParkSourceNavigation) return false
+        retireSourceEditor();cancelPendingBacklinkFocus();sourcesFor=null;sourceFocus=null
+        camera=saved?.copy();requestCameraRestore()
+        return true
+    }
 }
