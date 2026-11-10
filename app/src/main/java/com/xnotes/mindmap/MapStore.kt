@@ -206,6 +206,14 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         checkpoint(doc, pending = false)
     }
 
+    /** Retain the actual body locally without granting or exercising original-file write access. */
+    internal fun retainForRecovery(doc:MindMapDocument) {
+        durabilityEpoch=Any()
+        journalReady=false
+        MapCodec.encode(doc) // reject invalid bodies before touching the existing recovery copy
+        checkpoint(doc,pending=true)
+    }
+
     /** The caller holds the actual URI lock, so this is the just-verified publication, not a later read. */
     internal fun saveAndVerify(doc:MindMapDocument):String {
         save(doc)

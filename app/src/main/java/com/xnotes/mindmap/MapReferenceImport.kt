@@ -28,6 +28,7 @@ internal sealed interface MapSourceImportResult {
 internal sealed interface MapSaveOutcome {
     val capturedRevision:Long
     data class Written(override val capturedRevision:Long,val latest:Boolean,val sourceSha256:String?=null):MapSaveOutcome
+    data class Checkpointed(override val capturedRevision:Long,val latest:Boolean):MapSaveOutcome
     data class Retained(override val capturedRevision:Long,val latest:Boolean,val cause:Throwable):MapSaveOutcome
     data class Conflict(override val capturedRevision:Long,val retained:Boolean,val cause:Throwable):MapSaveOutcome
     data class Changed(override val capturedRevision:Long):MapSaveOutcome

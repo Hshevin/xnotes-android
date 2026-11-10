@@ -666,7 +666,8 @@ class MapSession() : ViewModel() {
         debounce = viewModelScope.launch { delay(350); save() }
     }
     /** [overwrite] is the explicit conflict choice to keep this version over the destination's. */
-    internal fun saveAttempt(overwrite:Boolean=false):Deferred<MapSaveOutcome> {
+    internal fun saveAttempt(overwrite:Boolean=false):Deferred<MapSaveOutcome> = enqueueSaveAttempt(overwrite,false)
+    private fun enqueueSaveAttempt(overwrite:Boolean,localOnly:Boolean):Deferred<MapSaveOutcome> {
         debounce?.cancel()
         val expectedHistory=history
         val epoch=connectedEpoch
@@ -685,18 +686,22 @@ class MapSession() : ViewModel() {
                 val version=revision
                 val result=withContext(Dispatchers.IO) {lock.withLock {
                     if(version!=revision || connectedEpoch!=epoch || replacingDocument) null
-                    else runCatching {if(overwrite) store.overwriteAndVerify(doc) else store.saveAndVerify(doc)}.also {
+                    else runCatching {
+                        if(localOnly) {store.retainForRecovery(doc);null}
+                        else if(overwrite) store.overwriteAndVerify(doc) else store.saveAndVerify(doc)
+                    }.also {
                         if(store.journalReady) durableRevision=version
                     }
                 }} ?: return@async MapSaveOutcome.Changed(version)
-                if(result.isSuccess) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
+                if(result.isSuccess && !localOnly) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
                 val latest=history===expectedHistory && connectedEpoch==epoch && revision==version && !replacingDocument
                 result.fold({sourceSha256->
+                    if(localOnly) return@fold MapSaveOutcome.Checkpointed(version,latest)
                     if(latest) {dirty=false;saveFailed=false;recovered=false;conflict=false}
                     MapSaveOutcome.Written(version,latest,sourceSha256)
                 },{error->
                     if(error is java.util.concurrent.CancellationException) throw error
-                    if(latest) {saveFailed=true;conflict=error is MapConflict}
+                    if(latest) {saveFailed=true;if(!localOnly) conflict=error is MapConflict}
                     when {
                         error is MapConflict -> MapSaveOutcome.Conflict(version,store.journalReady,error)
                         store.journalReady -> MapSaveOutcome.Retained(version,latest,error)
@@ -708,7 +713,7 @@ class MapSession() : ViewModel() {
     }
     /** Local recovery success is separate from whether the configured original accepted a write. */
     @androidx.annotation.MainThread
-    internal suspend fun awaitRecoveryCheckpoint(stillCurrent:()->Boolean={true}):MapRecoveryCheckpoint? {
+    internal suspend fun awaitRecoveryCheckpoint(localOnly:Boolean=false,stillCurrent:()->Boolean={true}):MapRecoveryCheckpoint? {
         if(!::store.isInitialized || !::storedUri.isInitialized || !stillCurrent() || !canParkSourceNavigation) return null
         val expectedHistory=history ?: return null
         val doc=document ?: return null
@@ -717,6 +722,7 @@ class MapSession() : ViewModel() {
             connectedEpoch==epoch && canParkSourceNavigation
         fun localSuccess(result:MapSaveOutcome)=result.capturedRevision==version && when(result) {
             is MapSaveOutcome.Written->result.latest
+            is MapSaveOutcome.Checkpointed->result.latest
             is MapSaveOutcome.Retained->result.latest
             is MapSaveOutcome.Conflict->result.retained
             else->false
@@ -735,7 +741,7 @@ class MapSession() : ViewModel() {
             if(dirty && settled?.capturedRevision==version && !localSuccess(requireNotNull(settled))) return null
             val observedDurable=!dirty || settled?.let(::localSuccess)==true || loadedRecoveryProof!=null && recoverySafe
             if(!observedDurable) {
-                val result=saveAttempt().await()
+                val result=enqueueSaveAttempt(false,localOnly).await()
                 if(!sameBody() || result.capturedRevision!=version) return null
                 if(!localSuccess(result)) return null
             }

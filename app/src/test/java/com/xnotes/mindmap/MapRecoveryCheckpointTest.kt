@@ -39,8 +39,8 @@ class MapRecoveryCheckpointTest {
                 withContext(NonCancellable+Dispatchers.Main) {session.cancelPendingAutosave();session.viewModelScope.cancel()}
             }
         }
-    private suspend fun edit(session:MapSession)=withContext(Dispatchers.Main) {
-        assertTrue(session.operate {it.update(it.root.id) {node->node.copy(text="current body")}})
+    private suspend fun edit(session:MapSession,text:String="current body")=withContext(Dispatchers.Main) {
+        assertTrue(session.operate {it.update(it.root.id) {node->node.copy(text=text)}})
         session.cancelPendingAutosave()
     }
 
@@ -106,5 +106,62 @@ class MapRecoveryCheckpointTest {
         }
         accepted.await()
         withContext(Dispatchers.Main) {assertFalse(current.current())}
+    }
+
+    @Test fun parkingRetainsTheActualDirtyBodyWithoutAttemptingTheOriginalAndLaterSaveStillUsesItsOldBase()=scenario {f,session,target->
+        val raw=target.bytes.clone()
+        edit(session)
+        val current=withContext(Dispatchers.Main) {requireNotNull(session.awaitRecoveryCheckpoint(localOnly=true))}
+        val journals=f.journalSnapshot()
+        assertTrue(journals.isNotEmpty());assertEquals(0,target.writes);assertArrayEquals(raw,target.bytes)
+        withContext(Dispatchers.Main) {
+            assertTrue(current.current());assertTrue(session.dirty);assertFalse(session.saveFailed)
+            val again=requireNotNull(session.awaitRecoveryCheckpoint(localOnly=true))
+            assertFalse(current.current());assertTrue(again.current())
+        }
+        assertEquals(journals,f.journalSnapshot());assertEquals(0,target.writes)
+        val saved=withContext(Dispatchers.Main) {session.saveAttempt()}.await()
+        assertTrue(saved is MapSaveOutcome.Written);assertEquals(1,target.writes)
+        assertEquals("current body",MapCodec.decode(target.bytes).root.text)
+    }
+
+    @Test fun localParkingDoesNotAcceptAnExternalBodyAsAnOverwriteBaseline()=scenario {f,session,target->
+        edit(session)
+        val external=MapCodec.encode(session.document!!.update(session.document!!.root.id) {it.copy(text="external C")})
+        target.bytes=external
+        withContext(Dispatchers.Main) {assertNotNull(session.awaitRecoveryCheckpoint(localOnly=true));assertTrue(session.dirty)}
+        assertEquals(0,target.writes);assertArrayEquals(external,target.bytes);assertTrue(f.journalSnapshot().isNotEmpty())
+        val result=withContext(Dispatchers.Main) {session.saveAttempt()}.await()
+        assertTrue(result is MapSaveOutcome.Conflict)
+        assertEquals(0,target.writes);assertArrayEquals(external,target.bytes)
+    }
+
+    @Test fun failedLocalParkingPreservesAnExistingSourceConflictAndThePreviousJournal()=scenario {f,first,target->
+        edit(first)
+        withContext(Dispatchers.Main) {assertNotNull(first.awaitRecoveryCheckpoint(localOnly=true));first.viewModelScope.cancel()}
+        val external=MapCodec.encode(first.document!!.update(first.document!!.root.id) {it.copy(text="external C")})
+        target.bytes=external
+        val session=withContext(Dispatchers.Main) {MapSession(MapSourceAccess::inspect) {target}.also {
+            it.open(f.context,f.uri(File(f.notes,"checkpoint.xmap")))
+        }}
+        var blocker:File?=null
+        try {
+            withTimeout(10000) {while(withContext(Dispatchers.Main) {session.loading}) delay(1)}
+            withContext(Dispatchers.Main) {assertTrue(session.recovered);assertTrue(session.conflict)}
+            edit(session,"later C1")
+            val journal=File(f.context.noBackupFilesDir,"mind-map-recovery").listFiles()!!.single {it.extension=="json"}
+            val previous=journal.readBytes()
+            blocker=File(journal.parentFile,journal.name+".pending").also {assertTrue(it.mkdir())}
+            withContext(Dispatchers.Main) {
+                assertNull(session.awaitRecoveryCheckpoint(localOnly=true))
+                assertTrue("A local I/O failure must preserve the known original-source conflict",session.conflict)
+                assertTrue(session.dirty)
+            }
+            assertArrayEquals(previous,journal.readBytes());assertArrayEquals(external,target.bytes)
+            assertEquals(0,target.writes)
+        } finally {
+            blocker?.delete()
+            withContext(NonCancellable+Dispatchers.Main) {session.cancelPendingAutosave();session.viewModelScope.cancel()}
+        }
     }
 }
