@@ -25,9 +25,11 @@ internal class LastPresentationObservation internal constructor(
     val read:LastPresentationRead,
     private val origin:Any?=null,
     private val fingerprint:Any?=null,
+    private val rootIdentity:Any?=null,
 ) {
-    internal fun authorizes(root:Any,head:Any?)=read===LastPresentationRead.Invalid &&
-        origin===root && fingerprint!=null && fingerprint==head
+    internal fun matches(root:Any,directory:Any?,head:Any?)=origin===root && rootIdentity!=null && rootIdentity==directory &&
+        fingerprint!=null && fingerprint==head
+    internal fun authorizes(root:Any,head:Any?,directory:Any?)=read===LastPresentationRead.Invalid && matches(root,directory,head)
 }
 
 /** Fixed private marker only. This component never opens the URIs written inside its payload. */
@@ -67,7 +69,11 @@ internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=S
 
     fun observe():LastPresentationObservation {
         val head=readHead()
-        return LastPresentationObservation(head.read,shared,head.fingerprint)
+        return LastPresentationObservation(head.read,shared,head.fingerprint,directoryIdentity)
+    }
+    /** Actual opaque head comparison, not DTO equality or permission to read an original. */
+    fun matches(observation:LastPresentationObservation):Boolean=synchronized(shared.gate) {
+        rootCurrent() && observation.matches(shared,directoryIdentity,readHead().fingerprint) && rootCurrent()
     }
 
     /** Reservation never waits for file IO or for a previously accepted publication. */
@@ -90,7 +96,7 @@ internal class LastPresentationStore(filesDir:File,private val fileOps:FileOps=S
         }
         val head=readHead()
         if(reset!=null) {
-            if(!reset.authorizes(shared,head.fingerprint) || head.read!==LastPresentationRead.Invalid)
+            if(!reset.authorizes(shared,head.fingerprint,directoryIdentity) || head.read!==LastPresentationRead.Invalid)
                 return Preparation(LastPresentationPrepare.Changed)
         } else if(head.read===LastPresentationRead.Invalid) return Preparation(LastPresentationPrepare.PreservedInvalid)
         val before=head.fingerprint ?: return Preparation(LastPresentationPrepare.Failed)

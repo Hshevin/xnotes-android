@@ -8,12 +8,52 @@ import com.xnotes.mindmap.MapPresentationCamera
 import com.xnotes.mindmap.MapSplitLayout
 import com.xnotes.mindmap.MindMapView
 import java.io.ByteArrayInputStream
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
 /** Actual Android org.json contracts. Source compilation does not mean Android execution. */
 class LastPresentationCodecAndroidTest {
+    private fun typedNativeWire():JSONObject=JSONObject().put("format","xnotes-last-presentation")
+        .put("version",2).put("state","native")
+        .put("slots",JSONArray().put(JSONObject().put("pane","PRIMARY").put("kind","note")
+            .put("hint",JSONObject().put("kind","note").put("documentId",noteId).put("path",JSONObject.NULL))
+            .put("view",JSONObject().put("zoom",1.25).put("x",17).put("y",27).put("view",JSONObject()).put("fitWidth",true))))
+        .put("layout",JSONObject().put("focusedPane","PRIMARY").put("ratio",.5).put("reversed",false))
+
+    @Test fun typedNativeNullPathIsPreservedButMissingPathAndNullViewAreRejected() {
+        val wire=typedNativeWire()
+        val parsed=parse(wire) as LastPresentation.Native
+        val slot=parsed.slots.single() as ColdNativeSlot.Note
+        assertNull(slot.hint.path);assertTrue(slot.view!!.fitWidth)
+        val encoded=JSONObject(String(LastPresentationCodec.encode(parsed),Charsets.UTF_8))
+        val hint=encoded.getJSONArray("slots").getJSONObject(0).getJSONObject("hint")
+        assertTrue(hint.has("path"));assertSame(JSONObject.NULL,hint.get("path"))
+        val missing=typedNativeWire()
+        missing.getJSONArray("slots").getJSONObject(0).getJSONObject("hint").remove("path")
+        reject(missing.toString())
+        for(key in listOf("view","hint")) {
+            val invalid=typedNativeWire();invalid.getJSONArray("slots").getJSONObject(0).put(key,JSONObject.NULL)
+            reject(invalid.toString())
+        }
+        val invalid=typedNativeWire()
+        invalid.getJSONArray("slots").getJSONObject(0).getJSONObject("view").put("fitWidth",JSONObject.NULL)
+        reject(invalid.toString())
+    }
+
+    @Test fun sharedSlotHasOneActualOwnerAndCannotHideAnotherHint() {
+        val valid=typedNativeWire()
+        valid.getJSONArray("slots").put(JSONObject().put("pane","SECONDARY").put("kind","shared").put("ownerPane","PRIMARY"))
+        assertEquals(Pane.PRIMARY,((parse(valid) as LastPresentation.Native).slots[1] as ColdNativeSlot.Shared).ownerPane)
+        val hidden=JSONObject(valid.toString())
+        hidden.getJSONArray("slots").getJSONObject(1).put("hint",JSONObject.NULL)
+        reject(hidden.toString())
+        val dangling=JSONObject(valid.toString())
+        dangling.getJSONArray("slots").getJSONObject(1).put("ownerPane","SECONDARY")
+        reject(dangling.toString())
+    }
+
     @Test fun nonAsciiUnicodeEscapeDigitsAreRejected() {
         val home="""{"format":"xnotes-last-presentation","version":1,"state":"home"}"""
         for(raw in listOf(
