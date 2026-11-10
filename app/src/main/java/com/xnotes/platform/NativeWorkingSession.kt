@@ -182,8 +182,10 @@ internal class NativeWorkingSession(
                                  previous:Read,capture:(CapturePermit)->Write):Pair<Write,Any> {
                 val intent=store.register(staged,previous);val permit=CapturePermit(store,intent)
                 val write=capture(permit)
-                if(!permit.used || !write.capturedBy(permit.seal) || !store.allowed(write)) throw WorkingSessionCache.Conflict()
-                return write to intent
+                try {
+                    if(!permit.used || !write.capturedBy(permit.seal) || !store.allowed(write)) throw WorkingSessionCache.Conflict()
+                    return write to intent
+                } catch(error:Throwable) {store.retire(write);throw error}
             }
         }
     }
@@ -218,6 +220,7 @@ internal class NativeWorkingSession(
                                          capture:(CapturePermit)->Write):HandoffPublication {
                 val context=currentCoroutineContext();val check={context.ensureActive();staged.checkCurrent()}
                 val preflight=AtomicReference<Read?>();val publication=AtomicReference<HandoffPublication?>()
+                val unpublished=AtomicReference<Write?>()
                 var failure:Throwable?=null
                 try {
                     // An active checkpoint owned by this runtime model is required. First capture
@@ -233,10 +236,10 @@ internal class NativeWorkingSession(
                             throw WorkingSessionCache.Conflict()
                     }
                     val (write,identity)=withContext(Dispatchers.Main.immediate) {
-                        check();CapturePermit.capture(store,staged,requireNotNull(preflight.get()),capture)
+                        check();CapturePermit.capture(store,staged,requireNotNull(preflight.get()),capture).also {unpublished.set(it.first)}
                     }
                     withContext(Dispatchers.IO) {
-                        check();store.publish(write,check)
+                        check();store.publish(write,check);unpublished.compareAndSet(write,null)
                         // Only this attempt or a LATER same-owner publication can acknowledge it.
                         val held=store.load(check) ?: throw WorkingSessionCache.Conflict()
                         try {
@@ -252,6 +255,7 @@ internal class NativeWorkingSession(
                     return requireNotNull(publication.getAndSet(null))
                 } catch(error:Throwable) {failure=error;throw error}
                 finally {
+                    unpublished.getAndSet(null)?.let(store::retire)
                     val old=preflight.getAndSet(null);val abandoned=publication.getAndSet(null)
                     val primary=failure
                     if(old!=null || abandoned!=null) withContext(NonCancellable+Dispatchers.IO) {
@@ -285,10 +289,12 @@ internal class NativeWorkingSession(
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},view,null,intent.handoff)
         parseMetadata(WorkingSessionCache.Kind.NOTE,id,metadata.toString())
         val ticket=cache.reserve(owner,WorkingSessionCache.Kind.NOTE,id,version,metadata,forceBody || needsHandoffBody(intent))
-        val snapshot=if(ticket.requiresBody) document.copyWriteSnapshot(fixedItems=true) else null
-        if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
-            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,snapshot,null,proof,intent.handoff,seal,intent.completion,intent.recovered)
+        try {
+            val snapshot=if(ticket.requiresBody) document.copyWriteSnapshot(fixedItems=true) else null
+            if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            return Write(ticket,snapshot,null,proof,intent.handoff,seal,intent.completion,intent.recovered)
+        } catch(error:Throwable) {cache.retire(ticket);throw error}
     }
     fun capture(document:InfiniteDocument,source:PreparedNativeOpen.EditSource?):Write {
         return captureCanvas(document,source)
@@ -304,20 +310,34 @@ internal class NativeWorkingSession(
             proof?.expected?.let {SourceDescription(it.kind,it.documentId,requireNotNull(document.path),it.locationKey,it.sha256)},null,document.lastView,intent.handoff)
         parseMetadata(WorkingSessionCache.Kind.CANVAS,id,metadata.toString())
         val ticket=cache.reserve(owner,WorkingSessionCache.Kind.CANVAS,id,version,metadata,forceBody || needsHandoffBody(intent))
-        val snapshot=if(ticket.requiresBody) document.snapshotForWrite(fixedItems=true) else null
-        if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
-            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        return Write(ticket,null,snapshot,proof,intent.handoff,seal,intent.completion,intent.recovered)
+        try {
+            val snapshot=if(ticket.requiresBody) document.snapshotForWrite(fixedItems=true) else null
+            if(proof?.isCurrent()==false || snapshot!=null && (snapshot.snapshotOwnerToken!==owner || snapshot.identity.documentId!=id || snapshot.bodyRevision!=version))
+                throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+            return Write(ticket,null,snapshot,proof,intent.handoff,seal,intent.completion,intent.recovered)
+        } catch(error:Throwable) {cache.retire(ticket);throw error}
     }
     fun isCurrent(write:Write)=cache.isCurrent(write.ticket) && write.sourceCurrent() && allowed(write)
     fun reserveClear()=cache.reserveClear()
+    fun retire(write:Write)=cache.retire(write.ticket)
+    fun retireClear(request:WorkingSessionCache.ClearRequest)=cache.retire(request)
     fun publishClear(request:WorkingSessionCache.ClearRequest,checkActive:()->Unit={}):WorkingSessionCache.Publication {
+        var published=false
+        try {return publishClearCandidate(request,checkActive).also {published=it.published}}
+        finally {if(!published) retireClear(request)}
+    }
+    private fun publishClearCandidate(request:WorkingSessionCache.ClearRequest,checkActive:()->Unit):WorkingSessionCache.Publication {
         val check={checkActive();synchronized(rootState) {if(rootState.intent!=null || rootState.recovered!=null) throw WorkingSessionCache.Conflict()}}
         check()
         return cache.publishClearChecked(request,check) {previous->if(previousMetadata(previous)?.handoff!=null) throw WorkingSessionCache.Conflict()}
     }
     /** IO-only. Checks the source epoch even when WorkingSessionCache reuses a body. */
     fun publish(write:Write,checkActive:()->Unit={}):WorkingSessionCache.Publication {
+        var published=false
+        try {return publishCandidate(write,checkActive).also {published=it.published}}
+        finally {if(!published) retire(write)}
+    }
+    private fun publishCandidate(write:Write,checkActive:()->Unit):WorkingSessionCache.Publication {
         if(!write.sourceCurrent() || !allowed(write)) return WorkingSessionCache.Publication(write.ticket,false)
         val check={checkActive();if(!write.sourceCurrent() || !allowed(write)) throw ExpiredSource()}
         return try {cache.publishChecked(write.ticket,check,{previous->
@@ -539,6 +559,11 @@ internal class NativeWorkingSession(
         val value=(n as Number).toLong();require(value in Int.MIN_VALUE..Int.MAX_VALUE);return value.toInt()
     }
     companion object {
+        internal fun legacyAccess(directory:File):LegacyAccess {
+            val canonical=directory.canonicalFile;val root=rootState(canonical.path)
+            return LegacyAccess(canonical,root,{root.intent==null && root.completion==null && root.recovered==null},
+                WorkingSessionCache.LegacyBoundary.create(canonical))
+        }
         private val HASH=Regex("[a-f0-9]{64}")
         private val COLOR=Regex("#[a-fA-F0-9]{6}")
         private fun extension(kind:WorkingSessionCache.Kind)=if(kind==WorkingSessionCache.Kind.NOTE) "xnote" else "xcanvas"

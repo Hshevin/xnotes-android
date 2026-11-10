@@ -41,30 +41,12 @@ class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, 
     }
 
     /** A null body only refreshes metadata; canvas view changes still require a new body. */
-    fun saveChecked(document:InfiniteDocument?,metadata:Metadata):LegacySessionWrite=runCatching {
-        LegacySessionBodyCandidates.cleanup(dir)
-        if(document==null) {
-            if(!docFile.exists()) return@runCatching LegacySessionWrite.NEEDS_BODY
-            if(!docFile.isFile) return@runCatching LegacySessionWrite.FAILED
-        } else {
-            check(dir.isDirectory || dir.mkdirs())
-            val candidate=LegacySessionBodyCandidates.create(dir,"canvas-",".xcanvas.tmp")
-            try {
-                FileOutputStream(candidate.file).use {output->
-                    codec.write(document,object:FilterOutputStream(output) {
-                        override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
-                        override fun close() {flush()}
-                    })
-                    output.fd.sync()
-                }
-                Files.move(candidate.file.toPath(),docFile.toPath(),ATOMIC_MOVE,REPLACE_EXISTING)
-            } finally {candidate.close()}
-        }
-        val json=JSONObject().put("dirty",metadata.dirty)
-        metadata.path?.let {json.put("path",it)}
-        metadata.displayName?.let {json.put("display_name",it)}
-        if(meta.writeChecked(json)) LegacySessionWrite.SAVED else LegacySessionWrite.FAILED
-    }.getOrDefault(LegacySessionWrite.FAILED)
+    internal fun prepareMutation(document:InfiniteDocument?,metadata:Metadata):PreparedLegacySessionMutation=
+        PreparedLegacySessionMutation.prepareCanvas(dir,codec,document,metadata)
+
+    /** A null body only refreshes metadata; canvas view changes still require a new body. */
+    fun saveChecked(document:InfiniteDocument?,metadata:Metadata):LegacySessionWrite=
+        publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareCanvas(dir,codec,document,metadata,clearNote=false)}.legacyWrite()
 
     /** The stored canvas, or null when there is none or it will not read. */
     fun load(): InfiniteDocument? = runCatching {
@@ -82,8 +64,5 @@ class CanvasSessionStore(private val dir: File, private val codec: CanvasCodec, 
     }
 
     /** Preserve the legacy empty sidecar, but never detach it from a body that failed to clear. */
-    fun clearChecked():Boolean=runCatching {
-        Files.deleteIfExists(docFile.toPath())
-        meta.writeChecked(JSONObject())
-    }.getOrDefault(false)
+    fun clearChecked():Boolean=publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareCanvasClear(dir)} is LegacyMutationResult.Published
 }
