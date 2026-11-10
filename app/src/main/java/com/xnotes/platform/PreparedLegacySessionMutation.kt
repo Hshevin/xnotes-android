@@ -57,6 +57,9 @@ internal class LegacyAccess internal constructor(internal val directory:File,pri
     internal fun consumeForRestore(observation:LegacyAbsentObservation):Boolean=try {synchronized(nativeRoot) {
         observation.access===this && nativeAvailable() && boundary.consume(observation.cache)
     }} catch(_:Exception) {false}
+    fun isCurrent(observation:LegacyAbsentObservation):Boolean=try {synchronized(nativeRoot) {
+        observation.access===this && nativeAvailable() && boundary.isCurrent(observation.cache)
+    }} catch(_:Exception) {false}
     fun consumeForNewDraft(observation:LegacyAbsentObservation)=consumeForRestore(observation)
 }
 

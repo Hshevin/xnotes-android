@@ -65,4 +65,32 @@ class LegacySessionQueueTrackedTest {
         assertFalse(old.consumeForRestore(accepted.settledFence(),observation))
         assertFalse(fresh.consumeForRestore(accepted.settledFence(),observation))
     }}}
+    @Test fun repeatedCheckpointChecksPreserveTheOneShotRestoreClaim()=runBlocking {withTimeout(5000) {scenario {root->
+        val owner=LegacySessionQueue.attach(root)
+        val access=NativeWorkingSession.legacyAccess(root)
+        val accepted=requireNotNull(owner.submitTracked {(access.observeAbsent() as LegacyAbsentResult.Granted).observation})
+        val observation=(accepted.awaitSettled() as LegacySessionQueue.Outcome.Success).value
+        val fence=accepted.settledFence()
+        repeat(3) {assertTrue(owner.matchesForCheckpoint(fence,observation))}
+        assertTrue(owner.consumeForRestore(fence,observation))
+        assertFalse(owner.matchesForCheckpoint(fence,observation))
+    }}}
+    @Test fun aNewQueueCommandOrNativeReservationInvalidatesTheCheckpointReceipt()=runBlocking {withTimeout(5000) {scenario {root->
+        val owner=LegacySessionQueue.attach(root)
+        val access=NativeWorkingSession.legacyAccess(root)
+        val accepted=requireNotNull(owner.submitTracked {(access.observeAbsent() as LegacyAbsentResult.Granted).observation})
+        val observation=(accepted.awaitSettled() as LegacySessionQueue.Outcome.Success).value
+        val fence=accepted.settledFence()
+        val release=CompletableDeferred<Unit>()
+        val later=requireNotNull(owner.submitTracked {release.await();(access.observeAbsent() as LegacyAbsentResult.Granted).observation})
+        try {assertFalse(owner.matchesForCheckpoint(fence,observation))}
+        finally {release.complete(Unit)}
+        val next=(later.awaitSettled() as LegacySessionQueue.Outcome.Success).value
+        assertTrue(owner.matchesForCheckpoint(later.settledFence(),next))
+        val cache=WorkingSessionCache(root,validateBody={_,_,_->})
+        val request=cache.reserve(Any(),WorkingSessionCache.Kind.NOTE,java.util.UUID.randomUUID().toString(),0,org.json.JSONObject())
+        try {assertFalse(owner.matchesForCheckpoint(later.settledFence(),next))}
+        finally {cache.retire(request)}
+        assertFalse("Retiring a newer intent cannot revive the old receipt",owner.matchesForCheckpoint(later.settledFence(),next))
+    }}}
 }

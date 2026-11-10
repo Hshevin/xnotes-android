@@ -120,6 +120,9 @@ internal class WorkingSessionCache(
         fun observe():AbsentObservation?=synchronized(state) {
             if(isProtected()) null else {state.observed=true;AbsentObservation(state,state.generation)}
         }
+        fun isCurrent(observation:AbsentObservation):Boolean=synchronized(state) {
+            observation.coordinator===state && observation.generation==state.generation && !isProtected()
+        }
         fun consume(observation:AbsentObservation):Boolean=synchronized(state) {
             if(observation.coordinator!==state || observation.generation!=state.generation || isProtected()) false
             else {advance();true}

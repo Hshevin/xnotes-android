@@ -46,6 +46,17 @@ class WorkingSessionCacheLegacyBoundaryTest {
         try {assertFalse(NativeWorkingSession.legacyAccess(otherRoot).consumeForNewDraft(observed(access)))}
         finally {otherRoot.deleteRecursively()}
     }
+    @Test fun checkingAbsenceDoesNotClaimOrRefreshAnOldObservation()=scenario {root,access->
+        val original=observed(access)
+        repeat(3) {assertTrue(access.isCurrent(original))}
+        assertTrue(access.consumeForNewDraft(original))
+        assertFalse(access.isCurrent(original))
+        val next=observed(access)
+        assertFalse(access.isCurrent(original))
+        assertTrue(access.isCurrent(next))
+        File(root,"head.json").writeText("late protected head")
+        assertFalse(access.isCurrent(next))
+    }
     @Test fun canonicalAliasesShareNativeReservationsAndRetiringAnOldTicketKeepsTheNewOne()=scenario {root,access->
         val alias=NativeWorkingSession.legacyAccess(File(root,"unused/.."))
         val cache=WorkingSessionCache(root,validateBody={_,_,_->})

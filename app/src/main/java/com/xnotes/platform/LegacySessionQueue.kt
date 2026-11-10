@@ -45,6 +45,11 @@ internal object LegacySessionQueue {
             fence.root===root && fence.owner===this && root.owner===this && root.acceptedSequence==fence.sequence &&
                 root.settledSequence>=fence.sequence && observation.access.consumeForRestore(observation)
         }
+        /** A settled body receipt can be reused for view-only checkpoints without claiming it. */
+        fun matchesForCheckpoint(fence:Fence,observation:LegacyAbsentObservation):Boolean=synchronized(root) {
+            fence.root===root && fence.owner===this && root.owner===this && root.acceptedSequence==fence.sequence &&
+                root.settledSequence>=fence.sequence && observation.access.isCurrent(observation)
+        }
         suspend fun awaitAccepted() {val accepted=synchronized(root) {lastAccepted};accepted?.join()}
     }
     internal class Root {
