@@ -579,19 +579,32 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     internal var presentationVersion by mutableStateOf(0L)
         private set
     private val presentationObservationReady=true
-    private var lastPresentationSignature:List<Any?>?=null
-    private fun presentationChanged() {
-        if(!presentationObservationReady) return
+    /** This pane's persisted note view: what working-session metadata and cold slots restore. */
+    private data class NotePresentationView(val view:ColdNativeView,val zoomLocked:Boolean)
+    private fun notePresentationView()=NotePresentationView(checkpointNoteView(),zoomLocked)
+    /** Everything a cold presentation publishes for this pane; a change of any field is a new version. */
+    private data class PresentationSnapshot(
+        val noteOpen:Boolean,val canvasOpen:Boolean,val model:Any,val adoption:Long,
+        val identity:Any?,val path:String?,val bodyRevision:Long,
+        val note:NotePresentationView?,val canvas:ColdCanvasView?,val viewportW:Int,val viewportH:Int,
+    )
+    private var lastPresentationSnapshot:PresentationSnapshot?=null
+    private fun presentationSnapshot():PresentationSnapshot {
         val owner=documentOwner
         val canvas=owner.infiniteOrNull?.takeIf {owner.canvasOpen}
-        val signature=listOf(noteOpen,canvasOpen,owner.presentationModelIdentity,owner.sessionAdoptionSequence,
+        return PresentationSnapshot(noteOpen,canvasOpen,owner.presentationModelIdentity,owner.sessionAdoptionSequence,
             if(canvas!=null) canvas.document.identity else owner.state.document.identity,
             if(canvas!=null) canvas.document.path else owner.state.document.path,
             if(canvas!=null) canvas.document.bodyRevision else owner.state.document.bodyRevision,
-            state.zoom,state.scrollX,state.scrollY,state.fitWidthActive,state.viewportW,state.viewportH,
-            canvas?.viewport?.zoom,canvas?.viewport?.centerContent?.x,canvas?.viewport?.centerContent?.y)
-        if(signature!=lastPresentationSignature) {
-            lastPresentationSignature=signature;presentationVersion=Math.incrementExact(presentationVersion)
+            if(canvas==null) notePresentationView() else null,
+            canvas?.viewport?.let {ColdCanvasView(it.centerContent.x,it.centerContent.y,it.zoom)},
+            state.viewportW,state.viewportH)
+    }
+    private fun presentationChanged() {
+        if(!presentationObservationReady) return
+        val snapshot=presentationSnapshot()
+        if(snapshot!=lastPresentationSnapshot) {
+            lastPresentationSnapshot=snapshot;presentationVersion=Math.incrementExact(presentationVersion)
         }
     }
     private class UnverifiedSessionOrigin(val model:Document)
@@ -4476,10 +4489,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (owner.noteWriteJob?.isActive == true || noteTransactionsPending(doc)) return null
         val body = if (forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision)
             doc.fixedWriteSnapshot() else null
-        val position=readingPositionForPersistence()
+        val persisted=notePresentationView();val position=persisted.view.position
         return WorkingCapture.Note(doc, doc.bodyRevision, body,
             com.xnotes.platform.SessionStore.Metadata(doc.path, doc.displayName, doc.dirty,
-                position.zoom, position.x, position.y, zoomLocked, position.overrides))
+                position.zoom, position.x, position.y, persisted.zoomLocked, position.overrides))
     }
 
     private fun sameWorkingModel(capture: WorkingCapture): Boolean = when (capture) {
@@ -4777,7 +4790,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val id=if(canvas) (model as com.xnotes.core.infinite.InfiniteDocument).identity.documentId else (model as Document).identity.documentId
         val path=if(canvas) (model as com.xnotes.core.infinite.InfiniteDocument).path else (model as Document).path
         val revision=if(canvas) (model as com.xnotes.core.infinite.InfiniteDocument).bodyRevision else (model as Document).bodyRevision
-        val noteView=if(canvas) null else checkpointNoteView()
+        val noteView=if(canvas) null else notePresentationView()
         val canvasView=if(canvas) checkpointCanvasView() else null
         val kind=if(canvas) DocumentKind.CANVAS else DocumentKind.NOTE
         val oldSha=if(canvas) lastCanvasSessionBodySha?.takeIf {lastCanvasSessionBody===model && lastCanvasSessionBodyRevision==revision}
@@ -4785,7 +4798,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         fun stable()=basic() && !mapSourceParkingInputBusy(OpenSlot(this,owner,model,canvas,true)) &&
             (if(canvas) (model as com.xnotes.core.infinite.InfiniteDocument).let {it.bodyRevision==revision && it.identity.documentId==id && it.path==path}
                 else (model as Document).let {it.bodyRevision==revision && it.identity.documentId==id && it.path==path}) &&
-            (if(canvas) checkpointCanvasView()==canvasView else checkpointNoteView()==noteView)
+            (if(canvas) checkpointCanvasView()==canvasView else notePresentationView()==noteView)
         for(forceBody in listOf(false,true)) {
             if(!stable()) return null
             val capture=if(canvas) {
@@ -4793,9 +4806,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 WorkingCapture.Canvas(doc,revision,if(oldSha==null || forceBody) doc.snapshotForWrite(fixedItems=true).also {it.lastView=infinite.viewport.toWaypoint()} else null,
                     com.xnotes.platform.CanvasSessionStore.Metadata(path,doc.displayName,doc.dirty))
             } else {
-                val doc=model as Document;val position=requireNotNull(noteView).position
+                val doc=model as Document;val persisted=requireNotNull(noteView);val position=persisted.view.position
                 WorkingCapture.Note(doc,revision,if(oldSha==null || forceBody) doc.fixedWriteSnapshot() else null,
-                    com.xnotes.platform.SessionStore.Metadata(path,doc.displayName,doc.dirty,position.zoom,position.x,position.y,zoomLocked,position.overrides))
+                    com.xnotes.platform.SessionStore.Metadata(path,doc.displayName,doc.dirty,position.zoom,position.x,position.y,persisted.zoomLocked,position.overrides))
             }
             sessionSaveSequence++;sessionPending=false
             val access=com.xnotes.platform.NativeWorkingSession.legacyAccess(sessionDir)
@@ -4830,7 +4843,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             fun current()=stable() && jobs==Triple(noteWriteJob,canvasWriteJob,sessionWriteJob) &&
                 ownerJobs==Triple(owner.noteWriteJob,owner.canvasWriteJob,owner.sessionWriteJob) && sessionOwner.matchesForCheckpoint(fence,read.absent)
             if(!current()) return null
-            return WorkingCheckpoint(com.xnotes.mindmap.MapNativeRestoreHint(id,path,kind),noteView,canvasView,::current)
+            return WorkingCheckpoint(com.xnotes.mindmap.MapNativeRestoreHint(id,path,kind),noteView?.view,canvasView,::current)
         }
         return null
     }
@@ -4865,16 +4878,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     internal suspend fun prepareColdNativePresentation(value:LastPresentation.Native,stillCurrent:()->Boolean):PreparedColdNativePresentation? {
         val root=sibling?.takeIf {it.secondary===this} ?: this
         if(root!==this) return root.prepareColdNativePresentation(value,stillCurrent)
+        // The persisted contract, checked before any pane is allocated or private cache is read.
+        if(!stillCurrent() || !LastPresentationContract.accepts(value)) return null
         val slots=value.slots
-        if(!stillCurrent() || slots.isEmpty() || slots.size>2 || slots.map {it.pane}.distinct().size!=slots.size ||
-            slots.none {it is ColdNativeSlot.Note || it is ColdNativeSlot.Canvas} ||
-            slots.any {it is ColdNativeSlot.Canvas} && slots.size!=1 || !value.layout.ratio.isFinite() ||
-            value.layout.ratio<=0f || value.layout.ratio>=1f || slots.none {it.pane==value.layout.focusedPane}) return null
-        if(slots.filterIsInstance<ColdNativeSlot.Note>().any {it.hint.kind!=DocumentKind.NOTE} ||
-            slots.filterIsInstance<ColdNativeSlot.Canvas>().any {it.hint.kind!=DocumentKind.CANVAS}) return null
-        val notes=slots.filterIsInstance<ColdNativeSlot.Note>()
-        if(notes.map {it.hint.documentId}.distinct().size!=notes.size) return null
-        if(slots.filterIsInstance<ColdNativeSlot.Shared>().any {s->s.ownerPane==s.pane || notes.none {it.pane==s.ownerPane}}) return null
         if(slots.any {it.pane==Pane.SECONDARY}) secondaryPane()
         fun editor(pane:Pane)=if(pane==Pane.PRIMARY) this else requireNotNull(secondary)
         val identity=captureNativePresentationIdentity()
@@ -4924,7 +4930,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
                 splitRatio=value.layout.ratio;splitSideBySide=value.layout.sideBySide;splitReversed=value.layout.reversed
                 focusedPane=value.layout.focusedPane
-                presentationChanged()
+                for(ed in listOfNotNull(this,secondary)) ed.presentationChanged()
             },closeBlock={close()})
             handedOff=true;return cap
         } finally {if(!handedOff) close()}
@@ -8624,6 +8630,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         viewOverrides = new
         applyResolvedViewSettings()
         saveViewState()
+        // An override equal to the default still persists; resolved settings may not have moved.
+        presentationChanged()
     }
 
     /** Install a just-opened note's View-menu overrides (no persistence — nothing changed yet). */
@@ -10066,6 +10074,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun toggleZoomLock() {
         zoomLocked = !zoomLocked
         state.zoomLocked = zoomLocked
+        presentationChanged()
     }
 
     fun toggleRuler() {
@@ -12512,6 +12521,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         installViewOverrides(position.overrides)
         state.pendingInitialView = InitialView.Restore(position.zoom, position.x, position.y)
         state.didInitialFit = false
+        presentationChanged()
         view.requestRender()
     }
 

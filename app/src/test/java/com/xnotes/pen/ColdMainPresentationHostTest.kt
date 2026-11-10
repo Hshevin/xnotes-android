@@ -135,6 +135,27 @@ class ColdMainPresentationHostTest {
         try {block(host)} finally {withContext(NonCancellable+Dispatchers.Main) {host.finish()}}
     }
 
+    @Test fun changingOnlyViewOverridesPublishesTheNewColdRestoreView()=scenario {h->
+        h.pair()
+        val before=h.mixed()
+        val updated=com.xnotes.canvas.ViewOverrides(contrast=137,scrollbar=false)
+        withContext(Dispatchers.Main) {h.f.editor.updateViewOverrides(updated)}
+        val store=LastPresentationStore(h.f.context.filesDir)
+        withTimeout(5000L) {
+            while(true) {
+                val saved=withContext(Dispatchers.IO) {
+                    ((store.observe().read as? LastPresentationRead.Ready)?.value as? LastPresentation.Mixed)?.value
+                }
+                if(saved?.nativeView?.position?.overrides==updated) break
+                h.tick();delay(5)
+            }
+        }
+        assertNotEquals(updated,before.nativeView?.position?.overrides)
+        assertTrue(h.cold())
+        withContext(Dispatchers.Main) {assertEquals(updated,h.f.editor.viewOverrides)}
+        assertEquals(0,h.f.writes.get())
+    }
+
     @Test fun ordinaryPairWithoutSaveSplitPublishesActualEditedBodiesAndColdRestoresBothWithNullNotePath()=scenario {h->
         val entry=h.pair()
         h.mixed()

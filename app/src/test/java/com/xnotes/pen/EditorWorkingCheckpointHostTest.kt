@@ -34,6 +34,35 @@ class EditorWorkingCheckpointHostTest {
         }
     }
 
+    @Test fun anExplicitOverrideEqualToTheDefaultStillChangesThePersistedView()=runParkingScenario {f->
+        open(f)
+        withContext(Dispatchers.Main) {
+            val old=requireNotNull(f.editor.checkpointNoteWorkingSession {true})
+            val resolved=f.editor.viewSettings
+            val version=f.editor.presentationVersion
+            val explicit=f.editor.viewOverrides.copy(contrast=resolved.contrast)
+            assertNotEquals(f.editor.viewOverrides,explicit)
+            f.editor.updateViewOverrides(explicit)
+            assertEquals("Rendering can remain identical while the persistence contract changes",resolved,f.editor.viewSettings)
+            assertTrue(f.editor.presentationVersion>version)
+            assertFalse(old.current())
+            val next=requireNotNull(f.editor.checkpointNoteWorkingSession {true})
+            assertEquals(explicit,next.noteView!!.position.overrides)
+        }
+        assertEquals(0,f.writes.get())
+    }
+
+    @Test fun togglingZoomLockInvalidatesTheCheckpointThatCapturedThePreviousLock()=runParkingScenario {f->
+        open(f)
+        withContext(Dispatchers.Main) {
+            val checkpoint=requireNotNull(f.editor.checkpointNoteWorkingSession {true})
+            assertTrue(checkpoint.current())
+            f.editor.toggleZoomLock()
+            assertFalse("A receipt must not certify metadata from before the zoom-lock change",checkpoint.current())
+        }
+        assertEquals(0,f.writes.get())
+    }
+
     @Test fun actualEditedBodyIsDurableAndViewOnlyCheckpointReusesItsBody()=runParkingScenario {f->
         open(f)
         val original=f.source.readBytes()

@@ -14,7 +14,6 @@ import java.io.InputStream
 import java.math.BigDecimal
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
-import java.util.UUID
 import org.json.JSONObject
 
 private typealias MarkerObject=Map<String,Any?>
@@ -52,9 +51,9 @@ internal object LastPresentationCodec {
             "map"->{
                 require(version==2);keys(root,setOf("format","version","state","map","camera","homeLayout"))
                 LastPresentation.MapOnly(readMap(obj(root,"map")),optional(root,"camera") {readCamera(obj(root,it))},
-                    optional(root,"homeLayout") {readMapLayout(obj(root,it),true)}).also(::validateMapOnly)
+                    optional(root,"homeLayout") {readMapLayout(obj(root,it),true)}).also(LastPresentationContract::validateMapOnly)
             }
-            "native"->{require(version==2);readNative(root).also(::validateNative)}
+            "native"->{require(version==2);readNative(root).also(LastPresentationContract::validateNative)}
             else->null
         }
     } catch(_:Exception) {null}
@@ -65,7 +64,7 @@ internal object LastPresentationCodec {
         when(value) {
             LastPresentation.Home->root.put("state","home")
             is LastPresentation.Mixed->{
-                val data=value.value;validate(data)
+                val data=value.value;LastPresentationContract.validateMixed(data)
                 root.put("state","mixed").put("map",writeMap(data.map)).put("native",writeHint(data.nativeHint))
                     .put("layout",writeMapLayout(data.layout))
                 data.mapCamera?.let {root.put("camera",writeCamera(it))}
@@ -73,12 +72,12 @@ internal object LastPresentationCodec {
                 data.nativeView?.let {root.put("nativeView",writeNativeView(it))}
             }
             is LastPresentation.MapOnly->{
-                validateMapOnly(value);root.put("state","map").put("map",writeMap(value.map))
+                LastPresentationContract.validateMapOnly(value);root.put("state","map").put("map",writeMap(value.map))
                 value.camera?.let {root.put("camera",writeCamera(it))}
                 value.homeLayout?.let {root.put("homeLayout",writeMapLayout(it).put("nativeHome",true))}
             }
             is LastPresentation.Native->{
-                validateNative(value)
+                LastPresentationContract.validateNative(value)
                 val slots=org.json.JSONArray()
                 for(slot in value.slots) {
                     val item=JSONObject().put("pane",slot.pane.name)
@@ -102,14 +101,14 @@ internal object LastPresentationCodec {
 
     private fun readMap(value:MarkerObject):SplitSourceRef {
         keys(value,setOf("kind","documentId","uri","title"));require(string(value,"kind")=="map")
-        return SplitSourceRef(string(value,"documentId"),string(value,"uri"),optional(value,"title") {string(value,it)}).also(::validateMap)
+        return SplitSourceRef(string(value,"documentId"),string(value,"uri"),optional(value,"title") {string(value,it)}).also(LastPresentationContract::validateMap)
     }
     private fun writeMap(value:SplitSourceRef)=JSONObject().put("kind","map").put("documentId",value.documentId).put("uri",value.uri)
         .also {json->value.title?.let {json.put("title",it)}}
     private fun readHint(value:MarkerObject,kind:DocumentKind):MapNativeRestoreHint {
         keys(value,setOf("kind","documentId","path"));require(string(value,"kind")==kind.name.lowercase())
         val path=required(value,"path").let {if(it==null) null else it as? String ?: error("Expected nullable path")}
-        return MapNativeRestoreHint(string(value,"documentId"),path,kind).also {validateHint(it,kind)}
+        return MapNativeRestoreHint(string(value,"documentId"),path,kind).also {LastPresentationContract.validateHint(it,kind)}
     }
     private fun writeHint(value:MapNativeRestoreHint)=JSONObject().put("kind",value.kind.name.lowercase())
         .put("documentId",value.documentId).put("path",value.path ?: JSONObject.NULL)
@@ -117,7 +116,7 @@ internal object LastPresentationCodec {
         keys(value,setOf("zoom","panX","panY","width","height","density"))
         return MapPresentationCamera(MindMapView.Viewport(float(bounded(value,"zoom","0.05","4")),
             float(number(value,"panX")),float(number(value,"panY"))),integer(value,"width"),integer(value,"height"),
-            float(number(value,"density"))).also(::validateCamera)
+            float(number(value,"density"))).also(LastPresentationContract::validateCamera)
     }
     private fun writeCamera(value:MapPresentationCamera)=JSONObject().put("zoom",value.viewport.zoom.toDouble())
         .put("panX",value.viewport.panX.toDouble()).put("panY",value.viewport.panY.toDouble()).put("width",value.width)
@@ -145,7 +144,7 @@ internal object LastPresentationCodec {
             optional(root,"camera") {readCamera(obj(root,it))},
             if(version==1) optional(root,"nativePosition") {readPosition(obj(root,it))} else null,
             if(version==2) readNativeView(obj(root,"nativeView")) else null)
-        return result.also(::validate)
+        return result.also(LastPresentationContract::validateMixed)
     }
     private fun readNative(root:MarkerObject):LastPresentation.Native {
         keys(root,setOf("format","version","state","slots","layout"))
@@ -180,58 +179,6 @@ internal object LastPresentationCodec {
             bool("verticalScroll"),bool("freeMovement"),int("contrast"),int("invert"),int("brightness"),int("sepia"),
             color("multiply"),color("screen"),bool("keepImages"),int("rotation"),bool("scrollbar"))
     }
-    private fun validateMap(value:SplitSourceRef) {
-        require(UUID.fromString(value.documentId).toString()==value.documentId)
-        text(value.uri);require(value.uri.isNotBlank());value.title?.let(::text)
-    }
-    private fun validateHint(value:MapNativeRestoreHint,kind:DocumentKind) {
-        require(value.kind==kind && UUID.fromString(value.documentId).toString()==value.documentId)
-        value.path?.let {text(it);require(it.isNotBlank())}
-    }
-    private fun validateCamera(value:MapPresentationCamera) {
-        require(value.viewport.zoom.isFinite() && value.viewport.zoom in .05f..4f && value.viewport.panX.isFinite() && value.viewport.panY.isFinite())
-        require(value.width>0 && value.height>0 && value.density.isFinite() && value.density>0)
-    }
-    private fun validateView(position:Editor.ReadingPosition) {
-        require(position.zoom.isFinite() && position.zoom in .05..20.0 && position.x.isFinite() && position.y.isFinite())
-        val view=position.overrides
-        view.contrast?.let {require(it in 0..200)};view.invert?.let {require(it in 0..100)}
-        view.brightness?.let {require(it in 0..200)};view.sepia?.let {require(it in 0..200)}
-        view.rotation?.let {require(it in listOf(0,90,180,270))}
-        for(color in listOfNotNull(view.multiply,view.screen))
-            require(color.r in 0..255 && color.g in 0..255 && color.b in 0..255 && color.a==255)
-    }
-    private fun validate(data:ColdMixedPresentation) {
-        validateMap(data.map);validateHint(data.nativeHint,DocumentKind.NOTE)
-        require(data.map.documentId!=data.nativeHint.documentId && !data.layout.nativeHome && data.layout.ratio.isFinite() && data.layout.ratio in .18f.. .82f)
-        require(data.nativeView==null || data.nativePosition==null)
-        data.mapCamera?.let(::validateCamera);data.nativePosition?.let(::validateView);data.nativeView?.position?.let(::validateView)
-    }
-    private fun validateMapOnly(value:LastPresentation.MapOnly) {
-        validateMap(value.map);value.camera?.let(::validateCamera)
-        value.homeLayout?.let {require(it.nativeHome && it.ratio.isFinite() && it.ratio in .18f.. .82f)}
-    }
-    private fun validateNative(value:LastPresentation.Native) {
-        require(value.slots.size in 1..2 && value.slots.map {it.pane}.distinct().size==value.slots.size)
-        require(value.layout.focusedPane in value.slots.map {it.pane} && value.layout.ratio.isFinite() && value.layout.ratio in .18f.. .82f)
-        require(value.slots.any {it !is ColdNativeSlot.Home})
-        val notes=value.slots.filterIsInstance<ColdNativeSlot.Note>()
-        require(notes.map {it.hint.documentId}.distinct().size==notes.size)
-        for(slot in value.slots) when(slot) {
-            is ColdNativeSlot.Note->{validateHint(slot.hint,DocumentKind.NOTE);slot.view?.position?.let(::validateView)}
-            is ColdNativeSlot.Canvas->{
-                require(value.slots.size==1);validateHint(slot.hint,DocumentKind.CANVAS)
-                slot.view?.let {require(it.centerX.isFinite() && it.centerY.isFinite() && it.zoom.isFinite() && it.zoom>0)}
-            }
-            is ColdNativeSlot.Shared->{
-                require(value.slots.size==2 && slot.ownerPane!=slot.pane && notes.any {it.pane==slot.ownerPane})
-                slot.view?.position?.let(::validateView)
-            }
-            is ColdNativeSlot.Home->Unit
-        }
-    }
-
-    private fun text(value:String) {require(value.length<=MAX_BYTES && Charsets.UTF_8.newEncoder().canEncode(value))}
     private fun keys(json:MarkerObject,allowed:Set<String>) {require(json.keys.all {it in allowed})}
     private fun required(json:MarkerObject,key:String):Any? {require(json.containsKey(key));return json[key]}
     private fun string(json:MarkerObject,key:String)=required(json,key) as? String ?: error("Expected string: $key")
@@ -292,7 +239,7 @@ internal object LastPresentationCodec {
             while(at<source.length) {
                 val char=source[at++]
                 when {
-                    char=='"'->return out.toString().also(::text)
+                    char=='"'->return out.toString().also(LastPresentationContract::text)
                     char=='\\'->{
                         require(at<source.length)
                         when(val escaped=source[at++]) {
