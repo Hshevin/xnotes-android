@@ -44,7 +44,7 @@ internal object LastPresentationCodec {
             .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
         val root=objectValue(JsonReader(text).read())
         require(string(root,"format")=="xnotes-last-presentation")
-        val version=integer(root,"version");require(version in 1..2)
+        val version=integer(root,"version");require(version in 1..3)
         when(string(root,"state")) {
             "home"->{require(version==1);keys(root,setOf("format","version","state"));LastPresentation.Home}
             "mixed"->LastPresentation.Mixed(readMixed(root,version))
@@ -53,13 +53,23 @@ internal object LastPresentationCodec {
                 LastPresentation.MapOnly(readMap(obj(root,"map")),optional(root,"camera") {readCamera(obj(root,it))},
                     optional(root,"homeLayout") {readMapLayout(obj(root,it),true)}).also(LastPresentationContract::validateMapOnly)
             }
-            "native"->{require(version==2);readNative(root).also(LastPresentationContract::validateNative)}
+            "native"->{require(version>=2);readNative(root,version).also(LastPresentationContract::validateNative)}
             else->null
         }
     } catch(_:Exception) {null}
 
     fun encode(value:LastPresentation):ByteArray {
-        val version=if(value===LastPresentation.Home || value is LastPresentation.Mixed && value.value.nativeView==null) 1 else 2
+        // v1/v2 keep their strict contracts; only a description carrying a stored lock needs v3.
+        val views=when(value) {
+            is LastPresentation.Mixed->listOfNotNull(value.value.nativeView)
+            is LastPresentation.Native->value.slots.mapNotNull {(it as? ColdNativeSlot.Note)?.view ?: (it as? ColdNativeSlot.Shared)?.view}
+            else->emptyList()
+        }
+        val version=when {
+            views.any {it.zoomLocked!=null}->3
+            value===LastPresentation.Home || value is LastPresentation.Mixed && value.value.nativeView==null->1
+            else->2
+        }
         val root=JSONObject().put("format","xnotes-last-presentation").put("version",version)
         when(value) {
             LastPresentation.Home->root.put("state","home")
@@ -129,24 +139,27 @@ internal object LastPresentationCodec {
     }
     private fun writeMapLayout(value:MapSplitLayout)=JSONObject().put("mapPane",value.mapPane.name).put("focusedPane",value.focusedPane.name)
         .put("ratio",value.ratio.toDouble()).put("reversed",value.reversed).also {json->value.sideBySide?.let {json.put("sideBySide",it)}}
-    private fun readPosition(value:MarkerObject,fit:Boolean=false):Editor.ReadingPosition {
-        keys(value,setOf("zoom","x","y","view")+if(fit) setOf("fitWidth") else emptySet())
+    private fun readPosition(value:MarkerObject,extra:Set<String> = emptySet()):Editor.ReadingPosition {
+        keys(value,setOf("zoom","x","y","view")+extra)
         return Editor.ReadingPosition(bounded(value,"zoom","0.05","20"),number(value,"x"),number(value,"y"),readView(obj(value,"view")))
     }
     private fun writePosition(value:Editor.ReadingPosition)=JSONObject().put("zoom",value.zoom).put("x",value.x).put("y",value.y)
         .put("view",ViewOverridesJson.write(JSONObject(),value.overrides))
-    private fun readNativeView(value:MarkerObject)=ColdNativeView(readPosition(value,true),boolean(value,"fitWidth"))
+    private fun readNativeView(value:MarkerObject,version:Int)=ColdNativeView(
+        readPosition(value,setOf("fitWidth")+if(version>=3) setOf("zoomLocked") else emptySet()),boolean(value,"fitWidth"),
+        optional(value,"zoomLocked") {boolean(value,it)})
     private fun writeNativeView(value:ColdNativeView)=writePosition(value.position).put("fitWidth",value.fitWidth)
+        .also {json->value.zoomLocked?.let {json.put("zoomLocked",it)}}
     private fun readMixed(root:MarkerObject,version:Int):ColdMixedPresentation {
         keys(root,setOf("format","version","state","map","native","layout","camera")+
             if(version==1) setOf("nativePosition") else setOf("nativeView"))
         val result=ColdMixedPresentation(readMap(obj(root,"map")),readHint(obj(root,"native"),DocumentKind.NOTE),readMapLayout(obj(root,"layout")),
             optional(root,"camera") {readCamera(obj(root,it))},
             if(version==1) optional(root,"nativePosition") {readPosition(obj(root,it))} else null,
-            if(version==2) readNativeView(obj(root,"nativeView")) else null)
+            if(version>=2) readNativeView(obj(root,"nativeView"),version) else null)
         return result.also(LastPresentationContract::validateMixed)
     }
-    private fun readNative(root:MarkerObject):LastPresentation.Native {
+    private fun readNative(root:MarkerObject,version:Int):LastPresentation.Native {
         keys(root,setOf("format","version","state","slots","layout"))
         val array=required(root,"slots") as? List<*> ?: error("Expected native slots")
         require(array.size in 1..2)
@@ -154,13 +167,13 @@ internal object LastPresentationCodec {
             val json=objectValue(item);val pane=Pane.valueOf(string(json,"pane"))
             when(string(json,"kind")) {
                 "home"->{keys(json,setOf("kind","pane"));ColdNativeSlot.Home(pane)}
-                "note"->{keys(json,setOf("kind","pane","hint","view"));ColdNativeSlot.Note(pane,readHint(obj(json,"hint"),DocumentKind.NOTE),optional(json,"view") {readNativeView(obj(json,it))})}
+                "note"->{keys(json,setOf("kind","pane","hint","view"));ColdNativeSlot.Note(pane,readHint(obj(json,"hint"),DocumentKind.NOTE),optional(json,"view") {readNativeView(obj(json,it),version)})}
                 "canvas"->{
                     keys(json,setOf("kind","pane","hint","view"))
                     ColdNativeSlot.Canvas(pane,readHint(obj(json,"hint"),DocumentKind.CANVAS),optional(json,"view") {
                         val view=obj(json,it);keys(view,setOf("cx","cy","zoom"));ColdCanvasView(number(view,"cx"),number(view,"cy"),number(view,"zoom"))})
                 }
-                "shared"->{keys(json,setOf("kind","pane","ownerPane","view"));ColdNativeSlot.Shared(pane,Pane.valueOf(string(json,"ownerPane")),optional(json,"view") {readNativeView(obj(json,it))})}
+                "shared"->{keys(json,setOf("kind","pane","ownerPane","view"));ColdNativeSlot.Shared(pane,Pane.valueOf(string(json,"ownerPane")),optional(json,"view") {readNativeView(obj(json,it),version)})}
                 else->error("Unknown native slot")
             }
         }

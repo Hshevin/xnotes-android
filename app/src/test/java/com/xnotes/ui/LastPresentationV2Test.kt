@@ -72,7 +72,7 @@ class LastPresentationV2Test {
         val value=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,note,view)),ColdNativeLayout(Pane.PRIMARY))
         val wire=String(LastPresentationCodec.encode(value),Charsets.UTF_8)
         for(raw in listOf(
-            wire.replace("\"version\":2","\"version\":3"),
+            wire.replace("\"version\":2","\"version\":99"),
             wire.replace("\"fitWidth\":true","\"fitWidth\":null"),
             wire.dropLast(1)+",\"native\":{}}",
             wire.replace("\"hint\":{","\"hint\":{\"future\":true,"))) {

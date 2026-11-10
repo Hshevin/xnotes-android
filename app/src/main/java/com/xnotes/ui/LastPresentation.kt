@@ -13,7 +13,8 @@ internal data class ColdMixedPresentation(
     val nativePosition:Editor.ReadingPosition?=null,
     val nativeView:ColdNativeView?=null,
 )
-internal data class ColdNativeView(val position:Editor.ReadingPosition,val fitWidth:Boolean)
+/** One pane's complete persisted note view; a null [zoomLocked] is an older record that never stored the lock. */
+internal data class ColdNativeView(val position:Editor.ReadingPosition,val fitWidth:Boolean,val zoomLocked:Boolean?=null)
 internal data class ColdCanvasView(val centerX:Double,val centerY:Double,val zoom:Double)
 internal data class ColdNativeLayout(val focusedPane:Pane,val ratio:Float=.5f,
                                     val sideBySide:Boolean?=null,val reversed:Boolean=false)
