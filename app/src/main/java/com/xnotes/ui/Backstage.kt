@@ -223,6 +223,7 @@ fun Backstage(
     onChooseSplitPair: () -> Unit = {},
     onOpenSplitFile: (String) -> Unit = {},
     onRestoreSplit: () -> Unit = {},
+    canRestoreSplit: Boolean = editor.hasSavedSplit || editor.inSplit,
     /** Several files are to be shared at once, as they are. */
     onShareFiles: (List<String>) -> Unit = {},
     /** Opens a file beside the note last open; null when there's no note to pair it with. */
@@ -254,6 +255,7 @@ fun Backstage(
         exportFilePdf = onExportFilePdf,
         openSplit = onOpenSplitEntries,
         chooseSplitPair = onChooseSplitPair, openSplitFile = onOpenSplitFile, restoreSplit = onRestoreSplit,
+        canRestoreSplit = canRestoreSplit,
         allowMapPairs = allowMapPairs,
         allowNativePairs = allowNativePairs,
         openBeside = onOpenBeside,
@@ -679,7 +681,7 @@ private fun BackstageMain(
                 BackstageView.SPLIT -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     Text(stringResource(R.string.split_workspace), color = palette.text.toComposeColor(), fontSize = TextSize.display, modifier = Modifier.padding(Space.s16))
                     Command(XnotesIcons.split, stringResource(R.string.split_choose_pair)) { calls.chooseSplitPair() }
-                    if (editor.hasSavedSplit || editor.inSplit) Command(XnotesIcons.clock, stringResource(R.string.split_restore_recent)) { calls.restoreSplit() }
+                    if (calls.canRestoreSplit) Command(XnotesIcons.clock, stringResource(R.string.split_restore_recent)) { calls.restoreSplit() }
                     val splitScope = rememberCoroutineScope()
                     val splitContext = LocalContext.current
                     var revision by remember { mutableStateOf(0) }
@@ -971,6 +973,7 @@ private class ExplorerCalls(
     val chooseSplitPair: () -> Unit,
     val openSplitFile: (String) -> Unit,
     val restoreSplit: () -> Unit,
+    val canRestoreSplit: Boolean,
     /** Opens a file beside the note last open, or null when there is none to pair it with. */
     val openBeside: (String) -> (() -> Unit)?,
     /** Exports picked items as PDFs, zipped under the given name; the callback runs once a destination is chosen. */

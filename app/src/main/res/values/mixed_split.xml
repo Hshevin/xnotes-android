@@ -12,4 +12,8 @@
     <string name="mixed_pair_open_failed">Could not open these files together. Your current workspace is still available.</string>
     <string name="native_split_opening">Opening split view…</string>
     <string name="native_split_open_failed">Could not open this split view. Your current workspace is still available.</string>
+    <string name="split_arrangement_invalid">This split arrangement is missing, damaged, or unsupported. Your current workspace is still available.</string>
+    <string name="mixed_split_save_complete_first">Open a map and a saved note in both panes before saving this split.</string>
+    <string name="mixed_split_save_failed">Could not save this split. Both documents are still available.</string>
+    <string name="mixed_split_saved_recent_failed">Split saved, but the recent split could not be updated. Open it from Saved splits.</string>
 </resources>

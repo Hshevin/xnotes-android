@@ -12,4 +12,8 @@
     <string name="mixed_pair_open_failed">无法一起打开这两个文件，当前工作区仍保留。</string>
     <string name="native_split_opening">正在打开分屏…</string>
     <string name="native_split_open_failed">无法打开此分屏，当前工作区仍保留。</string>
+    <string name="split_arrangement_invalid">此分屏安排不存在、已损坏或暂不支持，当前工作区仍保留。</string>
+    <string name="mixed_split_save_complete_first">请在两个窗格中打开导图和已保存的笔记后，再保存分屏。</string>
+    <string name="mixed_split_save_failed">无法保存此分屏，两份文档仍保留。</string>
+    <string name="mixed_split_saved_recent_failed">分屏已保存，但最近分屏未更新。请从已保存的分屏中打开。</string>
 </resources>
