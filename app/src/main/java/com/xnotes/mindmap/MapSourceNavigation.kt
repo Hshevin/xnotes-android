@@ -37,4 +37,8 @@ class MapHostHooks internal constructor(
     internal val returnToSourceMap:(()->Unit)?=null,
     internal val closeEntry:(()->Unit)?=null,
     internal val closeRecoveryEntry:(()->Unit)?=null,
+    internal val embedded:Boolean=false,
+    internal val focused:()->Boolean={true},
+    internal val requestFocus:()->Boolean={true},
+    internal val splitDocument:(()->Unit)?=null,
 )

@@ -74,11 +74,14 @@ internal class MapSourceNavigator(
         }
         val token=++generation
         val originGeneration=workspace.sourceNavigationGeneration
+        val splitGeneration=workspace.splitPresentation.generation
+        val split=workspace.splitPresentation.layout
         entry.sourceReturn=null;nativeFailure=null;saveFailed=false;nativeReturning=false;nativeBusy=true
         pendingEntry=entry;pendingTicket=ticket
         val identityAccess=editor.originalPdfAccess ?: OriginalPdfAccess(editor.view.context.applicationContext)
         var domains:OriginalPdfCatalog.IdentityDomainsBatch?=null
         fun valid()=current(entry,token) && workspace.sourceNavigationGeneration==originGeneration &&
+            workspace.splitPresentation.generation==splitGeneration &&
             workspace.visible && workspace.canHide(entry) && domains?.current()!=false &&
             entry.session.currentSourceNavigation(ticket)!=null
         val pending=scope.launch(start=CoroutineStart.LAZY) {
@@ -107,8 +110,13 @@ internal class MapSourceNavigator(
                     if(current(entry,token)) nativeFailure=NativeReferenceIssue.UNSUPPORTED
                     return@launch
                 }
+                val destination=split?.nativePane?.let {pane->
+                    if(pane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondary
+                }
+                if(split!=null && destination==null) {nativeFailure=NativeReferenceIssue.CHANGED;return@launch}
                 when(val prepared=editor.prepareReference(NativeReferenceTarget(target.documentId,target.pageId,
-                    requiredKind=if(target.scope==SourceScope.CANVAS_REGION) DocumentKind.CANVAS else null),target.region)) {
+                    requiredKind=if(target.scope==SourceScope.CANVAS_REGION) DocumentKind.CANVAS else null),target.region,
+                    pagedDestination=destination,allowCanvasHome=split?.nativeHome==true)) {
                     is NativeReferencePreparation.Failed->if(current(entry,token)) nativeFailure=prepared.issue
                     is NativeReferencePreparation.Ready->{
                         val native=prepared.request;request=native
@@ -127,7 +135,15 @@ internal class MapSourceNavigator(
                                     committed=true
                                     entry.sourceReturn=bookmark
                                     entry.skipNativePersistOnPresent=opened.pane.canvasOpen
-                                    workspace.hide(entry)
+                                    if(native.pagedDestination!=null) {
+                                        workspace.updateSplitLayout {it.copy(nativeHome=false,focusedPane=opened.pane.pane)}
+                                    } else {
+                                        if(opened.pane.canvasOpen) {
+                                            workspace.splitPresentation.prepareCanvasReturn(opened.pane.pane)
+                                            workspace.splitPresentation.rememberNativeHint(opened.pane.nativeRestoreHint())
+                                        }
+                                        workspace.hide(entry)
+                                    }
                                     onOpened(opened,native.keptOwner!=null)
                                 }
                                 if(!committed && current(entry,token) && result is NativeReferenceResult.Failed) nativeFailure=result.issue
@@ -262,12 +278,63 @@ internal class MapSourceNavigator(
         job=pending;pending.start();return true
     }
 
+    /** Prepare an ordinary workspace replacement without releasing this map before IO succeeds.
+     * The proof is Main-only and must be checked inside the native synchronous adoption callback. */
+    fun prepareEntryLeave(entry:MapWorkspace.Entry,stillCurrent:()->Boolean={true},onReady:(()->Boolean)->Unit):Boolean {
+        if(busy || !active || workspace.current!==entry || !workspace.isHostCurrent(binding) || !entry.lease.alive) return false
+        val originGeneration=workspace.sourceNavigationGeneration
+        val epoch=entry.session.interactionEpoch
+        val token=++generation
+        nativeFailure=null;mapFeedback=null;saveFailed=false;nativeBusy=true;pendingEntry=entry
+        fun valid()=current(entry,token) && workspace.sourceNavigationGeneration==originGeneration &&
+            entry.session.interactionEpoch==epoch && stillCurrent()
+        fun ready() {
+            val document=entry.session.document;val revision=entry.session.contentRevision
+            onReady {
+                valid() && entry.session.document===document && entry.session.contentRevision==revision &&
+                    (document==null || entry.session.canParkSourceNavigation &&
+                        (entry.lease.hasOtherOwners || !entry.session.dirty && !entry.session.saving))
+            }
+        }
+        val pending=scope.launch(start=CoroutineStart.LAZY) {
+            try {
+                while(valid()) {
+                    if(entry.session.document==null) {ready();return@launch}
+                    if(!entry.session.canParkSourceNavigation) {mapFeedback=R.string.graph_map_source_busy;return@launch}
+                    if(entry.lease.hasOtherOwners) {ready();return@launch}
+                    if(entry.session.dirty || entry.session.saving) {
+                        when(val outcome=entry.session.saveAttempt().await()) {
+                            is MapSaveOutcome.Written->if(!outcome.latest) continue
+                            else->{if(valid()) {saveFailed=true;mapFeedback=R.string.graph_map_close_failed};return@launch}
+                        }
+                    }
+                    if(valid() && !entry.session.dirty && !entry.session.saving) {ready();return@launch}
+                }
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {if(valid()) mapFeedback=R.string.graph_map_close_failed}
+            finally {if(generation==token) {job=null;pendingEntry=null;nativeBusy=false}}
+        }
+        job=pending;pending.start();return true
+    }
+
     /** A fresh native parking proof, followed by the actual same-entry presentation callback. */
     fun returnToMap():Boolean {
         if(originalNavigator?.ownsSourceReturn==true) return originalNavigator.returnToMap()
         val entry=workspace.current ?: return false
         val bookmark=entry.sourceReturn ?: return false
-        if(busy || !active || workspace.visible || !workspace.isHostCurrent(binding) || !entry.lease.alive) return false
+        if(busy || !active || !workspace.isHostCurrent(binding) || !entry.lease.alive) return false
+        val split=workspace.splitPresentation.layout
+        if(workspace.visible) {
+            if(split==null || entry.session.inkContact || editor.openPanes.any {it.stylusInContact}) return false
+            if(!entry.session.canRestoreSourceReturn(bookmark)) {
+                if(!entry.session.canRestoreSourceReturn(bookmark,requireReady=false)) entry.sourceReturn=null
+                nativeFailure=NativeReferenceIssue.CHANGED;return false
+            }
+            generation++;nativeFailure=null;mapFeedback=null;saveFailed=false
+            if(!workspace.focusSplit(split.mapPane)) return false
+            if(entry.presentation.applySourceReturn(entry.session,bookmark)) entry.sourceReturn=null
+            return true
+        }
         if(!entry.session.canRestoreSourceReturn(bookmark)) {
             if(!entry.session.canRestoreSourceReturn(bookmark,requireReady=false)) entry.sourceReturn=null
             nativeFailure=NativeReferenceIssue.CHANGED;return false
@@ -284,7 +351,7 @@ internal class MapSourceNavigator(
                 if(entry.presentation.applySourceReturn(entry.session,bookmark)) entry.sourceReturn=null
                 returnOperation=null;nativeBusy=false;nativeReturning=false
             }
-        },onFinished={shown->
+        },presentation=MapOpenPresentation.RestoreSplit,onFinished={shown->
             if(current(entry,token)) {
                 returnOperation=null;nativeBusy=false;nativeReturning=false
                 if(!shown) {

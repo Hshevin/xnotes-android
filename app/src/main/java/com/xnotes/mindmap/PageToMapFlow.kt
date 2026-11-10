@@ -19,10 +19,12 @@ import com.xnotes.ui.theme.*
 
 /** Pickers belong to the reading host, so a retired page cannot clear/rebind an old system result. */
 @Composable
-internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri,Boolean)->Unit,visible:Boolean=true) {
+internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri,Boolean)->Unit,visible:Boolean=true,
+    preferredMap:MapWorkspace.Entry?=null,preferredMapCurrent:(MapWorkspace.Entry)->Boolean={false},
+    visibleSourcePane:com.xnotes.ui.Pane?=null) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
-    val request:com.xnotes.ui.SourceCreationRequest?=editor.openPanes.firstNotNullOfOrNull {
+    val request:com.xnotes.ui.SourceCreationRequest?=editor.openPanes.filter {visibleSourcePane==null || it.pane==visibleSourcePane}.firstNotNullOfOrNull {
         it.pageReferenceRequest ?: it.canvasRegionReferenceRequest
     }
     val controller=remember(request?.id) {request?.let {PageToMapController(context,it,scope)}}
@@ -51,6 +53,9 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
     controller?.takeIf {visible}?.let {flow->
         val openUri=flow.targetUri;val openContext=flow.targetContext
         PageToMapDialog(flow,pickerRequest!=null || sourceCopyPicker.busy,
+            chooseOpen=preferredMap?.takeIf {it.lease.alive && preferredMapCurrent(it)}?.let {entry->{
+                flow.selectOpenMap(entry) {preferredMapCurrent(entry)};Unit
+            }},
             choose={if(pickerRequest==null && flow.request.current()) {
                 val accept=flow.mapDestination(false)
                 if(accept!=null) {pickerAccept=accept;pickerRequest=flow.request.id;pickerKind="OPEN"
@@ -77,7 +82,7 @@ internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Ur
 }
 
 @Composable
-private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:()->Unit,create:()->Unit,
+private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,chooseOpen:(()->Unit)?,choose:()->Unit,create:()->Unit,
                             save:()->Unit,reopen:()->Unit,open:()->Unit,close:()->Unit) {
     val session=flow.targetSession
     val doc=session?.document
@@ -151,6 +156,7 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                     PageToMapStep.DESTINATION->item {
                         Text(stringResource(R.string.graph_ref_destination_notice),fontSize=TextSize.body)
                         if(pickerBusy) Text(stringResource(R.string.native_save_picker_busy),fontSize=TextSize.caption)
+                        chooseOpen?.let {MapButton(R.string.graph_ref_other_pane_map,enabled=!pickerBusy,onClick=it)}
                         MapButton(R.string.graph_ref_choose_map,enabled=!pickerBusy,onClick=choose)
                         MapButton(R.string.map_new,enabled=!pickerBusy,onClick=create)
                     }

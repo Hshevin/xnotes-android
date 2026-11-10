@@ -15,7 +15,8 @@ import kotlinx.coroutines.*
 internal class OriginalPdfWorkspace(context:Context,private val scope:CoroutineScope,
     internal val access:OriginalPdfAccess=OriginalPdfAccess(context.applicationContext)) {
     internal sealed interface Return {
-        data class Map(val entry:MapWorkspace.Entry,val bookmark:MapSourceReturnBookmark):Return
+        data class Map(val entry:MapWorkspace.Entry,val bookmark:MapSourceReturnBookmark,
+            val nativeIdentity:com.xnotes.ui.NativePresentationIdentity?=null):Return
         data object Library:Return
     }
     internal class Entry internal constructor(internal val read:OriginalPdfAccess.Read,val returnTo:Return) {

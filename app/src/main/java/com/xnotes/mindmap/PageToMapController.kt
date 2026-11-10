@@ -33,6 +33,7 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
     private var importEpoch:Long?=null
     private var importDocument:String?=null
     private var lastTarget:Uri?=null
+    private var lastOpenMapRetry:(()->Boolean)?=null
     private var createdId:String?=null
     private var targetEpoch:Long?=null
     private var targetDocument:String?=null
@@ -145,12 +146,24 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
     private fun canChoose()=current() && imported==null && !busy && source!=null
     fun selectMap(uri:Uri):Boolean {
         if(!canChoose()) return false
-        lastTarget=uri
+        lastTarget=uri;lastOpenMapRetry=null
         return run(PageToMapStep.TARGET_LOADING) {token->adoptTarget(MapDocuments.acquire(app,uri),token,null)}
+    }
+    /** Selecting the other pane names that exact actor, not whatever later occupies its URI. */
+    fun selectOpenMap(entry:MapWorkspace.Entry,stillCurrent:()->Boolean={true}):Boolean {
+        val session=entry.session;val documentId=session.document?.id ?: return false
+        val epoch=session.interactionEpoch
+        fun expected()=entry.lease.alive && entry.session===session && session.interactionEpoch==epoch &&
+            session.document?.id==documentId && stillCurrent()
+        if(!canChoose() || !expected()) return false
+        lastTarget=entry.uri;lastOpenMapRetry={expected() && selectOpenMap(entry,stillCurrent)}
+        return run(PageToMapStep.TARGET_LOADING) {token->
+            adoptTarget(MapDocuments.acquire(app,entry.uri),token,documentId,session,::expected)
+        }
     }
     fun createMap(uri:Uri):Boolean {
         if(!canChoose()) return false
-        lastTarget=uri
+        lastTarget=uri;lastOpenMapRetry=null
         val fixed=MindMapDocument(nodes=listOf(MapNode(parent=null,text=app.getString(com.xnotes.R.string.map_topic))))
         return run(PageToMapStep.TARGET_LOADING) {token->
             when(val result=MapDocuments.create(app,uri,fixed)) {
@@ -166,14 +179,16 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
         val uri=targetUri ?: return false;val expected=createdId ?: return false
         return run(PageToMapStep.TARGET_LOADING) {token->adoptTarget(MapDocuments.acquire(app,uri),token,expected)}
     }
-    private suspend fun adoptTarget(incoming:MapDocumentLease,token:Long,expectedId:String?) {
+    private suspend fun adoptTarget(incoming:MapDocumentLease,token:Long,expectedId:String?,
+        expectedSession:MapSession?=null,expectedCurrent:()->Boolean={true}) {
         var accepted=false
         try {
             val session=incoming.session
             snapshotFlow {session.loading to incoming.alive}.first {!it.first || !it.second}
             if(!valid(token)) return
             val doc=session.document
-            if(!incoming.alive || session.loadFailed || doc==null || expectedId!=null && doc.id!=expectedId) {
+            if(!incoming.alive || session.loadFailed || doc==null || expectedId!=null && doc.id!=expectedId ||
+                expectedSession!=null && session!==expectedSession || !expectedCurrent()) {
                 step=PageToMapStep.TARGET_ERROR;return
             }
             val prior=lease;lease=incoming;accepted=true
@@ -181,7 +196,9 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
             targetEpoch=session.interactionEpoch;targetDocument=doc.id;targetContext=Any()
             selectedTicket=null;confirmationToken=null
             targetUri=incoming.uri;destination=null;saveOutcome=null;step=PageToMapStep.TARGET
-        } finally {if(!accepted) incoming.close()}
+        } finally {if(!accepted) {
+            if(expectedSession!=null) incoming.closeUnadoptedSource() else incoming.close()
+        }}
     }
     private fun targetCurrent()=targetSession?.let {it.interactionEpoch==targetEpoch && it.document?.id==targetDocument}==true
     private fun selecting(expectedContext:Any?):Boolean {
@@ -227,7 +244,7 @@ internal class PageToMapController(context:Context,val request:SourceCreationReq
         if(!canChoose()) return false
         destination=null;selectedTicket=null;confirmationToken=null;step=PageToMapStep.DESTINATION;return true
     }
-    fun retryTarget():Boolean=lastTarget?.let(::selectMap) ?: false
+    fun retryTarget():Boolean=lastOpenMapRetry?.invoke() ?: lastTarget?.let(::selectMap) ?: false
 
     fun confirm(expectedConfirmation:Any?=confirmationToken):Boolean {
         if(!selecting(targetContext) || imported!=null || expectedConfirmation==null || expectedConfirmation!==confirmationToken) return false

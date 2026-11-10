@@ -288,4 +288,5 @@
     <string name="graph_source_canvas_region">Fixed canvas region</string>
     <string name="graph_preview_historical">Historical preview; may differ from the current range or content</string>
     <string name="graph_backlinks_canvas_regions">Canvas regions</string>
+    <string name="graph_ref_other_pane_map">Use the mind map in the other pane</string>
 </resources>

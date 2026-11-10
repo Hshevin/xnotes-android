@@ -39,7 +39,8 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
             commit={read->
                 // Both mutations are guarded on the same Main dispatch; no native pane is adopted.
                 if(!maps.canHide(entry)) false else {
-                    val shown=originals.admit(binding,read,OriginalPdfWorkspace.Return.Map(entry,bookmark))
+                    val nativeIdentity=if(maps.splitPresentation.layout!=null) editor.captureNativePresentationIdentity() else null
+                    val shown=originals.admit(binding,read,OriginalPdfWorkspace.Return.Map(entry,bookmark,nativeIdentity))
                     if(shown==null) false else {
                         check(maps.hide(entry));entry.sourceReturn=bookmark;true
                     }
@@ -67,7 +68,7 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
                 val requestJob=currentCoroutineContext()[Job]!!
                 val loaded=withContext(Dispatchers.IO) {originals.access.open(target) {requestJob.ensureActive()}.also {read=it}}
                 if(!current() || !loaded.current()) {if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED;return@launch}
-                val proof=editor.awaitHostParking()
+                val proof=if(source && maps.splitPresentation.layout!=null) editor.awaitMapSourceParking() else editor.awaitHostParking()
                 if(proof==null || !current() || !proof.current() || !loaded.current()) {
                     if(hostCurrent() && generation==token) failure=NativeReferenceIssue.CHANGED
                     return@launch
@@ -101,19 +102,25 @@ internal class OriginalPdfNavigator(private val editor:Editor,private val maps:M
         onStarting()
         val token=++generation;val operation=Any()
         sourceOperation=true;failure=null;busy=true;returning=true;mapOperation=operation
+        val identity=origin.nativeIdentity
+        val sameNative=identity==null || editor.matchesNativePresentationIdentity(identity)
+        val restoreSplit=identity!=null && sameNative && maps.splitPresentation.returnLayout!=null
         fun valid()=hostCurrent() && generation==token && originals.current===shown &&
-            maps.current===entry && !maps.visible && networks.visible==false && entry.lease.alive && entry.sourceReturn===bookmark && host()
+            maps.current===entry && !maps.visible && networks.visible==false && entry.lease.alive && entry.sourceReturn===bookmark &&
+            (!restoreSplit || editor.matchesNativePresentationIdentity(requireNotNull(identity))) && host()
         val accepted=maps.open(entry.uri,entry.title,preparePresentation={
-            if(!valid()) null else editor.awaitHostParking()?.let {proof->({valid() && proof.current()})}
+            if(!valid()) null else (if(restoreSplit) editor.awaitMapSourceParking() else editor.awaitHostParking())
+                ?.let {proof->({valid() && proof.current()})}
         },stillCurrent=::valid,operation=operation,flushNativeOnPresent=false,onPresented={actual->
             if(validAfterMapPresentation(shown,entry,actual,token)) {
                 // This return parks all native owners, including dirty NOTE panes.
                 actual.skipNativePersistOnPresent=true
                 if(actual.session.canRestoreSourceReturn(bookmark)) actual.presentation.applySourceReturn(actual.session,bookmark)
                 if(actual.sourceReturn===bookmark) actual.sourceReturn=null
+                if(!sameNative) failure=NativeReferenceIssue.CHANGED
                 originals.close(binding,shown);mapOperation=null;busy=false;returning=false;onPresented()
             }
-        },onFinished={presented->if(generation==token) {
+        },presentation=if(restoreSplit) MapOpenPresentation.RestoreSplit else MapOpenPresentation.Single,onFinished={presented->if(generation==token) {
             mapOperation=null;busy=false;returning=false
             if(!presented) failure=NativeReferenceIssue.CHANGED
         }})

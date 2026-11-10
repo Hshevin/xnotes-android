@@ -288,4 +288,5 @@
     <string name="graph_source_canvas_region">画布固定区域</string>
     <string name="graph_preview_historical">历史预览，可能不代表当前范围或内容</string>
     <string name="graph_backlinks_canvas_regions">画布区域</string>
+    <string name="graph_ref_other_pane_map">使用另一窗格的导图</string>
 </resources>
