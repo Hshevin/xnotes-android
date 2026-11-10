@@ -347,6 +347,14 @@ class PdfSource private constructor(
         // [file] is owned by the caller (Document / import staging); deleting it here is not our job.
     }
 
+    /** IO-only. Stops text/link work and acknowledges the native close before releasing its caller's lease. */
+    fun closeAndAwait() {
+        close()
+        text.closeAndAwait()
+        awaitClosedExecutor(synchronized(executorLock) {linksExecutor})
+        pdf.closeAndAwait()
+    }
+
     companion object {
         private const val MAX_DIM = 4096
 

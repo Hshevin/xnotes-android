@@ -5,6 +5,9 @@ import android.content.Intent
 import android.graphics.Rect as AndroidRect
 import android.graphics.drawable.AnimationDrawable
 import android.net.Uri
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
@@ -15,11 +18,21 @@ import android.widget.ImageView
 import com.xnotes.MainActivity
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.infinite.InfiniteDocument
+import com.xnotes.core.infinite.Waypoint
+import com.xnotes.core.model.Stroke
+import com.xnotes.core.stroke.Sample
+import com.xnotes.core.tools.Tool
+import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.format.DocumentCodec
+import com.xnotes.format.CanvasCodec
+import com.xnotes.format.BundleHeader
+import com.xnotes.persistNativeForMapPresentation
+import com.xnotes.storage.NotebookStorage
 import com.xnotes.pen.PenTestRunner
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
@@ -218,4 +231,118 @@ class AndroidMainMapSourceNavigationHostTest {
         waitUntil("explicit return preserved the selection captured after cancelled navigation") {main {f.maps.visible && f.entry.session.selected=="f"} && field("Second remark")!=null}
         assertSame(f.entry,main {f.maps.current});assertArrayEquals(f.sourceBytes,f.source.readBytes())
     }
+    private class CanvasScene(val activity:MainActivity,val source:File,val map:File,val native:Editor,val maps:MapWorkspace,
+        val documentId:String,val sourceId:String) {
+        lateinit var entry:MapWorkspace.Entry
+        val sourceBytes=source.readBytes()
+    }
+    private fun canvasScenario(block:(CanvasScene)->Unit) {
+        val base=runner.targetContext
+        val recovery=listOf("session","session-b").flatMap {slot->listOf("document.xnote","session.json","canvas.xcanvas","canvas-session.json")
+            .map {File(base.filesDir,"$slot/$it")}}
+        val split=File(base.filesDir,"split-workspace.json")
+        val splitOpen=split.exists() && runCatching {org.json.JSONObject(split.readText()).optBoolean("secondOpen",false)}.getOrDefault(true)
+        assertTrue("Run Canvas source navigation on an empty instrumentation profile",recovery.none {it.exists()} && !splitOpen)
+        val source=File.createTempFile("main-canvas-source-",".xcanvas",base.cacheDir)
+        val map=File.createTempFile("main-canvas-graph-",".xmap",base.cacheDir)
+        var activity:MainActivity?=null;var scene:CanvasScene?=null
+        try {
+            val seeded=InfiniteDocument(lastView=Waypoint("Canvas source",200.0,100.0,1.2))
+            seeded.add(Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(100.0,100.0,.5),Sample(160.0,140.0,.7))))
+            source.outputStream().use {CanvasCodec(AndroidImageCodec(),AndroidTextMeasurer()).write(seeded,it)}
+            runBlocking {withContext(Dispatchers.IO) {
+                NotebookStorage.get(base).registry.registerObserved(BundleHeader.read(source),"xcanvas",source.name,Uri.fromFile(source).toString())
+            }}
+            val raw=MessageDigest.getInstance("SHA-256").digest(source.readBytes()).joinToString("") {"%02x".format(it)}
+            val target=MapSource(documentId=seeded.identity.documentId,fileName=source.name,scope=SourceScope.FILE,
+                note="Whole Canvas remark",sourceVersion=raw)
+            map.writeBytes(MapCodec.encode(MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="Canvas sources"),
+                MapNode(id="n",parent="r",kind=NodeKind.REFERENCE,text="Canvas display alias",sources=listOf(target))))))
+            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            activity=host
+            waitUntil("Main restored before Canvas source navigation") {main {
+                host.mapWorkspace!=null && host.documentEditor!=null && views(host.window.decorView).let {tree->
+                    tree.any {it.javaClass.name=="androidx.compose.ui.platform.AndroidComposeView" && it.width>0} &&
+                        tree.filterIsInstance<ImageView>().none {it.drawable is AnimationDrawable}
+                }
+            }}
+            val native=main {requireNotNull(host.documentEditor)};val maps=main {requireNotNull(host.mapWorkspace)}
+            main {assertTrue("Existing native documents must not be replaced by a Canvas test",native.openPanes.isEmpty());assertNull(maps.current)}
+            val f=CanvasScene(host,source,map,native,maps,seeded.identity.documentId,target.id);scene=f
+            main {assertTrue(maps.open(Uri.fromFile(map),"Canvas sources",preparePresentation={native.awaitHostParking()?.let {proof->({proof.current()})}}))}
+            waitUntil("Canvas source map's actual full-window View") {main {maps.visible && maps.current!=null && graph(host)?.let {it.width>0 && it.height>0 && it.isEnabled}==true}}
+            f.entry=main {maps.current!!};main {f.entry.session.selected="n"}
+            block(f)
+        } finally {
+            scene?.let {f->
+                join(main {f.maps.cancelOpen();f.maps.current?.takeIf {MapSaves.key(it.uri)==MapSaves.key(Uri.fromFile(map))}?.let {f.maps.close(it)}})
+                main {
+                    val panes=f.native.openPanes
+                    if(panes.all {it.visibleDocumentId==f.documentId}) f.native.goHomeAll(panes.map {it.documentOwner.discardForOpen()}.toSet())
+                }
+                waitUntil("test-owned Canvas closes") {main {f.native.openPanes.isEmpty()}}
+                val parked=runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {f.native.awaitHostParking()}}}
+                assertNotNull(parked)
+            }
+            activity?.let {main {it.finish()};runner.waitForIdleSync()}
+            source.delete();map.delete()
+        }
+    }
+    private fun doubleTapReference(view:MindMapView,id:String) {
+        val at=view.screenPoint(view.document.node(id).bounds.center);val now=SystemClock.uptimeMillis()
+        for((delay,action) in listOf(0L to MotionEvent.ACTION_DOWN,40L to MotionEvent.ACTION_UP,
+            140L to MotionEvent.ACTION_DOWN,180L to MotionEvent.ACTION_UP)) {
+            val event=MotionEvent.obtain(now,now+delay,action,at.x.toFloat(),at.y.toFloat(),0)
+            event.source=InputDevice.SOURCE_TOUCHSCREEN
+            try {assertTrue(view.onTouchEvent(event))} finally {event.recycle()}
+        }
+    }
+    @Test fun aSingleReferenceDoubleTapColdOpensItsWholeCanvasAndReturnsWithoutPersistingTheNewCanvasStroke()=canvasScenario {f->
+        val old=main {requireNotNull(graph(f.activity))}
+        val camera=main {old.zoomBy(1.35f);old.panText(74f,-49f);old.viewport() to center(old)}
+        main {
+            assertFalse(f.native.noteOpen)
+            val source=f.entry.session.document!!.node("n").sources.single()
+            assertEquals(SourceScope.FILE,source.scope);assertNull(source.pageId);assertNull(source.region)
+            doubleTapReference(old,"n")
+        }
+        waitUntil("single-source double tap opened the actual Canvas editor") {main {
+            !f.maps.visible && f.native.canvasOpen && f.native.visibleDocumentId==f.documentId &&
+                f.native.infinite.view.width>0 && f.native.infinite.view.height>0
+        }}
+        val model=main {f.native.infinite.document};val history=main {f.native.infinite.history}
+        main {
+            assertFalse(f.native.inSplit);assertEquals(f.sourceId,f.entry.sourceReturn!!.source.sourceId)
+            val origin=f.native.infinite.viewport.centerContent;val now=SystemClock.uptimeMillis()
+            for((index,action) in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP).withIndex()) {
+                val point=f.native.infinite.viewport.contentToViewport(Pt(origin.x+index*25,origin.y+index*18))
+                val pointer=MotionEvent.PointerProperties().apply {id=6;toolType=MotionEvent.TOOL_TYPE_STYLUS}
+                val coordinates=MotionEvent.PointerCoords().apply {x=point.x.toFloat();y=point.y.toFloat();pressure=.7f}
+                val event=MotionEvent.obtain(now,now+index*25L,action,1,arrayOf(pointer),arrayOf(coordinates),0,0,1f,1f,0,0,InputDevice.SOURCE_STYLUS,0)
+                try {assertTrue(f.native.infinite.view.onTouchEvent(event))} finally {event.recycle()}
+            }
+            assertTrue(model.dirty);assertTrue(history.canUndo);assertEquals(2,model.items.filterIsInstance<Stroke>().size)
+            // Make an erroneous presentation flush observable even for this cache-backed source.
+            Editor::class.java.getDeclaredField("canvasAutosaveUri").apply {isAccessible=true}.set(f.native,Uri.fromFile(f.source).toString())
+        }
+        val undo=main {history.nextUndo}
+        click(f.activity.getString(R.string.graph_return_map))
+        waitUntil("Canvas return restored the real graph camera") {main {
+            val shown=graph(f.activity)
+            f.maps.visible && f.maps.current===f.entry && shown!=null && shown!==old && shown.isEnabled &&
+                kotlin.math.abs(shown.viewport().zoom-camera.first.zoom)<.00001f &&
+                kotlin.math.abs(center(shown).x-camera.second.x)<.02 && kotlin.math.abs(center(shown).y-camera.second.y)<.02
+        }}
+        waitUntil("the exact whole-Canvas source row returned") {field("Whole Canvas remark")!=null}
+        main {persistNativeForMapPresentation(f.native,f.entry)}
+        val parked=runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {f.native.awaitHostParking()}}}
+        assertNotNull(parked)
+        main {
+            assertSame(model,f.native.infinite.document);assertSame(history,f.native.infinite.history);assertSame(undo,history.nextUndo)
+            assertTrue(model.dirty);assertTrue(history.canUndo);assertEquals("n",f.entry.session.selected)
+            assertEquals("n",f.entry.presentation.sourcesFor)
+        }
+        assertArrayEquals(f.sourceBytes,f.source.readBytes())
+    }
+
 }

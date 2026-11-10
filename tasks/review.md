@@ -1,3 +1,15 @@
+## 分页固定区域来源（2026-11-10）
+
+独立计划接受actualDoc/Page冻结与Note丢项／XML明确失败观察，默认宽容reader保留，futureXML不冒称无损。实现Required外发截图／选区DTO取消后复活已以candidate身份／selection代次闭合，实际Main旧菜单Host拒绝；页移除／换model epoch、共享pane同步、region strict首读／晚B重读、固定frame／保守EMPTY／保历史PNG、Locator进入宿主后卸载退休已核。67148旧行为3项真红；fixed恢复全比一致。
+
+54454实际281项279绿／Android源码compile，1121SHA全同。夹具修正仅两个unit文件：SPEED保持t=10断言、切分页先relayout、三轴delta0数值比较允许±0，不改页号／outline／history／零写。93555 sourceflow绿，30768 locator绿，逐case合并281全绿、0失败错误跳过；最终1121全同，生产/Android未变不重复跑。tmp/paged-region-verified-summary.json。真实Android／设备／SAF／Surface／GPU未运行；原PDF独立模式及其他原14组仍未完成。
+
+## Canvas 固定区域来源（2026-11-10）
+
+独立计划、copy安全采用补充合同、实现和证据复核完成。Required两个：未保存Canvas误入NOTE专用SaveAs、已入host pending定位跨卸载复活，均以实际专用picker／typed copy采用和enteredHost退休修复；原Locator新增Window case真实RED保留。完整读取观察、严格expected保存、C1与identity revision换算、旧v1—4 raw门禁、历史EMPTY图、固定裁切与明确Canvas kind、retained同候选／取消只保copy均静态及相关Host验证闭合。
+
+78922实际251项250过1夹具超时，Android源码编译过，1112输入SHA前后相同。唯一fixture Main delay不能被停车夹具未来时钟推进，改在worker轮询，全部PNG持久化／源字节断言不变；81852单case绿，独审核XML与两输入清单仅该测试变化、最终1112全同，可逐case替换保其余250，最终251项全绿。证据tmp/canvas-region-verified-summary.json。未运行真实Compose重组／系统picker／SAF／设备／Surface／GPU，未打包／安装／推送／合并／发布；不据此关闭整体需求。
+
 ## D2b 可操作展开流程（2026-11-09）
 
 按用户纠偏只在阶段边界复核新合同及本次展开差异，不重审未变Native/存储。review_d2_filters快速计划审核通过；实现Required仅一项：已blocked前序仍可作桥/打开。现Expansion不经受阻证据激活，Request.current也拒path.blocked，pure回归已通过。SOURCE/OWNER不伪造S，现有Navigator与actor双成员消费者复用。

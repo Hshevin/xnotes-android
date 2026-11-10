@@ -315,6 +315,48 @@ class MapSourcePreviewConsumerTest {
         }
     }
 
+    @Test fun droppedRawBodyItemsFailRefreshAndKeepThePreviousPngAndOriginalBytes()=scenario {f->
+        val expected=f.session.sourceEditSnapshot("n")!!
+        assertTrue(f.session.editSources(expected,expected.node.copy(sources=expected.node.sources.map {
+            if(it.id==f.one.id) it.copy(region=Rect(0.0,0.0,120.0,120.0)) else it
+        })))
+        f.firstPreview();val descriptor=f.source(f.one.id).lastPreview;val png=f.png()
+        for(item in listOf(org.json.JSONObject().put("kind","future-kind"),
+            org.json.JSONObject().put("kind","image").put("asset","assets/missing.png"))) {
+            f.writeNative();val file=f.provider.file(f.native)
+            val entries=java.util.zip.ZipFile(file).use {zip->zip.entries().asSequence().filterNot {it.isDirectory}
+                .associateTo(linkedMapOf()) {it.name to zip.getInputStream(it).use {input->input.readBytes()}}}
+            val manifest=org.json.JSONObject(String(entries.getValue("manifest.json")))
+            manifest.getJSONArray("pages").getJSONObject(1).getJSONArray("items").put(item)
+            entries["manifest.json"]=manifest.toString().toByteArray()
+            java.util.zip.ZipOutputStream(file.outputStream()).use {zip->entries.forEach {(name,bytes)->
+                zip.putNextEntry(java.util.zip.ZipEntry(name));zip.write(bytes);zip.closeEntry()
+            }}
+            val original=file.readBytes();assertTrue(f.panel.refresh(f.one.id));await {f.one.id !in f.panel.busySourceIds}
+            assertEquals(SourceStatus.UNAVAILABLE,f.source(f.one.id).status);assertTrue(f.source(f.one.id).hasHistoricalPreview)
+            assertEquals(descriptor,f.source(f.one.id).lastPreview);assertArrayEquals(png,f.png())
+            assertArrayEquals(original,file.readBytes());assertEquals(0,f.provider.writes[f.native.toString()] ?: 0)
+            assertTrue(File(f.context.cacheDir,"source-preview-assets").listFiles().orEmpty().isEmpty())
+        }
+    }
+
+    @Test fun sameInsidePageRangeBecomesEmptyAndKeepsAnExplicitHistoricalPngAcrossReopen()=scenario {f->
+        val expected=f.session.sourceEditSnapshot("n")!!
+        assertTrue(f.session.editSources(expected,expected.node.copy(sources=expected.node.sources.map {
+            if(it.id==f.one.id) it.copy(region=Rect(0.0,0.0,120.0,120.0)) else it
+        })))
+        f.firstPreview();val target=f.source(f.one.id).target;val descriptor=f.source(f.one.id).lastPreview;val png=f.png()
+        f.sourceModel.pages[1].items.clear();f.writeNative()
+        assertTrue(f.panel.refresh(f.one.id));await {f.one.id !in f.panel.busySourceIds}
+        assertEquals(SourceStatus.EMPTY,f.source(f.one.id).status);assertEquals(target,f.source(f.one.id).target)
+        assertEquals(descriptor,f.source(f.one.id).lastPreview);assertArrayEquals(png,f.png());assertTrue(f.source(f.one.id).hasHistoricalPreview)
+        f.session.save();await {!f.session.saving};assertFalse(f.session.saveFailed)
+        val reopened=MapSession().also {f.sessions+=it;it.open(f.context,f.map)};await {!reopened.loading}
+        f.panel.close();f.session=reopened;f.panel=SourceListEditor(reopened,reopened.sourceEditSnapshot("n")!!)
+        assertEquals(SourceStatus.EMPTY,f.source(f.one.id).status);assertArrayEquals(png,f.png());assertTrue(f.source(f.one.id).hasHistoricalPreview)
+        assertEquals(0,f.provider.writes[f.native.toString()] ?: 0)
+    }
+
     @Test fun explicitEmptyRangeProofKeepsTheLastPngAcrossReopenAndExpiresOnSourceOrTargetChanges()=scenario {f->
         f.firstPreview();val oldPng=f.png();val oldDescriptor=f.source(f.one.id).lastPreview
         fun range(rect:Rect) {

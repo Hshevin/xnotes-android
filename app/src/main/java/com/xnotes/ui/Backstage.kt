@@ -211,12 +211,19 @@ fun Backstage(
     onBackup: (export: Boolean) -> Unit = {},
     /** Two picked files are to be opened together, one per pane of a split view. */
     onOpenSplit: (String, String) -> Unit = { _, _ -> },
+    /** Captured entries keep selection order and routing hints fixed across asynchronous opens. */
+    onOpenSplitEntries: (BrowseEntry, BrowseEntry) -> Unit = { first,second -> onOpenSplit(first.documentUri,second.documentUri) },
     allowSplits: Boolean = true,
+    /** A map pair replaces the whole workspace, including when selected from a slot Home. */
+    allowMapPairs: Boolean = allowSplits,
+    /** Two notes selected here also replace the whole workspace, rather than nesting a split. */
+    allowNativePairs: Boolean = allowSplits,
     initialDocument: String? = null,
     backEnabled: Boolean = true,
     onChooseSplitPair: () -> Unit = {},
     onOpenSplitFile: (String) -> Unit = {},
     onRestoreSplit: () -> Unit = {},
+    canRestoreSplit: Boolean = editor.hasSavedSplit || editor.inSplit,
     /** Several files are to be shared at once, as they are. */
     onShareFiles: (List<String>) -> Unit = {},
     /** Opens a file beside the note last open; null when there's no note to pair it with. */
@@ -231,6 +238,8 @@ fun Backstage(
     onPreviewRecovery: () -> Unit = {},
     /** Explore authorized files without requiring an open native document. */
     onOpenNetwork: (() -> Unit)? = null,
+    /** Retained PDF originals have independent identities and a read-only reader. */
+    onOpenOriginalPdfs: (() -> Unit)? = null,
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -244,8 +253,11 @@ fun Backstage(
         shareFiles = onShareFiles,
         saveCopyFile = onSaveCopyFile,
         exportFilePdf = onExportFilePdf,
-        openSplit = onOpenSplit,
+        openSplit = onOpenSplitEntries,
         chooseSplitPair = onChooseSplitPair, openSplitFile = onOpenSplitFile, restoreSplit = onRestoreSplit,
+        canRestoreSplit = canRestoreSplit,
+        allowMapPairs = allowMapPairs,
+        allowNativePairs = allowNativePairs,
         openBeside = onOpenBeside,
         exportPdfs = onExportPdfs,
         importTemplate = onImportTemplate,
@@ -254,7 +266,7 @@ fun Backstage(
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
-        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork)
+        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs)
     }
 }
 
@@ -294,6 +306,7 @@ private fun BackstageContent(
     initialDocument: String?,
     onPreviewRecovery: () -> Unit,
     onOpenNetwork: (() -> Unit)?,
+    onOpenOriginalPdfs: (() -> Unit)?,
 ) {
     val palette = LocalPalette.current
     var createMode by remember { mutableStateOf(CreateMode.NONE) }
@@ -369,7 +382,7 @@ private fun BackstageContent(
     LaunchedEffect(editor.browseRoot) { editor.browseRoot?.let { r -> withContext(Dispatchers.IO) { editor.purgeExpiredTrash(r, prefs.trashDays) } } }
     // Kept while its inputs hold, so folding the sidebar never recomposes the rail or the sidebar.
     val showRecent = prefs.sidebarRecent && editor.browseRoot != null
-    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery, onOpenNetwork) {
+    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs) {
         SidebarNav(
             allowSplits = calls.allowSplits,
             view = view,
@@ -390,6 +403,7 @@ private fun BackstageContent(
             onUnpin = { editor.unpinFolder(it.uri) },
             onPreviewRecovery = { animateClose=false;drawerOpen=false;onPreviewRecovery() },
             onOpenNetwork = onOpenNetwork?.let {open->{animateClose=false;drawerOpen=false;open()}},
+            onOpenOriginalPdfs = onOpenOriginalPdfs?.let {open->{animateClose=false;drawerOpen=false;open()}},
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -508,6 +522,7 @@ private class SidebarNav(
     val onUnpin: (PinnedFolder) -> Unit,
     val onPreviewRecovery: () -> Unit,
     val onOpenNetwork: (() -> Unit)?,
+    val onOpenOriginalPdfs: (() -> Unit)?,
 )
 
 /** The full sidebar: a pane on wide screens, a slide-over drawer on phones. */
@@ -536,6 +551,7 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 nav.onOpenNetwork?.let {open->Command(XnotesIcons.map, stringResource(R.string.network_library_title), onClick=open)}
+                nav.onOpenOriginalPdfs?.let {open->Command(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), onClick=open)}
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
                 Command(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
@@ -592,6 +608,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 nav.onOpenNetwork?.let {open->RailItem(XnotesIcons.map, stringResource(R.string.network_library_title), onClick=open)}
+                nav.onOpenOriginalPdfs?.let {open->RailItem(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), onClick=open)}
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
                 RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
@@ -664,7 +681,7 @@ private fun BackstageMain(
                 BackstageView.SPLIT -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     Text(stringResource(R.string.split_workspace), color = palette.text.toComposeColor(), fontSize = TextSize.display, modifier = Modifier.padding(Space.s16))
                     Command(XnotesIcons.split, stringResource(R.string.split_choose_pair)) { calls.chooseSplitPair() }
-                    if (editor.hasSavedSplit || editor.inSplit) Command(XnotesIcons.clock, stringResource(R.string.split_restore_recent)) { calls.restoreSplit() }
+                    if (calls.canRestoreSplit) Command(XnotesIcons.clock, stringResource(R.string.split_restore_recent)) { calls.restoreSplit() }
                     val splitScope = rememberCoroutineScope()
                     val splitContext = LocalContext.current
                     var revision by remember { mutableStateOf(0) }
@@ -950,10 +967,13 @@ private class ExplorerCalls(
     val shareFiles: (List<String>) -> Unit,
     val saveCopyFile: (String) -> Unit,
     val exportFilePdf: (String) -> Unit,
-    val openSplit: (String, String) -> Unit,
+    val openSplit: (BrowseEntry, BrowseEntry) -> Unit,
+    val allowMapPairs: Boolean,
+    val allowNativePairs: Boolean,
     val chooseSplitPair: () -> Unit,
     val openSplitFile: (String) -> Unit,
     val restoreSplit: () -> Unit,
+    val canRestoreSplit: Boolean,
     /** Opens a file beside the note last open, or null when there is none to pair it with. */
     val openBeside: (String) -> (() -> Unit)?,
     /** Exports picked items as PDFs, zipped under the given name; the callback runs once a destination is chosen. */
@@ -1905,8 +1925,13 @@ private fun ExplorerSection(
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
                     if (selection.size == 1) ExplorerIcon(XnotesIcons.edit, stringResource(R.string.rename), fg) { renaming = selection.first(); selection.clear() }
-                    val pair = files.map { it.documentUri }.distinct().takeIf { it.size == 2 && files.size == selection.size && files.all { e -> DocumentKind.ofName(e.name) in listOf(DocumentKind.NOTE, DocumentKind.CANVAS) } }
-                    if (calls.allowSplits && pair != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) { selection.clear(); calls.openSplit(pair[0], pair[1]) }
+                    val pair = splitPairSelection(selection,allowNativePairs=calls.allowSplits || calls.allowNativePairs,
+                        allowMapPairs=calls.allowSplits || calls.allowMapPairs)
+                    val pairFiles=pair?.map {uri->files.first {it.documentUri==uri}}
+                    if (pairFiles != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) {
+                        val first=pairFiles[0];val second=pairFiles[1]
+                        selection.clear();calls.openSplit(first,second)
+                    }
                     ExplorerIcon(XnotesIcons.moveToFolder, stringResource(R.string.move_to_folder), fg) { moving = selection.toList() }
                     ExplorerIcon(XnotesIcons.copy, stringResource(R.string.copy), fg) { clipboard = ClipItem(selection.toList(), false); selection.clear() }
                     SelectionDivider()

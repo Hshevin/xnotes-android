@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="graph_reference_this_region">Reference this region</string>
+    <string name="graph_ref_save_in_place_notice">This canvas has unsaved changes. Save writes them to the original file, then continues this reference.</string>
+    <string name="graph_region_save_copy_notice">Save an independent canvas copy and switch to it to continue this reference. The original file is kept. You will choose the map again.</string>
+    <string name="graph_region_save_copy">Save a copy and continue</string>
+    <string name="graph_region_copy_file_name">Canvas reference copy.xcanvas</string>
+    <string name="graph_region_copy_retained">The copy was not fully published. Its recovery data is kept. Continue this same copy; do not create another one.</string>
+    <string name="graph_region_continue_copy">Continue this copy</string>
+    <string name="graph_region_copy_written">The copy was saved, but the current canvas changed before it could be adopted. The saved copy is kept. Reopen it to create the reference.</string>
+    <string name="graph_region_single_page_required">Finish editing, then select a region entirely on one page. A region spanning pages or the space between them cannot be referenced.</string>
+    <string name="graph_page_region_context">This fixed region belongs to this notebook page. For a PDF, it includes this notebook’s saved annotations. Moving selected items does not move the reference.</string>
+</resources>

@@ -54,9 +54,21 @@ class PageReferenceRegistryTest {
     @Test fun versionOneUpgradesWithoutChangingAnyExistingTableRows() = scenario {context,root->
         val before=oldDatabase(root)
         DocumentRegistry(context).use {registry->
-            assertEquals(2,registry.writableDatabase.version)
+            assertEquals(3,registry.writableDatabase.version)
             assertEquals(before,dump(registry.readableDatabase))
             assertEquals(id,registry.idAt(uri))
+        }
+    }
+    @Test fun versionTwoUpgradesWithoutChangingExistingTablesOrPageContracts() = scenario {context,root->
+        val before=oldDatabase(root)
+        SQLiteDatabase.openDatabase(File(root,"document-registry.db").path,null,SQLiteDatabase.OPEN_READWRITE).use {db->
+            db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
+            db.execSQL("INSERT INTO page_reference_contracts VALUES(?)",arrayOf(id));db.version=2
+        }
+        DocumentRegistry(context).use {registry->
+            assertEquals(3,registry.writableDatabase.version);assertEquals(before,dump(registry.readableDatabase))
+            assertTrue(registry.expectationForId(id).requiresPages)
+            registry.readableDatabase.rawQuery("SELECT COUNT(*) FROM original_pdf_documents",null).use {assertTrue(it.moveToFirst());assertEquals(0,it.getInt(0))}
         }
     }
     @Test fun pageContractIsMonotonicAcrossDefaultRegistrationsAliasesAndReopen() = scenario {context,_->
@@ -102,11 +114,11 @@ class PageReferenceRegistryTest {
     }
     @Test fun unknownFutureSchemaIsRejectedWithoutDowngradingOrChangingStoredRows() = scenario {context,root->
         val before=oldDatabase(root)
-        SQLiteDatabase.openDatabase(File(root,"document-registry.db").path,null,SQLiteDatabase.OPEN_READWRITE).use {it.version=3}
+        SQLiteDatabase.openDatabase(File(root,"document-registry.db").path,null,SQLiteDatabase.OPEN_READWRITE).use {it.version=4}
         val helper=DocumentRegistry(context)
         try {assertThrows(android.database.sqlite.SQLiteException::class.java) {helper.writableDatabase}} finally {helper.close()}
         SQLiteDatabase.openDatabase(File(root,"document-registry.db").path,null,SQLiteDatabase.OPEN_READONLY).use {db->
-            assertEquals(3,db.version);assertEquals(before,dump(db))
+            assertEquals(4,db.version);assertEquals(before,dump(db))
         }
     }
     @Test fun movedFileWithoutMarkerIsRejectedUsingUuidEvidenceAfterReopeningTheRegistry() = scenario {context,root->

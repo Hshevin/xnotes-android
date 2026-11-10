@@ -61,6 +61,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -73,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -125,6 +127,38 @@ private const val MIN_LOADER_MS = 600L
 /** How long the maths waits for the font bytes it measures with before going without. */
 private const val MATH_FONT_WAIT_MS = 1500L
 
+/** A revocable composition binding; retained workspace data never owns window coordinates. */
+internal class MixedInputBinding(
+    val router: com.xnotes.pen.MixedInputRouter,
+    val native: () -> Editor?,
+    val focus: (com.xnotes.pen.MixedInputRouter.Target) -> Boolean,
+    val blocked: () -> Boolean,
+)
+
+internal class MixedSplitHostState(
+    val workspace:com.xnotes.mindmap.MapWorkspace,
+    val input:MixedInputBinding,
+    val onPickMap:()->Unit,
+    val onCloseMap:()->Unit,
+)
+
+@Composable
+private fun mixedSlotInput(binding:MixedInputBinding,target:com.xnotes.pen.MixedInputRouter.Target):Modifier {
+    DisposableEffect(binding,target.pane) {onDispose {binding.router.remove(target.pane)}}
+    return Modifier.onGloballyPositioned {coordinates->
+        val bounds=coordinates.boundsInWindow()
+        binding.router.place(target,com.xnotes.pen.MixedInputRouter.Bounds(bounds.left,bounds.top,bounds.right,bounds.bottom))
+    }.pointerInput(binding,target) {
+        awaitPointerEventScope {while(true) {
+            val event=awaitPointerEvent(PointerEventPass.Initial)
+            if(event.type==PointerEventType.Press) {
+                val owner=binding.router.touchOwner
+                if(owner!=null && owner.pane!=target.pane || !binding.focus(target)) event.changes.forEach {it.consume()}
+            }
+        }}
+    }
+}
+
 /** Whether the display has a camera cutout (notch/hole-punch). False below API 29, which has no
  *  cutout API; such devices fall back to fullscreen by default. Also false for a context with no
  *  display of its own, which cannot answer the question. */
@@ -159,7 +193,34 @@ private fun standardPenAction(action: Int): Int = when (action) {
 
 /** Network exploration parks native buffers without starting an extra persistence operation. */
 internal fun persistNativeForMapPresentation(editor:Editor,entry:com.xnotes.mindmap.MapWorkspace.Entry) {
-    if(entry.flushNativeOnPresent) editor.persist()
+    if(entry.flushNativeOnPresent && !entry.skipNativePersistOnPresent) editor.persist()
+}
+
+/** Open the original library only after actual native input and accepted jobs have parked. */
+internal suspend fun presentOriginalPdfLibrary(editor:Editor,library:com.xnotes.mindmap.OriginalPdfLibraryState,
+    stillCurrent:()->Boolean):Boolean {
+    if(!stillCurrent() || library.visible) return false
+    val proof=editor.awaitHostParking() ?: return false
+    if(!stillCurrent() || !proof.current()) return false
+    return library.open()
+}
+
+/** Rebuild only the verified native slot from its working session; a hint never reopens a URI. */
+internal suspend fun restoreMixedNativeSession(editor:Editor,maps:com.xnotes.mindmap.MapWorkspace):Boolean {
+    val presentation=maps.splitPresentation
+    val layout=presentation.layout ?: presentation.returnLayout ?: return true
+    editor.mixedPresentationActive=true
+    val hint=presentation.nativeHint
+    if(hint==null && layout.nativeHome) return true
+    val target=if(layout.nativePane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondaryPane()
+    if(hint!=null) target.restoreSession(hint)
+    if(hint==null || !target.matchesNativeRestoreHint(hint) || target.canvasOpen && !layout.nativeHome) {
+        presentation.nativeRestoreFailed()
+        editor.message=editor.view.context.getString(R.string.mixed_split_restore_native_home)
+        return false
+    }
+    if(!target.canvasOpen) editor.focusMixedNativePane(target.pane)
+    return true
 }
 
 class MainActivity : ComponentActivity() {
@@ -170,7 +231,41 @@ class MainActivity : ComponentActivity() {
     private var editor: Editor? = null
     internal var mapWorkspace:com.xnotes.mindmap.MapWorkspace?=null
     internal var networkWorkspace:com.xnotes.mindmap.FileNetworkWorkspace?=null
-    private val graphicalSurfaceVisible get()=mapWorkspace?.visible==true || networkWorkspace?.visible==true
+    internal var originalWorkspace:com.xnotes.mindmap.OriginalPdfWorkspace?=null
+    internal var originalLibrary:com.xnotes.mindmap.OriginalPdfLibraryState?=null
+    internal var mixedInput: MixedInputBinding? = null
+    private data class NativeKey(val device: Int, val key: Int, val scan: Int)
+    private data class NativeKeyOwner(val receiver:Editor,val token:Any,val legacy:Boolean)
+    private val nativeKeyOwners = mutableMapOf<NativeKey, NativeKeyOwner>()
+
+    /** Captured before pair commit; only this preparation's real input owners may hand off. */
+    internal fun prepareNativeKeyHandoffs(handoffs:List<Pair<Editor,Editor>>):()->Unit {
+        data class Transfer(val from:Editor,val fromToken:Any,val to:Editor,val toToken:Any)
+        val transfers=handoffs.map {(from,to)->Transfer(from,from.penInputOwnerToken,to,to.penInputOwnerToken)}
+        var applied=false
+        return {
+            if(!applied) {
+                applied=true
+                nativeKeyOwners.entries.forEach {entry->
+                    val owner=entry.value
+                    val transfer=transfers.firstOrNull {it.from===owner.receiver && it.fromToken===owner.token}
+                    if(transfer!=null && transfer.to.noteOpen && transfer.to.penInputOwnerToken===transfer.toToken)
+                        entry.setValue(owner.copy(receiver=transfer.to,token=transfer.toToken))
+                }
+            }
+        }
+    }
+
+    private fun rememberNativeKey(key:NativeKey,receiver:Editor,legacy:Boolean=false) {
+        nativeKeyOwners[key]=NativeKeyOwner(receiver,receiver.penInputOwnerToken,legacy)
+    }
+
+    private fun dispatchAcceptedNativeKey(owner:NativeKeyOwner,event:KeyEvent) {
+        if(owner.legacy) owner.receiver.onStylusButtonKey(event)
+        else owner.receiver.onRecordedPenKey(event) || owner.receiver.onVolumeKey(event)
+    }
+    private val graphicalSurfaceVisible get()=mapWorkspace?.visible==true || networkWorkspace?.visible==true ||
+        originalWorkspace?.current!=null || originalLibrary?.visible==true
     internal val documentEditor:Editor? get()=editor
     internal val documentMaps:com.xnotes.mindmap.MapWorkspace by lazy {
         androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
@@ -180,12 +275,21 @@ class MainActivity : ComponentActivity() {
         androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
             com.xnotes.mindmap.MapWorkspaceOwner::class.java].networks
     }
+    internal val documentOriginals:com.xnotes.mindmap.OriginalPdfWorkspace by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].originals
+    }
+    internal val documentOriginalLibrary:com.xnotes.mindmap.OriginalPdfLibraryState by lazy {
+        androidx.lifecycle.ViewModelProvider(this,com.xnotes.mindmap.MapWorkspaceOwner.Factory(applicationContext))[
+            com.xnotes.mindmap.MapWorkspaceOwner::class.java].originalLibrary
+    }
     // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingImport by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         mapWorkspace=documentMaps;networkWorkspace=documentNetworks
+        originalWorkspace=documentOriginals;originalLibrary=documentOriginalLibrary
         com.xnotes.platform.FontCatalog.init(this)
         com.xnotes.platform.TemplateLibrary.init(this)
         com.xnotes.ui.AudioPlayback.init(this)
@@ -205,8 +309,13 @@ class MainActivity : ComponentActivity() {
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 val start = android.os.SystemClock.uptimeMillis()
-                ed.restoreSession() // heavy load off-thread; loader animates meanwhile
-                ed.restoreSplitWorkspace()
+                val retainedMaps=documentMaps
+                if(retainedMaps.splitPresentation.layout!=null || retainedMaps.splitPresentation.returnLayout!=null)
+                    restoreMixedNativeSession(ed,retainedMaps)
+                else {
+                    ed.restoreSession() // heavy load off-thread; loader animates meanwhile
+                    ed.restoreSplitWorkspace()
+                }
                 val elapsed = android.os.SystemClock.uptimeMillis() - start
                 if (elapsed < MIN_LOADER_MS) kotlinx.coroutines.delay(MIN_LOADER_MS - elapsed)
                 ready = true
@@ -242,20 +351,75 @@ class MainActivity : ComponentActivity() {
     var cancelPenRecording: (() -> Unit)? = null
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if(graphicalSurfaceVisible) return super.dispatchKeyEvent(event)
+        val key = NativeKey(event.deviceId, event.keyCode, event.scanCode)
+        var releasedOwner:Editor?=null
+        var releaseHandled=false
+        var staleRelease=false
+        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount>0) {
+            nativeKeyOwners[key]?.let {owner->
+                // A repeat cannot start work in a replacement model or move an accepted press.
+                if(owner.receiver.noteOpen && owner.receiver.penInputOwnerToken===owner.token)
+                    dispatchAcceptedNativeKey(owner,event)
+                return true
+            }
+            if(StylusButtonLatch.isStylusButtonKey(event.keyCode)) return true
+        }
+        // An accepted native press keeps its release even after focus moves to the map.
+        if (event.action == KeyEvent.ACTION_UP) {
+            nativeKeyOwners.remove(key)?.let { owner ->
+                val receiver=owner.receiver
+                releasedOwner=receiver
+                if(!receiver.noteOpen || receiver.penInputOwnerToken!==owner.token) {
+                    if(owner.legacy) StylusButtonLatch.releaseKey()
+                    staleRelease=true
+                } else {
+                    dispatchAcceptedNativeKey(owner,event)
+                }
+                releaseHandled=true
+            }
+        }
+        val mixed = mixedInput
+        val target = mixed?.native?.invoke()
+        if(staleRelease) {
+            // Native-only focus may already have inherited this press into the other actual pane.
+            // Retire the old receiver, while keeping the original recorded-key release broadcast.
+            if(mixed==null && !graphicalSurfaceVisible) editor?.openPanes?.filter {it!==releasedOwner}
+                ?.forEach {it.onRecordedPenKey(event)}
+            return true
+        }
+        if ((graphicalSurfaceVisible || mixed != null) && target == null) return releaseHandled || super.dispatchKeyEvent(event)
         if (penKeyRecorder?.invoke(event) == true) return true
         val workspace = editor
         // Release every pane: focus can have moved since the original press.
         if (event.action == KeyEvent.ACTION_UP) {
-            var handled = false
-            workspace?.openPanes?.forEach { if (it.onRecordedPenKey(event)) handled = true }
+            var handled = releaseHandled
+            (if (mixed != null) listOfNotNull(target) else workspace?.openPanes.orEmpty()).filter {it!==releasedOwner}
+                .forEach { if (it.onRecordedPenKey(event)) handled = true }
             if (handled) return true
-        } else if (workspace?.openPanes?.contains(workspace.active) == true &&
-            workspace.active.onRecordedPenKey(event)) return true
+        } else (target ?: workspace?.active?.takeIf { it in workspace.openPanes })?.let { receiver ->
+            if (receiver.onRecordedPenKey(event)) { rememberNativeKey(key,receiver); return true }
+        }
         // The pen writes in whichever pane has the focus, so its button keys go to that pane too.
-        if (editor?.active?.onStylusButtonKey(event) == true) return true
-        if (editor?.active?.onVolumeKey(event) == true) return true
+        val receiver = target ?: editor?.active
+        if (receiver?.onStylusButtonKey(event) == true) {
+            if (event.action == KeyEvent.ACTION_DOWN) rememberNativeKey(key,receiver,legacy=true)
+            return true
+        }
+        if (receiver?.onVolumeKey(event) == true) {
+            if (event.action == KeyEvent.ACTION_DOWN) rememberNativeKey(key,receiver)
+            return true
+        }
         return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        mixedInput?.let { binding ->
+            if (ev.actionMasked in listOf(MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE,
+                    MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE)) {
+                binding.router.hover(ev.x, ev.y)?.let(binding.focus)
+            }
+        }
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     // Older Samsung builds (seen on a Tab S6 Lite, Android 13; gone by Android 15) tag a stylus
@@ -266,7 +430,13 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         val workspace = editor
-        when (workspaceFourFingerTap.track(ev, !graphicalSurfaceVisible && workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
+        val binding = mixedInput
+        val down = ev.actionMasked == MotionEvent.ACTION_DOWN || standardPenAction(ev.actionMasked) == MotionEvent.ACTION_DOWN
+        val route = if (down) binding?.router?.begin(ev.x, ev.y) else binding?.router?.touchOwner
+        if (down && route != null) binding?.focus?.invoke(route)
+        val nativeRoute = if (binding != null) route?.kind == com.xnotes.pen.MixedInputRouter.Kind.NATIVE else !graphicalSurfaceVisible
+        try {
+        when (workspaceFourFingerTap.track(ev, nativeRoute && binding?.blocked?.invoke() != true && workspace != null && workspace.openPanes.isNotEmpty() && workspace.openPanes.none { it.stylusInContact })) {
             com.xnotes.pen.FourFingerTap.Result.CAPTURE -> {
                 val cancel = MotionEvent.obtain(ev)
                 cancel.action = MotionEvent.ACTION_CANCEL
@@ -280,7 +450,7 @@ class MainActivity : ComponentActivity() {
             com.xnotes.pen.FourFingerTap.Result.CONSUME -> return true
             com.xnotes.pen.FourFingerTap.Result.PASS -> Unit
         }
-        if(graphicalSurfaceVisible) return super.dispatchTouchEvent(ev)
+        if(!nativeRoute) return super.dispatchTouchEvent(ev)
         StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
@@ -292,6 +462,10 @@ class MainActivity : ComponentActivity() {
             return super.dispatchTouchEvent(rewritten)
         } finally {
             rewritten.recycle()
+        }
+        } finally {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL ||
+                standardPenAction(ev.actionMasked) == MotionEvent.ACTION_UP) binding?.router?.finish()
         }
     }
 
@@ -325,6 +499,8 @@ class MainActivity : ComponentActivity() {
         if (!hasFocus) {
             cancelPenRecording?.invoke()
             editor?.openPanes?.forEach { it.resetPenButtons() }
+            nativeKeyOwners.clear()
+            mixedInput?.router?.finish()
             StylusButtonLatch.releaseKey()
         } // a held pen key's key-up may not come back to this window
         if (hasFocus && editor?.fullscreen == true) applyFullscreen(true) // re-hide transient bars after they swipe in
@@ -333,6 +509,7 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         mapWorkspace?.persist()
+        editor?.mixedPresentationActive=mapWorkspace?.splitPresentation?.let {it.layout!=null || it.returnLayout!=null}==true
         editor?.persist()
     }
 
@@ -377,22 +554,31 @@ private fun EditorScreen(
     val mapActivity=context as? MainActivity
     val maps=mapActivity?.documentMaps ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.MapWorkspace(context,scope)}
     val networks=mapActivity?.documentNetworks ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.FileNetworkWorkspace(context,scope)}
-    val graphicsVisible=maps.visible || networks.visible
+    val originals=mapActivity?.documentOriginals ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.OriginalPdfWorkspace(context,scope)}
+    val originalLibrary=mapActivity?.documentOriginalLibrary ?: remember(context.applicationContext,scope) {com.xnotes.mindmap.OriginalPdfLibraryState(context,scope)}
+    val arrangementStore=remember(context.applicationContext) {com.xnotes.ui.SplitArrangementStore(context.filesDir)}
+    val recentWriter=remember(context.applicationContext) {com.xnotes.ui.SplitRecentWriter.forFilesDir(context.filesDir)}
+    val recentState by recentWriter.state.collectAsState()
+    val mixedLayout=maps.splitPresentation.layout
+    fun hasMixedPresentation()=maps.splitPresentation.layout!=null || maps.splitPresentation.returnLayout!=null
+    val mixedImportBlocked=hasMixedPresentation()
+    val graphicsVisible=maps.visible && mixedLayout==null || networks.visible || originals.current!=null || originalLibrary.visible
     val mapBinding=remember(maps) {Any()}
     var savedMapUri by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
     var savedMapTitle by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf("")}
     val focusManager=androidx.compose.ui.platform.LocalFocusManager.current
     val keyboard=androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    DisposableEffect(maps,networks,mapActivity,mapBinding) {
-        maps.bindHost(mapBinding);networks.bindHost(mapBinding)
+    DisposableEffect(maps,networks,originals,originalLibrary,mapActivity,mapBinding) {
+        maps.bindHost(mapBinding);networks.bindHost(mapBinding);originals.bindHost(mapBinding)
         mapActivity?.mapWorkspace=maps;mapActivity?.networkWorkspace=networks
+        mapActivity?.originalWorkspace=originals;mapActivity?.originalLibrary=originalLibrary
         onDispose {
-            maps.unbindHost(mapBinding);networks.unbindHost(mapBinding)
-            if(mapActivity==null) {maps.dispose();networks.dispose()}
+            maps.unbindHost(mapBinding);networks.unbindHost(mapBinding);originals.unbindHost(mapBinding)
+            if(mapActivity==null) {originalLibrary.dispose();originals.dispose();maps.dispose();networks.dispose()}
         }
     }
     SideEffect {maps.current?.let {savedMapUri=it.uri.toString();savedMapTitle=it.title}}
-    LaunchedEffect(maps.visible,maps.current?.flushNativeOnPresent) {if(maps.visible) {
+    LaunchedEffect(maps.visible,mixedLayout!=null,maps.current?.flushNativeOnPresent,maps.current?.skipNativePersistOnPresent) {if(maps.visible && mixedLayout==null) {
         mapActivity?.cancelPenRecording?.invoke()
         editor.openPanes.forEach {it.resetPenButtons()}
         StylusButtonLatch.releaseKey()
@@ -404,6 +590,13 @@ private fun EditorScreen(
         editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
         focusManager.clearFocus();keyboard?.hide()
     }}
+    LaunchedEffect(originals.current,originalLibrary.visible) {
+        if(originals.current!=null || originalLibrary.visible) {
+            mapActivity?.cancelPenRecording?.invoke()
+            editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
+            focusManager.clearFocus();keyboard?.hide()
+        }
+    }
     LaunchedEffect(maps.failure,maps.visible) {maps.failure?.takeIf {!maps.visible}?.let {
         editor.message=context.getString(if(it==com.xnotes.mindmap.MapWorkspaceFailure.CHANGED) R.string.native_open_changed else R.string.map_open_error)
         maps.clearFailure()
@@ -438,12 +631,58 @@ private fun EditorScreen(
     var pendingPdfInsert by remember { mutableStateOf<PendingPdfInsert?>(null) }
     var pendingShareUri by remember { mutableStateOf<String?>(null) }
     var paneHomes by remember { mutableStateOf<Map<com.xnotes.ui.Pane, String?>>(emptyMap()) }
+    var paneHomeViews by remember {mutableStateOf<Map<com.xnotes.ui.Pane,com.xnotes.ui.BackstageView>>(emptyMap())}
     var homeFocus by remember { mutableStateOf<com.xnotes.ui.Pane?>(null) }
     var mainMenu by remember { mutableStateOf(false) }
+    var pairOperation by remember {mutableStateOf<Any?>(null)}
+    var mixedSaveOperation by remember {mutableStateOf<Any?>(null)}
+    var nativeFocusGeneration by remember {mutableStateOf(0L)}
     var parkedDocuments by remember { mutableStateOf<Pair<Any?, Any?>?>(null) }
     val documentsNow = (if (editor.canvasOpen) editor.infinite.document else editor.state.document) to
         editor.secondary?.let { if (it.canvasOpen) it.infinite.document else it.state.document }
     LaunchedEffect(documentsNow) { if (mainMenu && parkedDocuments != documentsNow) mainMenu = false }
+
+    val mixedRouter=remember(editor,maps) {com.xnotes.pen.MixedInputRouter()}
+    fun mixedNative(layout:com.xnotes.mindmap.MapSplitLayout):Editor? =
+        (if(layout.nativePane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondary)
+    fun focusMixed(target:com.xnotes.pen.MixedInputRouter.Target):Boolean {
+        val layout=maps.splitPresentation.layout ?: return false
+        if(target.pane==layout.focusedPane) return true
+        if(editor.openPanes.any {it.stylusInContact} || maps.current?.session?.inkContact==true) return false
+        if(target.kind==com.xnotes.pen.MixedInputRouter.Kind.NATIVE && !editor.focusMixedNativePane(target.pane)) return false
+        if(!maps.focusSplit(target.pane)) return false
+        homeFocus=target.pane.takeIf {target.kind==com.xnotes.pen.MixedInputRouter.Kind.HOME}
+        return true
+    }
+    val latestMixedFocus by rememberUpdatedState<(com.xnotes.pen.MixedInputRouter.Target)->Boolean>(::focusMixed)
+    val latestMixedNative by rememberUpdatedState<()->Editor?>({
+        maps.splitPresentation.layout?.let {layout->
+            mixedNative(layout)?.takeIf {layout.focusedPane==layout.nativePane && !layout.nativeHome &&
+                it.pane !in paneHomes && it.noteOpen && !it.canvasOpen}
+        }
+    })
+    val mixedInput=remember(editor,maps,mixedRouter) {MixedInputBinding(mixedRouter,
+        native={latestMixedNative()},focus={latestMixedFocus(it)},
+        blocked={maps.current?.session?.inkContact==true})}
+    SideEffect {
+        maps.splitPresentation.layout?.takeIf {!it.nativeHome}?.let {layout->
+            mixedNative(layout)?.nativeRestoreHint()?.let(maps.splitPresentation::rememberNativeHint)
+        }
+    }
+    DisposableEffect(mixedInput,mixedLayout!=null,mainMenu,mapActivity,graphicsVisible) {
+        val active=mixedLayout!=null && !mainMenu && !graphicsVisible
+        val penFocus:((Editor,MotionEvent)->Unit)={pane,_->
+            mixedInput.focus(com.xnotes.pen.MixedInputRouter.Target(pane.pane,com.xnotes.pen.MixedInputRouter.Kind.NATIVE));Unit
+        }
+        editor.mixedPresentationActive=mixedLayout!=null || maps.splitPresentation.returnLayout!=null
+        if(active) {mapActivity?.mixedInput=mixedInput;editor.mixedPenFocus=penFocus}
+        onDispose {
+            if(mapActivity?.mixedInput===mixedInput) mapActivity.mixedInput=null
+            if(editor.mixedPenFocus===penFocus) editor.mixedPenFocus=null
+            editor.mixedPresentationActive=false
+            mixedRouter.clear()
+        }
+    }
 
     // A finished PDF render awaiting a SAF "Save as" destination (open-note / file / pages export).
     var pendingExportTemp by remember { mutableStateOf<java.io.File?>(null) }
@@ -808,6 +1047,25 @@ private fun EditorScreen(
         step(0)
     }
 
+    /** Pair preparation calls this only after both first reads, and excludes retained owners. */
+    suspend fun guardPairOwners(owners:List<Editor>,tag:Any,current:()->Boolean):Set<Editor.OpenDiscard>? =
+        kotlinx.coroutines.suspendCancellableCoroutine {waiter->
+            val discards=mutableSetOf<Editor.OpenDiscard>()
+            fun stopped() {if(waiter.isActive) waiter.resumeWith(Result.success(null))}
+            fun valid()=waiter.isActive && current()
+            fun step(index:Int) {
+                if(!valid()) {stopped();return}
+                if(index==owners.size) {waiter.resumeWith(Result.success(discards.toSet()));return}
+                guardOne(owners[index],{discards+=it},{stopped()},tag,::valid) {step(index+1)}
+            }
+            waiter.invokeOnCancellation {scope.launch {
+                guardState.current?.takeIf {it.sourceNavigation===tag}?.let {request->
+                    guardState.current=null;request.stop(NativeActionStop.CANCELLED)
+                }
+            }}
+            step(0)
+        }
+
     suspend fun guardReference(request:com.xnotes.ui.NativeReferenceRequest,current:()->Boolean):com.xnotes.mindmap.MapSourceGuardResult =
         kotlinx.coroutines.suspendCancellableCoroutine {waiter->
             val tag=Any()
@@ -835,18 +1093,7 @@ private fun EditorScreen(
             }}
             step(0)
         }
-    val sourceNavigator=remember(editor,maps,mapBinding,scope) {
-        com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference) {opened,live->
-            paneHomes=emptyMap();homeFocus=null;mainMenu=false
-            editor.message=when {
-                opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
-                live->context.getString(R.string.graph_source_live_note)
-                else->null
-            }
-        }
-    }
-    DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
-    fun captureMapHost():()->Boolean {
+    fun captureMapHost(allowedGuardTag:Any?=null):()->Boolean {
         val panes=(listOf(editor)+editor.openPanes).distinct()
         val checks=panes.map {pane->
             val owner=pane.documentOwner;val open=pane.noteOpen;val canvas=pane.canvasOpen
@@ -856,34 +1103,74 @@ private fun EditorScreen(
             check
         }
         val homes=paneHomes;val menu=mainMenu;val reversed=editor.splitReversed;val prompt=guardState.current
+        val split=maps.splitPresentation.layout;val splitReturn=maps.splitPresentation.returnLayout
+        val splitGeneration=maps.splitPresentation.generation
         return {maps.isHostCurrent(mapBinding) && panes==(listOf(editor)+editor.openPanes).distinct() && checks.all {it()} &&
-            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed && guardState.current===prompt}
+            paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed &&
+            (guardState.current===prompt || allowedGuardTag!=null && guardState.current?.sourceNavigation===allowedGuardTag) &&
+            maps.splitPresentation.layout==split && maps.splitPresentation.returnLayout==splitReturn &&
+            maps.splitPresentation.generation==splitGeneration}
     }
-    val backlinkNavigator=remember(editor,maps,mapBinding,scope) {
-        com.xnotes.mindmap.MapBacklinkNavigator(editor,maps,mapBinding,scope,captureHost=::captureMapHost,
+    val originalNavigator=remember(editor,maps,networks,originals,mapBinding,scope) {
+        com.xnotes.mindmap.OriginalPdfNavigator(editor,maps,networks,originals,mapBinding,scope,
+            captureHost={captureMapHost()},onPresented={focusManager.clearFocus();keyboard?.hide()})
+    }
+    DisposableEffect(originalNavigator) {onDispose {originalNavigator.dispose()}}
+    LaunchedEffect(originals.resumeRequested) {if(originals.resumeRequested) originalNavigator.resume()}
+    val sourceNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference,originalNavigator=originalNavigator) {opened,live->
+            paneHomes=emptyMap();homeFocus=null;mainMenu=false
+            editor.message=when {
+                opened.region==com.xnotes.ui.ReferenceRegionReveal.OUTSIDE->context.getString(R.string.graph_source_region_outside)
+                live->context.getString(if(opened.pane.canvasOpen) R.string.graph_source_live_canvas else R.string.graph_source_live_note)
+                else->null
+            }
+        }
+    }
+    DisposableEffect(sourceNavigator) {onDispose {sourceNavigator.dispose()}}
+    val fileRelationNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapFileRelationNavigator(editor,maps,mapBinding,scope,captureHost={captureMapHost()},
             onStarting={sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
+    }
+    DisposableEffect(fileRelationNavigator) {onDispose {fileRelationNavigator.dispose()}}
+    val backlinkNavigator=remember(editor,maps,mapBinding,scope) {
+        com.xnotes.mindmap.MapBacklinkNavigator(editor,maps,mapBinding,scope,captureHost={captureMapHost()},
+            onStarting={fileRelationNavigator.cancel();sourceNavigator.cancel()},onPresented={sourceNavigator.retire();networks.retireGraphReturn()})
     }
     DisposableEffect(backlinkNavigator) {onDispose {backlinkNavigator.dispose()}}
     val networkCoordinator=remember(editor,maps,networks,mapBinding,scope) {
-        com.xnotes.mindmap.LocalNetworkCoordinator(editor,maps,networks,mapBinding,scope,captureHost=::captureMapHost,
-            onStarting={backlinkNavigator.cancel();sourceNavigator.cancel()},onShown={
+        com.xnotes.mindmap.LocalNetworkCoordinator(editor,maps,networks,mapBinding,scope,captureHost={captureMapHost()},
+            onStarting={backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.cancel()},onShown={
                 sourceNavigator.retire()
                 if(maps.current==null) {savedMapUri=null;savedMapTitle=""}
             })
     }
     DisposableEffect(networkCoordinator) {onDispose {networkCoordinator.dispose()}}
+    LaunchedEffect(originalNavigator.failure,originalLibrary.visible,originals.current) {
+        if(originalLibrary.visible && originals.current==null) originalNavigator.failure?.let {issue->
+            if(issue==com.xnotes.storage.NativeReferenceIssue.CHANGED) originalLibrary.reportChanged()
+            else originalLibrary.reportUnavailable()
+            originalNavigator.clearFailure()
+        }
+    }
     var libraryNetworkLaunch by remember(networkCoordinator) {
         mutableStateOf<com.xnotes.mindmap.LibraryNetworkLaunchRequest?>(null)
     }
     LaunchedEffect(networks.current,networks.resumeRequested,mapBinding) {
         networks.current?.takeIf {networks.resumeRequested && !maps.visible}?.let {networkCoordinator.resume(it)}
     }
-    val backlinkHooks=remember(backlinkNavigator,networkCoordinator) {com.xnotes.mindmap.BacklinkHostHooks(
-        open=backlinkNavigator::open,busy={backlinkNavigator.busy || networkCoordinator.busy},
-        cancel={ctx->if(backlinkNavigator.canCancel(ctx)) backlinkNavigator.cancel(ctx) else networkCoordinator.cancel(ctx)},
-        canCancel={ctx->backlinkNavigator.canCancel(ctx) || networkCoordinator.canCancel(ctx)},
-        problem={ctx->backlinkNavigator.failureFor(ctx) ?: networkCoordinator.failureFor(ctx)},
-        openNetwork=networkCoordinator::open)}
+    val backlinkHooks=remember(backlinkNavigator,fileRelationNavigator,networkCoordinator) {com.xnotes.mindmap.BacklinkHostHooks(
+        open={request->!fileRelationNavigator.busy && backlinkNavigator.open(request)},
+        busy={backlinkNavigator.busy || fileRelationNavigator.busy || networkCoordinator.busy},
+        cancel={ctx->when {
+            backlinkNavigator.canCancel(ctx)->backlinkNavigator.cancel(ctx)
+            fileRelationNavigator.canCancel(ctx)->fileRelationNavigator.cancel(ctx)
+            else->networkCoordinator.cancel(ctx)
+        }},
+        canCancel={ctx->backlinkNavigator.canCancel(ctx) || fileRelationNavigator.canCancel(ctx) || networkCoordinator.canCancel(ctx)},
+        problem={ctx->backlinkNavigator.failureFor(ctx) ?: fileRelationNavigator.failureFor(ctx) ?: networkCoordinator.failureFor(ctx)},
+        openNetwork=networkCoordinator::open,
+        openRelation={request->!backlinkNavigator.busy && !networkCoordinator.busy && fileRelationNavigator.open(request)})}
     LaunchedEffect(sourceNavigator.failure,sourceNavigator.saveFailed,maps.visible) {
         sourceNavigator.failure?.takeIf {!maps.visible}?.let {editor.message=context.getString(
             if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed else referenceFailureText(it))}
@@ -970,6 +1257,9 @@ private fun EditorScreen(
             editor.message = context.getString(R.string.map_split_unsupported)
             return null
         }
+        if(maps.splitPresentation.layout!=null && kindOf(uriStr)==com.xnotes.core.util.DocumentKind.CANVAS) {
+            editor.message=context.getString(R.string.split_canvas_unsupported);return null
+        }
         if (requested.noteOpen && requested.visibleDocumentUri?.let { requested.isSameDocument(it, uriStr) } == true) return requested
         // Keep a shared document's save owner alive. Replace its borrowed view instead, then
         // exchange visual slots so the requested pane still opens the new file in place.
@@ -1006,7 +1296,24 @@ private fun EditorScreen(
     }
 
     fun closePaneHome(pane: Editor) {
-        if (editor.openPanes.any { it.stylusInContact }) return
+        if (editor.openPanes.any { it.stylusInContact } || maps.current?.session?.inkContact==true) return
+        maps.splitPresentation.layout?.let {layout->
+            val expected=maps.current
+            val generation=maps.splitPresentation.generation
+            var discard:Editor.OpenDiscard?=null
+            guarded(pane,onDiscard={discard=it}) {scope.launch {
+                val detached=editor.detachMixedPane(pane,setOfNotNull(discard),stillCurrent={
+                    maps.splitPresentation.layout==layout && maps.splitPresentation.generation==generation && maps.current===expected
+                },allowCanvasHome=layout.nativeHome && pane.pane==layout.nativePane) ?: return@launch
+                paneHomes=paneHomes-pane.pane-detached.retiredPane
+                homeFocus=null
+                if(pane.pane==layout.mapPane) maps.removeSplitHome(layout.mapPane)
+                else if(expected!=null) maps.splitPresentation.present(com.xnotes.mindmap.MapOpenPresentation.Single)
+                else maps.removeSplitHome(layout.mapPane)
+                editor.mixedPresentationActive=false
+            }}
+            return
+        }
         val close = {
             // Closing a shared owner retains that editor and closes the borrowed view instead.
             val retained = if (pane.isSharedView && pane.documentOwner === pane) pane.sibling else null
@@ -1020,7 +1327,15 @@ private fun EditorScreen(
     }
 
     fun closeEditorPane(pane: Editor) {
-        if (editor.openPanes.any { it.stylusInContact }) return
+        if (editor.openPanes.any { it.stylusInContact } || maps.current?.session?.inkContact==true) return
+        maps.splitPresentation.layout?.let {layout->
+            if(pane.pane==layout.nativePane) {
+                paneHomeViews=paneHomeViews+(pane.pane to com.xnotes.ui.BackstageView.HOME)
+                maps.updateSplitLayout {it.copy(nativeHome=true,focusedPane=it.nativePane)}
+                paneHomes=paneHomes+(pane.pane to pane.visibleDocumentUri);homeFocus=pane.pane
+            }
+            return
+        }
         val other = if (pane === editor) editor.secondary else editor
         if (other != null && (other.noteOpen || other.pane in paneHomes)) {
             // Park the document behind its file browser. Reuse the existing guarded replacement
@@ -1033,54 +1348,314 @@ private fun EditorScreen(
         }
     }
 
-    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor.OpenDiscard> = emptySet()) {
+    fun saveMixedArrangement() {
+        val layout=maps.splitPresentation.layout
+        if(layout==null || layout.nativeHome || maps.current==null || !maps.visible || paneHomes.isNotEmpty() || mainMenu ||
+            originals.current!=null || originalLibrary.visible || networks.visible) {
+            editor.message=context.getString(R.string.mixed_split_save_complete_first);return
+        }
+        if(mixedSaveOperation!=null) {editor.message=context.getString(R.string.mixed_split_busy);return}
+        val operation=Any();mixedSaveOperation=operation
+        val host=captureMapHost()
+        fun current()=mixedSaveOperation===operation && host() && maps.visible && !mainMenu &&
+            originals.current==null && !originalLibrary.visible && !networks.visible
+        // Reserve before either source save or arrangement IO, so a later intent can supersede us.
+        val ticket=recentWriter.reserve(explicit=true)
         scope.launch {
-            val kind = com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uriStr)) ?: "")
-            if (kind == com.xnotes.core.util.DocumentKind.SPLIT) {
-                if (editor.openSplitFile(uriStr, explicitlyDiscarded)) { paneHomes = emptyMap(); mainMenu = false }
-            } else if (editor.openSingleFromHome(uriStr, displayNameOf(resolver, Uri.parse(uriStr)), explicitlyDiscarded)) { paneHomes = emptyMap(); homeFocus = null; mainMenu = false }
+            val attempt=com.xnotes.ui.SplitPublicationAttempt(arrangementStore)
+            try {
+                val capture=maps.prepareMixedArrangementSave(prepareNative={pane,valid->
+                    editor.prepareMixedNoteArrangementSave(pane) {valid() && current()}
+                },stillCurrent=::current)
+                if(capture!=null && current()) {
+                    if(attempt.prepare(capture.request,capture.name)) capture.publish {attempt.commit()}
+                    if(attempt.publishedFile!=null && current()) {
+                        editor.persistMixedNotePresentation(capture.request.layout.nativePane)
+                        val outcome=recentWriter.submit(ticket,com.xnotes.ui.SplitOpenRequest.Mixed(capture.request)).await()
+                        if(current()) editor.message=context.getString(if(outcome===com.xnotes.ui.SplitRecentWrite.Written)
+                            R.string.split_saved else R.string.mixed_split_saved_recent_failed)
+                    } else if(attempt.publishedFile==null && current()) editor.message=context.getString(R.string.mixed_split_save_failed)
+                } else if(current()) editor.message=context.getString(R.string.mixed_split_save_failed)
+            } catch(cancelled:java.util.concurrent.CancellationException) {
+                if(attempt.publishedFile!=null && current()) editor.message=context.getString(R.string.mixed_split_saved_recent_failed)
+                throw cancelled
+            } catch(_:Exception) {
+                if(current()) editor.message=context.getString(if(attempt.publishedFile!=null) R.string.mixed_split_saved_recent_failed else R.string.mixed_split_save_failed)
+            } finally {
+                attempt.close()
+                if(mixedSaveOperation===operation) mixedSaveOperation=null
+            }
         }
     }
 
-    /** Open two picked files together, one per pane, and start the split focused on the first. */
-    fun openSplit(firstUri: String, secondUri: String) {
-        // Refuse unsupported types before creating or replacing any pane.
-        if (listOf(firstUri, secondUri).any { kindOf(it) == com.xnotes.core.util.DocumentKind.MIND_MAP }) {
-            editor.message = context.getString(R.string.map_split_unsupported)
-            return
+    fun openNativeSplit(operation:Any=Any(),capturedHost:(()->Boolean)?=null,prepare:suspend (()->Boolean,
+        suspend (List<Editor>,()->Boolean)->Set<Editor.OpenDiscard>?)->com.xnotes.ui.PreparedNativeSplitOpen?) {
+        if(!maps.isHostCurrent(mapBinding) || guardState.current!=null || originals.current!=null || originalLibrary.visible || networks.visible) {
+            if(pairOperation===operation) pairOperation=null
+            editor.message=context.getString(R.string.mixed_split_busy);return
         }
-        if (kindOf(firstUri) == com.xnotes.core.util.DocumentKind.CANVAS || kindOf(secondUri) == com.xnotes.core.util.DocumentKind.CANVAS) {
+        pairOperation=operation
+        val hostCurrent=capturedHost ?: captureMapHost(allowedGuardTag=operation)
+        fun current()=pairOperation===operation && hostCurrent() && originals.current==null && !originalLibrary.visible && !networks.visible
+        var applyKeys:(()->Unit)?=null
+        val accepted=maps.replaceWithNativeSplit(prepareNative={valid,settleMaps->
+            prepare({valid() && current()}) {owners,ready->
+                if(!valid() || !current() || !ready() || !settleMaps()) null
+                else guardPairOwners(owners,operation) {ready() && valid() && current()}
+            }?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
+        },stillCurrent=::current,operation=operation,onPresented={_->
+            // The coordinator has adopted both native views and retired only its Map route.
+            applyKeys?.invoke();applyKeys=null
+            editor.mixedPresentationActive=false
+            editor.persistNativeSplitPresentation()
+            mapActivity?.let {activity->if(activity.mixedInput===mixedInput) {activity.mixedInput=null;mixedRouter.clear()}}
+            networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+            savedMapUri=null;savedMapTitle=""
+            paneHomes=emptyMap();paneHomeViews=emptyMap();homeFocus=null;mainMenu=false
+            nativeFocusGeneration++
+        },onFinished={shown->
+            applyKeys=null
+            if(pairOperation===operation) {
+                pairOperation=null
+                if(!shown && maps.failure!=null) editor.message=context.getString(R.string.native_split_open_failed)
+            }
+        })
+        if(!accepted) {
+            if(pairOperation===operation) pairOperation=null
+            editor.message=context.getString(R.string.native_split_open_failed)
+        }
+    }
+    fun openSavedMixed(request:com.xnotes.ui.MixedSplitRequest,operation:Any,host:()->Boolean) {
+        fun current()=pairOperation===operation && host() && originals.current==null && !originalLibrary.visible && !networks.visible
+        val preferred=(maps.splitPresentation.layout ?: maps.splitPresentation.returnLayout)?.nativePane ?: editor.active.pane
+        var applyKeys:(()->Unit)?=null
+        val accepted=maps.openSavedPair(request,prepareNative={source,position,valid->
+            editor.preparePagedPairOpen(source,preferred,position=position,stillCurrent={valid() && current()},guardOwners={owners,ready->
+                guardPairOwners(owners,operation) {ready() && valid() && current()}
+            })?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
+        },stillCurrent=::current,operation=operation,onPresented={entry,cap->
+            applyKeys?.invoke();applyKeys=null
+            editor.mixedPresentationActive=true
+            editor.focusMixedNativePane(cap.nativePane)
+            editor.persistMixedNotePresentation(cap.nativePane)
+            networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+            savedMapUri=entry.uri.toString();savedMapTitle=entry.title
+            paneHomes=emptyMap();paneHomeViews=emptyMap();homeFocus=null;mainMenu=false
+            val actual=request.copy(
+                map=com.xnotes.ui.SplitSourceRef(entry.session.document?.id ?: request.map.documentId,entry.uri.toString(),entry.title),
+                native=com.xnotes.ui.SplitSourceRef(cap.target.visibleDocumentId,
+                    cap.target.visibleDocumentUri ?: request.native.uri,cap.target.title),
+                layout=maps.splitPresentation.layout ?: request.layout)
+            recentWriter.submit(recentWriter.reserve(),com.xnotes.ui.SplitOpenRequest.Mixed(actual))
+        },onFinished={shown->
+            applyKeys=null
+            if(pairOperation===operation) {
+                pairOperation=null
+                if(!shown && maps.failure!=null) editor.message=context.getString(R.string.native_split_open_failed)
+            }
+        })
+        if(!accepted && pairOperation===operation) {
+            pairOperation=null;editor.message=context.getString(R.string.native_split_open_failed)
+        }
+    }
+    fun openArrangement(uri:String?=null) {
+        if(!maps.isHostCurrent(mapBinding) || guardState.current!=null || originals.current!=null || originalLibrary.visible || networks.visible) {
+            editor.message=context.getString(R.string.mixed_split_busy);return
+        }
+        val operation=Any();pairOperation=operation
+        val host=captureMapHost(allowedGuardTag=operation)
+        scope.launch {
+            val read=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                if(uri==null) arrangementStore.readRecent() else arrangementStore.readManaged(uri)
+            }
+            if(pairOperation!==operation || !host()) {if(pairOperation===operation) pairOperation=null;return@launch}
+            when(read) {
+                is com.xnotes.ui.SplitArrangementRead.Ready->when(val request=read.request) {
+                    is com.xnotes.ui.SplitOpenRequest.Native->openNativeSplit(operation,host) {valid,guard->
+                        editor.prepareNativeSplitRequest(request.request,stillCurrent=valid,guardOwners=guard)
+                    }
+                    is com.xnotes.ui.SplitOpenRequest.Mixed->openSavedMixed(request.request,operation,host)
+                }
+                else->{pairOperation=null;editor.message=context.getString(R.string.split_arrangement_invalid)}
+            }
+        }
+    }
+    fun openTreeFile(uriStr: String, explicitlyDiscarded: Set<Editor.OpenDiscard> = emptySet()) {
+        if(kindOf(uriStr)==com.xnotes.core.util.DocumentKind.SPLIT) {openArrangement(uriStr);return}
+        val retainedMap=maps.current
+        val hostCurrent=captureMapHost()
+        fun launchOpen(mapProof:()->Boolean) {scope.launch {
+            editor.openSingleFromHome(uriStr, displayNameOf(resolver, Uri.parse(uriStr)), explicitlyDiscarded,
+                stillCurrent={hostCurrent() && mapProof()},onAdopted={
+                    if(retainedMap!=null) {maps.close(retainedMap);sourceNavigator.retire();savedMapUri=null;savedMapTitle=""}
+                    else maps.splitPresentation.clear()
+                    editor.mixedPresentationActive=false
+                    paneHomes=emptyMap();homeFocus=null;mainMenu=false
+                })
+        }}
+        if(retainedMap!=null) sourceNavigator.prepareEntryLeave(retainedMap,stillCurrent=hostCurrent, onReady=::launchOpen)
+        else launchOpen {true}
+    }
+
+    /** Open two picked files together, one per pane, and start the split focused on the first. */
+    fun openSplit(firstUri: String, secondUri: String,firstName:String?=null,secondName:String?=null) {
+        val names=listOf(firstName ?: displayNameOf(resolver,Uri.parse(firstUri)),
+            secondName ?: displayNameOf(resolver,Uri.parse(secondUri)))
+        val kinds=names.map {com.xnotes.core.util.DocumentKind.ofName(it.orEmpty())}
+        if (com.xnotes.core.util.DocumentKind.CANVAS in kinds) {
             editor.message = context.getString(R.string.split_canvas_unsupported)
             return
         }
-        editor.secondaryPane()
-        scope.launch {
-            // Either picked file may already be open in the other pane: settle both before reading.
-            for (current in editor.openPanes.map { it.documentOwner }.distinct()) {
-                if (current.visibleDocumentUri != null && !current.flushSplitDocument()) return@launch
+        val mapCount=kinds.count {it==com.xnotes.core.util.DocumentKind.MIND_MAP}
+        if(mapCount>0) {
+            if(mapCount!=1 || kinds.any {it!=com.xnotes.core.util.DocumentKind.MIND_MAP && it!=com.xnotes.core.util.DocumentKind.NOTE}) {
+                editor.message=context.getString(R.string.mixed_split_map_pair_unsupported);return
             }
-            val first = openInto(editor, firstUri) ?: return@launch
-            val second = first.sibling ?: return@launch
-            val opened = openInto(second, secondUri)
-            if (opened == null) editor.message = context.getString(R.string.err_open_second)
-            editor.splitRatio = 0.5f
-            editor.splitReversed = first !== editor
-            editor.focusPane(first.pane)
-            paneHomes = emptyMap()
-            mainMenu = false
+            if(!maps.isHostCurrent(mapBinding) || guardState.current!=null || originals.current!=null || originalLibrary.visible || networks.visible) {
+                editor.message=context.getString(R.string.mixed_split_busy);return
+            }
+            val operation=Any();pairOperation=operation
+            val hostCurrent=captureMapHost(allowedGuardTag=operation)
+            fun current()=pairOperation===operation && hostCurrent()
+            val mapIsFirst=kinds[0]==com.xnotes.core.util.DocumentKind.MIND_MAP
+            val mapIndex=if(mapIsFirst) 0 else 1
+            val nativeIndex=1-mapIndex
+            val uris=listOf(firstUri,secondUri)
+            val oldLayout=maps.splitPresentation.layout ?: maps.splitPresentation.returnLayout
+            val preferred=oldLayout?.nativePane ?: editor.active.pane
+            var applyKeys:(()->Unit)?=null
+            val accepted=maps.openPair(Uri.parse(uris[mapIndex]),
+                com.xnotes.core.util.DocumentKind.stripSuffix(names[mapIndex].orEmpty()),mapIsFirst,
+                prepareNative={valid->
+                    editor.preparePagedPairOpen(uris[nativeIndex],names[nativeIndex],preferred,
+                        stillCurrent={valid() && current()},guardOwners={owners,ready->
+                            guardPairOwners(owners,operation) {ready() && valid() && current()}
+                        })?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
+                },stillCurrent=::current,operation=operation,
+                onPresented={entry,cap->
+                    // The pair coordinator has just proved and adopted both sides in this stack.
+                    applyKeys?.invoke();applyKeys=null
+                    editor.mixedPresentationActive=true
+                    editor.focusMixedNativePane(cap.nativePane)
+                    networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+                    savedMapUri=entry.uri.toString();savedMapTitle=entry.title
+                    paneHomes=emptyMap();paneHomeViews=emptyMap();homeFocus=null;mainMenu=false
+                },onFinished={shown->
+                    applyKeys=null
+                    if(pairOperation===operation) {
+                        pairOperation=null
+                        if(!shown && maps.failure!=null) editor.message=context.getString(R.string.mixed_pair_open_failed)
+                    }
+                })
+            if(!accepted) {
+                if(pairOperation===operation) pairOperation=null
+                editor.message=context.getString(R.string.mixed_pair_open_failed)
+            }
+            return
+        }
+        val previousLayout=maps.splitPresentation.layout ?: maps.splitPresentation.returnLayout
+        val layout=com.xnotes.ui.NativeSplitOpenLayout(sideBySide=previousLayout?.sideBySide ?: editor.splitSideBySide)
+        openNativeSplit {valid,guard->
+            editor.prepareNativePairOpen(com.xnotes.ui.NativeSplitSource(firstUri,names[0]),
+                com.xnotes.ui.NativeSplitSource(secondUri,names[1]),layout=layout,stillCurrent=valid,guardOwners=guard)
         }
     }
 
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
-    fun openMap(uri:String,title:String=stemOf(uri)) {
-        if(!maps.isHostCurrent(mapBinding)) return
-        networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();sourceNavigator.retire()
+    var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
+    fun openOriginalLibrary() {
+        if(originalLibraryLaunch!=null || originalLibrary.visible || originals.current!=null || maps.visible || networks.visible) return
+        val launch=Any();originalLibraryLaunch=launch
         val current=captureMapHost()
-        maps.open(Uri.parse(uri),title,preparePresentation={
-            if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
-        },stillCurrent=current)
+        scope.launch {
+            try {
+                presentOriginalPdfLibrary(editor,originalLibrary) {
+                    originalLibraryLaunch===launch && current() && originals.current==null && !maps.visible && !networks.visible
+                }
+            } finally {if(originalLibraryLaunch===launch) originalLibraryLaunch=null}
+        }
+    }
+
+    fun openMap(uri:String,title:String=stemOf(uri),flushNativeOnPresent:Boolean=true,requestedPane:Editor?=null) {
+        if(!maps.isHostCurrent(mapBinding) || originals.current!=null || originalLibrary.visible) return
+        val layout=maps.splitPresentation.layout
+        if(requestedPane!=null) {
+            if(maps.current!=null || layout!=null && layout.mapPane!=requestedPane.pane) {
+                editor.message=context.getString(R.string.mixed_split_map_pair_unsupported);return
+            }
+            val other=if(requestedPane===editor) editor.secondaryPane() else editor
+            if(requestedPane.canvasOpen || other.canvasOpen) {
+                editor.message=context.getString(R.string.split_canvas_unsupported);return
+            }
+            var discard:Editor.OpenDiscard?=null
+            guarded(requestedPane,onDiscard={discard=it}) {scope.launch {
+                val current=captureMapHost()
+                val prepared=editor.prepareDetachMixedPane(requestedPane,setOfNotNull(discard),current) ?: return@launch
+                val mapPane=prepared.result.retiredPane
+                val split=com.xnotes.mindmap.MapSplitLayout(mapPane,mapPane,
+                    layout?.ratio ?: editor.splitRatio,layout?.sideBySide ?: editor.splitSideBySide,
+                    (layout?.reversed ?: editor.splitReversed) xor (mapPane!=requestedPane.pane),
+                    nativeHome=layout?.nativeHome ?: (other.pane in paneHomes || !other.noteOpen))
+                networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+                maps.open(Uri.parse(uri),title,preparePresentation={
+                    if(!current() || !prepared.current()) null else editor.awaitHostParking()?.let {proof->
+                        ({current() && proof.current() && prepared.commit()!=null})
+                    }
+                },stillCurrent=current,flushNativeOnPresent=false,presentation=com.xnotes.mindmap.MapOpenPresentation.Split(split),
+                    onPresented={
+                        editor.mixedPresentationActive=true
+                        val surviving=if(split.nativePane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondary
+                        maps.splitPresentation.rememberNativeHint(surviving?.nativeRestoreHint())
+                        paneHomes=paneHomes-requestedPane.pane-mapPane
+                        homeFocus=split.nativePane.takeIf {split.nativeHome};mainMenu=false
+                    })
+            }}
+            return
+        }
+        val prior=maps.current
+        val host=captureMapHost()
+        fun launchSingle(leaveProof:()->Boolean) {
+            if(!leaveProof() || !host()) return
+            val oldModel=prior?.session?.document
+            val oldEpoch=prior?.session?.interactionEpoch
+            val oldRevision=prior?.session?.contentRevision
+            fun current()=host() && (prior==null || maps.current===prior && prior.lease.alive &&
+                prior.session.document===oldModel && prior.session.interactionEpoch==oldEpoch &&
+                prior.session.contentRevision==oldRevision && prior.session.canParkSourceNavigation &&
+                (prior.lease.hasOtherOwners || !prior.session.dirty && !prior.session.saving))
+            networkCoordinator.cancel();networks.retireGraphReturn();backlinkNavigator.cancel();fileRelationNavigator.cancel()
+            maps.open(Uri.parse(uri),title,preparePresentation={
+                if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
+            },stillCurrent=::current,flushNativeOnPresent=flushNativeOnPresent,
+                onPresented={editor.mixedPresentationActive=false;sourceNavigator.retire();paneHomes=emptyMap();homeFocus=null;mainMenu=false})
+        }
+        if(prior!=null) sourceNavigator.prepareEntryLeave(prior,stillCurrent=host,onReady=::launchSingle)
+        else launchSingle {true}
+    }
+    fun splitMap(entry:com.xnotes.mindmap.MapWorkspace.Entry) {
+        if(maps.current!==entry || !maps.visible || maps.splitPresentation.layout!=null || !entry.session.canParkSourceNavigation) return
+        val native=editor.active
+        val mapPane=if(native.pane==com.xnotes.ui.Pane.PRIMARY) editor.secondaryPane() else editor
+        val current=captureMapHost()
+        var discard:Editor.OpenDiscard?=null
+        guarded(mapPane,onDiscard={discard=it}) {scope.launch {
+            val proof=editor.awaitHostParking() ?: return@launch
+            if(!current() || !proof.current() || !entry.session.canParkSourceNavigation) return@launch
+            val prepared=editor.prepareDetachMixedPane(mapPane,setOfNotNull(discard),current) ?: return@launch
+            val slot=prepared.result.retiredPane
+            val split=com.xnotes.mindmap.MapSplitLayout(slot,slot,.5f,editor.splitSideBySide,
+                reversed=slot==com.xnotes.ui.Pane.PRIMARY,nativeHome=!native.noteOpen || native.canvasOpen)
+            if(!proof.current() || !prepared.current() || !entry.session.canParkSourceNavigation) return@launch
+            if(prepared.commit()==null || !maps.showSplit(entry,split)) return@launch
+            editor.mixedPresentationActive=true
+            val surviving=if(split.nativePane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondary
+            maps.splitPresentation.rememberNativeHint(surviving?.nativeRestoreHint())
+            paneHomes=paneHomes-slot
+            if(split.nativeHome) paneHomes=paneHomes+(split.nativePane to native.visibleDocumentUri)
+            homeFocus=split.nativePane.takeIf {split.nativeHome};mainMenu=false
+        }}
     }
     LaunchedEffect(Unit) {if(maps.current==null) savedMapUri?.let {openMap(it,savedMapTitle)}}
 
@@ -1276,7 +1851,14 @@ private fun EditorScreen(
                 var discarded: Editor.OpenDiscard? = null
                 guarded(target, onDiscard = { discarded = it }) { target.newNote(setOfNotNull(discarded)) }
             },
-            open = { backstageView = com.xnotes.ui.BackstageView.HOME; guardedAll { editor.goHomeAll(it) } },
+            open = {
+                val layout=maps.splitPresentation.layout
+                if(layout!=null) mixedNative(layout)?.let {target->
+                    closeEditorPane(target)
+                    if(maps.splitPresentation.layout?.nativeHome==true)
+                        paneHomeViews=paneHomeViews+(target.pane to com.xnotes.ui.BackstageView.HOME)
+                } else {backstageView = com.xnotes.ui.BackstageView.HOME; guardedAll { editor.goHomeAll(it) }}
+            },
             save = { saveOrPrompt() },
             saveAs = { launchSaveAs(editor.active) },
             exportPdf = {
@@ -1285,7 +1867,14 @@ private fun EditorScreen(
                     render = { o, prog, cancel -> from.exportPdf(o, prog, cancel) },
                     onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${from.title}.pdf") })
             },
-            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; guardedAll { editor.goHomeAll(it) } },
+            preferences = {
+                val layout=maps.splitPresentation.layout
+                if(layout!=null) mixedNative(layout)?.let {target->
+                    closeEditorPane(target)
+                    if(maps.splitPresentation.layout?.nativeHome==true)
+                        paneHomeViews=paneHomeViews+(target.pane to com.xnotes.ui.BackstageView.PREFERENCES)
+                } else {backstageView = com.xnotes.ui.BackstageView.PREFERENCES; guardedAll { editor.goHomeAll(it) }}
+            },
             fullscreen = onToggleFullscreen,
         )
     }
@@ -1308,8 +1897,8 @@ private fun EditorScreen(
     // and land on the backstage so its name dialog appears, exactly like the in-app "Import PDF"
     // button. With no folder chosen yet, fall back to App storage so the explorer renders and the
     // note autosaves. A markdown file becomes a new note whose text it is.
-    LaunchedEffect(importUri,graphicsVisible) {
-        if(graphicsVisible) return@LaunchedEffect
+    LaunchedEffect(importUri,graphicsVisible,mixedImportBlocked) {
+        if(graphicsVisible || mixedImportBlocked) return@LaunchedEffect
         val src = importUri ?: return@LaunchedEffect
         onImportConsumed() // consume once; the body has no suspend point so it runs to completion
         val name = displayNameOf(resolver, src)
@@ -1332,28 +1921,57 @@ private fun EditorScreen(
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
     com.xnotes.mindmap.PageToMapFlowHost(editor,
         onSave={target->launchSaveAs(target)},
-        onOpenMap={uri->openMap(uri.toString())},visible=!graphicsVisible)
+        onOpenMap={uri,flush->
+            val entry=maps.current
+            val layout=maps.splitPresentation.layout
+            if(entry!=null && layout!=null && com.xnotes.mindmap.MapSaves.key(entry.uri)==com.xnotes.mindmap.MapSaves.key(uri)) {
+                focusMixed(com.xnotes.pen.MixedInputRouter.Target(layout.mapPane,com.xnotes.pen.MixedInputRouter.Kind.MAP))
+            } else openMap(uri.toString(),flushNativeOnPresent=flush)
+        },visible=!graphicsVisible && mixedLayout?.nativeHome!=true,
+        preferredMap=maps.current.takeIf {mixedLayout!=null},
+        preferredMapCurrent={entry->maps.isHostCurrent(mapBinding) && maps.current===entry && maps.visible &&
+            maps.splitPresentation.layout?.let {it.mapPane==mixedLayout?.mapPane && it.nativePane==mixedLayout?.nativePane}==true && entry.lease.alive},
+        visibleSourcePane=mixedLayout?.nativePane)
 
-    com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->
+    fun closeMapEntry(entry:com.xnotes.mindmap.MapWorkspace.Entry,preserveRecovery:Boolean=false):Boolean {
+        if(!maps.isHostCurrent(mapBinding) || maps.current!==entry) return false
         val back=networks.returnEntry(entry)
-        if(maps.isHostCurrent(mapBinding) && maps.current===entry) {
-            backlinkNavigator.cancel();sourceNavigator.retire()
-            if(back!=null) networkCoordinator.resume(back,entry,closeMap=true)
-            else if(maps.close(entry)!=null) {
-                savedMapUri=null;savedMapTitle=""
-                editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
-            }
-        }
-    },hooks={entry->
+        backlinkNavigator.cancel();fileRelationNavigator.cancel();sourceNavigator.retire()
+        if(back!=null) return networkCoordinator.resume(back,entry,closeMap=true,preserveMapRecovery=preserveRecovery)
+        val closing=if(maps.splitPresentation.layout!=null) maps.closeToHome(entry,preserveRecovery=preserveRecovery)
+            else maps.close(entry,preserveRecovery=preserveRecovery)
+        if(closing==null) return false
+        savedMapUri=null;savedMapTitle=""
+        editor.refreshStoredFile(entry.uri.toString());editor.secondary?.refreshStoredFile(entry.uri.toString())
+        return true
+    }
+    com.xnotes.mindmap.OriginalPdfWorkspaceHost(originals,onClose={originalNavigator.close()}) {
+    com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary,onOpen={observation,current->
+        val record=observation.record
+        val target=com.xnotes.mindmap.MapSourceTarget(record.id,com.xnotes.mindmap.SourceScope.PDF_ORIGINAL,
+            pageId=record.pages.first(),originalPdf=com.xnotes.mindmap.PdfOriginalProjection(record.sha256,0))
+        originalNavigator.openLibrary(target,current)
+    }) {
+    com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->closeMapEntry(entry)},hooks={entry->
         val back=networks.returnEntry(entry)
         com.xnotes.mindmap.MapHostHooks(
             openSource={ticket,bookmark->sourceNavigator.open(entry,ticket,bookmark)},
-            busy={sourceNavigator.busy || networkCoordinator.busy},
+            busy={sourceNavigator.busy || networkCoordinator.busy || maps.splitPresentation.layout!=null && editor.openPanes.any {it.stylusInContact}},
             cancel={if(sourceNavigator.busy) sourceNavigator.cancel() else back?.let {networkCoordinator.cancel(it)}},
-            feedback={if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed
+            feedback={sourceNavigator.mapFeedback ?: if(sourceNavigator.saveFailed) R.string.graph_source_guard_save_failed
                 else sourceNavigator.failure?.let(::referenceFailureText)
                     ?: back?.let {networkCoordinator.failureFor(it)}?.let {com.xnotes.mindmap.networkProblemText(it)}},
-            returnToNetwork=back?.let {network->{ {networkCoordinator.resume(network,entry);Unit} }})}) {
+            returnToNetwork=back?.let {network->{ {networkCoordinator.resume(network,entry);Unit} }},
+            returnToSourceMap=if(maps.canReturnSource) ({sourceNavigator.returnToSourceMap();Unit}) else null,
+            closeEntry={sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}},
+            closeRecoveryEntry={sourceNavigator.closeEntry(entry,preserveRecovery=true) {closeMapEntry(entry,true)}},
+            embedded=maps.splitPresentation.layout!=null,
+            focused={maps.splitPresentation.layout?.let {it.focusedPane==it.mapPane} ?: true},
+            requestFocus={maps.splitPresentation.layout?.let {layout->
+                focusMixed(com.xnotes.pen.MixedInputRouter.Target(layout.mapPane,com.xnotes.pen.MixedInputRouter.Kind.MAP))
+            } ?: true},
+            keyboardFocusGeneration=maps.splitPresentation.generation,
+            splitDocument=if(maps.splitPresentation.layout==null) ({splitMap(entry)}) else null)}) {
     com.xnotes.mindmap.FileNetworkWorkspaceHost(networks,com.xnotes.mindmap.FileNetworkHostActions(
         open={entry,anchor,target->
             if(!networks.current(mapBinding,entry) || !networks.visible) false else {
@@ -1364,11 +1982,22 @@ private fun EditorScreen(
                 }
                 guarded!=null && backlinkNavigator.openNetwork(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
             }
-        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.close(entry)},
-        busy={backlinkNavigator.busy || networkCoordinator.busy},
-        cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
-        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)},
-        openCanvas=networkCoordinator::openCanvas)) {
+        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.close(entry)},
+        busy={backlinkNavigator.busy || fileRelationNavigator.busy || networkCoordinator.busy},
+        cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
+        feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner)
+            ?: fileRelationNavigator.failureFor(entry.controller.requestOwner) ?: networkCoordinator.failureFor(entry)},
+        openCanvas=networkCoordinator::openCanvas,
+        openRelation={entry,row->
+            if(!networks.current(mapBinding,entry) || !networks.visible || backlinkNavigator.busy || networkCoordinator.busy) false else {
+                val input=entry.presentation.captureInput()
+                val request=entry.controller.captureRelation(row)
+                val guarded=if(input==null) null else request?.withPresentationGuard {
+                    input.current() && networks.current(mapBinding,entry) && networks.visible
+                }
+                guarded!=null && fileRelationNavigator.open(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
+            }
+        })) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
@@ -1409,14 +2038,17 @@ private fun EditorScreen(
             // BASE LAYER: backstage is the root of the stack — always present underneath.
             val home: @Composable (Editor?) -> Unit = { target ->
                 androidx.compose.runtime.key(target?.pane) {
-                var paneView by remember { mutableStateOf(com.xnotes.ui.BackstageView.HOME) }
                 com.xnotes.ui.Backstage(
                 editor = target ?: editor,
-                view = if (target == null) backstageView else paneView,
-                onSelectView = { if (target == null) backstageView = it else paneView = it },
+                view = if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
+                onSelectView = { if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it) },
                 allowSplits = target == null,
+                allowMapPairs = true,
+                allowNativePairs = true,
+                canRestoreSplit = recentState.loaded && recentState.read is com.xnotes.ui.SplitArrangementRead.Ready,
                 initialDocument = target?.let { paneHomes[it.pane] },
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
+                onOpenOriginalPdfs = ::openOriginalLibrary,
                 onOpenNetwork = {
                     if(!networkCoordinator.busy) {
                         val request=com.xnotes.mindmap.LibraryNetworkLaunchRequest.capture(
@@ -1426,7 +2058,7 @@ private fun EditorScreen(
                             editor.message=context.getString(com.xnotes.mindmap.networkProblemText(com.xnotes.mindmap.BacklinkProblem.CHANGED))
                     }
                 },
-                backEnabled = target == null || homeFocus == target.pane,
+                backEnabled = target == null || (maps.splitPresentation.layout?.focusedPane ?: homeFocus) == target.pane,
                 onExitApp = { if (target == null) (context as? android.app.Activity)?.finish() else closePaneHome(target) },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
                 onImportFont = { importFontLauncher.launch(arrayOf("*/*")) },
@@ -1436,8 +2068,10 @@ private fun EditorScreen(
                 },
                 onImportPdf = { importPdfPane = target; importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri ->
-                    if (com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty()) == com.xnotes.core.util.DocumentKind.MIND_MAP) {
-                        openMap(uri)
+                    val kind=com.xnotes.core.util.DocumentKind.ofName(displayNameOf(resolver, Uri.parse(uri)).orEmpty())
+                    if(kind==com.xnotes.core.util.DocumentKind.SPLIT) openArrangement(uri)
+                    else if (kind == com.xnotes.core.util.DocumentKind.MIND_MAP) {
+                        openMap(uri,requestedPane=target)
                     } else if (target == null) guardedAll { discarded -> openTreeFile(uri, discarded) }
                     else guarded(target) {
                         val toolsFrom = editor.active
@@ -1446,22 +2080,36 @@ private fun EditorScreen(
                             if (opened != null) {
                                 paneHomes = com.xnotes.ui.finishPaneHomeOpen(paneHomes, target.pane, opened.pane)
                                 homeFocus = null
-                                opened.copyToolSettingsFrom(toolsFrom)
-                                editor.focusPane(opened.pane)
+                                val split=maps.splitPresentation.layout
+                                if(split!=null) {
+                                    if(target.pane==split.mapPane && maps.current==null) maps.removeSplitHome(split.mapPane)
+                                    else {
+                                        maps.updateSplitLayout {it.copy(nativeHome=false,focusedPane=opened.pane)}
+                                        editor.focusMixedNativePane(opened.pane)
+                                    }
+                                } else {
+                                    opened.copyToolSettingsFrom(toolsFrom)
+                                    editor.focusPane(opened.pane)
+                                }
                             }
                         }
                     }
                 },
                 onChooseSplitPair = {
+                    if(hasMixedPresentation() || maps.current!=null) {
+                        editor.message=context.getString(R.string.mixed_split_pair_pending)
+                    } else {
                     if (editor.browseRoot == null) editor.useInternalStorage()
+                    maps.splitPresentation.clear()
                     editor.secondaryPane()
                     paneHomes = mapOf(com.xnotes.ui.Pane.PRIMARY to null, com.xnotes.ui.Pane.SECONDARY to null)
                     homeFocus = com.xnotes.ui.Pane.PRIMARY
                     editor.splitRatio = 0.5f
                     mainMenu = false
+                    }
                 },
-                onOpenSplitFile = { uri -> guardedAll { discarded -> scope.launch { if (editor.openSplitFile(uri, discarded)) { paneHomes = emptyMap(); mainMenu = false } } } },
-                onRestoreSplit = { if (editor.inSplit) { paneHomes = emptyMap(); mainMenu = false } else guardedAll { discarded -> scope.launch { if (editor.openSplitFile(explicitlyDiscarded = discarded)) { paneHomes = emptyMap(); mainMenu = false } } } },
+                onOpenSplitFile = ::openArrangement,
+                onRestoreSplit = {openArrangement()},
                 onPickRoot = { browsePickerPane = target; pickRootLauncher.launch(null) },
                 onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
                 onSaveCopyFile = ::launchStoredCopy,
@@ -1470,14 +2118,18 @@ private fun EditorScreen(
                         render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },
                         onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${stemOf(uri)}.pdf") })
                 },
-                onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
+                onOpenSplitEntries = { first, second ->
+                    openSplit(first.documentUri,second.documentUri,first.name,second.name)
+                },
                 onShareFiles = { uris -> shareFiles(uris) },
                 onOpenBeside = { uri ->
                     editor.currentUri?.takeIf {
                         target == null && !editor.canvasOpen && !editor.isSameDocument(it, uri) &&
-                            kindOf(uri) != com.xnotes.core.util.DocumentKind.CANVAS &&
-                            kindOf(uri) != com.xnotes.core.util.DocumentKind.MIND_MAP
-                    }?.let { first -> { guardedAll { openSplit(first, uri) } } }
+                            kindOf(uri) != com.xnotes.core.util.DocumentKind.CANVAS
+                    }?.let { first -> {
+                        if(kindOf(uri)==com.xnotes.core.util.DocumentKind.MIND_MAP) openMap(uri,requestedPane=editor.secondaryPane())
+                        else openSplit(first, uri)
+                    } }
                 },
                 onExportPdfs = { picked, name, onStarted ->
                     pendingPdfs = PendingPdfs(picked, onStarted)
@@ -1493,13 +2145,28 @@ private fun EditorScreen(
             )
                 }
             }
-            if (paneHomes.isEmpty() || mainMenu) home(null)
+            if (mixedLayout==null && paneHomes.isEmpty() || mainMenu) home(null)
+            BackHandler(enabled=mainMenu && maps.splitPresentation.returnLayout!=null) {
+                val layout=maps.splitPresentation.returnLayout
+                val entry=maps.current
+                if(layout!=null) {
+                    if(entry==null) {maps.splitPresentation.present(com.xnotes.mindmap.MapOpenPresentation.RestoreSplit);mainMenu=false}
+                    else {
+                        val current=captureMapHost()
+                        maps.open(entry.uri,entry.title,preparePresentation={
+                            if(!current()) null else editor.awaitHostParking()?.let {proof->({current() && proof.current()})}
+                        },stillCurrent=current,flushNativeOnPresent=false,
+                            presentation=com.xnotes.mindmap.MapOpenPresentation.Split(layout),onPresented={mainMenu=false})
+                    }
+                }
+            }
 
             // TOP LAYER: the open panes (toolbar + canvas each), pushed over backstage. Back acts on
             // the focused pane; its handlers live here so — composed after backstage — they win while
             // a note is open.
             val focused = editor.active
-            if (focused.noteOpen && !mainMenu && (paneHomes.isEmpty() || homeFocus == null)) {
+            val nativeFocused=mixedLayout==null || mixedLayout.focusedPane==mixedLayout.nativePane && !mixedLayout.nativeHome
+            if (focused.noteOpen && nativeFocused && !mainMenu && (paneHomes.isEmpty() || homeFocus == null)) {
                 // While a text box is open, Back commits-or-dismisses it (and hides the keyboard).
                 BackHandler(enabled = focused.editingField != null) { focused.commitText() }
                 // A live flow caret session ends first (flushing its typing burst).
@@ -1513,15 +2180,26 @@ private fun EditorScreen(
             val actions = PaneActions(
                 onToggleFullscreen = onToggleFullscreen,
                 onMainMenu = {
-                    if (editor.openPanes.none { it.stylusInContact }) {
-                        editor.persist()
-                        parkedDocuments = documentsNow
-                        mainMenu = true
+                    val layout=maps.splitPresentation.layout
+                    val entry=maps.current
+                    if(layout!=null) {
+                        val current=captureMapHost()
+                        scope.launch {
+                            val proof=editor.awaitHostParking() ?: return@launch
+                            if(!current() || !proof.current() || entry?.session?.canParkSourceNavigation==false) return@launch
+                            if(entry!=null && !maps.hide(entry)) return@launch
+                            if(entry==null) maps.splitPresentation.park()
+                            editor.persist();maps.persist()
+                            parkedDocuments=documentsNow;mainMenu=true;backstageView=com.xnotes.ui.BackstageView.HOME
+                        }
+                    } else if (editor.openPanes.none { it.stylusInContact }) {
+                        editor.persist();parkedDocuments = documentsNow;mainMenu = true
                         backstageView = com.xnotes.ui.BackstageView.HOME
                     }
                 },
                 onSaveSplit = {
-                    if (paneHomes.isNotEmpty() || editor.openPanes.any { it.visibleDocumentUri == null }) editor.message = context.getString(R.string.split_save_files_first)
+                    if(hasMixedPresentation()) saveMixedArrangement()
+                    else if (paneHomes.isNotEmpty() || editor.openPanes.any { it.visibleDocumentUri == null }) editor.message = context.getString(R.string.split_save_files_first)
                     else scope.launch { editor.saveCurrentSplit() }
                 },
                 onOpenBackstage = { pane ->
@@ -1531,14 +2209,16 @@ private fun EditorScreen(
                     closeEditorPane(pane)
                 },
                 onPickDocument = { pane ->
-                    if (!editor.active.stylusInContact) {
+                    if (editor.openPanes.none {it.stylusInContact} && maps.current?.session?.inkContact!=true) {
                         if (editor.browseRoot == null) editor.useInternalStorage()
                         paneHomes = paneHomes + (pane.pane to pane.visibleDocumentUri)
+                        paneHomeViews=paneHomeViews+(pane.pane to com.xnotes.ui.BackstageView.HOME)
                         homeFocus = pane.pane
+                        maps.updateSplitLayout {it.copy(nativeHome=true,focusedPane=pane.pane)}
                     }
                 },
                 onSplitDocument = { pane ->
-                    if (!editor.inSplit && !pane.canvasOpen && !pane.stylusInContact) {
+                    if (maps.splitPresentation.layout==null && !editor.inSplit && !pane.canvasOpen && !pane.stylusInContact) {
                         if (editor.browseRoot == null) editor.useInternalStorage()
                         val slot = if (pane === editor) com.xnotes.ui.Pane.SECONDARY else com.xnotes.ui.Pane.PRIMARY
                         editor.secondaryPane()
@@ -1560,7 +2240,12 @@ private fun EditorScreen(
                     runCatching { launchShare(file, file.nameWithoutExtension, "image/png") }
                         .onFailure { editor.message = context.getString(R.string.err_share_image) }
                 },
-                onOpenFile = { pane, uri -> scope.launch { openInto(pane, uri) } },
+                onOpenFile = { pane, uri ->
+                    if(kindOf(uri)==com.xnotes.core.util.DocumentKind.SPLIT) openArrangement(uri)
+                    else if(kindOf(uri)==com.xnotes.core.util.DocumentKind.MIND_MAP)
+                        openMap(uri,requestedPane=pane.takeIf {editor.inSplit})
+                    else scope.launch { openInto(pane, uri) }
+                },
                 onAddStickers = { addStickersLauncher.launch(arrayOf("image/*")) },
                 onInsertAudio = { pane ->
                     pendingAudioPane = pane
@@ -1619,6 +2304,9 @@ private fun EditorScreen(
                 },
                 backlinks = backlinkHooks,
             )
+            val mixedHost=mixedLayout?.let {MixedSplitHostState(maps,mixedInput,
+                onPickMap={maps.current?.let {entry->sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}}},
+                onCloseMap={maps.current?.let {entry->sourceNavigator.closeEntry(entry) {closeMapEntry(entry)}}})}
             // A canvas being opened stays hidden until its first GL frame is on screen, so the menu
             // underneath stays in view rather than an empty surface flashing black. Only while that
             // menu is actually composed below; otherwise the canvas's own paper cover takes over.
@@ -1633,7 +2321,8 @@ private fun EditorScreen(
                                 .changes.forEach { it.consume() }
                         }
                     } else Modifier),
-            ) { SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null }) { pane ->
+            ) { SplitHost(editor, actions, paneHomes.keys, onDocumentFocus = { homeFocus = null },mixed=mixedHost,
+                nativeFocusGeneration=nativeFocusGeneration) { pane ->
                 BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(com.xnotes.ui.theme.LocalPalette.current.bg.toComposeColor())) {
                     val configuration = android.content.res.Configuration(LocalConfiguration.current).apply {
                         screenWidthDp = maxWidth.value.toInt()
@@ -1643,10 +2332,13 @@ private fun EditorScreen(
                         Column(Modifier.fillMaxSize().pointerInput(pane) {
                             awaitPointerEventScope { while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                                if (event.type == PointerEventType.Press) homeFocus = pane.pane
+                                if (event.type == PointerEventType.Press) {
+                                    homeFocus = pane.pane
+                                    if(maps.splitPresentation.layout!=null) focusMixed(com.xnotes.pen.MixedInputRouter.Target(pane.pane,com.xnotes.pen.MixedInputRouter.Kind.HOME))
+                                }
                             } }
                         }) {
-                            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().height(com.xnotes.ui.theme.MinTouchTarget), verticalAlignment = Alignment.CenterVertically) {
                                 Text(stringResource(R.string.home), Modifier.weight(1f).padding(horizontal = Space.s16),
                                     color = com.xnotes.ui.theme.LocalPalette.current.text.toComposeColor())
                                 androidx.compose.material3.IconButton(onClick = {
@@ -1663,13 +2355,30 @@ private fun EditorScreen(
     }
     }
     }
+    }
+    }
+    if(originals.current!=null && (originalNavigator.busy || originalNavigator.failure!=null)) {
+        Box(Modifier.fillMaxSize()) {
+            androidx.compose.material3.Surface(Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
+                Row(Modifier.padding(Space.s8),verticalAlignment=Alignment.CenterVertically,
+                    horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
+                    Text(stringResource(originalNavigator.failure?.let(::referenceFailureText) ?: R.string.graph_source_returning),fontSize=TextSize.body)
+                    com.xnotes.mindmap.MapButton(R.string.cancel) {
+                        if(originalNavigator.busy) originalNavigator.cancel() else originalNavigator.clearFailure()
+                    }
+                }
+            }
+        }
+    }
     val latestImport by androidx.compose.runtime.rememberUpdatedState(importUri)
-    if(graphicsVisible && importUri!=null) {
+    if((graphicsVisible || mixedImportBlocked) && importUri!=null) {
         val expectedImport=importUri
         Box(Modifier.fillMaxSize()) {
             androidx.compose.material3.Surface(modifier=Modifier.align(Alignment.BottomEnd).padding(Space.s8)) {
                 Row(Modifier.padding(Space.s8),verticalAlignment=Alignment.CenterVertically) {
-                    Text(stringResource(if(networks.visible) R.string.network_import_notice else R.string.graph_host_import_notice),fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                    Text(stringResource(when {mixedImportBlocked->R.string.mixed_split_import_pending
+                        networks.visible->R.string.network_import_notice
+                        else->R.string.graph_host_import_notice}),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                     com.xnotes.mindmap.MapButton(R.string.cancel) {if(latestImport==expectedImport) onImportConsumed()}
                 }
             }
@@ -1973,21 +2682,32 @@ private fun Editor.toolbarDocuments(): Set<com.xnotes.core.tools.ToolbarDocument
 }.toSet()
 
 @Composable
-internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit, home: @Composable (Editor) -> Unit) {
-    val second = editor.secondary
-    val primaryVisible = editor.noteOpen || com.xnotes.ui.Pane.PRIMARY in homes
-    val secondVisible = second != null && (second.noteOpen || com.xnotes.ui.Pane.SECONDARY in homes)
+internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnotes.ui.Pane>, onDocumentFocus: () -> Unit,
+    mixed:MixedSplitHostState?=null,nativeFocusGeneration:Long=0, home: @Composable (Editor) -> Unit) {
+    val mixedLayout=mixed?.workspace?.splitPresentation?.layout
+    val mapContent=com.xnotes.mindmap.LocalMapPaneContent.current
+    val shownHomes=homes + listOfNotNull(mixedLayout?.takeIf {it.nativeHome}?.nativePane)
+    val second = if(mixedLayout!=null) remember(editor) {editor.secondaryPane()} else editor.secondary
+    val primaryVisible = mixedLayout!=null || editor.noteOpen || com.xnotes.ui.Pane.PRIMARY in shownHomes
+    val secondVisible = second != null && (mixedLayout!=null || second.noteOpen || com.xnotes.ui.Pane.SECONDARY in shownHomes)
     val split = primaryVisible && secondVisible
     // A pane that closed on its own leaves the other one full-screen; once neither is open the
     // second editor is released, freeing its canvas and GL surfaces.
-    LaunchedEffect(editor.noteOpen, second?.noteOpen, homes) {
-        if (second != null && !second.noteOpen && com.xnotes.ui.Pane.SECONDARY !in homes) editor.releaseClosedSecondary()
+    LaunchedEffect(editor.noteOpen, second?.noteOpen, shownHomes,mixedLayout!=null) {
+        if (mixedLayout==null && second != null && !second.noteOpen && com.xnotes.ui.Pane.SECONDARY !in shownHomes) editor.releaseClosedSecondary()
     }
     if (!primaryVisible && !secondVisible) return
 
-    val sideBySide = editor.splitSideBySide ?: (LocalConfiguration.current.orientation ==
+    val sideBySide = (mixedLayout?.sideBySide ?: editor.splitSideBySide) ?: (LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE)
-    val ratio = editor.splitRatio.coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
+    val ratio = (mixedLayout?.ratio ?: editor.splitRatio).coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
+    val reversed=mixedLayout?.reversed ?: editor.splitReversed
+    fun inputIdle()=editor.openPanes.none {it.stylusInContact} && mixed?.workspace?.current?.session?.inkContact!=true
+    fun swapPositions() {
+        if(!inputIdle()) return
+        if(mixed!=null) mixed.workspace.updateSplitLayout {it.copy(reversed=!it.reversed)}
+        else editor.splitReversed=!editor.splitReversed
+    }
     var swapAnimating by remember(editor, sideBySide, split) { mutableStateOf(false) }
     var titleDrag by remember(editor, sideBySide, split) { mutableStateOf<SplitTitleDrag?>(null) }
     Column(Modifier.fillMaxSize().then(SwallowTouches).imePadding()) {
@@ -2001,11 +2721,17 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
                     com.xnotes.ui.ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home), onClick = actions.onMainMenu)
                 }, trailing = {
                     com.xnotes.ui.ToolbarIcon(XnotesIcons.save, stringResource(R.string.split_save), onClick = actions.onSaveSplit)
-                    com.xnotes.ui.ToolbarIcon(XnotesIcons.split, stringResource(R.string.split_change_direction)) { editor.splitSideBySide = !sideBySide }
+                    com.xnotes.ui.ToolbarIcon(XnotesIcons.split, stringResource(R.string.split_change_direction)) {
+                        if(inputIdle()) {
+                            if(mixed!=null) mixed.workspace.updateSplitLayout {it.copy(sideBySide=!sideBySide)}
+                            else editor.splitSideBySide = !sideBySide
+                        }
+                    }
+                    if(mixed!=null) com.xnotes.ui.ToolbarIcon(XnotesIcons.redo,stringResource(R.string.mixed_split_swap),onClick=::swapPositions)
                 }) {
                     CompositionLocalProvider(com.xnotes.ui.LocalEmbeddedToolbar provides true,
                         com.xnotes.ui.LocalWorkspaceToolbarLayout provides layout.forDocumentControls(false, editor.toolbarDocuments())) {
-                        if (homes.size < 2) EditorToolbar(editor.active, editor, actions, shared = true)
+                        if (mixed==null && homes.size < 2) EditorToolbar(editor.active, editor, actions, shared = true)
                     }
                 }
             }
@@ -2040,7 +2766,7 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
             val local = drag.point - hostOrigin
             val axis = if (sideBySide) local.x else local.y
             val cross = if (sideBySide) local.y else local.x
-            val sourceFirst = (drag.source === editor) != editor.splitReversed
+            val sourceFirst = (drag.source === editor) != reversed
             return split && !drag.returning && com.xnotes.core.util.isOppositeSplitPane(
                 sourceFirst, axis, cross, extentPx, crossPx, ratio)
         }
@@ -2049,24 +2775,24 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
         }
         val onTitleDrop: (Boolean) -> Unit = { cancelled ->
             titleDrag?.let { drag ->
-                if (!cancelled && isDropTarget(drag) && editor.openPanes.none { it.stylusInContact }) {
+                if (!cancelled && isDropTarget(drag) && inputIdle()) {
                     swapAnimating = true
-                    editor.splitReversed = !editor.splitReversed
+                    swapPositions()
                     titleDrag = null
                 } else titleDrag = drag.copy(point = drag.origin, returning = true)
             }
         }
         // Recreate on size/ratio changes so resizing stays immediate; animate only reordering.
         val primaryPosition = remember(firstExtent, sideBySide, split) {
-            androidx.compose.animation.core.Animatable(if (split && editor.splitReversed) with(density) { firstExtent.toPx() } else 0f)
+            androidx.compose.animation.core.Animatable(if (split && reversed) with(density) { firstExtent.toPx() } else 0f)
         }
         val secondaryPosition = remember(firstExtent, sideBySide, split) {
-            androidx.compose.animation.core.Animatable(if (split && !editor.splitReversed) with(density) { firstExtent.toPx() } else 0f)
+            androidx.compose.animation.core.Animatable(if (split && !reversed) with(density) { firstExtent.toPx() } else 0f)
         }
-        LaunchedEffect(editor.splitReversed, primaryPosition, secondaryPosition) {
-            val primaryMotion = launch { primaryPosition.animateTo(if (split && editor.splitReversed) with(density) { firstExtent.toPx() } else 0f,
+        LaunchedEffect(reversed, primaryPosition, secondaryPosition) {
+            val primaryMotion = launch { primaryPosition.animateTo(if (split && reversed) with(density) { firstExtent.toPx() } else 0f,
                 androidx.compose.animation.core.tween(240)) }
-            secondaryPosition.animateTo(if (split && !editor.splitReversed) with(density) { firstExtent.toPx() } else 0f,
+            secondaryPosition.animateTo(if (split && !reversed) with(density) { firstExtent.toPx() } else 0f,
                 androidx.compose.animation.core.tween(240))
             primaryMotion.join()
             swapAnimating = false
@@ -2075,38 +2801,58 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
             androidx.compose.ui.unit.IntOffset(if (sideBySide) position.value.roundToInt() else 0,
                 if (sideBySide) 0 else position.value.roundToInt())
         }
-        if (primaryVisible) {
-            if (com.xnotes.ui.Pane.PRIMARY in homes) Box(animatedPosition(primaryPosition)
-                .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent))) { home(editor) }
-            else androidx.compose.runtime.key(editor, editor.canvasOpen) { EditorPane(
-                editor = editor,
-                app = editor,
-                actions = actions,
-                closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
-                modifier = animatedPosition(primaryPosition)
-                    .then(paneSize(if (split && editor.splitReversed) secondExtent else firstExtent)),
-            ) }
+        @Composable fun paneContent(pane:Editor, modifier:Modifier) {
+            val mapPane=mixedLayout?.mapPane==pane.pane
+            val isHome=if(mapPane) mixed?.workspace?.current==null else pane.pane in shownHomes
+            val kind=when {isHome->com.xnotes.pen.MixedInputRouter.Kind.HOME
+                mapPane->com.xnotes.pen.MixedInputRouter.Kind.MAP
+                else->com.xnotes.pen.MixedInputRouter.Kind.NATIVE}
+            val route=com.xnotes.pen.MixedInputRouter.Target(pane.pane,kind)
+            val paneModifier=if(mixed!=null) modifier.then(mixedSlotInput(mixed.input,route)) else modifier
+            if(isHome) Box(paneModifier.clipToBounds()) {home(pane)}
+            else if(mapPane && mixed!=null) {
+                val palette=LocalPalette.current
+                Column(paneModifier.clipToBounds().background(palette.bg.toComposeColor())) {
+                    Row(Modifier.fillMaxWidth().heightIn(min=com.xnotes.ui.theme.MinTouchTarget)
+                        .background(palette.panel.toComposeColor()).border(Space.s2/2,palette.border.toComposeColor()),
+                        verticalAlignment=Alignment.CenterVertically) {
+                        Text(mixed.workspace.current?.title.orEmpty(),fontSize=TextSize.body,
+                            color=palette.text.toComposeColor(),maxLines=1,
+                            overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            textDecoration=if(mixedLayout?.focusedPane==pane.pane) androidx.compose.ui.text.style.TextDecoration.Underline else null,
+                            modifier=Modifier.weight(1f).clickable {mixed.input.focus(route)}.padding(Space.s12))
+                        androidx.compose.material3.IconButton(onClick=mixed.onPickMap,modifier=Modifier.size(com.xnotes.ui.theme.MinTouchTarget)) {
+                            Icon(XnotesIcons.folder,stringResource(R.string.split_replace_document))
+                        }
+                        androidx.compose.material3.IconButton(onClick=mixed.onCloseMap,modifier=Modifier.size(com.xnotes.ui.theme.MinTouchTarget)) {
+                            Icon(XnotesIcons.close,stringResource(R.string.split_close_document))
+                        }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {mapContent?.invoke()}
+                }
+            } else androidx.compose.runtime.key(pane,pane.canvasOpen) {EditorPane(
+                editor=pane,app=editor,actions=actions,closable=split,
+                onTitleDrag=onTitleDrag,onTitleDrop=onTitleDrop,onDocumentFocus=onDocumentFocus,
+                focusGeneration=nativeFocusGeneration,
+                paneFocused=mixedLayout?.let {it.focusedPane==pane.pane},
+                onPaneFocus=mixed?.let {host->{target->host.input.focus(com.xnotes.pen.MixedInputRouter.Target(target.pane,kind));Unit}},
+                toolbarDocuments=mixed?.let {setOf(com.xnotes.core.tools.ToolbarDocument.MAP,
+                    if(pane.hasPdf) com.xnotes.core.tools.ToolbarDocument.PDF else com.xnotes.core.tools.ToolbarDocument.NOTE)},
+                modifier=paneModifier,
+            )}
         }
-        if (secondVisible && second != null) {
-            if (com.xnotes.ui.Pane.SECONDARY in homes) Box(animatedPosition(secondaryPosition)
-                .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent))) { home(second) }
-            else androidx.compose.runtime.key(second, second.canvasOpen) { EditorPane(
-                editor = second,
-                app = editor,
-                actions = actions,
-                closable = split, onTitleDrag = onTitleDrag, onTitleDrop = onTitleDrop, onDocumentFocus = onDocumentFocus,
-                modifier = animatedPosition(secondaryPosition)
-                    .then(paneSize(if (split && editor.splitReversed) firstExtent else secondExtent)),
-            ) }
-        }
+        if(primaryVisible) paneContent(editor,animatedPosition(primaryPosition)
+            .then(paneSize(if(split && reversed) secondExtent else firstExtent)))
+        if(secondVisible && second!=null) paneContent(second,animatedPosition(secondaryPosition)
+            .then(paneSize(if(split && reversed) firstExtent else secondExtent)))
         // Composed last so it sits over both panes and catches the drag before either of them.
         if (split) {
             SplitDivider(
                 sideBySide = sideBySide,
                 extentPx = with(LocalDensity.current) { full.toPx() },
-                ratio = editor.splitRatio,
-                onRatio = { editor.splitRatio = it },
-                canDrag = { editor.openPanes.none { it.stylusInContact } },
+                ratio = ratio,
+                onRatio = { value -> if(mixed!=null) mixed.workspace.updateSplitLayout {it.copy(ratio=value)} else editor.splitRatio=value },
+                canDrag = ::inputIdle,
                 modifier = paneOffset((firstExtent - DIVIDER / 2).coerceAtLeast(0.dp))
                     .then(paneSize(DIVIDER)),
             )
@@ -2118,7 +2864,7 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
         titleDrag?.let { drag ->
             val palette = LocalPalette.current
             if (isDropTarget(drag)) {
-                val sourceFirst = (drag.source === editor) != editor.splitReversed
+                val sourceFirst = (drag.source === editor) != reversed
                 Box(paneOffset(if (sourceFirst) firstExtent else 0.dp)
                     .then(paneSize(if (sourceFirst) secondExtent else firstExtent))
                     .border(3.dp, palette.text.toComposeColor())) {
@@ -2208,6 +2954,10 @@ private fun EditorPane(
     onTitleDrag: (Editor, Offset, Offset) -> Unit,
     onTitleDrop: (Boolean) -> Unit,
     onDocumentFocus: () -> Unit,
+    focusGeneration:Long=0,
+    paneFocused:Boolean?=null,
+    onPaneFocus:((Editor)->Unit)?=null,
+    toolbarDocuments:Set<com.xnotes.core.tools.ToolbarDocument>?=null,
     modifier: Modifier = Modifier,
 ) {
     editor.missingDocument?.let { missing ->
@@ -2234,10 +2984,11 @@ private fun EditorPane(
     }
     val palette = LocalPalette.current
     val focusRequester = remember { FocusRequester() }
-    val focused = app.active === editor
+    val focused = paneFocused ?: (app.active === editor)
+    fun focusPane() {onDocumentFocus();if(onPaneFocus!=null) onPaneFocus(editor) else app.focusPane(editor.pane)}
     SideEffect { editor.openInPane = { uri -> actions.onOpenFile(editor, uri) } }
     // This pane owns the keyboard while it is the focused one; (re)grab it as that changes.
-    LaunchedEffect(focused, editor.noteOpen) {
+    LaunchedEffect(focused, editor.noteOpen,focusGeneration) {
         if (focused && editor.noteOpen) runCatching { focusRequester.requestFocus() }
     }
     var titleOrigin by remember(editor) { mutableStateOf(Offset.Zero) }
@@ -2271,7 +3022,7 @@ private fun EditorPane(
             while (true) {
                 // Initial pass and never consumed: the pane notices the touch, the canvas still gets it.
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type == PointerEventType.Press) { onDocumentFocus(); app.focusPane(editor.pane) }
+                if (event.type == PointerEventType.Press) focusPane()
             }
         }
     }
@@ -2286,7 +3037,7 @@ private fun EditorPane(
                 .focusRequester(focusRequester)
                 .focusable()
                 .onPreviewKeyEvent { ke ->
-                    ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
+                    focused && ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
                 },
         ) {
             if (closable) {
@@ -2294,7 +3045,7 @@ private fun EditorPane(
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(if (editor.canvasOpen) editor.infinite.title else editor.title,
                         Modifier.width(titleWidth).fillMaxHeight().then(dragTitle)
-                            .clickable { app.focusPane(editor.pane) }.padding(horizontal = Space.s12, vertical = Space.s8)
+                            .clickable { focusPane() }.padding(horizontal = Space.s12, vertical = Space.s8)
                             .wrapContentHeight(Alignment.CenterVertically),
                         color = palette.text.toComposeColor(), maxLines = 1,
                         textDecoration = if (focused) androidx.compose.ui.text.style.TextDecoration.Underline else androidx.compose.ui.text.style.TextDecoration.None,
@@ -2302,7 +3053,7 @@ private fun EditorPane(
                     Box(Modifier.weight(1f)) {
                         val look = com.xnotes.ui.LocalToolbarLook.current
                         val layout = com.xnotes.core.tools.documentToolbarLayout(
-                            com.xnotes.core.tools.workspaceToolbarLayout(app.toolbarLayout, app.canvasToolbarLayout), editor.canvasOpen, editor.hasPdf, app.toolbarDocuments())
+                            com.xnotes.core.tools.workspaceToolbarLayout(app.toolbarLayout, app.canvasToolbarLayout), editor.canvasOpen, editor.hasPdf, toolbarDocuments ?: app.toolbarDocuments())
                         CompositionLocalProvider(com.xnotes.ui.LocalToolbarLook provides look.copy(position = com.xnotes.settings.ToolbarPosition.TOP, floating = false),
                             com.xnotes.ui.LocalWorkspaceToolbarLayout provides layout,
                             com.xnotes.ui.LocalToolbarFocused provides focused) {
@@ -2361,8 +3112,10 @@ private fun EditorPane(
                             onSaveAudio = { actions.onSaveAudio(editor, it) },
                             onShareAudio = { actions.onShareAudio(editor, it) },
                             onShareImage = actions.onShareImage,
+                            onReferenceSelection = {canvas.sourceSelectionRegion()?.let(editor::requestCanvasRegionReference)==true},
                         )
-                        com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage)
+                        com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage,
+                            onReferenceRegion = {canvas.sourceCaptureRegion()?.let(editor::requestCanvasRegionReference)==true})
                         com.xnotes.ui.CropOverlay(canvas)
                         com.xnotes.ui.TextStyleBar(canvas)
                         com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
@@ -2398,14 +3151,19 @@ private fun EditorPane(
                                 com.xnotes.ui.TextEditorOverlay(editor, field)
                             }
                             floatingBar()
+                            val regionModel=editor.state.document
+                            val selectionSource=editor.selectionMenuRect?.let {editor.sourceSelectionRegion()}
+                            val captureSource=editor.screenshotMenu?.let {editor.sourceCaptureRegion()}
                             com.xnotes.ui.SelectionMenu(
                                 editor,
                                 onSaveAudio = { actions.onSaveAudio(editor, it) },
                                 onShareAudio = { actions.onShareAudio(editor, it) },
                                 onShareImage = actions.onShareImage,
+                                onReferenceSelection = {requestPagedRegionReference(editor,regionModel,selectionSource)},
                             )
                             com.xnotes.ui.CropOverlay(editor)
-                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage)
+                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage,
+                                onReferenceRegion = {requestPagedRegionReference(editor,regionModel,captureSource)})
                             com.xnotes.ui.TextStyleBar(editor)
                             com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
                             com.xnotes.ui.FlowEditMenu(editor)
@@ -2860,3 +3618,11 @@ private fun displayNameOf(resolver: android.content.ContentResolver, uri: Uri): 
         } else null
     }
 }.getOrNull()
+
+/** A rendered menu keeps its own model and fixed range; a late action cannot bind a new selection. */
+internal fun requestPagedRegionReference(editor:Editor,model:com.xnotes.core.model.Document,
+    target:com.xnotes.canvas.PageSourceRegion?):Boolean {
+    if(!editor.noteOpen || editor.canvasOpen || editor.state.document!==model) return false
+    if(target==null) {editor.message=editor.view.context.getString(R.string.graph_region_single_page_required);return false}
+    return editor.requestPageRegionReference(target)
+}

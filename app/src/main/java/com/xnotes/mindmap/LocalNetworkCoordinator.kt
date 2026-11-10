@@ -72,25 +72,30 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
         if(!started) {busy=false;canvasOperation=null;request.finished(false)}
         return started
     }
-    fun resume(entry:FileNetworkWorkspace.Entry,from:MapWorkspace.Entry?=null,closeMap:Boolean=false):Boolean {
+    fun resume(entry:FileNetworkWorkspace.Entry,from:MapWorkspace.Entry?=null,closeMap:Boolean=false,preserveMapRecovery:Boolean=false):Boolean {
         if(!hostCurrent() || busy || networks.visible || !networks.current(binding,entry)) return false
+        val mapEpoch=from?.session?.interactionEpoch
         fun valid()=networks.current(binding,entry) && if(from==null) !maps.visible
-            else maps.current===from && maps.visible && networks.returnEntry(from)===entry && maps.canHide(from)
+            else maps.current===from && maps.visible && networks.returnEntry(from)===entry &&
+                if(closeMap) from.lease.alive && from.session.interactionEpoch==mapEpoch &&
+                    (from.lease.hasOtherOwners || from.session.canParkSourceNavigation)
+                else maps.canHide(from)
         if(!valid()) {owner=entry;problem=BacklinkProblem.BUSY;return false}
-        return present(entry,::valid) {
+        return present(entry,::valid,pureMapParking=closeMap) {
             if(from!=null) {
-                if(closeMap) {if(maps.close(from)==null) return@present false}
+                if(closeMap) {if(maps.close(from,preserveRecovery=preserveMapRecovery)==null) return@present false}
                 else if(!maps.hide(from)) return@present false
             }
             networks.show(binding,entry)
         }
     }
-    private fun present(expectedOwner:Any,origin:()->Boolean,commit:()->Boolean):Boolean {
+    private fun present(expectedOwner:Any,origin:()->Boolean,pureMapParking:Boolean=false,commit:()->Boolean):Boolean {
         val host=captureHost()
         if(!host()) return false
         onStarting();maps.cancelOpen()
+        val mapGeneration=maps.sourceNavigationGeneration
         val token=++generation;owner=expectedOwner;problem=null;busy=true
-        fun current()=hostCurrent() && generation==token && origin() && host()
+        fun current()=hostCurrent() && generation==token && maps.sourceNavigationGeneration==mapGeneration && origin() && host()
         val pending=scope.launch(start=CoroutineStart.LAZY) {
             var committed=false
             val watcher=scope.launch {
@@ -100,7 +105,7 @@ internal class LocalNetworkCoordinator(private val editor:Editor,private val map
                 }
             }
             try {
-                val proof=if(current()) editor.awaitHostParking() else null
+                val proof=if(!current()) null else if(pureMapParking) editor.awaitMapSourceParking() else editor.awaitHostParking()
                 if(proof==null || !current() || !proof.current()) {
                     if(hostCurrent() && generation==token) problem=BacklinkProblem.CHANGED
                     return@launch

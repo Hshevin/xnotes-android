@@ -78,6 +78,12 @@ internal fun NetworkToCanvasFlow(entry:FileNetworkWorkspace.Entry,scene:LocalNet
         text={Text(stringResource(R.string.network_canvas_selection_changed),fontSize=TextSize.body)},
         confirmButton={MapButton(R.string.map_done) {unavailable=false}})
     val shown=flow ?: return
+    // Only an unaccepted selection expires with metadata. Accepted creation/append keeps its
+    // original controller and payload through retained publication, save retry and viewing.
+    if(!shown.current()) {
+        SideEffect {if(flow===shown) {picker.retire();shown.close();flow=null}}
+        return
+    }
     val live=MapDocuments.observations(app)
     var targetsProblem by remember(shown) {mutableStateOf(false)}
     val storedTargets by produceState<List<NetworkCanvasTarget>>(emptyList(),shown) {

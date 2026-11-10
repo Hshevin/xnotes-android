@@ -59,6 +59,7 @@ internal fun runParkingScenario(block:suspend (EditorPageCopyFixture)->Unit) {
                     suspendCancellableCoroutine<Unit> {waiter->Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}}
                 }
                 for(pane in panes) (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(pane) as LegacySessionQueue.Owner).awaitAccepted()
+                com.xnotes.ui.SplitRecentWriter.forFilesDir(f.context.filesDir).awaitAccepted()
             }
             singleton.set(null,previous);withContext(Dispatchers.IO) {f.storage.registry.close()}
         }}

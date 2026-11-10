@@ -41,7 +41,7 @@ internal suspend fun acquireBacklink(app:Context,row:MapBacklinkRow,valid:()->Bo
 
 /** Main-thread access; a stored observation can first sign only this call's own new actor. */
 internal suspend fun acquireBacklinkMembers(app:Context,rows:List<MapBacklinkRow>,valid:()->Boolean,
-    roots:List<String>):BacklinkMembersAccessResult {
+    roots:List<String>,targetAcquired:(MapSession)->Boolean={true}):BacklinkMembersAccessResult {
     if(!valid()) return BacklinkMembersAccessResult.Failed(BacklinkProblem.CHANGED)
     val first=rows.firstOrNull() ?: return BacklinkMembersAccessResult.Failed(BacklinkProblem.CHANGED)
     if(rows.any {it.location.key!=first.location.key || it.location.graphId!=first.location.graphId || it.nodeId!=first.nodeId} ||
@@ -69,6 +69,7 @@ internal suspend fun acquireBacklinkMembers(app:Context,rows:List<MapBacklinkRow
     var transferred=false
     var preserveDirty=false
     try {
+        if(!targetAcquired(lease.session)) return BacklinkMembersAccessResult.Failed(BacklinkProblem.CHANGED)
         snapshotFlow {Triple(lease.session.loading,lease.alive,valid())}.first {!it.first || !it.second || !it.third}
         if(!lease.alive || !valid()) return BacklinkMembersAccessResult.Failed(BacklinkProblem.CHANGED)
         val session=lease.session

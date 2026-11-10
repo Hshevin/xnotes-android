@@ -1,0 +1,13 @@
+<resources>
+    <string name="graph_source_mode_notice">选择此来源显示的内容。</string>
+    <string name="graph_source_mode_note">此笔记页面（含批注）</string>
+    <string name="graph_source_mode_original">保留并引用原 PDF 原文</string>
+    <string name="graph_source_mode_original_retention">原 PDF 将独立保留在本机原件库。取消加图或删除批注笔记，均不会移除该原件。</string>
+    <string name="graph_source_mode_change">更换来源模式</string>
+    <string name="graph_source_original_region_unavailable">此范围跨过插入空白、页边距或被裁切的 PDF 边缘。请调整范围，或引用含批注的笔记页面。</string>
+    <string name="graph_source_original_unavailable">无法核验或保留原 PDF。可重试，或引用含批注的笔记页面。</string>
+    <string name="graph_source_original_changed">来源或原件库记录已改变。请重新选择，或引用含批注的笔记页面。</string>
+    <string name="graph_source_original_restore_notice">此原 PDF 已从原件库删除。添加此来源前，需明确恢复原件，并保留原有文档和页面编号。</string>
+    <string name="graph_source_original_restore">恢复并引用原 PDF</string>
+    <string name="graph_source_original_context">此来源仅显示原 PDF，不含笔记批注、插入空白和纸张样式。</string>
+</resources>

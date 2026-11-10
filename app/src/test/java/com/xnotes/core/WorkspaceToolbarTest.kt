@@ -27,14 +27,16 @@ class WorkspaceToolbarTest {
             val common = items(layout.forDocumentControls(false, documents))
             assertEquals(common, items(layout.forDocumentControls(false, setOf(right, left))))
             for (kind in documents) {
-                val local = items(documentToolbarLayout(layout, kind == ToolbarDocument.CANVAS, kind == ToolbarDocument.PDF, documents))
-                assertTrue(local.containsAll(listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES)))
+                val local = items(documentToolbarLayout(layout, kind, documents))
+                if (kind == ToolbarDocument.MAP) assertTrue(local.isEmpty())
+                else assertTrue(local.containsAll(listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES)))
                 assertTrue(common.intersect(local.toSet()).isEmpty())
                 assertEquals(local.size, local.distinct().size)
-                assertEquals(kind != ToolbarDocument.CANVAS, ToolbarItem.PAGE_NAV in local)
+                assertEquals(kind == ToolbarDocument.NOTE || kind == ToolbarDocument.PDF, ToolbarItem.PAGE_NAV in local)
                 assertEquals(kind == ToolbarDocument.CANVAS, ToolbarItem.WAYPOINTS in local)
             }
-            assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT)))
+            if (ToolbarDocument.MAP in documents) assertTrue(common.isEmpty())
+            else assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT)))
         }
     }
 
@@ -91,7 +93,7 @@ class WorkspaceToolbarTest {
             val workspace = setOf(first, second)
             assertFalse(ToolbarItem.LAYERS in items(layout.forDocumentControls(false, workspace)))
             for (doc in workspace) {
-                val bar = documentToolbarLayout(layout, doc == ToolbarDocument.CANVAS, doc == ToolbarDocument.PDF, workspace)
+                val bar = documentToolbarLayout(layout, doc, workspace)
                 // Notes and PDFs open layers from the side panel tab instead.
                 assertEquals(if (doc == ToolbarDocument.CANVAS) 1 else 0, items(bar).count { it == ToolbarItem.LAYERS })
             }

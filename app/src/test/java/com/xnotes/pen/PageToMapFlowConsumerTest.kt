@@ -154,7 +154,7 @@ class PageToMapFlowConsumerTest {
         try {
             composition.setContent {
                 CompositionLocalProvider(LocalContext provides context,LocalActivityResultRegistryOwner provides owner) {
-                    PageToMapFlowHost(source.editor,{},{})
+                    PageToMapFlowHost(source.editor,{},{_,_->})
                 }
             }
             // Inspect the contracts actually registered by the production host. No document or

@@ -1,4 +1,4 @@
-2026-11-10 D2d1 已接完整网络→关系画布→手工线/撤销重做→保存关闭重开→原网络，406相关验证及Android源码编译通过，真实平台未运行。下一D2d2将显式卡片关联接自动网络及来源侧手工组；先按用户要求在本阶段提交后换全新6.1sol/ultra对话复用同树，完整范围不缩减。见docs/movinkpad/network-to-relation-canvas-2026-11-10.md。
+2026-11-10 续作工作树codex/mind-map-original-network：原文网络整合及完整卡片/Reader往返已实现，302项相关主机测试及Android源码编译通过；独立证据复核通过。下一来源范围调整/换源，原完整14组不缩减；仅实现/验证/文档/本地提交。见docs/movinkpad/original-pdf-network-2026-11-10.md。
 
 2026-11-09 D2c：无文档首页→全库→指定多文件中心→筛选／具体来源打开→同网络返回已实现，89相关用例及Android测试源码编译通过，真实平台未运行。继续显式用户关联和将文件加入可保存关系画布；其他原需求保留。见docs/movinkpad/file-network-overview-2026-11-09.md。
 
@@ -529,3 +529,35 @@ Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Su
 本阶段接具体来源入口、严格NOTE/PDF FILE/PAGE打开、actual owner原槽保留与其余文档原保存保护、真实attach/稳定preDraw定位、fresh DOWN取消pending跳转、同Entry相机/选集/来源条返回。范围变化/删除undo/重载旧票不复活，来源备注IME和失效成员收尾不污染相机；embedded PDF v1保包装/原字节、secondary单文档恢复无phantom primary。351套3771项全量与Android测试源码编译、独立复核通过；无APK，实际平台与目标设备未运行。详见 `docs/movinkpad/mind-map-source-navigation-2026-11-09.md`。
 
 下一阶段优先从现有文件/页面查看真实反向引用并定位图中具体来源条目，复用MapDocuments唯一actor及现有窗口/保存保护；不手工维护双向关系。随后局部及筛选/全库文件网络，严格区分内容引用、用户关联、可选同图出现，不因概念多来源推导文件彼此依赖。真正图双窗格、Canvas/xmap来源打开、区域/画布创建入口及范围调整、精确失效与权限/身份恢复、复制/完整备份、无中心/同级插入/边缘平移与真机验收仍保留；整体未完成。
+
+### D2d2：显式文件关联探索与真实画布编辑（2026-11-10，verified）
+
+已接同次实际图读取/live overlay→独立用户关联证据→局部/多文件/全库/筛选/交替展开及跨图聚合→来源侧手工组/网络具体记录→原画布真实关系编辑/保存/删除→原网络或原阅读文件返回。159有效相关主机验证、Android源码编译与独立复核通过，实际平台未运行。阶段证据见file-relation-exploration-2026-11-10.md与当前恢复点。
+
+下一可操作阶段接Canvas具体来源单文档打开和返回，复用现参考打开/停车/采用保护，不恢复Canvas分屏；区域提示需按实际模型支持边界拆片。其余原完整范围继续保留，不把D2d2当全目标完成。
+
+### Canvas 整文件来源打开与返回（2026-11-10，verified）
+
+已接实际类型冻结/严格源读核与Canvas完整解码，活Canvas保模型/历史/视口/dirty并经专用输入屏障，冷打开与最终源变化重读均拒部分解码；真实Main返回只为本次呈现跳过额外持久化，下一普通打开恢复原策略。187相关主机测试、Android源码编译和独立复核通过；真实平台未运行。见canvas-source-navigation-2026-11-10.md。
+
+下一阶段接Canvas区域来源完整流程（范围表示/创建/持久化/预览裁切/实际临时定位/返回），现FILE+region禁止规则暂保留，不凭整文件来源往返冒充区域已支持。原其他需求保留。
+
+### Canvas 固定区域来源（2026-11-10，verified）
+
+实际选择／截图→CANVAS_REGION／v5→已有／新图及概念→保存重开／裁切PNG→真实宿主定位／返回。完整采用／发布才续来源观察；有修改显式strict保存，无路径显式typed独立副本并安全采用同模型，保history／C1，失败只续同候选；FILE＋region仍拒。独审两入口／定位问题已修。251项有效相关主机测试与Android源码编译、独立复核通过；真实平台／设备未运行。见canvas-region-sources-2026-11-10.md。
+
+下一阶段接分页选择／套索及截图区域来源，沿永久pageId＋worldRect，核PDF原文／含批注选择语义；同样交付完整创建／保存／预览／来源定位返回，不仅放宽模型。原完整需求及设备验收保留，整体active。
+
+### 分页固定区域创建与往返（2026-11-10，verified）
+
+单页选区／套索／截图固定actual Doc/Page/localRect，复用永久页身份、严格版本和原PageToMapFlow，一次导入／失败仅重存；保存PNG冷重开／来源定位返回。区域Note完整item观察与明确XML失败、旧DTO取消／delete-undo退休、固定frame／保守EMPTY和旧图均已接；普通读取不扩大。281项有效相关测试与Android源码编译、独立复核通过，真实平台未运行。见paged-region-sources-2026-11-10.md。PDF当前是此份批注笔记上下文；下一原PDF独立内容模式，#7两模式和完整需求仍未完。
+
+### 独立原 PDF 原文（2026-11-10，verified）
+
+整页与区域同mode选择，actual PDF geometry/DPI/Rooms固定映射；独立catalog随机文档/页UUID与资源保护同SQLite事务、tombstone/严格同SHA恢复/v6投影。原文预览、专用只读reader/同图返回与原件库实际管理已接，首次开图及返回不额外保存脏Note。185相关主机测试、Android测试源码编译及独立复核通过，真实平台/像素/硬件未运行；见original-pdf-sources-2026-11-10.md。下一原文在网络格式/状态中的只读整合，范围调整/换源与完整引用备份等完整要求仍保留，整体active。
+
+### 原 PDF 文件网络与卡片（2026-11-10，verified）
+
+默认／格式／目录网络显示独立原文身份和删除／缺失状态，保具体证据／概念／PNG；原件库域不借Note目录，独立orphan在真实关系后限额显示。canonical首页锚整原件卡→新／已有关系画布→显式线／保存冷开／实际Reader／同图与同网络返回已接；接受后的retained／save重试固定同receipt，不重新追加。只读metadata、epoch START/END和跨域无fallback守实际边界。
+
+55套302唯一主机项全过，Android测试源码编译通过，1174输入前后SHA同，计划与实现独审通过；独立证据复核通过。真实Android/SAF/PDFium像素/Surface/GPU/设备未运行，不打包/安装/推送/合并/发布。下一来源范围调整／换源、Map来源／双窗格、Canvas反向、精确恢复与完整引用备份及原14组继续。

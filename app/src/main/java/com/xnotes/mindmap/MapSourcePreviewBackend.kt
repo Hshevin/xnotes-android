@@ -7,6 +7,10 @@ import android.graphics.Color
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.xnotes.core.util.DocumentKind
+import com.xnotes.core.model.*
+import com.xnotes.format.FlowXml
+import com.xnotes.format.MarkupsXfdf
+import java.util.zip.ZipFile
 import com.xnotes.format.BundleHeader
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.CanvasCodec
@@ -39,6 +43,8 @@ internal object MapSourcePreviewBackend {
         val check={coroutine.ensureActive();checkActive()}
         require(targets.isNotEmpty() && targets.all {it.documentId==targets[0].documentId})
         targets.forEach {it.validate()};require(render.all {it in targets});check()
+        if(targets.any {it.scope==SourceScope.PDF_ORIGINAL})
+            return OriginalPdfSourcePreviewBackend.load(context,targets,render,check)
         try {
             val app=context.applicationContext
             com.xnotes.platform.FontCatalog.ensureInitialized(app)
@@ -76,6 +82,7 @@ internal object MapSourcePreviewBackend {
                 checkActive()
                 val status=when {
                     target.scope==SourceScope.FILE->SourceStatus.CURRENT
+                    target.scope==SourceScope.CANVAS_REGION->if(kind==DocumentKind.CANVAS) SourceStatus.CURRENT else SourceStatus.UNAVAILABLE
                     kind!=DocumentKind.NOTE || pages==null->SourceStatus.UNAVAILABLE
                     target.pageId?.let {it in pages.ids}!=true->SourceStatus.DELETED
                     else->SourceStatus.CURRENT
@@ -89,7 +96,17 @@ internal object MapSourcePreviewBackend {
             val canvasCodec=CanvasCodec(image,text)
             val assetRoot=File(context.cacheDir,"source-preview-assets").apply {check(isDirectory || mkdirs())}
             val pdfDir=File(context.cacheDir,"source-preview-pdfs").apply {check(isDirectory || mkdirs())}
-            PreparedNativeOpen.read(source,storage.pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,null,checkActive).use {prepared->
+            val completeNoteRegion=kind==DocumentKind.NOTE && base.any {
+                it.target in render && it.status==SourceStatus.CURRENT && it.target.scope==SourceScope.PAGE && it.target.region!=null
+            }
+            // Unknown XML extensions are not covered by the item-survival observation. Their
+            // actual presence keeps a region conservative, even if the forgiving XML reader saw no text.
+            val xmlMayDraw=completeNoteRegion && ZipFile(source.file).use {zip->
+                checkActive();zip.getEntry(FlowXml.ENTRY_NAME)!=null || zip.getEntry(MarkupsXfdf.ENTRY_NAME)!=null
+            }
+            PreparedNativeOpen.read(source,storage.pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,null,
+                requireCompleteCanvas=targets.any {it.scope==SourceScope.CANVAS_REGION},
+                requireCompleteNote=completeNoteRegion,checkActive=checkActive).use {prepared->
                 NativeDocumentPreview(context,text).use {painter->
                     val note=prepared.note
                     val byId=note?.pages?.mapIndexedNotNull {index,page->page.referenceIdentity.id?.let {it to index}}?.toMap().orEmpty()
@@ -103,9 +120,26 @@ internal object MapSourcePreviewBackend {
                         else try {
                             if(note!=null) {
                                 val at=requireNotNull(index(read));val page=note.pages[at];val region=read.target.region
-                                if(region!=null && NativeDocumentPreview.intersect(NativeDocumentPreview.footprint(note,page),region)==null) read.copy(status=SourceStatus.EMPTY)
+                                val visible=region?.let {NativeDocumentPreview.intersect(NativeDocumentPreview.footprint(note,page),it)}
+                                val template=page.resolvedTemplate(note)
+                                val backgroundMayDraw=xmlMayDraw || page.pdfPage!=null || page.markups.isNotEmpty() || !note.flow.isEmpty ||
+                                    template!=PageTemplates.NONE && template !in PageTemplates.BUILT_IN
+                                val empty=region!=null && (visible==null || !backgroundMayDraw && page.layers.ordered(page.items.toList()).none {
+                                    checkActive();val bounds=it.paintBounds()
+                                    require(listOf(bounds.x,bounds.y,bounds.w,bounds.h).all {n->n.isFinite()})
+                                    bounds.intersects(visible)
+                                })
+                                if(empty) read.copy(status=SourceStatus.EMPTY)
                                 else read.copy(asset=png(requireNotNull(painter.note(note,at,SIDE,region,checkActive)),checkActive))
-                            } else read.copy(asset=png(painter.canvas(requireNotNull(prepared.canvas),SIDE,SIDE,checkActive),checkActive))
+                            } else {
+                                val canvas=requireNotNull(prepared.canvas)
+                                if(read.target.scope==SourceScope.CANVAS_REGION) {
+                                    val region=requireNotNull(read.target.region)
+                                    val visible=canvas.layers.ordered(canvas.items.toList())
+                                    if(visible.none {checkActive();it.paintBounds().intersects(region)}) read.copy(status=SourceStatus.EMPTY)
+                                    else read.copy(asset=png(painter.canvasRegion(canvas,region,SIDE,checkActive),checkActive))
+                                } else read.copy(asset=png(painter.canvas(canvas,SIDE,SIDE,checkActive),checkActive))
+                            }
                         } catch(error:CancellationException) {throw error}
                         catch(_:Exception) {read.copy(failedPreview=true)}
                     }.also {checkActive()}

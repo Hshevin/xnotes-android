@@ -7,7 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.xnotes.ui.PageReferenceEnableResult
 import com.xnotes.ui.PageReferencePreparation
-import com.xnotes.ui.PageReferenceRequest
+import com.xnotes.ui.SourceCreationRequest
 import com.xnotes.ui.theme.Space
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -17,12 +17,12 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
 
 internal enum class PageToMapStep {
-    PREPARING,SAVE_REQUIRED,ENABLE_REQUIRED,ENABLE_RETAINED,REOPEN_REQUIRED,DESTINATION,
+    PREPARING,SOURCE_MODE,ORIGINAL_RESTORE_REQUIRED,SAVE_REQUIRED,SOURCE_COPY_RETAINED,SOURCE_COPY_WRITTEN,ENABLE_REQUIRED,ENABLE_RETAINED,REOPEN_REQUIRED,DESTINATION,
     TARGET_LOADING,TARGET,CONFIRMING,SAVING,ADDED,SAVE_FAILED,CREATE_RETAINED,SOURCE_ERROR,TARGET_ERROR,CLOSED,
 }
 
 /** The reading pane keeps its place. Only a lease joins the destination's actual editing actor. */
-internal class PageToMapController(context:Context,val request:PageReferenceRequest,private val scope:CoroutineScope) {
+internal class PageToMapController(context:Context,val request:SourceCreationRequest,private val scope:CoroutineScope) {
     private val app=context.applicationContext
     private var active=true
     private var generation=0L
@@ -33,6 +33,7 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
     private var importEpoch:Long?=null
     private var importDocument:String?=null
     private var lastTarget:Uri?=null
+    private var lastOpenMapRetry:(()->Boolean)?=null
     private var createdId:String?=null
     private var targetEpoch:Long?=null
     private var targetDocument:String?=null
@@ -41,15 +42,22 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
     var confirmationToken by mutableStateOf<Any?>(null);private set
     var step by mutableStateOf(PageToMapStep.PREPARING);private set
     var source by mutableStateOf<MapSource?>(null);private set
+    var sourceModes by mutableStateOf<Set<com.xnotes.ui.SourceCreationMode>>(emptySet());private set
+    var sourceModeIssue by mutableStateOf<com.xnotes.ui.SourceCreationIssue?>(null);private set
+    var sourceModeContext by mutableStateOf<Any?>(null);private set
+    var originalRestoreOffer by mutableStateOf<com.xnotes.storage.OriginalPdfCatalog.Observation?>(null);private set
+    val canChangeSourceMode get()=sourceModes.isNotEmpty() && imported==null && !busy
     var destination by mutableStateOf<MapReferenceDestination?>(null);private set
     var saveOutcome by mutableStateOf<MapSaveOutcome?>(null);private set
     var targetUri by mutableStateOf<Uri?>(null);private set
     val targetSession:MapSession? get()=lease?.takeIf {it.alive}?.session
     val newNodeTitle get()=(destination as? MapReferenceDestination.New)?.node?.text.orEmpty()
     val hasImportedReference get()=imported!=null
-    val sourceNeedsIndependentSave get()=request.model.path!=null
+    val sourceNeedsIndependentSave get()=request.hasSavedPath
+    val canSaveSourceInPlace get()=request.canSaveInPlace
+    val canSaveSourceCopy get()=request.canSaveCopy
     val busy get()=step in setOf(PageToMapStep.PREPARING,PageToMapStep.TARGET_LOADING,PageToMapStep.CONFIRMING,PageToMapStep.SAVING)
-    private fun current()=active && request.pane.pageReferenceCurrent(request)
+    private fun current()=active && request.current()
 
     private fun run(next:PageToMapStep,block:suspend (Long)->Unit):Boolean {
         if(!current() || busy && work?.isActive==true) return false
@@ -65,11 +73,16 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
 
     fun start():Boolean {
         if(imported!=null) return false
-        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.pane.preparePageReference(request),token)}
+        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.prepare(),token)}
     }
     private fun acceptPreparation(result:PageReferencePreparation,token:Long) {
         if(!valid(token)) return
         step=when(result) {
+            is PageReferencePreparation.ModeRequired->{
+                source=null;sourceModes=result.modes;sourceModeIssue=result.issue;sourceModeContext=Any()
+                originalRestoreOffer=null;PageToMapStep.SOURCE_MODE
+            }
+            is PageReferencePreparation.RestoreRequired->{originalRestoreOffer=result.offer;PageToMapStep.ORIGINAL_RESTORE_REQUIRED}
             is PageReferencePreparation.Ready->{source=result.source;if(targetSession?.document!=null) PageToMapStep.TARGET else PageToMapStep.DESTINATION}
             PageReferencePreparation.SaveRequired->PageToMapStep.SAVE_REQUIRED
             is PageReferencePreparation.EnableRequired->{enableOffer=result.offer;PageToMapStep.ENABLE_REQUIRED}
@@ -77,15 +90,38 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
             PageReferencePreparation.Changed,PageReferencePreparation.Failed->PageToMapStep.SOURCE_ERROR
         }
     }
-    private fun reopenStep()=if(request.model.dirty) PageToMapStep.SAVE_REQUIRED else PageToMapStep.REOPEN_REQUIRED
+    fun selectSourceMode(mode:com.xnotes.ui.SourceCreationMode,expectedContext:Any?=sourceModeContext):Boolean {
+        if(step!=PageToMapStep.SOURCE_MODE || imported!=null || expectedContext==null || expectedContext!==sourceModeContext || mode !in sourceModes) return false
+        sourceModeContext=null
+        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.selectMode(mode),token)}
+    }
+    fun changeSourceMode():Boolean {
+        if(!current() || !canChangeSourceMode || !request.resetMode()) return false
+        source=null;originalRestoreOffer=null;sourceModeContext=null
+        return start()
+    }
+    fun restoreOriginal(expected:com.xnotes.storage.OriginalPdfCatalog.Observation?=originalRestoreOffer):Boolean {
+        if(step!=PageToMapStep.ORIGINAL_RESTORE_REQUIRED || expected==null || expected!==originalRestoreOffer || imported!=null) return false
+        return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.restoreOriginal(expected),token)}
+    }
+    /** A mode change or another picker retires this callback, even though the outer request ID is unchanged. */
+    internal fun mapDestination(create:Boolean):((Uri)->Boolean)? {
+        if(!canChoose()) return null
+        val token=generation;val target=source?.target;var consumed=false
+        return {uri->
+            if(consumed || !valid(token) || source?.target!=target || !canChoose()) false
+            else {consumed=true;if(create) createMap(uri) else selectMap(uri)}
+        }
+    }
+    private fun reopenStep()=if(request.dirty) PageToMapStep.SAVE_REQUIRED else PageToMapStep.REOPEN_REQUIRED
     fun enablePages():Boolean {
         if(step!=PageToMapStep.ENABLE_REQUIRED) return false
         val offer=enableOffer ?: return false
-        return run(PageToMapStep.PREPARING) {token->acceptEnable(request.pane.enablePageReference(request,offer),token)}
+        return run(PageToMapStep.PREPARING) {token->acceptEnable(request.enablePages(offer),token)}
     }
     fun continueEnable():Boolean {
         if(step!=PageToMapStep.ENABLE_RETAINED) return false
-        return run(PageToMapStep.PREPARING) {token->acceptEnable(request.pane.continuePageReferenceEnable(request),token)}
+        return run(PageToMapStep.PREPARING) {token->acceptEnable(request.continueEnablePages(),token)}
     }
     private fun acceptEnable(result:PageReferenceEnableResult,token:Long) {
         if(!valid(token)) return
@@ -97,12 +133,12 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
     }
     fun reopen(onOpened:()->Unit):Boolean {
         if(step!=PageToMapStep.REOPEN_REQUIRED) return false
-        if(request.model.dirty) {step=PageToMapStep.SAVE_REQUIRED;return false}
+        if(request.dirty) {step=PageToMapStep.SAVE_REQUIRED;return false}
         return run(PageToMapStep.PREPARING) {token->
             // A successful actual adoption intentionally retires the old page/request.
-            val opened=request.pane.reopenPageReference(request)
+            val opened=request.reopen()
             if(active && generation==token) {
-                if(opened) {onOpened();close()} else step=if(request.model.dirty) PageToMapStep.SAVE_REQUIRED else PageToMapStep.SOURCE_ERROR
+                if(opened) {onOpened();close()} else step=if(request.dirty) PageToMapStep.SAVE_REQUIRED else PageToMapStep.SOURCE_ERROR
             }
         }
     }
@@ -110,12 +146,24 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
     private fun canChoose()=current() && imported==null && !busy && source!=null
     fun selectMap(uri:Uri):Boolean {
         if(!canChoose()) return false
-        lastTarget=uri
+        lastTarget=uri;lastOpenMapRetry=null
         return run(PageToMapStep.TARGET_LOADING) {token->adoptTarget(MapDocuments.acquire(app,uri),token,null)}
+    }
+    /** Selecting the other pane names that exact actor, not whatever later occupies its URI. */
+    fun selectOpenMap(entry:MapWorkspace.Entry,stillCurrent:()->Boolean={true}):Boolean {
+        val session=entry.session;val documentId=session.document?.id ?: return false
+        val epoch=session.interactionEpoch
+        fun expected()=entry.lease.alive && entry.session===session && session.interactionEpoch==epoch &&
+            session.document?.id==documentId && stillCurrent()
+        if(!canChoose() || !expected()) return false
+        lastTarget=entry.uri;lastOpenMapRetry={expected() && selectOpenMap(entry,stillCurrent)}
+        return run(PageToMapStep.TARGET_LOADING) {token->
+            adoptTarget(MapDocuments.acquire(app,entry.uri),token,documentId,session,::expected)
+        }
     }
     fun createMap(uri:Uri):Boolean {
         if(!canChoose()) return false
-        lastTarget=uri
+        lastTarget=uri;lastOpenMapRetry=null
         val fixed=MindMapDocument(nodes=listOf(MapNode(parent=null,text=app.getString(com.xnotes.R.string.map_topic))))
         return run(PageToMapStep.TARGET_LOADING) {token->
             when(val result=MapDocuments.create(app,uri,fixed)) {
@@ -131,14 +179,16 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
         val uri=targetUri ?: return false;val expected=createdId ?: return false
         return run(PageToMapStep.TARGET_LOADING) {token->adoptTarget(MapDocuments.acquire(app,uri),token,expected)}
     }
-    private suspend fun adoptTarget(incoming:MapDocumentLease,token:Long,expectedId:String?) {
+    private suspend fun adoptTarget(incoming:MapDocumentLease,token:Long,expectedId:String?,
+        expectedSession:MapSession?=null,expectedCurrent:()->Boolean={true}) {
         var accepted=false
         try {
             val session=incoming.session
             snapshotFlow {session.loading to incoming.alive}.first {!it.first || !it.second}
             if(!valid(token)) return
             val doc=session.document
-            if(!incoming.alive || session.loadFailed || doc==null || expectedId!=null && doc.id!=expectedId) {
+            if(!incoming.alive || session.loadFailed || doc==null || expectedId!=null && doc.id!=expectedId ||
+                expectedSession!=null && session!==expectedSession || !expectedCurrent()) {
                 step=PageToMapStep.TARGET_ERROR;return
             }
             val prior=lease;lease=incoming;accepted=true
@@ -146,7 +196,9 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
             targetEpoch=session.interactionEpoch;targetDocument=doc.id;targetContext=Any()
             selectedTicket=null;confirmationToken=null
             targetUri=incoming.uri;destination=null;saveOutcome=null;step=PageToMapStep.TARGET
-        } finally {if(!accepted) incoming.close()}
+        } finally {if(!accepted) {
+            if(expectedSession!=null) incoming.closeUnadoptedSource() else incoming.close()
+        }}
     }
     private fun targetCurrent()=targetSession?.let {it.interactionEpoch==targetEpoch && it.document?.id==targetDocument}==true
     private fun selecting(expectedContext:Any?):Boolean {
@@ -192,7 +244,7 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
         if(!canChoose()) return false
         destination=null;selectedTicket=null;confirmationToken=null;step=PageToMapStep.DESTINATION;return true
     }
-    fun retryTarget():Boolean=lastTarget?.let(::selectMap) ?: false
+    fun retryTarget():Boolean=lastOpenMapRetry?.invoke() ?: lastTarget?.let(::selectMap) ?: false
 
     fun confirm(expectedConfirmation:Any?=confirmationToken):Boolean {
         if(!selecting(targetContext) || imported!=null || expectedConfirmation==null || expectedConfirmation!==confirmationToken) return false
@@ -204,7 +256,7 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
         // The resulting target generation stays frozen throughout source IO; ordinary C1 merges.
         val ticket=session.captureSourceImport(chosen) ?: return false
         return run(PageToMapStep.CONFIRMING) {token->
-            val checked=request.pane.preparePageReference(request)
+            val checked=request.prepare()
             if(!valid(token) || lease!==target || !target.alive) return@run
             if(checked !is PageReferencePreparation.Ready) {acceptPreparation(checked,token);return@run}
             source=checked.source
@@ -239,8 +291,38 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
         if(!importedCurrent(target)) {step=PageToMapStep.TARGET_ERROR;return false}
         return run(PageToMapStep.SAVING) {token->saveImported(target,token)}
     }
+    /** A picker callback retains its original controller generation, never the latest UI request. */
+    internal fun sourceCopyDestination(name:String):((Uri)->Boolean)? {
+        if(!current() || step!=PageToMapStep.SAVE_REQUIRED || !request.canSaveCopy || request.pendingSaveCopy!=null) return null
+        val token=generation;var consumed=false
+        return {uri->
+            if(consumed || !valid(token) || step!=PageToMapStep.SAVE_REQUIRED) false
+            else {
+                consumed=true
+                runCatching {app.contentResolver.takePersistableUriPermission(uri,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}
+                    .onFailure {runCatching {app.contentResolver.takePersistableUriPermission(uri,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)}}
+                run(PageToMapStep.PREPARING) {next->acceptSourceCopy(request.saveCopyTo(uri.toString(),name) {valid(next)},next)}
+            }
+        }
+    }
+    private fun acceptSourceCopy(result:com.xnotes.ui.SourceCopyResult,token:Long) {
+        if(!valid(token)) return
+        step=when(result) {
+            com.xnotes.ui.SourceCopyResult.Adopted->PageToMapStep.CLOSED // Editor has already issued the new fixed-region request.
+            com.xnotes.ui.SourceCopyResult.Retained->PageToMapStep.SOURCE_COPY_RETAINED
+            is com.xnotes.ui.SourceCopyResult.WrittenNotAdopted->PageToMapStep.SOURCE_COPY_WRITTEN
+            com.xnotes.ui.SourceCopyResult.Changed,com.xnotes.ui.SourceCopyResult.Failed->
+                if(request.pendingSaveCopy!=null) PageToMapStep.SOURCE_COPY_RETAINED else PageToMapStep.SOURCE_ERROR
+        }
+    }
+    fun continueSourceCopy():Boolean {
+        if(step!=PageToMapStep.SOURCE_COPY_RETAINED || request.pendingSaveCopy==null) return false
+        return run(PageToMapStep.PREPARING) {token->acceptSourceCopy(request.continueSaveCopy {valid(token)},token)}
+    }
     fun saveSource(action:(com.xnotes.ui.Editor)->Unit):Boolean {
         if(!current() || step!=PageToMapStep.SAVE_REQUIRED) return false
+        if(request.canSaveInPlace) return run(PageToMapStep.PREPARING) {token->acceptPreparation(request.saveInPlace(),token)}
+        if(request.canSaveCopy) return false // Canvas uses its typed copy picker, never the NOTE-only Main Save As.
         val pane=request.pane;close();action(pane);return true
     }
     fun openMap(expectedUri:Uri?,expectedContext:Any?,action:(Uri)->Unit):Boolean {
@@ -251,7 +333,7 @@ internal class PageToMapController(context:Context,val request:PageReferenceRequ
     fun close():Job? {
         if(!active) return null
         active=false;generation++;work?.cancel();step=PageToMapStep.CLOSED
-        request.pane.clearPageReference(request)
+        request.clear()
         val owned=lease;lease=null
         return owned?.close()
     }

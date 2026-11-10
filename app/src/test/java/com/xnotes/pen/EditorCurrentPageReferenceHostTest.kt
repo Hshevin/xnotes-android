@@ -90,19 +90,27 @@ class EditorCurrentPageReferenceHostTest {
     }
     /** Exercise the real close/pause producers after the reference dialog itself has gone away. */
     private suspend fun flushAfterReferenceDismissal(f:EditorPageCopyFixture) {
-        val auto=withContext(Dispatchers.Main) {
+        val sessionOwner=withContext(Dispatchers.Main) {
             f.editor.pageReferenceRequest?.let {f.editor.clearPageReference(it)}
             // Bind the fixture like a granted folder note so flushAutosave/persist really enqueue
             // native writes; the provider has deliberately supplied no reliable known stamp.
             Editor::class.java.getDeclaredField("ownAutosaveUri").apply {isAccessible=true}.set(f.editor,f.targetUri)
             f.editor.flushAutosave();f.editor.persist()
-            Editor::class.java.getDeclaredField("autosaveScope").apply {isAccessible=true}.get(f.editor) as CoroutineScope
+            Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(f.editor) as LegacySessionQueue.Owner
         }
         repeat(3) {
             withContext(Dispatchers.Main) {suspendCancellableCoroutine<Unit> {waiter->
                 Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}
             }}
-            auto.coroutineContext[Job]!!.children.toList().forEach {it.join()}
+            // The same scope also owns the permanent recent-arrangement StateFlow collector.
+            // Await actual finite writes and their accepted session prefix instead of that scope.
+            withContext(Dispatchers.Main) {
+                Editor::class.java.getDeclaredField("noteWriteJob").apply {isAccessible=true}.get(f.editor) as? Job
+            }?.join()
+            sessionOwner.awaitAccepted()
+            withContext(Dispatchers.Main) {
+                Editor::class.java.getDeclaredField("sessionWriteJob").apply {isAccessible=true}.get(f.editor) as? Job
+            }?.join()
         }
         withContext(Dispatchers.Main) {
             assertFalse("The later ordinary close flush must preserve the source conflict",f.editor.flushSplitDocument())

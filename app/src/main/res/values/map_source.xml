@@ -1,0 +1,6 @@
+<resources>
+    <string name="graph_return_parent_map">Return to previous map</string>
+    <string name="graph_map_source_busy">A map has an unfinished edit or source selection. Finish or cancel it, then try again.</string>
+    <string name="graph_map_source_limit">The map navigation limit has been reached. Return to the starting map and close it before opening another source.</string>
+    <string name="graph_map_close_failed">The map could not be saved. Your edits are kept. Resolve the save problem and try closing again.</string>
+</resources>

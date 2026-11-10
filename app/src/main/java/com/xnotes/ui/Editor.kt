@@ -146,6 +146,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import com.xnotes.core.model.sourcePoint
@@ -298,10 +299,25 @@ private val sharedRecents = androidx.compose.runtime.mutableStateOf<List<com.xno
  */
 enum class Pane { PRIMARY, SECONDARY }
 
+internal data class MixedPaneDetach(val remainingPane:Pane?,val retiredPane:Pane)
+
+/** A settled close candidate; only its synchronous commit may retire the observed native slot. */
+internal class PreparedMixedPaneDetach internal constructor(val result:MixedPaneDetach,
+    private val check:()->Boolean,private val detach:()->Unit) {
+    private var consumed=false
+    fun current()=!consumed && check()
+    fun commit():MixedPaneDetach? {
+        if(!current()) return null
+        consumed=true;detach();return result
+    }
+}
+
 @Stable
 class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, SwatchStore, ColorDropHost, AudioHost, CropHost {
 
     private val appContext = context.applicationContext
+    private val presentationRuntimeIdentity=Any()
+    private var presentationModelIdentity:Any=Any()
 
     /** The context the views are built from, kept so a second pane can be built the same way. The
      *  application context will not do: it is not attached to a display, so the cutout probe throws
@@ -615,11 +631,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
-    private suspend fun awaitNoteCapture(doc: Document): Boolean {
+    private suspend fun awaitNoteCapture(doc: Document,preserveInput:Boolean=false): Boolean {
         afterInputDispatch()
         while (sessionOwner.isCurrent() && noteOpen && !canvasOpen && state.document === doc && documentOwner === this) {
             val boundary = captureBoundary
-            if (!noteTransactionsPending(doc)) return true
+            val retainedInputBusy=preserveInput && listOfNotNull(this,sharedPeer()).any {pane->
+                pane.state.document===doc && mapSourceParkingInputBusy(OpenSlot(pane,this,doc,false,pane.noteOpen))}
+            if (!noteTransactionsPending(doc) && !retainedInputBusy) return true
             kotlinx.coroutines.selects.select<Unit> {
                 boundary.onAwait { }
                 sessionOwner.onRetired { }
@@ -793,7 +811,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Flipped by the open dialog's Cancel so a slow open is discarded instead of swapped in. */
     private class NativeOpenRequest {val cancelled=java.util.concurrent.atomic.AtomicBoolean(false)}
     @Volatile private var nativeOpenRequest:NativeOpenRequest?=null
+    @Volatile private var pagedPairRequest:Any?=null
+    private var mixedNoteArrangementSaveRequest:Any?=null
     private var noteEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
+    // Sticky for this actual model: an ordinary tolerant save cannot launder a dropped payload.
+    private var incompleteNoteModel=java.lang.ref.WeakReference<Document>(null)
     private var canvasEditSource:com.xnotes.storage.PreparedNativeOpen.EditSource?=null
     private fun retireNoteEditSource() {
         referenceLocator.clear()
@@ -801,8 +823,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         pageReferenceRequest?.let(::clearPageReference)
         sharedPeer()?.let {peer->peer.pageReferenceRequest?.let(peer::clearPageReference)}
     }
-    private fun retireCanvasEditSource() {canvasEditSource?.invalidate();canvasEditSource=null}
+    private fun retireCanvasEditSource() {
+        canvasEditSource?.invalidate();canvasEditSource=null;canvasSourceObservation=null;canvasSourceIncomplete=false;canvasReferenceProtection=null
+        canvasRegionReferenceRequest?.let(::clearCanvasRegionReference)
+    }
     private fun invalidateNativeOpen() {
+        (sibling?.takeIf {it.secondary===this} ?: this).let {it.pagedPairRequest=null;it.mixedNoteArrangementSaveRequest=null}
         nativeOpenRequest?.cancelled?.set(true);nativeOpenRequest=null;opening=false
     }
     private fun nativeOpenCurrent(request:NativeOpenRequest)=nativeOpenRequest===request && !request.cancelled.get()
@@ -823,6 +849,34 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         fun matches(owner:Editor)=sameOrigin(owner) && model.bodyRevision==revision && !model.dirty
     }
     private var noteSourceObservation:NoteSourceObservation?=null
+    private class CanvasSourceObservation(val model:com.xnotes.core.infinite.InfiniteDocument,val revision:Long,
+        val version:com.xnotes.storage.NativeSourceVersion,val identity:com.xnotes.format.BundleIdentity) {
+        fun sameOrigin(owner:Editor)=owner.sessionOwner.isCurrent() && owner.documentOwner===owner && owner.noteOpen && owner.canvasOpen &&
+            owner.infiniteOrNull?.document===model && model.identity==identity &&
+            model.path?.let {owner.notebookStorage.registry.locationKey(it)}==version.locationKey
+        fun matches(owner:Editor)=sameOrigin(owner) && model.bodyRevision==revision && !model.dirty
+    }
+    private var canvasSourceObservation:CanvasSourceObservation?=null
+    private var canvasSourceIncomplete=false
+    private class CanvasReferenceProtection(val model:com.xnotes.core.infinite.InfiniteDocument,
+        val identity:com.xnotes.format.BundleIdentity,val locationKey:String)
+    private var canvasReferenceProtection:CanvasReferenceProtection?=null
+    private fun canvasReferenceProtects(doc:com.xnotes.core.infinite.InfiniteDocument,uri:String):Boolean {
+        val protection=canvasReferenceProtection ?: return false
+        if(protection.model!==doc || protection.identity!=doc.identity ||
+            doc.path?.let {notebookStorage.registry.locationKey(it)}!=protection.locationKey) {
+            canvasReferenceProtection=null;return false
+        }
+        return protection.locationKey==notebookStorage.registry.locationKey(uri)
+    }
+    /** Only a proven complete adopted body or this same owner's fixed successful publication calls this. */
+    private fun observePublishedCanvas(doc:com.xnotes.core.infinite.InfiniteDocument,version:com.xnotes.storage.NativeSourceVersion,
+        revision:Long=doc.bodyRevision) {
+        if(!sessionOwner.isCurrent() || documentOwner!==this || !noteOpen || !canvasOpen || infiniteOrNull?.document!==doc ||
+            version.kind!=DocumentKind.CANVAS || version.documentId!=doc.identity.documentId ||
+            doc.path?.let {notebookStorage.registry.locationKey(it)}!=version.locationKey) return
+        canvasSourceObservation=CanvasSourceObservation(doc,revision,version,doc.identity)
+    }
     /** A source action must not fall back to weak stamps later through pause/close/queued autosave. */
     private class PageReferenceProtection(val model:Document,val locationKey:String)
     private var pageReferenceProtection:PageReferenceProtection?=null
@@ -895,8 +949,222 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val referenceIssuer=Any()
     private val referenceLocator by lazy {NativeReferenceLocator(state,view) {refreshView()}}
     private val pageReferenceIssuer=Any()
+    /** Per-owner PDF engine boundary; production defaults to the actual immutable PDF reader. */
+    internal var originalPdfAccess:com.xnotes.storage.OriginalPdfAccess?=null
     internal var pageReferenceRequest by mutableStateOf<PageReferenceRequest?>(null)
         private set
+
+    private val canvasRegionReferenceIssuer=Any()
+    internal var canvasRegionReferenceRequest by mutableStateOf<CanvasRegionReferenceRequest?>(null)
+        private set
+    internal fun requestCanvasRegionReference(region:Rect):Boolean {
+        val owner=documentOwner;val canvas=owner.infiniteOrNull ?: return false;val doc=canvas.document
+        if(!noteOpen || !canvasOpen || missingDocument!=null || !owner.noteOpen || !owner.canvasOpen ||
+            !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent() || owner.documentOwner!==owner ||
+            infiniteOrNull?.document!==doc || stylusInContact || canvas.hasPendingContentTransaction ||
+            canvas.interaction.mode!=com.xnotes.ui.CanvasPointerMode.IDLE ||
+            listOf(region.x,region.y,region.w,region.h).any {!it.isFinite() || kotlin.math.abs(it)>com.xnotes.mindmap.MindMapDocument.MAX_COORD} ||
+            region.w<=0 || region.h<=0) return false
+        canvasRegionReferenceRequest?.retire()
+        doc.path?.let {owner.canvasReferenceProtection=CanvasReferenceProtection(doc,doc.identity,notebookStorage.registry.locationKey(it))}
+        owner.canvasDebounceJob?.cancel()
+        canvasRegionReferenceRequest=CanvasRegionReferenceRequest.capture(canvasRegionReferenceIssuer,this,owner,doc,region,
+            sessionOwner,owner.sessionOwner)
+        return true
+    }
+    internal fun clearCanvasRegionReference(request:CanvasRegionReferenceRequest) {
+        if(canvasRegionReferenceRequest!==request) return
+        request.retire();canvasRegionReferenceRequest=null
+    }
+    internal fun canvasRegionReferenceCurrent(request:CanvasRegionReferenceRequest):Boolean {
+        val owner=request.owner;val doc=request.model
+        return canvasRegionReferenceRequest===request && request.issuedBy(canvasRegionReferenceIssuer) && request.pane===this && request.active() &&
+            sessionOwner===request.paneSession && owner.sessionOwner===request.ownerSession && documentOwner===owner && owner.documentOwner===owner &&
+            noteOpen && canvasOpen && missingDocument==null && owner.noteOpen && owner.canvasOpen &&
+            infiniteOrNull?.document===doc && owner.infiniteOrNull?.document===doc && doc.identity==request.identity && doc.path==request.path
+    }
+    internal fun canSaveCanvasRegionReference(request:CanvasRegionReferenceRequest)=canvasRegionReferenceCurrent(request) &&
+        request.path!=null && request.owner.canvasSourceObservation?.takeIf {it.model===request.model}?.sameOrigin(request.owner)==true
+    internal fun canCopyCanvasRegionReference(request:CanvasRegionReferenceRequest)=canvasRegionReferenceCurrent(request) &&
+        !request.owner.canvasSourceIncomplete &&
+        (request.owner.canvasEditSource==null || request.owner.canvasSourceObservation?.sameOrigin(request.owner)==true)
+
+    internal suspend fun copyCanvasRegionReference(request:CanvasRegionReferenceRequest,uri:String,name:String?,
+        stillCurrent:()->Boolean):SourceCopyResult = performCanvasRegionCopy(request,uri,name,stillCurrent,false)
+    internal suspend fun continueCanvasRegionCopy(request:CanvasRegionReferenceRequest,stillCurrent:()->Boolean):SourceCopyResult {
+        val attempt=request.copyAttempt ?: return SourceCopyResult.Failed
+        if(attempt.pending==null) return SourceCopyResult.Failed
+        return performCanvasRegionCopy(request,attempt.uri,attempt.name,stillCurrent,true)
+    }
+    /** The independent publication survives UI cancellation; only its final same-model adoption is conditional. */
+    private suspend fun performCanvasRegionCopy(request:CanvasRegionReferenceRequest,uri:String,name:String?,
+        stillCurrent:()->Boolean,continuing:Boolean):SourceCopyResult {
+        if(!canvasRegionReferenceCurrent(request) || !stillCurrent()) return SourceCopyResult.Changed
+        if(!canCopyCanvasRegionReference(request)) return SourceCopyResult.Failed
+        if(!continuing && request.copyAttempt!=null) return if(request.pendingSaveCopy!=null) SourceCopyResult.Retained else SourceCopyResult.Failed
+        val owner=request.owner;val doc=request.model
+        val finished=kotlinx.coroutines.CompletableDeferred<SourceCopyResult>()
+        val previous=owner.canvasWriteJob
+        owner.canvasDebounceJob?.cancel()
+        lateinit var copyJob:kotlinx.coroutines.Job
+        copyJob=owner.autosaveScope.launch(start=kotlinx.coroutines.CoroutineStart.LAZY) {
+            var result:SourceCopyResult=SourceCopyResult.Failed
+            var attempt:CanvasRegionCopyAttempt?=null
+            try {
+                previous?.join();owner.awaitSessionEncoders()
+                if(!owner.awaitCanvasCapture(doc) || !request.pane.canvasRegionReferenceCurrent(request) || !stillCurrent()) {
+                    result=SourceCopyResult.Changed;return@launch
+                }
+                if(!request.pane.canCopyCanvasRegionReference(request)) return@launch
+                if(continuing) {
+                    val held=request.copyAttempt ?: return@launch
+                    val pending=held.pending ?: return@launch
+                    attempt=held
+                    val version=try {withContext(Dispatchers.IO) {notebookStorage.completeCreation(pending)}}
+                        catch(error:Exception) {
+                            if(error is java.util.concurrent.CancellationException) throw error
+                            result=SourceCopyResult.Retained;return@launch
+                        }
+                    held.published=version;held.pending=null
+                } else {
+                    // A queued second click cannot replace a candidate accepted by the first operation.
+                    if(request.copyAttempt!=null) {result=if(request.pendingSaveCopy!=null) SourceCopyResult.Retained else SourceCopyResult.Failed;return@launch}
+                    val intent=notebookStorage.beginCreation(DocumentKind.CANVAS)
+                    val revision=doc.bodyRevision
+                    val snapshot=doc.snapshotForWrite(fixedItems=true)
+                    snapshot.identity=snapshot.identity.copy(documentId=intent.documentId)
+                    val displayName=name?.takeIf {it.isNotBlank()} ?: DocumentKind.withSuffix(doc.title,DocumentKind.CANVAS)
+                    val held=CanvasRegionCopyAttempt(uri,displayName,intent,revision,snapshot.identity)
+                    attempt=held;request.copyAttempt=held
+                    val written=withContext(Dispatchers.IO) {
+                        publishCreatedCanvas(uri,displayName,snapshot,intent,requireComplete=true)
+                    }
+                    if(written.error!=null) {
+                        held.pending=written.pending
+                        if(held.pending!=null) result=SourceCopyResult.Retained
+                        else {if(request.copyAttempt===held) request.copyAttempt=null;result=SourceCopyResult.Failed}
+                        return@launch
+                    }
+                    held.published=requireNotNull(written.version)
+                }
+                val held=requireNotNull(attempt);val version=requireNotNull(held.published)
+                result=SourceCopyResult.WrittenNotAdopted(held.uri,version.documentId)
+                if(!request.pane.canvasRegionReferenceCurrent(request) || !stillCurrent()) return@launch
+                if(!owner.awaitCanvasCapture(doc)) return@launch
+                owner.awaitSessionEncoders()
+                if(!request.pane.canvasRegionReferenceCurrent(request) || !stillCurrent() || owner.canvasWriteJob!==copyJob ||
+                    owner.infiniteOrNull?.hasPendingContentTransaction!=false || owner.stylusInContact ||
+                    version.kind!=DocumentKind.CANVAS || version.documentId!=held.identity.documentId ||
+                    version.locationKey!=notebookStorage.registry.locationKey(held.uri)) return@launch
+                // No suspension through retirement, identity adoption, exact B observation and new request.
+                val beforeIdentityRevision=doc.bodyRevision
+                val lateC1=beforeIdentityRevision!=held.capturedRevision
+                owner.retireCanvasEditSource()
+                doc.identity=held.identity
+                val identityRevisionDelta=doc.bodyRevision-beforeIdentityRevision
+                doc.path=held.uri;doc.displayName=held.name
+                doc.dirty=lateC1
+                owner.canvasAutosaveUri=held.uri.takeIf {owner.documentStorageRoot(it)!=null}
+                owner.observePublishedCanvas(doc,version,Math.addExact(held.capturedRevision,identityRevisionDelta))
+                check(request.pane.requestCanvasRegionReference(request.region))
+                owner.invalidateThumb(held.uri);owner.rememberStamp(held.uri);owner.requestWorkingSession()
+                result=SourceCopyResult.Adopted
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {
+                val held=attempt
+                result=held?.published?.let {SourceCopyResult.WrittenNotAdopted(requireNotNull(held).uri,it.documentId)}
+                    ?: if(held?.pending!=null) SourceCopyResult.Retained else SourceCopyResult.Failed
+                if(held?.published==null && held?.pending==null && request.copyAttempt===held) request.copyAttempt=null
+            } finally {owner.contentTransactionChanged();finished.complete(result)}
+        }
+        owner.canvasWriteJob=copyJob
+        copyJob.invokeOnCompletion {if(!finished.isCompleted) finished.complete(SourceCopyResult.Changed)}
+        copyJob.start();copyJob.join()
+        return finished.await()
+    }
+    private inner class CanvasRegionReferenceReadStamp(val request:CanvasRegionReferenceRequest,val observation:CanvasSourceObservation) {
+        private val revision=request.model.bodyRevision
+        private val writes=Triple(request.owner.noteWriteJob,request.owner.canvasWriteJob,request.owner.sessionWriteJob)
+        fun current()=canvasRegionReferenceCurrent(request) && request.model.bodyRevision==revision &&
+            request.owner.canvasSourceObservation===observation && observation.matches(request.owner) &&
+            request.owner.infiniteOrNull?.hasPendingContentTransaction==false && !request.owner.stylusInContact &&
+            request.owner.noteWriteJob===writes.first && request.owner.canvasWriteJob===writes.second && request.owner.sessionWriteJob===writes.third &&
+            writes.first?.isActive!=true && writes.second?.isActive!=true && writes.third?.isActive!=true
+    }
+    internal suspend fun prepareCanvasRegionReference(request:CanvasRegionReferenceRequest):PageReferencePreparation {
+        if(!canvasRegionReferenceCurrent(request)) return PageReferencePreparation.Changed
+        val owner=request.owner;val doc=request.model
+        owner.canvasWriteJob?.join();owner.awaitSessionEncoders()
+        if(!canvasRegionReferenceCurrent(request)) return PageReferencePreparation.Changed
+        val uri=doc.path ?: return PageReferencePreparation.SaveRequired
+        if(owner.canvasSourceIncomplete || owner.canvasEditSource!=null && owner.canvasSourceObservation?.sameOrigin(owner)!=true)
+            return PageReferencePreparation.Failed
+        if(doc.dirty) return PageReferencePreparation.SaveRequired
+        val observed=owner.canvasSourceObservation?.takeIf {it.matches(owner)}
+            ?: return if(owner.canvasEditSource!=null) PageReferencePreparation.Failed else PageReferencePreparation.SaveRequired
+        val stamp=CanvasRegionReferenceReadStamp(request,observed)
+        if(!stamp.current()) return PageReferencePreparation.Changed
+        return try {
+            val source=withContext(Dispatchers.IO) {
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val check={coroutine.ensureActive();if(!request.active()) throw java.util.concurrent.CancellationException("Canvas reference retired")}
+                val offer=com.xnotes.mindmap.MapSourceAccess.offerCanvas(appContext,android.net.Uri.parse(uri),request.identity.documentId,check)
+                val catalog=offer.catalog ?: return@withContext null
+                if(catalog.kind!=DocumentKind.CANVAS || catalog.documentId!=observed.version.documentId ||
+                    catalog.locationKey!=observed.version.locationKey || catalog.sha256!=observed.version.sha256) return@withContext null
+                com.xnotes.mindmap.MapSourceAccess.selectCanvasRegion(appContext,offer,request.region,check).copy(id=request.sourceId)
+            }
+            if(!stamp.current()) PageReferencePreparation.Changed
+            else source?.let {PageReferencePreparation.Ready(it)} ?: PageReferencePreparation.Failed
+        } catch(cancelled:java.util.concurrent.CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();PageReferencePreparation.Changed
+        } catch(_:Exception) {if(canvasRegionReferenceCurrent(request)) PageReferencePreparation.Failed else PageReferencePreparation.Changed}
+    }
+    /** Only the explicit source-flow button starts this write; cancelling its UI never cancels accepted IO. */
+    internal suspend fun saveCanvasRegionReference(request:CanvasRegionReferenceRequest):PageReferencePreparation {
+        if(!canvasRegionReferenceCurrent(request)) return PageReferencePreparation.Changed
+        val owner=request.owner;val doc=request.model
+        if(owner.canvasSourceIncomplete || owner.canvasEditSource!=null && owner.canvasSourceObservation?.sameOrigin(owner)!=true)
+            return PageReferencePreparation.Failed
+        if(!canSaveCanvasRegionReference(request)) return PageReferencePreparation.SaveRequired
+        val completed=kotlinx.coroutines.CompletableDeferred<PageReferencePreparation?>()
+        val pending=owner.canvasWriteJob
+        owner.canvasDebounceJob?.cancel()
+        val job=owner.autosaveScope.launch {
+            var outcome:PageReferencePreparation?=PageReferencePreparation.Failed
+            try {
+                pending?.join();owner.awaitSessionEncoders()
+                if(!owner.awaitCanvasCapture(doc) || !request.pane.canvasRegionReferenceCurrent(request)) {
+                    outcome=PageReferencePreparation.Changed;return@launch
+                }
+                val base=owner.canvasSourceObservation?.takeIf {it.sameOrigin(owner)}
+                if(base==null) {outcome=PageReferencePreparation.SaveRequired;return@launch}
+                if(!doc.dirty) {outcome=null;return@launch}
+                val path=doc.path ?: run {outcome=PageReferencePreparation.SaveRequired;return@launch}
+                val identity=doc.identity;val source=owner.canvasEditSource
+                val snapshot=doc.snapshotForWrite(fixedItems=true);val revision=doc.bodyRevision
+                val version=withContext(Dispatchers.IO) {owner.writeCanvasSafely(path,snapshot,base.version)} ?: return@launch
+                // B remains the actual publication even if a late C1 or UI cancellation arrived during IO.
+                if(!owner.sessionOwner.isCurrent() || owner.documentOwner!==owner || !owner.noteOpen || !owner.canvasOpen ||
+                    owner.infiniteOrNull?.document!==doc || doc.path!=path || doc.identity!=identity ||
+                    owner.canvasEditSource!==source || owner.canvasSourceObservation!==base) {
+                    outcome=PageReferencePreparation.Changed;return@launch
+                }
+                doc.dirty=doc.bodyRevision!=revision
+                owner.observePublishedCanvas(doc,version,revision)
+                owner.invalidateThumb(path);owner.requestWorkingSession()
+                outcome=if(request.pane.canvasRegionReferenceCurrent(request)) null else PageReferencePreparation.Changed
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {outcome=if(request.pane.canvasRegionReferenceCurrent(request)) PageReferencePreparation.Failed else PageReferencePreparation.Changed}
+            finally {owner.contentTransactionChanged();completed.complete(outcome)}
+        }
+        owner.canvasWriteJob=job
+        job.invokeOnCompletion {if(!completed.isCompleted) completed.complete(PageReferencePreparation.Changed)}
+        job.join()
+        completed.await()?.let {return it}
+        owner.afterInputDispatch();owner.awaitSessionEncoders()
+        return prepareCanvasRegionReference(request)
+    }
 
     private fun observePublishedNote(doc:Document,version:com.xnotes.storage.NativeSourceVersion,revision:Long=doc.bodyRevision) {
         if(!sessionOwner.isCurrent() || documentOwner!==this || !noteOpen || canvasOpen || state.document!==doc ||
@@ -904,14 +1172,39 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             doc.path?.let {notebookStorage.registry.locationKey(it)}!=version.locationKey) return
         noteSourceObservation=NoteSourceObservation(doc,revision,version,doc.identity,doc.hasReferenceAnchors,doc.pageReferenceScope)
     }
-    internal fun requestPageReference(page:Page):Boolean {
+    internal fun sourceSelectionRegion():com.xnotes.canvas.PageSourceRegion? =
+        if(noteOpen && !canvasOpen) controller.sourceSelectionRegion() else null
+    internal fun sourceCaptureRegion():com.xnotes.canvas.PageSourceRegion? =
+        if(noteOpen && !canvasOpen) controller.sourceCaptureRegion() else null
+    internal fun requestPageRegionReference(target:com.xnotes.canvas.PageSourceRegion):Boolean {
+        fun rejected():Boolean {message=appContext.getString(R.string.graph_region_single_page_required);return false}
+        val region=target.region;val doc=state.document
+        if(!target.current() || target.document!==doc || doc.pages.count {it===target.page}!=1 || region.w<=0 || region.h<=0 ||
+            listOf(region.x,region.y,region.w,region.h,region.right,region.bottom).any {!it.isFinite()} ||
+            listOf(region.x,region.y,region.w,region.h).any {kotlin.math.abs(it)>com.xnotes.mindmap.MindMapDocument.MAX_COORD}) return rejected()
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root.openPanes.any {pane->pane.hostTouching || pane.stylusInContact ||
+            (if(pane.canvasOpen) pane.infiniteOrNull?.hasPendingContentTransaction==true
+                else pane.controller.hasPendingContentTransaction || pane.tablePreviews.values.any {pane.currentTablePreview(it) && it.table.snapshot()!=it.before})})
+            return rejected()
+        return if(capturePageReference(target.page,region)) true else rejected()
+    }
+    internal fun requestPageReference(page:Page):Boolean = capturePageReference(page,null)
+    private fun capturePageReference(page:Page,region:Rect?):Boolean {
         val owner=documentOwner;val doc=state.document
         if(!noteOpen || canvasOpen || missingDocument!=null || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent() ||
-            owner.state.document!==doc || doc.pages.none {it===page}) return false
+            owner.state.document!==doc || doc.pages.count {it===page}!=1) return false
         pageReferenceRequest?.retire()
         pageReferenceRequest=PageReferenceRequest.capture(pageReferenceIssuer,this,owner,doc,page,
-            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner)
+            doc.path?.let(::documentKey),sessionOwner,owner.sessionOwner,region,
+            OriginalPdfCreationRequest.capture(appContext,originalPdfAccess ?: com.xnotes.storage.OriginalPdfAccess(appContext),doc,page,region))
         return true
+    }
+    /** Read-only preparation never settles previews, flushes the note or creates note page IDs. */
+    internal fun originalPdfReferenceReady(request:PageReferenceRequest):Boolean {
+        if(!pageReferenceCurrent(request)) return false
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        return root.hostParkingSlots().none {root.hostParkingInputBusy(it)}
     }
     internal fun clearPageReference(request:PageReferenceRequest) {
         if(pageReferenceRequest!==request) return
@@ -925,7 +1218,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.document===doc && owner.state.document===doc && doc.pages.any {it===request.page} &&
             doc.identity.documentId==request.documentId && doc.path?.let(::documentKey)==request.path &&
             (request.scope==null || doc.pageReferenceScope===request.scope) &&
-            (request.initialPageId==null || request.page.referenceIdentity.id==request.initialPageId)
+            (request.initialPageId==null || request.page.referenceIdentity.id==request.initialPageId) &&
+            (request.region==null || doc.pages.count {it===request.page}==1 && doc.identity==request.regionIdentity &&
+                doc.path==request.regionPath && doc.pdfFile?.path==request.regionPdfPath)
     }
     private fun retireInvalidPageReference() {
         pageReferenceRequest?.let {if(!pageReferenceCurrent(it)) clearPageReference(it)}
@@ -1006,6 +1301,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     internal suspend fun preparePageReference(request:PageReferenceRequest):PageReferencePreparation {
         if(!pageReferenceCurrent(request)) return PageReferencePreparation.Changed
+        if(request.region!=null && request.owner.incompleteNoteModel.get()===request.model) return PageReferencePreparation.Failed
         val uri=request.model.path ?: return PageReferencePreparation.SaveRequired
         request.owner.pageReferenceProtection=PageReferenceProtection(request.model,notebookStorage.registry.locationKey(uri))
         request.owner.beginPageReferenceSave()
@@ -1032,7 +1328,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     val index=pages.orderedIds.indexOf(id)
                     if(index<0 || !request.model.hasReferenceAnchors) return PageReferencePreparation.ReopenRequired
                     PageReferencePreparation.Ready(offer.fileSource.copy(id=request.sourceId,scope=com.xnotes.mindmap.SourceScope.PAGE,
-                        pageId=id,lastKnownPage=index+1).also {it.validate()})
+                        pageId=id,lastKnownPage=index+1,region=request.region).also {it.validate()})
                 }
                 com.xnotes.storage.NativeSourceSnapshot.ReferenceCatalog.Pages.NotPaginated -> PageReferencePreparation.Failed
             }
@@ -1123,6 +1419,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             else ed.controller.hasPendingContentTransaction ||
                 ed.tablePreviews.values.any {ed.currentTablePreview(it) && it.table.snapshot()!=it.before}
     }
+    /** Map-to-map presentation observes drafts; even an unchanged live editor must finish itself. */
+    private fun mapSourceParkingInputBusy(slot:OpenSlot)=hostParkingInputBusy(slot) ||
+        listOf(slot.pane,slot.owner).distinct().any {ed->
+            if(slot.canvas) ed.infiniteOrNull?.editingField!=null
+            else ed.controller.isEditingText || ed.editingField!=null || ed.flowEditingActive || ed.flowText.active ||
+                ed.editingTable!=null || ed.tablePreviews.values.any {ed.currentTablePreview(it)}
+        }
     private fun hostParkingWriterBusy(slot:OpenSlot)=listOf(slot.pane,slot.owner).any {
         it.noteWriteJob?.isActive==true || it.canvasWriteJob?.isActive==true || it.sessionWriteJob?.isActive==true}
 
@@ -1172,9 +1475,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Park the existing workspace intact; dirty is allowed and no native write is requested here. */
-    internal suspend fun awaitHostParking():NativeHostParking? {
+    internal suspend fun awaitHostParking():NativeHostParking? = awaitHostParking(commitText=true)
+
+    /** Pure observation for a map source hop: no text, flow, table or selection is confirmed. */
+    internal suspend fun awaitMapSourceParking():NativeHostParking? = awaitHostParking(commitText=false)
+
+    private suspend fun awaitHostParking(commitText:Boolean):NativeHostParking? {
         val workspace=sibling?.takeIf {it.secondary===this} ?: this
-        if(workspace!==this) return workspace.awaitHostParking()
+        if(workspace!==this) return workspace.awaitHostParking(commitText)
+        fun inputBusy(slot:OpenSlot)=if(commitText) hostParkingInputBusy(slot) else mapSourceParkingInputBusy(slot)
         val slots=hostParkingSlots()
         val replacements=slots.map {it.pane.replacementSequence}
         fun current()=sameHostParkingSlots(slots) && slots.zip(replacements).all {(slot,sequence)->
@@ -1184,7 +1493,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 ed.noteWriteJob?.join();ed.canvasWriteJob?.join();ed.awaitSessionEncoders()
                 if(!current()) return null
             }
-            for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
+            if(commitText) for(slot in slots.filter {it.open}.distinctBy {it.owner}) {
                 if(slot.canvas) slot.owner.infiniteOrNull?.commitText()
                 else {slot.owner.commitNoteTextForSave();slot.owner.flowText.endSession()}
             }
@@ -1193,14 +1502,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if(!current()) return null
             val wakes=slots.map {it.pane.captureBoundary}
             if(slots.any(::hostParkingWriterBusy)) continue
-            if(slots.none(::hostParkingInputBusy)) {
+            if(slots.none(::inputBusy)) {
                 val stamps=slots.map(::HostParkingStamp)
                 return NativeHostParking.observe {
-                    current() && slots.none(::hostParkingInputBusy) && slots.none(::hostParkingWriterBusy) && stamps.all {it.current()}
+                    current() && slots.none(::inputBusy) && slots.none(::hostParkingWriterBusy) && stamps.all {it.current()}
                 }
             }
             // A closed physical surface cannot ask the user to finish an invisible transaction.
-            if(slots.any {!it.open && hostParkingInputBusy(it)}) return null
+            if(slots.any {!it.open && inputBusy(it)}) return null
             kotlinx.coroutines.selects.select<Unit> {
                 for(wake in wakes) wake.onAwait { }
                 for(slot in slots) slot.pane.sessionOwner.onRetired { }
@@ -1577,21 +1886,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Write [doc] to [uri] through a private temp, so a failed encode never truncates a good file. */
-    private fun writeCanvasSafely(uri: String, doc: com.xnotes.core.infinite.InfiniteDocument): Boolean =
+    private fun writeCanvasSafely(uri: String, doc: com.xnotes.core.infinite.InfiniteDocument,
+        expected:com.xnotes.storage.NativeSourceVersion?=null):com.xnotes.storage.NativeSourceVersion? =
         synchronized(saveLock) {
             runCatching {
                 val tmp = java.io.File.createTempFile("save", ".xcanvas", saveTmpDir)
                 try {
                     java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }
-                    notebookStorage.publishNote(uri,tmp,DocumentKind.CANVAS,doc.displayName ?: doc.title)
+                    val version=if(expected==null) notebookStorage.publishNoteObserved(uri,tmp,DocumentKind.CANVAS,doc.displayName ?: doc.title)
+                        else notebookStorage.publishExpected(uri,tmp,expected,doc.displayName ?: doc.title)
                     rememberStamp(uri)
-                    true
+                    version
                 } finally {
                     tmp.delete()
                 }
             }.getOrElse {error->
                     if(isNativeSaveRejection(error) || error is java.util.concurrent.CancellationException) throw error
-                    false
+                    null
                 }
         }
 
@@ -1624,6 +1935,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 sessionOwner.awaitAccepted()
                 if (!awaitCanvasCapture(doc)) return@launch
                 val target = if (uri == requestedPath && doc.path != requestedPath) doc.path ?: return@launch else uri
+                val strictSource=canvasReferenceProtects(doc,target)
+                val publishedBase=canvasSourceObservation?.takeIf {it.sameOrigin(this@Editor)}
+                val expected=if(strictSource) publishedBase?.version else null
+                if(strictSource && expected==null) return@launch
                 val originalPath=doc.path
                 val originalIdentity=doc.identity
                 val source=canvasEditSource
@@ -1634,7 +1949,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val captureTitle = doc.displayName ?: title
                 wasDirty=doc.dirty;doc.dirty=false
                 if (showOverlay) savingNote = true
-                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(target,snapshot,captureTitle,doc,intent)}
+                val res=withContext(Dispatchers.IO) {saveCanvasGuarded(target,snapshot,captureTitle,doc,intent,expected)}
                 if(res!=null) {
                     res.fork?.let {fork->
                         savingNote=false
@@ -1648,6 +1963,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         doc.dirty=doc.dirty || !unchanged
                         requestWorkingSession()
                     }
+                    if(res.fork==null && publishedBase!=null && canvasSourceObservation===publishedBase &&
+                        infiniteOrNull?.document===doc && canvasOpen && documentOwner===this@Editor &&
+                        doc.path==originalPath && doc.identity==originalIdentity && canvasEditSource===source && observation?.isCurrent()!=false)
+                        res.version?.let {observePublishedCanvas(doc,it,revision)}
                     invalidateThumb(res.uri)
                     success=true
                 }
@@ -3851,7 +4170,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Snapshot live state into settings and save (call on pause/stop). */
     fun persist() {
         if (canvasOpen) infiniteOrNull?.commitText() else commitNoteTextForSave()
-        if (pane == Pane.PRIMARY && active !== this) {
+        if (pane == Pane.PRIMARY && active !== this && !mixedPresentationActive) {
             active.resetPenButtons()
             copyToolSettingsFrom(active)
         }
@@ -3900,6 +4219,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun sessionModelAdopted() {
+        presentationModelIdentity=Any()
         sessionAdoptionSequence++
         sessionSaveSequence++
         sessionPending = false
@@ -3943,9 +4263,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (owner.noteWriteJob?.isActive == true || noteTransactionsPending(doc)) return null
         val body = if (forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision)
             doc.fixedWriteSnapshot() else null
+        val position=readingPositionForPersistence()
         return WorkingCapture.Note(doc, doc.bodyRevision, body,
             com.xnotes.platform.SessionStore.Metadata(doc.path, doc.displayName, doc.dirty,
-                state.zoom, state.scrollX, state.scrollY, zoomLocked, viewOverrides))
+                position.zoom, position.x, position.y, zoomLocked, position.overrides))
     }
 
     private fun sameWorkingModel(capture: WorkingCapture): Boolean = when (capture) {
@@ -4036,7 +4357,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Reopen the last session (document + view state). The heavy load runs off the
      *  main thread; the apply runs on the caller's (main) dispatcher. A no-op when
      *  there is no saved session. Drives the launch loader, so it's safe to await. */
-    suspend fun restoreSession() {
+    suspend fun restoreSession()=restoreSession(expectedHint=null)
+
+    internal suspend fun restoreSession(expectedHint:com.xnotes.mindmap.MapNativeRestoreHint?) {
         if (sessionLoaded || noteOpen || sessionSlotAdopted) return
         val request = ++sessionAdoptionSequence
         // A canvas was open last time: it takes precedence, since only one document is ever on top.
@@ -4048,6 +4371,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (request != sessionAdoptionSequence || !sessionOwner.isCurrent() || sessionLoaded || noteOpen) return
         if (outcome !is com.xnotes.platform.LegacySessionQueue.Outcome.Success) { sessionLoaded = true; return }
         val (canvasDoc, snap) = outcome.value
+        if(expectedHint!=null) {
+            val matches=when {
+                canvasDoc!=null->matchesRestoreIdentity(expectedHint,canvasDoc.identity.documentId,canvasDoc.path,DocumentKind.CANVAS)
+                snap!=null->matchesRestoreIdentity(expectedHint,snap.document.identity.documentId,snap.document.path,DocumentKind.NOTE)
+                else->false
+            }
+            // A mismatched working copy remains unadopted and cannot be rewritten by this slot.
+            if(!matches) {sessionLoaded=true;return}
+        }
         if (canvasDoc != null) {
             openCanvasDocument(canvasDoc, canvasDoc.path, canvasDoc.displayName, fromSession = true)
             return
@@ -4349,6 +4681,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun sharedLayoutSnapshot() = state.document.pages.map { Triple(it, state.footprint(it), it.pdfTurn) }
 
     private fun refreshContent(notifySharedView: Boolean = true) {
+        controller.sourceRegionsChanged()
         retireInvalidPageReference();sharedPeer()?.retireInvalidPageReference()
         contentTransactionChanged()
         republishFlowIfStale()
@@ -4717,70 +5050,109 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * the loaded note and leaves the explorer as it was. A second tap while one open is in flight is
      * ignored, so two reads never race to swap in a document.
      */
+    private fun liveReferenceOwners(documentId:String)=openPanes.filter {it.missingDocument==null}.map {it.documentOwner}.distinct()
+        .filter {owner->if(owner.canvasOpen) owner.infiniteOrNull?.document?.identity?.documentId==documentId
+            else owner.state.document.identity.documentId==documentId}
     /** Freeze the actual panes and models, while allowing another owner a same-model Save As. */
     internal suspend fun prepareReference(target:com.xnotes.storage.NativeReferenceTarget,region:Rect?=null,
-                                          selectedUri:String?=null):NativeReferencePreparation {
+                                          selectedUri:String?=null,pagedDestination:Editor?=null,
+                                          allowCanvasHome:Boolean=false):NativeReferencePreparation {
         val root=sibling?.takeIf {it.secondary===this} ?: this
-        if(root!==this) return root.prepareReference(target,region,selectedUri)
-        if(region!=null && (target.pageId==null || listOf(region.x,region.y,region.w,region.h).any {!it.isFinite()} || region.w<=0 || region.h<=0))
+        if(root!==this) return root.prepareReference(target,region,selectedUri,pagedDestination,allowCanvasHome)
+        if(region!=null && ((target.pageId==null && target.requiredKind!=DocumentKind.CANVAS) ||
+                listOf(region.x,region.y,region.w,region.h).any {!it.isFinite()} || region.w<=0 || region.h<=0))
             return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
         val initialSlots=hostParkingSlots();val initialMissing=initialSlots.map {it.pane.missingDocument}
         fun initialCurrent()=sameHostParkingSlots(initialSlots) && initialSlots.zip(initialMissing).all {(slot,m)->slot.pane.missingDocument===m}
-        fun live()=openPanes.filter {!it.canvasOpen && it.missingDocument==null}.map {it.documentOwner}.distinct()
-            .filter {it.state.document.identity.documentId==target.documentId}
-        fun freeze(uri:String?,owner:Editor?,name:String?):NativeReferencePreparation {
+        fun freeze(uri:String?,owner:Editor?,name:String?,kind:DocumentKind):NativeReferencePreparation {
             if(!sessionOwner.isCurrent() || opening) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.BUSY)
+            if(target.requiredKind!=null && target.requiredKind!=kind)
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+            if(kind==DocumentKind.CANVAS && (target.pageId!=null || region!=null && target.requiredKind!=DocumentKind.CANVAS))
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
             val slots=hostParkingSlots();val missing=slots.map {it.pane.missingDocument}
             if(slots.any {!it.pane.sessionOwner.isCurrent() || !it.owner.sessionOwner.isCurrent()})
                 return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-            val model=owner?.state?.document
-            // Once RAM was identified as a source, all later saves retain its original strict base.
+            val destination=pagedDestination.takeIf {kind==DocumentKind.NOTE}
+            if(destination!=null && (slots.none {it.pane===destination} || destination.canvasOpen && !allowCanvasHome ||
+                    owner!=null && owner!==destination))
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+            val model=owner?.takeUnless {it.canvasOpen}?.state?.document
+            val canvas=owner?.takeIf {it.canvasOpen}?.infiniteOrNull?.document
+            if(region!=null && kind==DocumentKind.NOTE && model!=null && owner?.incompleteNoteModel?.get()===model)
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
+            if(owner!=null && (if(kind==DocumentKind.CANVAS) canvas==null else model==null))
+                return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+            // A retained source keeps its original strict edit source; this navigation never saves it.
             model?.path?.let {requireNotNull(owner).pageReferenceProtection=PageReferenceProtection(model,notebookStorage.registry.locationKey(it))}
-            val page=try {model?.let(target::page)} catch(error:com.xnotes.storage.NativeReferenceFailure) {
+            val page=try {
+                canvas?.let {target.canvas(it)}
+                model?.let(target::page)
+            } catch(error:com.xnotes.storage.NativeReferenceFailure) {
                 return NativeReferencePreparation.Failed(error.issue)
             }
-            val identity=model?.identity;val path=model?.path;val scope=model?.pageReferenceScope
-            val guards=slots.filter {it.open}.map {it.owner}.distinct().filter {it!==owner}
-            val request=NativeReferenceRequest.observe(referenceIssuer,this,target,region,uri,name,owner,guards,model,page,
+            val identity=model?.identity ?: canvas?.identity;val path=model?.path ?: canvas?.path;val scope=model?.pageReferenceScope
+            val guards=slots.filter {it.open && (destination==null || it.pane===destination)}.map {it.owner}.distinct().filter {it!==owner}
+            val request=NativeReferenceRequest.observe(referenceIssuer,this,target,kind,region,uri,name,owner,guards,model,page,canvas,
                 valid={sameHostParkingSlots(slots) && slots.zip(missing).all {(slot,m)->slot.pane.missingDocument===m} &&
-                    (owner==null || owner.state.document===model && model!!.identity==identity && model.path==path && model.pageReferenceScope===scope &&
-                        runCatching {target.page(model)===page}.getOrDefault(false))},
-                active={slots.all {it.pane.sessionOwner.isCurrent() && it.owner.sessionOwner.isCurrent()}})
+                    (owner==null || if(kind==DocumentKind.CANVAS) owner.canvasOpen && owner.infiniteOrNull?.document===canvas &&
+                        canvas!!.identity==identity && canvas.path==path && runCatching {target.canvas(canvas);true}.getOrDefault(false)
+                    else !owner.canvasOpen && owner.state.document===model && model!!.identity==identity && model.path==path &&
+                        model.pageReferenceScope===scope && runCatching {target.page(model)===page}.getOrDefault(false))},
+                active={slots.all {it.pane.sessionOwner.isCurrent() && it.owner.sessionOwner.isCurrent()}},
+                pagedDestination=destination)
             return NativeReferencePreparation.Ready(request)
         }
-        val first=live()
+        val first=liveReferenceOwners(target.documentId)
         if(first.size>1) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
-        first.singleOrNull()?.let {owner->owner.state.document.path?.let {
+        first.singleOrNull()?.takeUnless {it.canvasOpen}?.let {owner->owner.state.document.path?.let {
             owner.pageReferenceProtection=PageReferenceProtection(owner.state.document,notebookStorage.registry.locationKey(it))
         }}
         val initialSource=first.singleOrNull()
-        val initialIdentity=initialSource?.state?.document?.identity
-        val initialPath=initialSource?.state?.document?.path
-        val initialScope=initialSource?.state?.document?.pageReferenceScope
+        val initialKind=initialSource?.let {if(it.canvasOpen) DocumentKind.CANVAS else DocumentKind.NOTE}
+        val initialModel=initialSource?.takeUnless {it.canvasOpen}?.state?.document
+        val initialCanvas=initialSource?.takeIf {it.canvasOpen}?.infiniteOrNull?.document
+        val initialIdentity=initialModel?.identity ?: initialCanvas?.identity
+        val initialPath=initialModel?.path ?: initialCanvas?.path
+        val initialScope=initialModel?.pageReferenceScope
         val resolved=try {withContext(Dispatchers.IO) {
+            val coroutine=kotlinx.coroutines.currentCoroutineContext();val checkActive={coroutine.ensureActive()}
             val registry=notebookStorage.registry
-            val kind=registry.kindForId(target.documentId)
-            if(kind!=null && kind!="xnote") throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+            val knownKind=when(registry.kindForId(target.documentId)) {
+                null->null;"xnote"->DocumentKind.NOTE;"xcanvas"->DocumentKind.CANVAS
+                else->throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+            }
+            if(initialKind!=null && knownKind!=null && initialKind!=knownKind)
+                throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             if(registry.locations(target.documentId).size>1) throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
             val uri=selectedUri ?: registry.resolve(target.documentId)
+            val kind=initialKind ?: knownKind ?: uri?.let {notebookStorage.referenceKind(it,target,checkActive)}
+                ?: throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
             val actualName=uri?.let {location->runCatching {
                 val parsed=android.net.Uri.parse(location)
                 if(parsed.scheme=="file") java.io.File(requireNotNull(parsed.path)).name
                 else appContext.contentResolver.query(parsed,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)
                     ?.use {c->if(c.moveToFirst() && !c.isNull(0)) c.getString(0) else null}
             }.getOrNull()?.takeIf {it.isNotBlank()}}
-            uri to (actualName ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()})
+            Triple(uri,actualName ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()},kind)
         }} catch(error:java.util.concurrent.CancellationException) {throw error
         } catch(error:Exception) {return NativeReferencePreparation.Failed(referenceIssue(error))}
-        if(!initialCurrent() || initialSource!=null && (initialSource.state.document.identity!=initialIdentity ||
-                initialSource.state.document.path!=initialPath || initialSource.state.document.pageReferenceScope!==initialScope))
+        if(!initialCurrent() || initialSource!=null && (if(initialKind==DocumentKind.CANVAS)
+                initialSource.infiniteOrNull?.document!==initialCanvas || initialCanvas?.identity!=initialIdentity || initialCanvas?.path!=initialPath
+            else initialSource.state.document!==initialModel || initialModel?.identity!=initialIdentity ||
+                initialModel?.path!=initialPath || initialModel?.pageReferenceScope!==initialScope))
             return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        val uri=resolved.first
-        val after=live()
+        val uri=resolved.first;val kind=resolved.third
+        val after=liveReferenceOwners(target.documentId)
         if(after.size>1) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
-        if(after.size==1) return freeze(after.single().state.document.path,after.single(),after.single().state.document.displayName)
+        if(after.size==1) {
+            val owner=after.single();val actualKind=if(owner.canvasOpen) DocumentKind.CANVAS else DocumentKind.NOTE
+            if(actualKind!=kind) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+            return if(owner.canvasOpen) freeze(owner.infinite.document.path,owner,owner.infinite.document.displayName,kind)
+                else freeze(owner.state.document.path,owner,owner.state.document.displayName,kind)
+        }
         if(uri==null) return NativeReferencePreparation.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
-        return freeze(uri,null,resolved.second ?: DocumentKind.withSuffix(appContext.getString(R.string.untitled),DocumentKind.NOTE))
+        return freeze(uri,null,resolved.second ?: DocumentKind.withSuffix(appContext.getString(R.string.untitled),kind),kind)
     }
     private fun referenceIssue(error:Exception)=when(error) {
         is com.xnotes.storage.NativeReferenceFailure->error.issue
@@ -4800,11 +5172,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         if(request.keptOwner!=null) return locateReference(request,explicitlyDiscarded,stillCurrent,onOpened)
         if(!request.current()) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        if(openPanes.any {!it.canvasOpen && it.missingDocument==null && it.state.document.identity.documentId==request.target.documentId})
+        if(liveReferenceOwners(request.target.documentId).isNotEmpty())
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         val uri=request.uri ?: return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.UNAVAILABLE)
         val context=ReferenceOpenContext(request,stillCurrent,onOpened)
-        val success=openNative(uri,request.displayName,DocumentKind.NOTE,true,explicitlyDiscarded,reference=context)
+        val destination=request.pagedDestination ?: this
+        val success=destination.openNative(uri,request.displayName,request.kind,request.pagedDestination==null,
+            explicitlyDiscarded,reference=context)
         return if(success) context.result ?: NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
             else (context.result as? NativeReferenceResult.Failed) ?: NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
     }
@@ -4815,27 +5189,41 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(!request.issuedBy(referenceIssuer) || request.workspace!==this || !stillCurrent())
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
         val keep=request.keptOwner ?: return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        if(keep.state.document===request.model) try {request.target.page(keep.state.document)}
-            catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
+        try {
+            if(request.kind==DocumentKind.CANVAS) request.canvasModel?.let {request.target.canvas(it)}
+            else if(keep.state.document===request.model) request.target.page(keep.state.document)
+        } catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
         if(!request.current()) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        val slots=captureOpenSlots(true)
-        if(!settleOpenSlots(slots,true,explicitlyDiscarded,null,retainedOwner=keep))
+        val destination=request.pagedDestination
+        if(destination!=null && (request.kind!=DocumentKind.NOTE || keep!==destination || keep.documentOwner!==keep))
+            return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+        val receiver=destination ?: this
+        val whole=destination==null
+        val slots=receiver.captureOpenSlots(whole)
+        if(!receiver.settleOpenSlots(slots,whole,explicitlyDiscarded,null,retainedOwner=keep,
+                preserveRetainedInput=destination!=null))
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.BUSY)
         val stamps=slots.map(::OpenReadStamp)
         val duplicate=try {withContext(Dispatchers.IO) {notebookStorage.registry.locations(request.target.documentId).size>1}}
             catch(error:java.util.concurrent.CancellationException) {throw error}
             catch(error:Exception) {return NativeReferenceResult.Failed(referenceIssue(error))}
         if(duplicate) return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
-        if(!request.current() || !stillCurrent() || !stamps.all {it.isCurrent()} || !readyToAdopt(slots,true,explicitlyDiscarded,null,keep))
+        if(!request.current() || !stillCurrent() || !stamps.all {it.isCurrent()} ||
+            destination!=null && slots.any {mapSourceParkingInputBusy(it)} ||
+            !receiver.readyToAdopt(slots,whole,explicitlyDiscarded,null,keep))
             return NativeReferenceResult.Failed(com.xnotes.storage.NativeReferenceIssue.CHANGED)
-        val page=try {request.target.page(keep.state.document)} catch(error:com.xnotes.storage.NativeReferenceFailure) {
-            return NativeReferenceResult.Failed(error.issue)
-        }
+        val page=try {
+            if(request.kind==DocumentKind.CANVAS) {request.target.canvas(requireNotNull(request.canvasModel));null}
+            else request.target.page(keep.state.document)
+        } catch(error:com.xnotes.storage.NativeReferenceFailure) {return NativeReferenceResult.Failed(error.issue)}
         // No suspension from this final check through the owner's UI handoff.
-        detachReferenceOthers(keep)
+        if(destination==null) detachReferenceOthers(keep)
         focusedPane=keep.pane
-        val result=NativeReferenceResult.Opened(keep,keep.referenceLocator.show(keep.state.document,page,request.region))
-        keep.refreshView();onOpened(result)
+        val region=if(request.kind==DocumentKind.CANVAS) keep.infinite.showReferenceRegion(requireNotNull(request.canvasModel),request.region)
+            else keep.referenceLocator.show(keep.state.document,page,request.region)
+        val result=NativeReferenceResult.Opened(keep,region)
+        if(request.kind==DocumentKind.CANVAS) keep.infinite.view.requestRender() else keep.refreshView()
+        onOpened(result)
         return result
     }
     private fun detachReferenceOthers(keep:Editor) {
@@ -4851,10 +5239,532 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     suspend fun openAsync(uri:String,name:String?=null) {openNative(uri,name,DocumentKind.NOTE)}
 
+    internal val penInputOwnerToken:Any
+        get()=if(canvasOpen) infinite.presentationModelIdentity else presentationModelIdentity
+
+    private data class PagedSourceRead(val version:com.xnotes.storage.NativeSourceVersion,
+        val identity:com.xnotes.storage.DocumentRegistryIdentityEpoch.Ticket,
+        val domain:com.xnotes.storage.OriginalPdfCatalog.IdentityDomainsBatch)
+    private fun checkedPagedSource(uri:String,source:com.xnotes.storage.NativeSourceSnapshot,checkActive:()->Unit):PagedSourceRead {
+        val actual=source.version
+        if(actual.kind!=DocumentKind.NOTE)
+            throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+        val registry=notebookStorage.registry
+        val identity=registry.identityObservation(actual.documentId)
+        val domain=com.xnotes.storage.OriginalPdfCatalog(registry).identityDomains(setOf(actual.documentId),checkActive)
+        val kind=registry.kindForId(actual.documentId)
+        if(kind!=null && kind!="xnote" || !domain.supported || domain.unverifiable || actual.documentId in domain.reservedOriginalIds)
+            throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
+        if(registry.locations(actual.documentId).any {registry.locationKey(it)!=actual.locationKey})
+            throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
+        com.xnotes.storage.ReferenceContract.verifyObserved(registry.expectationAt(uri),registry.expectationForId(actual.documentId),
+            com.xnotes.format.BundleHeader.read(source.file) {checkActive();false})
+        checkActive()
+        if(!identity.current() || !domain.current())
+            throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+        return PagedSourceRead(actual,identity,domain)
+    }
+    private fun decodePagedSource(uri:String,name:String?,source:com.xnotes.storage.NativeSourceSnapshot,
+        timing:DocumentCodec.ReadTiming,checkActive:()->Unit):com.xnotes.storage.PreparedNativeOpen {
+        val prepared=com.xnotes.storage.PreparedNativeOpen.read(source,notebookStorage.pdfResources,codec,canvasCodec,
+            pdfDir,imageDir,timing,requireCompleteCanvas=false,requireCompleteNote=true,checkActive=checkActive)
+        try {
+            requireNotNull(prepared.note).let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
+            prepared.protectForAdoption();checkActive();return prepared
+        } catch(error:Throwable) {try {prepared.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
+    }
+
+    internal suspend fun preparePagedPairOpen(source:NativeSplitSource,preferredNativePane:Pane=Pane.PRIMARY,
+        position:ReadingPosition?=null,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),stillCurrent:()->Boolean={true},
+        guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?={_,_->emptySet()}):PreparedPagedPairOpen? =
+        preparePagedPairOpenActual(source.uri,source.name,preferredNativePane,explicitlyDiscarded,stillCurrent,guardOwners,source.expectedId,position)
+
+    internal suspend fun prepareMixedNoteArrangementSave(nativePane:Pane,
+        stillCurrent:()->Boolean={true}):PreparedMixedNoteArrangementSave? {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) return root.prepareMixedNoteArrangementSave(nativePane,stillCurrent)
+        val target=if(nativePane==Pane.PRIMARY) this else secondary ?: return null
+        val owner=target.documentOwner;val doc=target.state.document
+        if(!stillCurrent() || !target.noteOpen || target.canvasOpen || target.missingDocument!=null ||
+            !owner.noteOpen || owner.canvasOpen || owner.state.document!==doc || owner.incompleteNoteModel.get()===doc) return null
+        val path=doc.path ?: return null
+        val identity=doc.identity;val scope=doc.pageReferenceScope
+        val slots=hostParkingSlots();val missing=slots.map {it.pane.missingDocument}
+        val operation=Any();mixedNoteArrangementSaveRequest=operation
+        fun actualOwnerCurrent()=sameHostParkingSlots(slots) && target.documentOwner===owner && owner.documentOwner===owner &&
+            target.state.document===doc && owner.state.document===doc && target.noteOpen && owner.noteOpen &&
+            !target.canvasOpen && !owner.canvasOpen && doc.path==path && doc.identity==identity && doc.pageReferenceScope===scope &&
+            slots.zip(missing).all {(slot,placeholder)->slot.pane.missingDocument===placeholder}
+        fun requestCurrent()=mixedNoteArrangementSaveRequest===operation && stillCurrent() && actualOwnerCurrent() &&
+            slots.none {it.pane.opening || it.pane.nativeOpenRequest!=null}
+        if(!requestCurrent()) return null
+        val pending=owner.noteWriteJob
+        val completed=kotlinx.coroutines.CompletableDeferred<Boolean>()
+        var acceptedWrite=false
+        var previousSettled=false
+        owner.noteDebounceJob?.cancel()
+        val job=owner.autosaveScope.launch {
+            var success=false;var restoreDirty=false
+            owner.beginPageReferenceSave()
+            try {
+                pending?.join();owner.canvasWriteJob?.join();owner.awaitSessionEncoders()
+                previousSettled=true
+                if(!requestCurrent()) return@launch
+                // A cached path or clean bit is not a source baseline.
+                val initial=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: return@launch
+                owner.pageReferenceProtection=PageReferenceProtection(doc,initial.version.locationKey)
+                owner.commitNoteTextForSave();owner.flowText.endSession()
+                if(!owner.awaitNoteCapture(doc) || !requestCurrent()) return@launch
+                val base=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: return@launch
+                if(doc.dirty) {
+                    val snapshot=doc.fixedWriteSnapshot();val revision=doc.bodyRevision
+                    doc.dirty=false;owner.dirty=false;restoreDirty=true
+                    // The owner's accepted write outlives a cancelled arrangement request.
+                    acceptedWrite=true
+                    val version=withContext(Dispatchers.IO) {owner.writeNoteSafely(path,snapshot,base.version)} ?: return@launch
+                    restoreDirty=false
+                    if(!actualOwnerCurrent() || owner.noteSourceObservation!==base) return@launch
+                    doc.dirty=doc.dirty || doc.bodyRevision!=revision;owner.dirty=doc.dirty
+                    owner.observePublishedNote(doc,version,revision)
+                    owner.invalidateThumb(path);owner.requestWorkingSession()
+                }
+                success=requestCurrent() && owner.noteSourceObservation?.matches(owner)==true && !owner.noteTransactionsPending(doc)
+            } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
+            catch(_:Exception) {success=false}
+            finally {
+                if(restoreDirty) {doc.dirty=true;if(owner.state.document===doc) owner.dirty=true}
+                owner.endPageReferenceSave(doc);owner.contentTransactionChanged();completed.complete(success)
+            }
+        }
+        owner.noteWriteJob=job
+        job.invokeOnCompletion {if(!completed.isCompleted) completed.complete(false)}
+        try {
+            job.join()
+            if(!completed.await() || !requestCurrent()) return null
+            // The write's Main notification may have just registered its own recovery encoder.
+            afterInputDispatch()
+            for(slot in slots) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
+            if(!requestCurrent()) return null
+            val parking=awaitMapSourceParking() ?: return null
+            val published=owner.noteSourceObservation?.takeIf {it.matches(owner)} ?: return null
+            val position=target.readingPositionForPersistence()
+            fun current()=requestCurrent() && parking.current() && owner.noteSourceObservation===published && published.matches(owner)
+            if(!current()) return null
+            return PreparedMixedNoteArrangementSave(nativePane,
+                SplitSourceRef(doc.identity.documentId,path,doc.displayName),position,published.version,::current,verify={
+                    if(!current()) null else try {
+                        val verified=withContext(Dispatchers.IO) {
+                            val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                            val check={coroutine.ensureActive()}
+                            notebookStorage.openSourceActual(path,check).use {source->
+                                val read=checkedPagedSource(path,source,check)
+                                val actual=read.version;val expected=published.version
+                                if(actual.kind!=expected.kind || actual.documentId!=expected.documentId ||
+                                    actual.locationKey!=expected.locationKey || actual.sha256!=expected.sha256)
+                                    throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                                check();read
+                            }
+                        }
+                        val proof:()->Boolean={current() && verified.identity.current() && verified.domain.current()}
+                        proof.takeIf {it()}
+                    } catch(cancelled:java.util.concurrent.CancellationException) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive();null
+                    } catch(_:Exception) {null}
+                })
+        } finally {
+            if(!kotlinx.coroutines.currentCoroutineContext().isActive) {
+                if(mixedNoteArrangementSaveRequest===operation) mixedNoteArrangementSaveRequest=null
+                // Keep a waiting join in the native job chain until every older accepted write
+                // has completed; cancelling that link would let the next request overtake it.
+                if(!acceptedWrite && previousSettled) job.cancel()
+            }
+        }
+    }
+
+    internal fun persistMixedNotePresentation(nativePane:Pane) {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) {root.persistMixedNotePresentation(nativePane);return}
+        val target=if(nativePane==Pane.PRIMARY) this else secondary ?: return
+        val owner=target.documentOwner
+        if(!target.noteOpen || target.canvasOpen || target.missingDocument!=null || !target.sessionOwner.isCurrent() ||
+            !owner.sessionOwner.isCurrent() || owner.canvasOpen || target.state.document!==owner.state.document) return
+        target.saveViewState(includePendingRestore=true);target.requestWorkingSession()
+    }
+
+    /** Read both incoming files before the caller lets any old native model leave its slot. */
+    internal suspend fun preparePagedPairOpen(uri:String,name:String?,preferredNativePane:Pane=Pane.PRIMARY,
+        explicitlyDiscarded:Set<OpenDiscard> = emptySet(),stillCurrent:()->Boolean={true},
+        guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?={_,_->emptySet()}):PreparedPagedPairOpen? =
+        preparePagedPairOpenActual(uri,name,preferredNativePane,explicitlyDiscarded,stillCurrent,guardOwners,null,null)
+
+    private suspend fun preparePagedPairOpenActual(uri:String,name:String?,preferredNativePane:Pane,
+        explicitlyDiscarded:Set<OpenDiscard>,stillCurrent:()->Boolean,
+        guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?,expectedId:String?,savedPosition:ReadingPosition?):PreparedPagedPairOpen? {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) return root.preparePagedPairOpenActual(uri,name,preferredNativePane,explicitlyDiscarded,stillCurrent,guardOwners,expectedId,savedPosition)
+        if(expectedId!=null && runCatching {java.util.UUID.fromString(expectedId).toString()==expectedId}.getOrDefault(false)!=true) return null
+        if(savedPosition!=null && (savedPosition.zoom !in .05..20.0 || !savedPosition.x.isFinite() || !savedPosition.y.isFinite())) return null
+        if(!stillCurrent() || hostParkingPanes().any {it.opening || !it.sessionOwner.isCurrent()}) return null
+        val requested=if(preferredNativePane==Pane.PRIMARY) this else secondaryPane()
+        val slots=hostParkingSlots()
+        val missing=slots.map {it.pane.missingDocument}
+        val operation=Any();pagedPairRequest=operation
+        val owned=java.util.concurrent.atomic.AtomicReference<com.xnotes.storage.PreparedNativeOpen?>()
+        val timing=DocumentCodec.ReadTiming()
+        var handedOff=false
+        fun valid()=pagedPairRequest===operation && stillCurrent() && sameHostParkingSlots(slots) &&
+            slots.zip(missing).all {(slot,placeholder)->slot.pane.missingDocument===placeholder}
+        suspend fun release() {
+            if(pagedPairRequest===operation) pagedPairRequest=null
+            val candidate=owned.getAndSet(null)
+            if(candidate!=null) withContext(kotlinx.coroutines.NonCancellable+Dispatchers.IO) {candidate.close()}
+        }
+        try {
+            val candidates=slots.filter {it.open && it.pane.missingDocument==null &&
+                it.pane.visibleDocumentUri?.let {path->documentKey(path)==documentKey(uri)}==true}.map {it.owner}.distinct()
+            if(candidates.size>1 || candidates.any {it.canvasOpen}) return null
+            val retained=candidates.singleOrNull()
+            val target=retained ?: requested
+            val retainedModel=retained?.state?.document
+            val initial=withContext(Dispatchers.IO) {
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val check={coroutine.ensureActive();if(pagedPairRequest!==operation) throw java.util.concurrent.CancellationException("Pair open expired")}
+                notebookStorage.openSourceActual(uri,check).use {source->
+                    if(expectedId!=null && source.version.documentId!=expectedId)
+                        throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                    val observed=checkedPagedSource(uri,source,check)
+                    if(retained==null) {
+                        val prepared=decodePagedSource(uri,name,source,timing,check)
+                        owned.set(prepared)
+                    }
+                    check();observed.version
+                }
+            }
+            if(!valid() || retained!=null && (retained.state.document!==retainedModel ||
+                    retainedModel!!.identity.documentId!=initial.documentId || retained.canvasOpen)) return null
+            if(slots.filter {it.open}.map {it.owner}.distinct().any {owner->
+                    val id=if(owner.canvasOpen) owner.infinite.document.identity.documentId else owner.state.document.identity.documentId
+                    id==initial.documentId && owner!==retained}) return null
+            val leaving=slots.filter {it.open && it.owner!==retained}.map {it.owner}.distinct()
+            val decision=guardOwners(leaving,::valid) ?: return null
+            if(!valid()) return null
+            val discards=(explicitlyDiscarded+decision).filter {it.owner!==retained}.toSet()
+            if(discards.any {it.owner in leaving && !it.applies()}) return null
+            // The retained document's every physical view keeps its own unfinished input.
+            for(owner in slots.filter {it.open}.map {it.owner}.distinct()) {
+                val ownerSlots=slots.filter {it.owner===owner && it.open}
+                for(slot in ownerSlots) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
+                if(!valid()) return null
+                if(owner===retained) {
+                    if(!owner.awaitNoteCapture(requireNotNull(retainedModel),preserveInput=true)) return null
+                } else {
+                    if(discards.any {it.owner===owner && !it.applies()}) return null
+                    for(slot in ownerSlots) {
+                        if(discards.any {it.owner===owner && it.applies()}) continue
+                        AudioRecording.stopFor(slot.pane)
+                        if(slot.canvas) {AudioRecording.stopFor(slot.pane.infinite);slot.pane.infinite.commitText()}
+                        else {slot.pane.commitText();slot.pane.flowText.endSession()}
+                    }
+                    if(discards.any {it.owner===owner && it.applies()}) continue
+                    if(!owner.flushSplitDocument()) return null
+                }
+            }
+            for(slot in slots) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
+            afterInputDispatch()
+            if(!valid()) return null
+            val openSlots=captureOpenSlots(true)
+            val stamps=slots.map(::OpenReadStamp)
+            val inputRevisions=slots.map {it.pane.hostInputRevision}
+            val identities=slots.map {it.pane.penInputOwnerToken}
+            val discardedPaths=discards.mapNotNull {if(it.owner.canvasOpen) it.owner.infinite.document.path else it.owner.state.document.path}
+            val finalRead=withContext(Dispatchers.IO) {
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val check={coroutine.ensureActive();if(pagedPairRequest!==operation) throw java.util.concurrent.CancellationException("Pair open expired")}
+                if(discardedPaths.any {notebookStorage.hasRecovery(it)})
+                    throw com.xnotes.storage.MigrationPublication.RecoveryRequired(com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.MIGRATION_RECOVERY_PENDING))
+                notebookStorage.openSourceActual(uri,check).use {source->
+                    val actual=source.version
+                    if(actual.kind!=DocumentKind.NOTE || actual.documentId!=initial.documentId || actual.locationKey!=initial.locationKey ||
+                        expectedId!=null && actual.documentId!=expectedId)
+                        throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                    val observed=checkedPagedSource(uri,source,check)
+                    if(retained==null && actual.sha256!=requireNotNull(owned.get()).version.sha256) {
+                        val refreshed=decodePagedSource(uri,name,source,timing,check)
+                        var transferred=false
+                        try {
+                            check()
+                            val previous=owned.getAndSet(refreshed);transferred=true;previous?.close()
+                        } finally {if(!transferred) refreshed.close()}
+                    }
+                    check();observed
+                }
+            }
+            val finalVersion=finalRead.version
+            fun current()=valid() && finalRead.identity.current() && finalRead.domain.current() && stamps.all {it.isCurrent()} &&
+                slots.zip(inputRevisions).all {(slot,revision)->slot.pane.hostInputRevision==revision} &&
+                slots.zip(identities).all {(slot,identity)->slot.pane.penInputOwnerToken===identity} &&
+                slots.none {mapSourceParkingInputBusy(it) || hostParkingWriterBusy(it)} &&
+                readyToAdopt(openSlots,true,discards,null,retained) &&
+                (retained==null || retained.state.document===retainedModel && !retained.canvasOpen &&
+                    retainedModel!!.identity.documentId==finalVersion.documentId && retainedModel.path?.let(::documentKey)==documentKey(uri))
+            if(!current()) return null
+            val retired=slots.filter {it.open && it.pane!==target}.map {it.pane}
+            val handoffs=if(retained==null) emptyList() else retired.map {it to target}
+            val cap=PreparedPagedPairOpen(target,handoffs,::current,adopt={
+                if(!current()) false else {
+                    val input=active.takeIf {retained!=null && it!==target}?.penSnapshot
+                    val borrowed=retired.firstOrNull {it.sharedOwner===retained}
+                    val position=borrowed?.readingPosition()
+                    pagedPairRequest=null
+                    for(pane in retired) {
+                        pane.invalidateNativeOpen()
+                        if(pane.sharedOwner!=null) pane.leaveSharedDocument()
+                        pane.retireNoteEditSource();pane.retireCanvasEditSource();pane.resetPenButtons()
+                        AudioPlayback.closeFor(pane);pane.infiniteOrNull?.let {AudioPlayback.closeFor(it)}
+                        if(!pane.canvasOpen) pane.saveViewState()
+                        pane.noteDebounceJob?.cancel();pane.autosaveUri=null;pane.canvasAutosaveUri=null
+                        pane.canvasOpen=false;pane.noteOpen=false;pane.missingDocument=null;pane.workingSessionClosed()
+                    }
+                    if(retained==null) {
+                        val prepared=requireNotNull(owned.get());val doc=requireNotNull(prepared.note)
+                        target.resetPenButtons()
+                        try {target.replaceDocument(doc)} finally {if(target.state.document===doc) {
+                            prepared.adopt(doc);target.noteEditSource=prepared.editSource()
+                            target.incompleteNoteModel=java.lang.ref.WeakReference<Document>(doc.takeUnless {prepared.completeNoteOrigin(it)})
+                            target.observePublishedNote(doc,prepared.version)
+                        }}
+                        target.state.openFileBytes=prepared.byteSize;target.state.lastSaveBytes=prepared.byteSize
+                        target.state.lastOpenInflateMs=timing.inflateMs;target.state.lastOpenParseMs=timing.parseMs
+                        target.state.lastOpenAssetsMs=timing.assetsMs;target.state.lastOpenCompactMs=timing.compactMs
+                        target.maybeBindAutosave(uri);target.noteOpen=true;target.missingDocument=null;target.rememberOpened(uri,name)
+                    } else {
+                        if(position!=null) target.restoreReadingPosition(position)
+                        if(input!=null) target.inheritPenInput(input)
+                    }
+                    savedPosition?.let(target::restoreReadingPosition)
+                    true
+                }
+            },release={release()})
+            handedOff=true;return cap
+        } catch(error:java.util.concurrent.CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();return null
+        } catch(_:Exception) {return null
+        } finally {if(!handedOff) release()}
+    }
+
+    /** One request covers preparation, saving the old owners and synchronous adoption. */
+    internal suspend fun prepareNativePairOpen(first:NativeSplitSource,second:NativeSplitSource,
+        layout:NativeSplitOpenLayout=NativeSplitOpenLayout(),explicitlyDiscarded:Set<OpenDiscard> = emptySet(),
+        stillCurrent:()->Boolean={true},guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?={_,_->emptySet()}):PreparedNativeSplitOpen? {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) return root.prepareNativePairOpen(first,second,layout,explicitlyDiscarded,stillCurrent,guardOwners)
+        val positions=listOfNotNull(layout.firstPosition,layout.secondPosition)
+        if(!stillCurrent() || !layout.ratio.isFinite() || positions.any {it.zoom<=0 || !it.zoom.isFinite() || !it.x.isFinite() || !it.y.isFinite()} ||
+            hostParkingPanes().any {it.opening || !it.sessionOwner.isCurrent()}) return null
+        val other=secondaryPane();val slots=hostParkingSlots();val missing=slots.map {it.pane.missingDocument}
+        val operation=Any();pagedPairRequest=operation
+        class Candidate(val source:NativeSplitSource,val retained:Editor?) {
+            val model=retained?.state?.document
+            val timing=DocumentCodec.ReadTiming()
+            val prepared=java.util.concurrent.atomic.AtomicReference<com.xnotes.storage.PreparedNativeOpen?>()
+            var initial:PagedSourceRead?=null
+            var latest:PagedSourceRead?=null
+        }
+        val candidates=linkedMapOf<String,Candidate>();var handedOff=false
+        fun valid()=pagedPairRequest===operation && stillCurrent() && sameHostParkingSlots(slots) &&
+            slots.zip(missing).all {(slot,placeholder)->slot.pane.missingDocument===placeholder}
+        suspend fun release() {
+            if(pagedPairRequest===operation) pagedPairRequest=null
+            val discard=candidates.values.mapNotNull {it.prepared.getAndSet(null)}
+            withContext(kotlinx.coroutines.NonCancellable+Dispatchers.IO) {
+                var failure:Throwable?=null
+                for(candidate in discard) try {candidate.close()} catch(error:Throwable) {if(failure==null) failure=error else failure.addSuppressed(error)}
+                failure?.let {throw it}
+            }
+        }
+        try {
+            val inputs=listOf(first,second)
+            for(source in inputs) {
+                require(source.uri.isNotBlank())
+                source.expectedId?.let {require(java.util.UUID.fromString(it).toString()==it)}
+                val key=documentKey(source.uri)
+                if(key in candidates) continue
+                val owners=slots.filter {it.open && it.pane.missingDocument==null &&
+                    it.pane.visibleDocumentUri?.let {uri->documentKey(uri)==key}==true}.map {it.owner}.distinct()
+                if(owners.size>1 || owners.any {it.canvasOpen}) return null
+                candidates[key]=Candidate(source,owners.singleOrNull())
+            }
+            for(candidate in candidates.values) {
+                val observed=withContext(Dispatchers.IO) {
+                    val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                    val check={coroutine.ensureActive();if(pagedPairRequest!==operation) throw java.util.concurrent.CancellationException("Split open expired")}
+                    notebookStorage.openSourceActual(candidate.source.uri,check).use {source->
+                        val proof=checkedPagedSource(candidate.source.uri,source,check)
+                        for(input in inputs.filter {documentKey(it.uri)==documentKey(candidate.source.uri)})
+                            if(input.expectedId!=null && input.expectedId!=proof.version.documentId)
+                                throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                        if(candidate.retained==null) candidate.prepared.set(decodePagedSource(candidate.source.uri,candidate.source.name,source,candidate.timing,check))
+                        check();proof
+                    }
+                }
+                candidate.initial=observed
+                if(!valid() || candidate.retained!=null && (candidate.retained.state.document!==candidate.model ||
+                        candidate.model!!.identity.documentId!=observed.version.documentId || candidate.retained.canvasOpen)) return null
+                if(slots.filter {it.open}.map {it.owner}.distinct().any {owner->
+                        val id=if(owner.canvasOpen) owner.infinite.document.identity.documentId else owner.state.document.identity.documentId
+                        id==observed.version.documentId && owner!==candidate.retained}) return null
+            }
+            if(candidates.values.groupBy {requireNotNull(it.initial).version.documentId}.any {(_,group)->group.size>1}) return null
+            val pair=inputs.map {candidates.getValue(documentKey(it.uri))}
+            val same=pair[0]===pair[1]
+            val firstTarget=pair[0].retained ?: if(pair[1].retained===this) other else this
+            val secondTarget=if(same) (if(firstTarget===this) other else this)
+                else pair[1].retained ?: if(firstTarget===this) other else this
+            if(firstTarget===secondTarget) return null
+            val retained=candidates.values.mapNotNull {it.retained}.toSet()
+            val leaving=slots.filter {it.open && it.owner !in retained}.map {it.owner}.distinct()
+            val decision=guardOwners(leaving,::valid) ?: return null
+            if(!valid()) return null
+            val discards=(explicitlyDiscarded+decision).filter {it.owner !in retained}.toSet()
+            if(discards.any {it.owner in leaving && !it.applies()}) return null
+            for(owner in slots.filter {it.open}.map {it.owner}.distinct()) {
+                val physical=slots.filter {it.open && it.owner===owner}
+                for(slot in physical) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
+                if(!valid()) return null
+                if(owner in retained) {
+                    if(!owner.awaitNoteCapture(owner.state.document,preserveInput=true)) return null
+                } else {
+                    if(discards.any {it.owner===owner && !it.applies()}) return null
+                    if(discards.any {it.owner===owner && it.applies()}) continue
+                    for(slot in physical) {
+                        AudioRecording.stopFor(slot.pane)
+                        if(slot.canvas) {AudioRecording.stopFor(slot.pane.infinite);slot.pane.infinite.commitText()}
+                        else {slot.pane.commitText();slot.pane.flowText.endSession()}
+                    }
+                    if(!owner.flushSplitDocument()) return null
+                }
+            }
+            for(slot in slots) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
+            afterInputDispatch();if(!valid()) return null
+            val stamps=slots.map(::OpenReadStamp);val inputRevisions=slots.map {it.pane.hostInputRevision}
+            val tokens=slots.map {it.pane.penInputOwnerToken}
+            val discardedPaths=discards.mapNotNull {if(it.owner.canvasOpen) it.owner.infinite.document.path else it.owner.state.document.path}
+            withContext(Dispatchers.IO) {
+                val coroutine=kotlinx.coroutines.currentCoroutineContext()
+                val check={coroutine.ensureActive();if(pagedPairRequest!==operation) throw java.util.concurrent.CancellationException("Split open expired")}
+                if(discardedPaths.any {notebookStorage.hasRecovery(it)})
+                    throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                for(candidate in candidates.values) notebookStorage.openSourceActual(candidate.source.uri,check).use {source->
+                    val proof=checkedPagedSource(candidate.source.uri,source,check);val initial=requireNotNull(candidate.initial).version
+                    if(proof.version.documentId!=initial.documentId || proof.version.locationKey!=initial.locationKey)
+                        throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.CHANGED)
+                    if(candidate.retained==null && proof.version.sha256!=requireNotNull(candidate.prepared.get()).version.sha256) {
+                        val refreshed=decodePagedSource(candidate.source.uri,candidate.source.name,source,candidate.timing,check)
+                        var transferred=false
+                        try {check();val old=candidate.prepared.getAndSet(refreshed);transferred=true;old?.close()}
+                        finally {if(!transferred) refreshed.close()}
+                    }
+                    candidate.latest=proof;check()
+                }
+            }
+            val keepPeer=same && pair[0].retained!=null && secondTarget.noteOpen && secondTarget.sharedOwner===firstTarget &&
+                secondTarget.state.document===firstTarget.state.document
+            val changed=listOfNotNull(firstTarget.takeIf {pair[0].retained==null},
+                secondTarget.takeIf {if(same) !keepPeer else pair[1].retained==null}).toSet()
+            fun recordingCanStay():Boolean {
+                val owner=AudioRecording.session?.owner ?: return true
+                return changed.none {owner===it || owner===it.infiniteOrNull}
+            }
+            fun current()=valid() && recordingCanStay() && stamps.all {it.isCurrent()} &&
+                slots.zip(inputRevisions).all {(slot,revision)->slot.pane.hostInputRevision==revision} &&
+                slots.zip(tokens).all {(slot,token)->slot.pane.penInputOwnerToken===token} &&
+                slots.none {mapSourceParkingInputBusy(it) || hostParkingWriterBusy(it)} &&
+                candidates.values.all {candidate->candidate.latest?.let {it.identity.current() && it.domain.current()}==true &&
+                    (candidate.retained==null || candidate.retained.state.document===candidate.model && !candidate.retained.canvasOpen &&
+                        candidate.model!!.identity.documentId==candidate.latest!!.version.documentId &&
+                        candidate.model.path?.let(::documentKey)==documentKey(candidate.source.uri))} &&
+                discards.all {it.applies()} && slots.filter {it.open}.map {it.owner}.distinct().all {owner->
+                    owner in retained || discards.any {it.owner===owner && it.applies()} ||
+                        !(if(owner.canvasOpen) owner.infinite.document.dirty else owner.state.document.dirty)}
+            if(!current()) return null
+            val handoffs=if(retained.size==1) slots.filter {it.open && it.pane in changed}.map {it.pane to retained.single()} else emptyList()
+            val focus=if(layout.focused==Pane.PRIMARY) firstTarget else secondTarget
+            val cap=PreparedNativeSplitOpen(firstTarget,secondTarget,focus.pane,handoffs,::current,adopt={
+                if(!current()) false else {
+                    val previous=active;val snapshot=previous.penSnapshot
+                    pagedPairRequest=null
+                    fun adoptFresh(target:Editor,candidate:Candidate) {
+                        val prepared=requireNotNull(candidate.prepared.get());val model=requireNotNull(prepared.note)
+                        target.resetPenButtons()
+                        try {target.replaceDocument(model)} finally {if(target.state.document===model) {
+                            prepared.adopt(model);target.noteEditSource=prepared.editSource()
+                            target.incompleteNoteModel=java.lang.ref.WeakReference<Document>(model.takeUnless {prepared.completeNoteOrigin(it)})
+                            target.observePublishedNote(model,prepared.version)
+                        }}
+                        target.state.openFileBytes=prepared.byteSize;target.state.lastSaveBytes=prepared.byteSize
+                        target.state.lastOpenInflateMs=candidate.timing.inflateMs;target.state.lastOpenParseMs=candidate.timing.parseMs
+                        target.state.lastOpenAssetsMs=candidate.timing.assetsMs;target.state.lastOpenCompactMs=candidate.timing.compactMs
+                        target.maybeBindAutosave(candidate.source.uri);target.noteOpen=true;target.missingDocument=null
+                        target.rememberOpened(candidate.source.uri,candidate.source.name)
+                    }
+                    if(pair[0].retained==null) adoptFresh(firstTarget,pair[0])
+                    if(same) {if(!keepPeer) secondTarget.attachSharedViewSettled(firstTarget)}
+                    else if(pair[1].retained==null) adoptFresh(secondTarget,pair[1])
+                    if(focus.documentOwner in retained && previous!==focus) focus.inheritPenInput(snapshot)
+                    else if(retained.size==1 && previous in changed) retained.single().inheritPenInput(snapshot)
+                    layout.firstPosition?.let(firstTarget::restoreReadingPosition)
+                    layout.secondPosition?.let(secondTarget::restoreReadingPosition)
+                    splitRatio=layout.ratio.coerceIn(.18f,.82f);splitSideBySide=layout.sideBySide
+                    splitReversed=layout.reversed xor (firstTarget.pane!=Pane.PRIMARY);focusedPane=focus.pane
+                    true
+                }
+            },release={release()})
+            handedOff=true;return cap
+        } catch(error:java.util.concurrent.CancellationException) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive();return null
+        } catch(_:Exception) {return null
+        } finally {if(!handedOff) release()}
+    }
+
+    private fun attachSharedViewSettled(owner:Editor) {
+        AudioPlayback.closeFor(this);infiniteOrNull?.let {AudioPlayback.closeFor(it)}
+        invalidateNativeOpen();retireNoteEditSource();retireCanvasEditSource();leaveSharedDocument();resetPenButtons()
+        noteDebounceJob?.cancel();canvasDebounceJob?.cancel();ownAutosaveUri=null;canvasAutosaveUri=null
+        controller.resetGestureState();clearPageSelection()
+        state.document=owner.state.document;sharedOwner=owner;history.shareWith(owner.history);canvasOpen=false
+        rebuildPdfSource();adoptOpenPdf(state.document);installViewOverrides(owner.viewOverrides)
+        state.relayout();state.pendingInitialView=InitialView.Restore(owner.state.zoom,owner.state.scrollX,owner.state.scrollY)
+        state.didInitialFit=false;noteOpen=true;missingDocument=null;sessionModelAdopted()
+        sibling?.takeIf {it.secondary===this}?.secondaryStarted=true
+        sharedLayout=sharedLayoutSnapshot();owner.sharedLayout=owner.sharedLayoutSnapshot()
+        publishedBackgroundRevision=state.backgroundRevision;refreshContent();view.requestRender()
+    }
+
+    internal suspend fun prepareNativeSplitFile(uri:String?=null,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),
+        stillCurrent:()->Boolean={true},guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?={_,_->emptySet()}):PreparedNativeSplitOpen? {
+        val request=try {withContext(Dispatchers.IO) {
+            val file=if(uri==null) java.io.File(appContext.filesDir,"saved-split.json") else managedSplitFile(uri)
+            file.inputStream().use {NativeSplitOpenParser.read(it,allowLegacyFormat=uri==null)}
+        }} catch(error:java.util.concurrent.CancellationException) {throw error} catch(_:Exception) {null} ?: return null
+        return prepareNativeSplitRequest(request,explicitlyDiscarded,stillCurrent,guardOwners)
+    }
+    internal suspend fun prepareNativeSplitRequest(request:NativeSplitOpenRequest,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),stillCurrent:()->Boolean={true},
+        guardOwners:suspend (List<Editor>,()->Boolean)->Set<OpenDiscard>?={_,_->emptySet()}):PreparedNativeSplitOpen? {
+        val resolved=try {withContext(Dispatchers.IO) {
+            listOf(request.first,request.second).map {source->
+                source.expectedId?.let {id->source.copy(uri=notebookStorage.registry.resolve(id) ?: source.uri)} ?: source
+            }
+        }} catch(error:java.util.concurrent.CancellationException) {throw error} catch(_:Exception) {null} ?: return null
+        if(!stillCurrent()) return null
+        return prepareNativePairOpen(resolved[0],resolved[1],request.layout,explicitlyDiscarded,stillCurrent,guardOwners)
+    }
+
     /** One request covers preparation, saving the old owners and synchronous adoption. */
     private suspend fun openNative(uri:String,name:String?,kind:DocumentKind,fromHome:Boolean=false,
-                                   explicitlyDiscarded:Set<OpenDiscard> = emptySet(),cleanOnly:Boolean=false,reference:ReferenceOpenContext?=null):Boolean {
-        if(opening || !sessionOwner.isCurrent() || nativeOpenPenInContact()) return false
+                                   explicitlyDiscarded:Set<OpenDiscard> = emptySet(),cleanOnly:Boolean=false,reference:ReferenceOpenContext?=null,
+                                   externalFinalProof:()->Boolean={true},onAdopted:()->Unit={}):Boolean {
+        if(!externalFinalProof() || opening || !sessionOwner.isCurrent() || nativeOpenPenInContact()) return false
+        (sibling?.takeIf {it.secondary===this} ?: this).pagedPairRequest=null
         val request=NativeOpenRequest();nativeOpenRequest=request;opening=true
         val slots=captureOpenSlots(fromHome)
         val owned=java.util.concurrent.atomic.AtomicReference<com.xnotes.storage.PreparedNativeOpen?>()
@@ -4871,7 +5781,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     if(!nativeOpenCurrent(request) || reference?.reference?.ioCurrent()==false) throw java.util.concurrent.CancellationException("Open request expired")
                 }
                 val prepared=if(reference==null) notebookStorage.prepareOpen(uri,kind,codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
-                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
+                    else notebookStorage.prepareReferenceOpen(uri,name,reference.reference.target,codec,canvasCodec,pdfDir,imageDir,timing,kind=reference.reference.kind,
+                        requireCompleteNote=reference.reference.kind==DocumentKind.NOTE && reference.reference.region!=null,checkActive=checkActive)
                 // The outer holder owns the result even if withContext's return dispatch is cancelled.
                 owned.set(prepared)
                 prepared.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
@@ -4879,7 +5790,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 checkActive();prepared.protectForAdoption();checkActive()
             }
             readMs=(System.nanoTime()-readStarted)/1_000_000
-            if(reference!=null && !reference.current()) return false
+            if(!externalFinalProof() || reference!=null && !reference.current()) return false
             if(!settleOpenSlots(slots,fromHome,explicitlyDiscarded,request,cleanOnly)) return false
             val stamps=slots.map(::OpenReadStamp)
             val verifyStarted=System.nanoTime()
@@ -4904,7 +5815,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         var primary:Throwable?=null
                         try {
                             refreshed=com.xnotes.storage.PreparedNativeOpen.read(source,notebookStorage.pdfResources,
-                                codec,canvasCodec,pdfDir,imageDir,timing,checkActive)
+                                codec,canvasCodec,pdfDir,imageDir,timing,
+                                requireCompleteCanvas=reference?.reference?.kind==DocumentKind.CANVAS,
+                                requireCompleteNote=reference?.reference?.let {it.kind==DocumentKind.NOTE && it.region!=null}==true,checkActive=checkActive)
                             refreshed.note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             refreshed.canvas?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
                             checkActive();refreshed.protectForAdoption();checkActive()
@@ -4923,26 +5836,38 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             readMs+=(System.nanoTime()-verifyStarted)/1_000_000
             // No suspension from the final workspace check through replacement. A close/new action
             // cannot interleave here, and a late prior request cannot clear another spinner.
-            if(!stamps.all {it.isCurrent()} || !readyToAdopt(slots,fromHome,explicitlyDiscarded,request)) {
+            if(!externalFinalProof() || !stamps.all {it.isCurrent()} || !readyToAdopt(slots,fromHome,explicitlyDiscarded,request)) {
                 if(nativeOpenCurrent(request)) message=appContext.getString(R.string.native_open_changed)
                 return false
             }
             val prepared=requireNotNull(owned.get())
             if(reference!=null) {
                 if(!reference.current()) return false
-                reference.reference.target.page(requireNotNull(prepared.note))
+                if(prepared.version.kind!=reference.reference.kind) return false
+                if(kind==DocumentKind.CANVAS) reference.reference.target.canvas(requireNotNull(prepared.canvas))
+                else reference.reference.target.page(requireNotNull(prepared.note))
             }
+            if(!externalFinalProof()) return false
             nativeOpenRequest=null;opening=false
             if(fromHome) {detachSettledWorkspace();abandonSecondary();focusedPane=Pane.PRIMARY}
             if(kind==DocumentKind.CANVAS) {
                 val doc=requireNotNull(prepared.canvas)
                 try {openCanvasDocument(doc,uri,name)} finally {
-                    if(infiniteOrNull?.document===doc && canvasOpen) {prepared.adopt(doc);canvasEditSource=prepared.editSource();adopted=true;adoptedModel=doc}
+                    if(infiniteOrNull?.document===doc && canvasOpen) {
+                        prepared.adopt(doc);canvasEditSource=prepared.editSource()
+                        canvasSourceIncomplete=!prepared.completeCanvasOrigin(doc)
+                        if(!canvasSourceIncomplete) observePublishedCanvas(doc,prepared.version)
+                        adopted=true;adoptedModel=doc
+                    }
                 }
             } else {
                 val doc=requireNotNull(prepared.note)
                 try {replaceDocument(doc)} finally {
-                    if(state.document===doc) {prepared.adopt(doc);noteEditSource=prepared.editSource();observePublishedNote(doc,prepared.version);adopted=true;adoptedModel=doc}
+                    if(state.document===doc) {
+                        prepared.adopt(doc);noteEditSource=prepared.editSource()
+                        incompleteNoteModel=java.lang.ref.WeakReference<Document>(doc.takeUnless {prepared.completeNoteOrigin(it)})
+                        observePublishedNote(doc,prepared.version);adopted=true;adoptedModel=doc
+                    }
                 }
                 state.openFileBytes=prepared.byteSize;state.lastSaveBytes=prepared.byteSize
                 state.lastOpenInflateMs=timing.inflateMs;state.lastOpenParseMs=timing.parseMs
@@ -4951,12 +5876,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             missingDocument=null;rememberOpened(uri,name)
             if(reference!=null) {
-                val doc=requireNotNull(prepared.note)
-                observePublishedNote(doc,prepared.version)
-                pageReferenceProtection=PageReferenceProtection(doc,prepared.version.locationKey)
-                val result=NativeReferenceResult.Opened(this,referenceLocator.show(doc,reference.reference.target.page(doc),reference.reference.region))
-                reference.result=result;refreshView();reference.onOpened(result)
+                val region=if(kind==DocumentKind.CANVAS) infinite.showReferenceRegion(requireNotNull(prepared.canvas),reference.reference.region) else {
+                    val doc=requireNotNull(prepared.note)
+                    observePublishedNote(doc,prepared.version)
+                    pageReferenceProtection=PageReferenceProtection(doc,prepared.version.locationKey)
+                    referenceLocator.show(doc,reference.reference.target.page(doc),reference.reference.region)
+                }
+                val result=NativeReferenceResult.Opened(this,region)
+                reference.result=result
+                if(kind==DocumentKind.CANVAS) infinite.view.requestRender() else refreshView()
+                reference.onOpened(result)
             }
+            onAdopted()
         } catch(error:java.util.concurrent.CancellationException) {
             failure=error
             kotlinx.coroutines.currentCoroutineContext().ensureActive() // user Cancel is quiet; coroutine cancellation propagates.
@@ -5021,7 +5952,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * a cloud provider is an untimed binder call into that provider's process.
      */
     private data class CreatedNoteWrite(val error:Exception?=null,val retained:Boolean=false,
-        val version:com.xnotes.storage.NativeSourceVersion?=null)
+        val version:com.xnotes.storage.NativeSourceVersion?=null,val pending:com.xnotes.storage.NativeCreationPending?=null)
 
     /** IO-only: encode a fixed copy without pinning an unpublished document as a permanent PDF owner. */
     private fun publishCreatedNote(uri:String,name:String,snapshot:Document,
@@ -5071,27 +6002,35 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Canvas creation has no page projection or PDF admission, but uses the same checked publication. */
     private fun publishCreatedCanvas(uri:String,name:String,snapshot:com.xnotes.core.infinite.InfiniteDocument,
-                                     intent:com.xnotes.storage.NativeCreationIntent):CreatedNoteWrite {
+        intent:com.xnotes.storage.NativeCreationIntent,requireComplete:Boolean=false,checkActive:()->Unit={}):CreatedNoteWrite {
         var candidate:java.io.File?=null
+        var validationAssets:java.io.File?=null
         try {
-            val permit=notebookStorage.prepareNewTarget(intent,uri)
+            val permit=notebookStorage.prepareNewTarget(intent,uri,checkActive)
             val file=java.io.File.createTempFile("create-canvas-",".xcanvas",saveTmpDir).also {candidate=it}
             java.io.FileOutputStream(file).use {output->
                 canvasCodec.write(snapshot,object:java.io.FilterOutputStream(output) {
                     override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
                     override fun close() {flush()}
-                })
+                },isCancelled={checkActive();false})
                 output.fd.sync()
             }
-            notebookStorage.publishCreated(uri,file,permit,name)
-            return CreatedNoteWrite()
+            if(requireComplete) {
+                val assets=java.nio.file.Files.createTempDirectory(saveTmpDir.toPath(),"verify-canvas-").toFile().also {validationAssets=it}
+                checkActive()
+                val complete=file.inputStream().use {canvasCodec.readComplete(it,assets)}
+                require(complete.document.identity==snapshot.identity && complete.document.items.size==snapshot.items.size)
+                checkActive()
+            }
+            val version=notebookStorage.publishCreated(uri,file,permit,name,checkActive)
+            return CreatedNoteWrite(version=version)
         } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
         catch(error:Exception) {
-            val retained=try {notebookStorage.retainedCreation(intent,uri,name)!=null}
+            val pending=try {notebookStorage.retainedCreation(intent,uri,name,checkActive)}
                 catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
-                catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);false}
-            return CreatedNoteWrite(error,retained)
-        } finally {candidate?.delete()}
+                catch(recognition:Exception) {if(recognition!==error) error.addSuppressed(recognition);null}
+            return CreatedNoteWrite(error,retained=pending!=null,pending=pending)
+        } finally {candidate?.delete();validationAssets?.deleteRecursively()}
     }
 
     fun saveToThen(uri:String,onDone:(Boolean)->Unit)=saveToThen(uri,null,false,onDone)
@@ -6659,15 +7598,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
     private fun saveCanvasGuarded(uri:String,doc:com.xnotes.core.infinite.InfiniteDocument,title:String,
-                                  owner:com.xnotes.core.infinite.InfiniteDocument,intent:com.xnotes.storage.NativeCreationIntent):SaveResult? = synchronized(saveLock) {
+                                  owner:com.xnotes.core.infinite.InfiniteDocument,intent:com.xnotes.storage.NativeCreationIntent,
+                                  expected:com.xnotes.storage.NativeSourceVersion?=null):SaveResult? = synchronized(saveLock) {
         try {
             val target=forks.target(uri,owner)
+            if(expected!=null) return writeCanvasSafely(target,doc,expected)?.let {SaveResult(target,null,it)}
             if(changedUnderneath(target)) {
                 val base=forks.base(target,DocumentKind.stripSuffix(title))
                 val fork=forkCanvas(target,doc,base,intent) ?: return null
                 return SaveResult(fork.uri,fork)
             }
-            if(writeCanvasSafely(target,doc)) SaveResult(target,null) else null
+            writeCanvasSafely(target,doc)?.let {SaveResult(target,null,it)}
         } catch(error:Exception) {
             if(!isNativeSaveRejection(error)) throw error
             if(infiniteOrNull?.document===owner) message=error.message ?: appContext.getString(R.string.err_save_note)
@@ -6930,12 +7871,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Remember the current note's view (zoom + scroll); a no-op unless it's a laid-out folder note. */
-    private fun saveViewState() {
+    private fun saveViewState(includePendingRestore:Boolean=false) {
         if (sharedOwner != null) return // split positions are saved separately, never over the owner
 
-        if (!state.didInitialFit || state.viewportW <= 0) return // nothing meaningful established yet
+        if ((!includePendingRestore || state.pendingInitialView !is InitialView.Restore) &&
+            (!state.didInitialFit || state.viewportW <= 0)) return // nothing meaningful established yet
         val key = viewKey(currentUri) ?: return
-        viewStates.put(key, state.zoom, state.scrollX, state.scrollY, viewOverrides)
+        val position=if(includePendingRestore) readingPositionForPersistence() else readingPosition()
+        viewStates.put(key, position.zoom, position.x, position.y, position.overrides)
     }
 
     /** Update the global View-menu defaults (the menu's "Default for all notes" checkbox),
@@ -9913,6 +10856,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (editingTable == null) return
         editingTable = null
         if (!flowText.active) setFlowLifted(false)
+        contentTransactionChanged()
     }
 
     private fun setFlowLifted(lifted: Boolean) {
@@ -10834,6 +11778,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     data class ReadingPosition(val zoom: Double, val x: Double, val y: Double, val overrides: com.xnotes.canvas.ViewOverrides)
     fun readingPosition() = ReadingPosition(state.zoom, state.scrollX, state.scrollY, viewOverrides)
+    private fun readingPositionForPersistence():ReadingPosition {
+        val pending=state.pendingInitialView as? InitialView.Restore
+        return if(pending==null) readingPosition() else ReadingPosition(pending.zoom,pending.scrollX,pending.scrollY,viewOverrides)
+    }
     fun restoreReadingPosition(position: ReadingPosition) {
         installViewOverrides(position.overrides)
         state.pendingInitialView = InitialView.Restore(position.zoom, position.x, position.y)
@@ -10916,12 +11864,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             .put("focused", focusedPane.name).put("reversed", splitReversed)
         splitSideBySide?.let { json.put("sideBySide", it) }
         if (second?.noteOpen == true) {
+            val primaryPosition=readingPositionForPersistence();val secondPosition=second.readingPositionForPersistence()
             json.put("shared", isSharedView)
             json.put("primaryPath", visibleDocumentUri ?: "")
             json.put("secondPath", second.visibleDocumentUri ?: "")
             json.put("primaryId", visibleDocumentId).put("secondId", second.visibleDocumentId)
-            json.put("zoom", second.state.zoom).put("x", second.state.scrollX).put("y", second.state.scrollY)
-            json.put("primaryZoom", state.zoom).put("primaryX", state.scrollX).put("primaryY", state.scrollY)
+            json.put("zoom", secondPosition.zoom).put("x", secondPosition.x).put("y", secondPosition.y)
+            json.put("primaryZoom", primaryPosition.zoom).put("primaryX", primaryPosition.x).put("primaryY", primaryPosition.y)
             json.put("primaryView", com.xnotes.platform.ViewOverridesJson.write(org.json.JSONObject(), viewOverrides))
             json.put("secondView", com.xnotes.platform.ViewOverridesJson.write(org.json.JSONObject(), second.viewOverrides))
         }
@@ -10940,20 +11889,46 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return json
     }
 
-    private fun saveSplitWorkspace() {
+    private fun nativeRecentRequest():SplitOpenRequest.Native? {
+        val other=secondary ?: return null
+        if(!noteOpen || !other.noteOpen || canvasOpen || other.canvasOpen || missingDocument!=null || other.missingDocument!=null) return null
+        val firstUri=visibleDocumentUri ?: return null;val secondUri=other.visibleDocumentUri ?: return null
+        return SplitOpenRequest.Native(NativeSplitOpenRequest(
+            NativeSplitSource(firstUri,expectedId=visibleDocumentId),NativeSplitSource(secondUri,expectedId=other.visibleDocumentId),
+            NativeSplitOpenLayout(splitRatio,splitSideBySide,splitReversed,focusedPane,readingPositionForPersistence(),other.readingPositionForPersistence())))
+    }
+
+    private fun saveSplitWorkspace(publishRecent:Boolean=true) {
+        if(mixedPresentationActive || !sessionOwner.isCurrent()) return
         val json = splitSnapshot()
         splitWorkspace.write(json)
-        if (inSplit && openPanes.all { it.visibleDocumentUri != null }) {
-            savedSplit.write(json)
-            hasSavedSplit = true
+        if(publishRecent && !opening && nativeOpenRequest==null && hostParkingPanes().all {it.sessionOwner.isCurrent()}) {
+            nativeRecentRequest()?.let {request->
+                val ticket=splitRecentWriter.reserve(explicit=false)
+                splitRecentWriter.submit(ticket,request)
+            }
         }
     }
 
-    private val savedSplit by lazy {
-        com.xnotes.platform.JsonStore(java.io.File(appContext.filesDir, "saved-split.json"))
+    /** Preserve an adopted native split without changing either pane's tools or unfinished input. */
+    internal fun persistNativeSplitPresentation(publishRecent:Boolean=true) {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) {root.persistNativeSplitPresentation(publishRecent);return}
+        if(mixedPresentationActive || !inSplit || openPanes.any {it.canvasOpen || it.missingDocument!=null}) return
+        for(ed in openPanes) {ed.saveViewState(includePendingRestore=true);ed.requestWorkingSession()}
+        saveSplitWorkspace(publishRecent)
     }
-    var hasSavedSplit by mutableStateOf(savedSplit.read().has("primaryPath"))
+
+    private val splitRecentWriter by lazy {SplitRecentWriter.forFilesDir(appContext.filesDir)}
+    var hasSavedSplit by mutableStateOf(false)
         private set
+    init {
+        autosaveScope.launch {
+            splitRecentWriter.state.collect {recent->
+                if(sessionOwner.isCurrent()) hasSavedSplit=recent.loaded && recent.read is SplitArrangementRead.Ready
+            }
+        }
+    }
 
     /** Await writes without overwriting an externally changed clean file. */
     suspend fun flushSplitDocument(): Boolean {
@@ -10977,30 +11952,42 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** An explicit reusable arrangement; independent of the last-session recovery files. */
     suspend fun saveCurrentSplit(): Boolean {
+        if(mixedPresentationActive) return false
         if (savingSplit) return false
         if (!inSplit || openPanes.any { it.stylusInContact }) return false
         if (openPanes.any { it.visibleDocumentUri == null }) {
             say(appContext.getString(R.string.split_save_files_first)); return false
         }
+        val slots=hostParkingSlots();val identity=captureNativePresentationIdentity()
+        fun current()=sessionOwner.isCurrent() && !mixedPresentationActive && sameHostParkingSlots(slots) && matchesNativePresentationIdentity(identity) &&
+            slots.none {it.pane.opening || it.pane.nativeOpenRequest!=null}
+        if(!current()) return false
+        // Reserve in this Main intent, before any IO or late completion can reorder it.
+        val recentTicket=splitRecentWriter.reserve(explicit=true)
         savingSplit = true
         try {
             val paths = openPanes.map { it.visibleDocumentUri!! }.sorted()
             val alreadySaved = withContext(Dispatchers.IO) {
                 storedSplitFiles().any { file ->
                     runCatching {
-                        val stored = org.json.JSONObject(file.readText())
-                        stored.optString("format") == "xnotes-split" &&
-                            listOf(stored.optString("primaryPath"), stored.optString("secondPath")).sorted() == paths
+                        val stored=file.inputStream().use {NativeSplitOpenParser.read(it)}
+                        stored!=null && listOf(stored.first.uri,stored.second.uri).sorted()==paths
                     }.getOrDefault(false)
                 }
             }
-            if (alreadySaved) return true
+            if(!current()) return false
+            if(alreadySaved) {
+                nativeRecentRequest()?.let {splitRecentWriter.submit(recentTicket,it).await()}
+                return true
+            }
             commitSplitEdits()
             for (ed in openPanes.map { it.documentOwner }.distinct()) {
                 val ok = ed.flushSplitDocument()
                 if (!ok) { say(appContext.getString(R.string.err_save_note)); return false }
             }
+            if(!current()) return false
             val json = splitSnapshot()
+            val recentRequest=nativeRecentRequest() ?: return false
             fun capture(ed: Editor, prefix: String) {
                 json.put(prefix + "Canvas", ed.canvasOpen)
                 if (ed.canvasOpen) {
@@ -11019,12 +12006,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     var sequence = 1
                     while (file.exists()) file = java.io.File(directory, "${DocumentKind.stripSuffix(name)}_${sequence++}${DocumentKind.SPLIT.suffix}")
                     check(com.xnotes.platform.JsonStore(file).writeChecked(json))
-                    // The explicit file is already safe even if updating last-session recovery fails.
-                    savedSplit.writeChecked(json)
                     true
                 }.getOrDefault(false)
             }
-            if (ok) { hasSavedSplit = true; persist() }
+            if(ok && current()) {
+                // A failed/superseded recent update cannot revoke the explicit file.
+                splitRecentWriter.submit(recentTicket,recentRequest).await()
+                if(current()) persistNativeSplitPresentation(publishRecent=false)
+            }
             say(appContext.getString(if (ok) R.string.split_saved else R.string.err_save_note))
             return ok
         } finally { savingSplit = false }
@@ -11075,47 +12064,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Validate the arrangement and both references before replacing the current workspace. */
-    suspend fun openSplitFile(uri: String? = null, explicitlyDiscarded: Set<OpenDiscard> = emptySet()): Boolean {
-        if (openPanes.any { it.stylusInContact }) return false
-        val json = withContext(Dispatchers.IO) {
-            runCatching {
-                val j = if (uri == null) savedSplit.read() else managedSplitFile(uri).inputStream().use { input ->
-                    val output = java.io.ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        require(output.size() + n <= 1024 * 1024)
-                        output.write(buffer, 0, n)
-                    }
-                    org.json.JSONObject(output.toString("UTF-8"))
-                } ?: error("Cannot read split file")
-                require((uri == null || j.optString("format") == "xnotes-split") && j.optInt("version", 1) in 1..2)
-                require(j.optDouble("ratio", .5).isFinite())
-                for (prefix in listOf("primary", "second")) {
-                    val path = j.getString(if (prefix == "primary") "primaryPath" else "secondPath")
-                    require(path.isNotBlank())
-                    val valid = if (j.optBoolean(prefix + "Canvas")) peekFile(path, { canvasCodec.peek(it) }, { canvasCodec.peek(it) }) != null
-                        else peekFile(path, { codec.peek(it) }, { codec.peek(it) }) != null
-                    // Missing files remain as pane placeholders after the arrangement is validated.
-                    if (!valid) j.put(prefix + "Missing", true)
-                    for (key in listOf(prefix + "CX", prefix + "CY", prefix + "CZ")) if (j.has(key)) require(j.getDouble(key).isFinite())
-                }
-                for (key in listOf("primaryZoom", "primaryX", "primaryY", "zoom", "x", "y")) if (j.has(key)) require(j.getDouble(key).isFinite())
-                j
-            }.getOrNull()
-        }
-        if (json == null) { say(appContext.getString(R.string.split_invalid_file)); return false }
-        // Refused before detaching, so the current workspace stays as it is.
-        if (splitIncludesCanvas(json)) { say(appContext.getString(R.string.split_canvas_saved_unsupported)); return false }
-        if (!detachWorkspaceForOpen(explicitlyDiscarded)) return false
-        return openSavedSplit(json).also { if (it) persist() }
+    suspend fun openSplitFile(uri:String?=null,explicitlyDiscarded:Set<OpenDiscard> = emptySet()):Boolean {
+        val cap=prepareNativeSplitFile(uri,explicitlyDiscarded) ?: return false
+        return try {cap.commit().also {if(it) persistNativeSplitPresentation()}} finally {cap.close()}
     }
 
     /** Main-menu file selection starts a single document, even when a split is parked behind Home. */
-    suspend fun openSingleFromHome(uri:String,name:String?,explicitlyDiscarded:Set<OpenDiscard> = emptySet()):Boolean {
+    suspend fun openSingleFromHome(uri:String,name:String?,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),
+                                   stillCurrent:()->Boolean={true},onAdopted:()->Unit={}):Boolean {
         val kind=if(DocumentKind.ofName(name ?: "")==DocumentKind.CANVAS) DocumentKind.CANVAS else DocumentKind.NOTE
-        return openNative(uri,name,kind,true,explicitlyDiscarded).also {if(it) persist()}
+        return openNative(uri,name,kind,true,explicitlyDiscarded,externalFinalProof=stillCurrent,onAdopted=onAdopted).also {if(it) persist()}
     }
 
     private class OpenSlot(val pane:Editor,val owner:Editor,val model:Any,val canvas:Boolean,val open:Boolean)
@@ -11164,7 +12122,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return true
     }
     private suspend fun settleOpenSlots(slots:List<OpenSlot>,whole:Boolean,discarded:Set<OpenDiscard>,request:NativeOpenRequest?,
-                                        cleanOnly:Boolean=false,retainedOwner:Editor?=null):Boolean {
+                                        cleanOnly:Boolean=false,retainedOwner:Editor?=null,preserveRetainedInput:Boolean=false):Boolean {
         fun current()=(request==null || nativeOpenCurrent(request)) && sameOpenSlots(slots,whole)
         if(!current() || nativeOpenPenInContact()) return false
         for (ed in slots.map { it.pane }.distinct()) {
@@ -11181,13 +12139,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val discardOwners = discarded.filter { it.owner!==retainedOwner && it.owner in owners && it.applies() }.map { it.owner }.toSet()
         for(ed in panes) {
             if (ed.documentOwner in discardOwners) continue
+            if(preserveRetainedInput && ed.documentOwner===retainedOwner) continue
             AudioRecording.stopFor(ed)
             if(ed.canvasOpen) {AudioRecording.stopFor(ed.infinite);ed.infinite.commitText()}
             else {ed.commitText();ed.flowText.endSession()}
         }
         for(ed in panes.map {it.documentOwner}.distinct()) {
             if(!current()) return false
-            if(ed===retainedOwner) {if(!ed.awaitNoteCapture(ed.state.document)) return false;continue}
+            if(ed===retainedOwner) {
+                val stable=if(ed.canvasOpen) ed.awaitCanvasCapture(ed.infinite.document)
+                    else ed.awaitNoteCapture(ed.state.document,preserveInput=preserveRetainedInput)
+                if(!stable) return false
+                continue
+            }
             if(discarded.any {it.owner===ed && it.applies()}) continue
             if(cleanOnly) {
                 ed.noteDebounceJob?.cancel()
@@ -11222,55 +12186,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Called from the main menu when no documents are open; failed files never replace live edits. */
-    suspend fun openSavedSplit(snapshot: org.json.JSONObject? = null): Boolean {
-        if (openPanes.isNotEmpty()) return false
-        val json = snapshot ?: withContext(Dispatchers.IO) { savedSplit.read() }
-        suspend fun resolve(prefix: String): String = withContext(Dispatchers.IO) {
-            val id=json.optString(prefix+"Id")
-            if(id.isBlank()) json.optString(prefix+"Path")
-            else runCatching { notebookStorage.registry.resolve(id) }.getOrNull() ?: json.optString(prefix+"Path")
-        }
-        val first = resolve("primary")
-        val other = resolve("second")
-        if (first.isBlank() || other.isBlank()) return false
-        suspend fun load(ed: Editor, path: String, prefix: String): Boolean {
-            val expected=json.optString(prefix+"Id")
-            val matches=withContext(Dispatchers.IO) { expected.isBlank() || runCatching { notebookStorage.identity(path)?.documentId == expected }.getOrDefault(false) }
-            if(matches) {
-                if (json.optBoolean(prefix + "Canvas")) ed.openCanvasAsync(path, null) else ed.openAsync(path)
-            }
-            if (matches && ed.noteOpen && ed.missingDocument == null && ed.visibleDocumentUri == path) return true
-            ed.missingDocument = MissingDocument(json.optString(prefix+"Id"),path,org.json.JSONObject(json.toString()),prefix)
-            ed.noteOpen=true
-            return false
-        }
-        load(this, first, "primary")
-        val second = secondaryPane()
-        if (missingDocument == null && !canvasOpen && first == other) second.openSharedView(this)
-        else load(second, other, "second")
-        fun position(ed: Editor, prefix: String, z: String, x: String, y: String) {
-            if (ed.missingDocument != null) return
-            if (ed.canvasOpen) {
-                val view = com.xnotes.core.infinite.Waypoint("", json.optDouble(prefix + "CX", 0.0),
-                    json.optDouble(prefix + "CY", 0.0), json.optDouble(prefix + "CZ", 1.0).coerceIn(0.05, 20.0))
-                ed.infinite.document.lastView = view
-                ed.infinite.viewport.apply(view)
-                ed.infinite.view.publish()
-            } else {
-                json.optJSONObject(prefix + "View")?.let { ed.installViewOverrides(com.xnotes.platform.ViewOverridesJson.read(it)) }
-                ed.state.pendingInitialView = InitialView.Restore(json.optDouble(z, 1.0).coerceIn(0.05, 20.0), json.optDouble(x, 0.0), json.optDouble(y, 0.0))
-                ed.state.didInitialFit = false
-                ed.view.requestLayout()
-                ed.view.requestRender()
-            }
-        }
-        position(this, "primary", "primaryZoom", "primaryX", "primaryY")
-        position(second, "second", "zoom", "x", "y")
-        splitRatio = json.optDouble("ratio", 0.5).toFloat().coerceIn(0.18f, 0.82f)
-        splitReversed = json.optBoolean("reversed")
-        splitSideBySide = if (json.has("sideBySide")) json.optBoolean("sideBySide") else null
-        focusPane(if (json.optString("focused") == Pane.SECONDARY.name) Pane.SECONDARY else Pane.PRIMARY)
-        return true
+    suspend fun openSavedSplit(snapshot:org.json.JSONObject?=null):Boolean {
+        if(openPanes.isNotEmpty()) return false
+        val cap=if(snapshot==null) prepareNativeSplitFile() else {
+            val request=NativeSplitOpenParser.parse(snapshot.toString().toByteArray(Charsets.UTF_8),allowLegacyFormat=true) ?: return false
+            prepareNativeSplitRequest(request,emptySet(),{true}) {_,_->emptySet()}
+        } ?: return false
+        return try {cap.commit().also {if(it) persistNativeSplitPresentation()}} finally {cap.close()}
     }
 
     /** Restore the workspace after the primary session, validating identities before sharing. */
@@ -11429,6 +12351,88 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** Set only by the current mixed host; native-only recovery must not describe a Map slot. */
+    internal var mixedPresentationActive:Boolean=false
+
+    internal fun nativeRestoreHint():com.xnotes.mindmap.MapNativeRestoreHint? {
+        val owner=documentOwner
+        if(!noteOpen || missingDocument!=null || !sessionOwner.isCurrent() || !owner.sessionOwner.isCurrent()) return null
+        return if(canvasOpen) {
+            if(!owner.canvasOpen) return null
+            val model=owner.infinite.document
+            com.xnotes.mindmap.MapNativeRestoreHint(model.identity.documentId,model.path,DocumentKind.CANVAS)
+        } else {
+            if(owner.canvasOpen || state.document!==owner.state.document) return null
+            val model=owner.state.document
+            com.xnotes.mindmap.MapNativeRestoreHint(model.identity.documentId,model.path,DocumentKind.NOTE)
+        }
+    }
+    private fun matchesRestoreIdentity(hint:com.xnotes.mindmap.MapNativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean =
+        hint.documentId==documentId && hint.kind==kind &&
+            (if(hint.path==null || path==null) hint.path==path else documentKey(hint.path)==documentKey(path))
+    internal fun matchesNativeRestoreHint(hint:com.xnotes.mindmap.MapNativeRestoreHint):Boolean {
+        val actual=nativeRestoreHint() ?: return false
+        return matchesRestoreIdentity(hint,actual.documentId,actual.path,actual.kind)
+    }
+
+    private fun nativePresentationSlots():List<NativePresentationSlotIdentity> = hostParkingPanes().map {slot->
+        val owner=slot.documentOwner
+        val canvas=owner.infiniteOrNull?.takeIf {owner.canvasOpen}
+        val modelToken=if(slot.canvasOpen) slot.infinite.presentationModelIdentity else slot.presentationModelIdentity
+        val ownerModelToken=canvas?.presentationModelIdentity ?: owner.presentationModelIdentity
+        NativePresentationSlotIdentity(slot.pane,slot.presentationRuntimeIdentity,owner.presentationRuntimeIdentity,
+            modelToken,ownerModelToken,slot.noteOpen,if(slot.canvasOpen) DocumentKind.CANVAS else DocumentKind.NOTE,
+            canvas?.document?.identity?.documentId ?: owner.state.document.identity.documentId,
+            (if(owner.canvasOpen) canvas?.document?.path else owner.state.document.path)?.let(::documentKey),
+            slot.sessionAdoptionSequence,owner.sessionAdoptionSequence,
+            slot.sessionOwner.isCurrent() && owner.sessionOwner.isCurrent() &&
+                slot.canvasOpen==owner.canvasOpen && (slot.canvasOpen || slot.state.document===owner.state.document))
+    }
+    internal fun captureNativePresentationIdentity():NativePresentationIdentity {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        return NativePresentationIdentity(root.nativePresentationSlots())
+    }
+    internal fun matchesNativePresentationIdentity(ticket:NativePresentationIdentity):Boolean {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        val actual=root.nativePresentationSlots()
+        return ticket.slots.all {it.current} && actual.all {it.current} && ticket.slots==actual
+    }
+
+    internal suspend fun prepareDetachMixedPane(target:Editor,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),
+                                                stillCurrent:()->Boolean={true},allowCanvasHome:Boolean=false):PreparedMixedPaneDetach? {
+        val root=sibling?.takeIf {it.secondary===this} ?: this
+        if(root!==this) return root.prepareDetachMixedPane(target,explicitlyDiscarded,stillCurrent,allowCanvasHome)
+        if(!stillCurrent() || target!==this && target!==secondary || target.canvasOpen && !allowCanvasHome) return null
+        val all=hostParkingSlots()
+        val ownedPeer=target.sharedPeer()?.takeIf {target.sharedOwner==null}
+        val retired=ownedPeer ?: target
+        val remaining=if(ownedPeer!=null) target else openPanes.firstOrNull {it!==target}
+        val retainedOwner=target.documentOwner.takeIf {ownedPeer!=null || target.sharedOwner!=null}
+        val slots=target.captureOpenSlots(false)
+        if(!target.settleOpenSlots(slots,false,explicitlyDiscarded,null,retainedOwner=retainedOwner)) return null
+        val stamps=all.map(::OpenReadStamp)
+        fun current()=stillCurrent() && sameHostParkingSlots(all) && stamps.all {it.isCurrent()} &&
+            all.none {mapSourceParkingInputBusy(it)} &&
+            target.readyToAdopt(slots,false,explicitlyDiscarded,null,retainedOwner)
+        if(!current()) return null
+        return PreparedMixedPaneDetach(MixedPaneDetach(remaining?.pane,retired.pane),::current) {
+            // Closing an owner keeps the same model/history and adopts the peer's physical reading position.
+            val position=ownedPeer?.readingPosition()
+            retired.invalidateNativeOpen();retired.retireNoteEditSource();retired.retireCanvasEditSource()
+            retired.resetPenButtons();AudioPlayback.closeFor(retired)
+            retired.infiniteOrNull?.let {AudioPlayback.closeFor(it)}
+            if(!retired.canvasOpen) retired.saveViewState()
+            if(retired.sharedOwner!=null) retired.leaveSharedDocument()
+            retired.noteDebounceJob?.cancel();retired.autosaveUri=null;retired.canvasAutosaveUri=null
+            retired.canvasOpen=false;retired.noteOpen=false;retired.missingDocument=null;retired.workingSessionClosed()
+            if(position!=null) target.restoreReadingPosition(position)
+            remaining?.let {focusedPane=it.pane}
+        }
+    }
+    internal suspend fun detachMixedPane(target:Editor,explicitlyDiscarded:Set<OpenDiscard> = emptySet(),
+                                         stillCurrent:()->Boolean={true},allowCanvasHome:Boolean=false):MixedPaneDetach? =
+        prepareDetachMixedPane(target,explicitlyDiscarded,stillCurrent,allowCanvasHome)?.commit()
+
     private val penSnapshot: com.xnotes.pen.PenInputSnapshot
         get() = if (canvasOpen) infinite.penSnapshot else proPenInput.snapshot
 
@@ -11437,6 +12441,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** All incoming pen routes take focus before the sample reaches the target state machine. */
+    /** Composition-owned mixed-workspace focus. Null retains the native/native handoff unchanged. */
+    internal var mixedPenFocus:((Editor,android.view.MotionEvent)->Unit)?=null
     private fun focusForPenInput(event: android.view.MotionEvent) {
         observeHostInput(event)
         if (!noteOpen || event.actionMasked !in listOf(android.view.MotionEvent.ACTION_DOWN,
@@ -11445,8 +12451,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 android.view.MotionEvent.ACTION_BUTTON_RELEASE)) return
         if (!com.xnotes.pen.PenSignals.isPen(event)) return
         val workspace = sibling?.takeIf { it.secondary === this } ?: this
+        workspace.mixedPenFocus?.let {it(this,event);return}
         if (workspace.active === this || workspace.openPanes.any { it.stylusInContact }) return
         workspace.focusPane(pane)
+    }
+
+    /** Mixed map/native focus never commits text or copies a different editor's tools/HOLD. */
+    internal fun focusMixedNativePane(pane:Pane):Boolean {
+        val workspace=sibling?.takeIf {it.secondary===this} ?: this
+        if(workspace!==this) return workspace.focusMixedNativePane(pane)
+        val target=if(pane==Pane.PRIMARY) this else secondary ?: return false
+        if(!target.noteOpen || target.canvasOpen || !target.sessionOwner.isCurrent() || openPanes.any {it.stylusInContact}) return false
+        focusedPane=pane;return true
     }
 
     /** Give [pane] the keyboard and the file actions. */

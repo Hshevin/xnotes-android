@@ -12,6 +12,7 @@ internal object MapGraphJson {
             .put("previewKey",s.previewKey ?: JSONObject.NULL).put("sourceVersion",s.sourceVersion ?: JSONObject.NULL)
             .put("region",s.region?.let { JSONArray(listOf(it.x,it.y,it.w,it.h)) } ?: JSONObject.NULL)
             .also {json->
+                s.originalPdf?.let {json.put("originalPdf",original(it))}
                 s.lastKnownPage?.let {json.put("lastKnownPage",it)}
                 s.observedVersion?.let {json.put("observedVersion",it)}
                 s.acceptedPreviewVersion?.let {json.put("acceptedPreviewVersion",it)}
@@ -20,6 +21,51 @@ internal object MapGraphJson {
                     .put("generatedAt",preview.generatedAt).put("target",target(preview.target)))}
             })
     } }
+    /** v1 skips sources and v2 skips previews, so the format gate inspects their exact raw paths first. */
+    fun rejectCanvasRegions(nodes:JSONArray) {
+        for(i in 0 until nodes.length()) {
+            val node=nodes.opt(i) as? JSONObject ?: continue
+            val sources=node.opt("sources") as? JSONArray ?: continue
+            for(k in 0 until sources.length()) {
+                val source=sources.opt(k) as? JSONObject ?: continue
+                require(source.opt("scope")!=SourceScope.CANVAS_REGION.name)
+                val preview=source.opt("lastPreview") as? JSONObject ?: continue
+                val target=preview.opt("target") as? JSONObject ?: continue
+                require(target.opt("scope")!=SourceScope.CANVAS_REGION.name)
+            }
+        }
+    }
+    /** Run before v1/v2 legacy skips so old versions cannot hide a new semantic target. */
+    fun rejectOriginalPdfs(nodes:JSONArray) {
+        for(i in 0 until nodes.length()) {
+            val sources=(nodes.opt(i) as? JSONObject)?.opt("sources") as? JSONArray ?: continue
+            for(k in 0 until sources.length()) {
+                val source=sources.opt(k) as? JSONObject ?: continue
+                fun reject(value:JSONObject) {
+                    require(value.opt("scope")!=SourceScope.PDF_ORIGINAL.name)
+                    require(!value.has("originalPdf") || value.get("originalPdf")===JSONObject.NULL)
+                }
+                reject(source)
+                val preview=source.opt("lastPreview") as? JSONObject ?: continue
+                (preview.opt("target") as? JSONObject)?.let(::reject)
+            }
+        }
+    }
+    private fun original(value:PdfOriginalProjection)=JSONObject().put("sha256",value.sha256)
+        .put("pageIndex",value.pageIndex).put("viewTurns",value.viewTurns)
+        .put("userRegion",value.userRegion?.let {JSONArray(listOf(it.x,it.y,it.w,it.h))} ?: JSONObject.NULL)
+    private fun readOriginal(j:JSONObject):PdfOriginalProjection?=nullable(j,"originalPdf",true) {value->
+        require(value is JSONObject)
+        val region=nullable(value,"userRegion",false) {raw->
+            require(raw is JSONArray && raw.length()==4)
+            Rect(num(raw.get(0)),num(raw.get(1)),num(raw.get(2)),num(raw.get(3)))
+        }
+        PdfOriginalProjection(str(value,"sha256"),integer(value.get("pageIndex")),integer(value.get("viewTurns")),region)
+    }
+    private fun integer(value:Any):Int {
+        require(value is Int || value is Long)
+        val n=(value as Number).toLong();require(n in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong());return n.toInt()
+    }
     fun readSources(n: JSONObject, previews:Boolean = false): List<MapSource> {
         val a=n.getJSONArray("sources"); require(a.length()<=128)
         return (0 until a.length()).map { i -> val s=a.getJSONObject(i)
@@ -29,7 +75,7 @@ internal object MapGraphJson {
             if(s.has("includeAnnotations")) require(s.get("includeAnnotations").let {it is Boolean && !it})
             val r=if(s.isNull("region")) null else s.getJSONArray("region").let { require(it.length()==4);Rect(num(it.get(0)),num(it.get(1)),num(it.get(2)),num(it.get(3))) }
             MapSource(id=str(s,"id"),documentId=str(s,"documentId"),fileName=str(s,"fileName"),scope=SourceScope.valueOf(str(s,"scope")),
-                pageId=nullable(s,"pageId"),region=r,
+                pageId=nullable(s,"pageId"),region=r,originalPdf=readOriginal(s),
                 note=str(s,"note"),status=SourceStatus.valueOf(str(s,"status")),previewKey=nullable(s,"previewKey"),
                 sourceVersion=nullable(s,"sourceVersion"),lastKnownPage=lastKnownPage(s),
                 observedVersion=if(previews) nullable(s,"observedVersion",true,::strValue) else null,
@@ -44,11 +90,12 @@ internal object MapGraphJson {
     private fun target(t:MapSourceTarget) = JSONObject().put("documentId",t.documentId)
         .put("scope",t.scope.name).put("pageId",t.pageId ?: JSONObject.NULL)
         .put("region",t.region?.let {JSONArray(listOf(it.x,it.y,it.w,it.h))} ?: JSONObject.NULL)
+        .also {j->t.originalPdf?.let {j.put("originalPdf",original(it))}}
     private fun readTarget(j:JSONObject):MapSourceTarget {
         val region=if(j.get("region")===JSONObject.NULL) null else j.getJSONArray("region").let {
             require(it.length()==4);Rect(num(it.get(0)),num(it.get(1)),num(it.get(2)),num(it.get(3)))
         }
-        return MapSourceTarget(str(j,"documentId"),SourceScope.valueOf(str(j,"scope")),nullable(j,"pageId"),region)
+        return MapSourceTarget(str(j,"documentId"),SourceScope.valueOf(str(j,"scope")),nullable(j,"pageId"),region,readOriginal(j))
     }
     private fun long(value:Any):Long {require(value is Int || value is Long);return (value as Number).toLong()}
     fun relations(doc: MindMapDocument) = JSONArray().also { a -> doc.relations.forEach { r ->

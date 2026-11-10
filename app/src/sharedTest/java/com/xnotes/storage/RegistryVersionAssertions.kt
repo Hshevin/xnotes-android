@@ -14,15 +14,17 @@ object RegistryVersionAssertions {
         val context=object:ContextWrapper(base) {override fun getNoBackupFilesDir()=root}
         val id=UUID.randomUUID().toString();val uri="content://version-test/document/original"
         try {
-            DocumentRegistry(context).use {registry->
+            val futureVersion=DocumentRegistry(context).use {registry->
                 registry.register(id,"xnote","Original",uri,pageReferences=true)
                 registry.writableDatabase.execSQL("INSERT INTO migrations(uri,original,candidate,source_hash,document_id) VALUES(?,?,?,?,?)",
                     arrayOf(uri,"retained-original","retained-candidate","digest",id))
-                registry.writableDatabase.version=3
+                val future=registry.writableDatabase.version+1
+                registry.writableDatabase.version=future
+                future
             }
             assertThrows(SQLiteException::class.java) {DocumentRegistry(context).use {it.writableDatabase}}
             SQLiteDatabase.openDatabase(File(root,"document-registry.db").path,null,SQLiteDatabase.OPEN_READONLY).use {db->
-                assertEquals(3,db.version)
+                assertEquals(futureVersion,db.version)
                 db.rawQuery("SELECT document_id FROM locations WHERE uri=?",arrayOf(uri)).use {assertTrue(it.moveToFirst());assertEquals(id,it.getString(0))}
                 db.rawQuery("SELECT document_id FROM page_reference_contracts",null).use {assertTrue(it.moveToFirst());assertEquals(id,it.getString(0))}
                 db.rawQuery("SELECT original,candidate FROM migrations WHERE uri=?",arrayOf(uri)).use {

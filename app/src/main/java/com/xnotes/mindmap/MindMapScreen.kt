@@ -28,6 +28,7 @@ import com.xnotes.settings.SettingsRepository
 import com.xnotes.ui.theme.*
 
 internal val LocalInkBusy=staticCompositionLocalOf {false}
+private val LocalMapActionFocus=staticCompositionLocalOf<()->Boolean> {{true}}
 
 @Composable
 fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:MapPresentationState?=null,hostHooks:MapHostHooks?=null) {
@@ -39,10 +40,15 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
     val appearance = remember { LiveSettings.get(SettingsRepository(context)).prefs.uiAppearance }
     val dark = when (appearance) { "light" -> false; "dark", "oled" -> true; else -> isSystemInDarkTheme() }
     XnotesTheme(monochromePalette(dark)) {
-      CompositionLocalProvider(LocalInkBusy provides (session.inkContact || navigationBusy)) screen@{
+      CompositionLocalProvider(LocalInkBusy provides (session.inkContact || navigationBusy),
+          com.xnotes.ui.LocalToolbarFocused provides (hostHooks?.focused?.invoke()!=false),
+          LocalMapActionFocus provides (hostHooks?.requestFocus ?: {true})) screen@{
         var pendingSourceRequest by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         var activeExistingSource by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
         val sourceController=session.sourcePicker
+        val sourceTargets=session.sourceTargetEdits
+        val targetPicker=LocalSourceTargetPickerHost.current ?: rememberSourceTargetPickerHost()
+        val pendingTargetPickerId=targetPicker.pendingId
         val graphEpoch=session.interactionEpoch
         var graphTools by remember(graphEpoch) { mutableStateOf(false) }
         var pendingRelation by remember(graphEpoch) {mutableStateOf<MapRelation?>(null)}
@@ -78,7 +84,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         // The host parks only the visible editor. OS picker slots above retain their original owner.
         if(!presentationState.visible) return@screen
-        val close = { if (session.document == null || !session.dirty) onClose() else session.save(onClose) }
+        val close:()->Unit = {
+            val closeEntry=hostHooks?.closeEntry
+            if(closeEntry!=null) closeEntry()
+            else if(session.document==null || !session.dirty) onClose() else session.save(onClose)
+        }
         val focus = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
         val density = LocalDensity.current
@@ -122,7 +132,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             if(!hooks.openSource(ticket,bookmark)) presentationState.reopenSourcePanel(session,ticket)
         }
         fun editNode(id:String) {
-            if(session.closing || navigationBusy) return
+            if(session.closing || navigationBusy || hostHooks?.requestFocus?.invoke()==false) return
             val node=session.document?.nodes?.firstOrNull {it.id==id} ?: return
             if(node.kind!=NodeKind.REFERENCE) {editing=id;return}
             if(!showSources(id)) return
@@ -141,7 +151,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             }
         }
         LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token,presentationState.restoreVersion,
-            presentationState.pendingBacklinkFocus,session.selectedNodes,session.nodeSelectionMode,session.selectedRelation) {
+            presentationState.pendingBacklinkFocus,presentationState.pendingFileRelationFocus,session.selectedNodes,session.nodeSelectionMode,session.selectedRelation) {
             val graph=view ?: return@LaunchedEffect
             if(textDraft!=null || textRestore!=null) {
                 // Text transactions own their pre-edit camera and their existing restoration path.
@@ -177,7 +187,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             graph.restoreViewport(restore.viewport,restore.width,restore.height,restore.density)
             session.completeTextRestore(restore.token)
         }
-        BackHandler {
+        BackHandler(enabled=hostHooks?.focused?.invoke()!=false) {
             if(navigationBusy) hostHooks?.cancel?.invoke()
             else if(sourceController.state!=null) sourceController.cancel(sourceController.state!!)
             else if(session.connectedDraft!=null) session.cancelConnectedNode(session.connectedDraft!!.token)
@@ -190,9 +200,32 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         val palette = LocalPalette.current
         val enlarged=editing?.let { id -> session.document?.nodes?.any {it.id==id && it.kind==NodeKind.INK} } == true
+        val paneFocused=hostHooks?.focused?.invoke()!=false
+        val keyboardReady=cameraReady && editing==null && textDraft==null && textRestore==null &&
+            session.connectedDraft==null && !navigationBusy && !session.closing && !session.replacingDocument
+        DisposableEffect(view,paneFocused,keyboardReady,hostHooks?.keyboardFocusGeneration) {
+            val graph=view
+            if(graph==null || !paneFocused || !keyboardReady) onDispose {}
+            else {
+                val takeFocus=Runnable {
+                    if(presentationState.visible && hostHooks?.focused?.invoke()!=false && graph===view &&
+                        graph.isAttachedToWindow && graph.isEnabled && graph.width>0 && graph.height>0 &&
+                        editing==null && session.textDraft==null && session.textRestore==null && session.connectedDraft==null &&
+                        !session.closing && !session.replacingDocument) graph.requestFocus()
+                }
+                val listener=object:android.view.View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v:android.view.View) {graph.post(takeFocus)}
+                    override fun onViewDetachedFromWindow(v:android.view.View) {graph.removeCallbacks(takeFocus)}
+                }
+                graph.addOnAttachStateChangeListener(listener)
+                graph.post(takeFocus)
+                onDispose {graph.removeCallbacks(takeFocus);graph.removeOnAttachStateChangeListener(listener)}
+            }
+        }
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
           CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null || session.replacingDocument || navigationBusy)) {
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
+            Column(Modifier.fillMaxSize().then(if(hostHooks?.embedded==true) Modifier
+                else Modifier.windowInsetsPadding(WindowInsets.systemBars).imePadding())) {
                 if(textDraft!=null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                         MapButton(R.string.map_done) {endText(true)}
@@ -203,6 +236,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8), verticalAlignment = Alignment.CenterVertically) {
                     MapButton(R.string.map_close, enabled = !session.closing) { close() }
+                    hostHooks?.splitDocument?.let {split->
+                        MapButton(R.string.map_split_open_beside,enabled=!session.closing && !session.hasUnconfirmedContent) {split()}
+                    }
+                    hostHooks?.returnToSourceMap?.let {back->MapButton(R.string.graph_return_parent_map,
+                        enabled=!session.closing && !session.hasUnconfirmedContent) {back()}}
                     hostHooks?.returnToNetwork?.let {back->MapButton(R.string.network_return,
                         enabled=!session.closing && !session.hasUnconfirmedContent) {back()}}
                     Text(title.ifBlank { stringResource(R.string.map_title) }, fontSize = TextSize.title, modifier = Modifier.padding(horizontal = Space.s12))
@@ -315,7 +353,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             v.documentEpoch=graphEpoch
                             v.documentRevision=session.contentRevision;v.nodeSelectionMode=nodeMode
                             v.expandedAncestors=session.navigationExpandedAncestors;v.visibilityRevision=session.visibilityRevision
-                            v.onGraphContact={geometryChanged=false;presentationState.cancelPendingBacklinkFocus()}
+                            v.onGraphContact={
+                                geometryChanged=false
+                                presentationState.cancelPendingBacklinkFocus()
+                                if(v.isEnabled && hostHooks?.requestFocus?.invoke()!=false) v.requestFocus()
+                            }
                             v.document = proposed ?: doc; v.dark = dark
                             if(session.selectedRelation!=null) v.selectedRelation=session.selectedRelation else v.setSelectedNodes(session.selectedNodes)
                             v.onCaptureNodes=session::captureNodes;v.onMoveNodes=session::moveNodes;v.onSelectNodes={capture,ids->session.selectNodes(capture,ids)}
@@ -333,7 +375,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                     } }
                     problem?.takeIf {textDraft==null}?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
                         Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
-                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {onClose()}
+                        if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {
+                            hostHooks?.closeRecoveryEntry?.invoke() ?: onClose()
+                        }
                         if(session.conflict) {
                             MapButton(R.string.map_conflict_keep, enabled = !session.saving) { session.save(overwrite = true) }
                             MapButton(R.string.map_conflict_use_file, enabled = !session.saving) { discardingRecovery = true }
@@ -394,22 +438,29 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         val currentSourceFocus=pendingSourceFocus?.takeIf {session.currentSourceNavigation(it.source)!=null}
         SideEffect {if(pendingSourceFocus!=null && currentSourceFocus==null) presentationState.consumeSourceFocus(pendingSourceFocus.token)}
         if(!session.hasUnconfirmedContent && !enlarged) presentationState.sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
-            val editor=remember(session,id,sourceEdit.epoch,sourceEdit.documentId) {SourceListEditor(session,sourceEdit)}
+            val editor=remember(presentationState,session,id,sourceEdit.epoch,sourceEdit.documentId) {presentationState.bindSourceEditor(session,sourceEdit)}
             GraphSourcesDialog(sourceEdit,editor, {
                 if(pendingSourceRequest==null) session.beginExistingSource(id)?.let {request->
                     pendingSourceRequest=request
                     try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
                     catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
                 }
-            },addEnabled=pendingSourceRequest==null && sourceController.state==null,
+            },addEnabled=pendingSourceRequest==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null,
                 open=if(hostHooks==null || !cameraReady) null else ::openSource,focus=currentSourceFocus,
-                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback) {
+                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback,
+                targetEditsEnabled=pendingSourceRequest==null && connectedPickerId==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null) {
                 listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
                 // Keep the system launch occupied until ITS result consumes the old ticket.
                 activeExistingSource=null;presentationState.closeSources();focus.clearFocus();keyboard?.hide()
             }
         } }
         sourceController.state?.let {GraphSourceChoiceDialog(it,sourceController)}
+        sourceTargets.state?.let {shown->SourceTargetEditDialog(sourceTargets,shown,
+            filePickerAvailable=pendingTargetPickerId==null && pendingSourceRequest==null && connectedPickerId==null) {slot->
+                if(pendingTargetPickerId!=null || pendingSourceRequest!=null || connectedPickerId!=null) sourceTargets.receivePicker(slot,null)
+                else targetPicker.launch(slot)
+            }
+        }
         if (discardingRecovery) AlertDialog(onDismissRequest = { discardingRecovery = false },
             title = { Text(stringResource(R.string.map_conflict_use_file), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.map_conflict_use_file_confirm), fontSize = TextSize.body) },
@@ -453,9 +504,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
 internal fun MapButton(label: Int, enabled: Boolean = true, selected: Boolean = false, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val fg = palette.text.toComposeColor(); val bg = palette.panel.toComposeColor()
-    TextButton(onClick, enabled = enabled && !LocalInkBusy.current, modifier = Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget)
-        .then(if (selected) Modifier.background(fg) else Modifier),
-        colors = ButtonDefaults.textButtonColors(contentColor = if (selected) bg else fg)) {
+    val highlighted=selected && com.xnotes.ui.LocalToolbarFocused.current
+    val takeFocus=LocalMapActionFocus.current
+    TextButton({if(takeFocus()) onClick()}, enabled = enabled && !LocalInkBusy.current, modifier = Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget)
+        .then(if (highlighted) Modifier.background(fg) else Modifier),
+        colors = ButtonDefaults.textButtonColors(contentColor = if (highlighted) bg else fg)) {
         Text(stringResource(label), fontSize = TextSize.body)
     }
 }

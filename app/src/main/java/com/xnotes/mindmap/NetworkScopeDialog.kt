@@ -87,8 +87,11 @@ internal fun NetworkScopeControls(entry:FileNetworkWorkspace.Entry,enabled:Boole
                             }
                         }),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
                         Checkbox(checked,onCheckedChange=null,enabled=current() && (checked || shown.ids.size<250))
-                        Text(file.observedNames.firstOrNull().orEmpty().ifBlank {stringResource(R.string.network_file)},
-                            fontSize=TextSize.body,modifier=Modifier.weight(1f))
+                        Column(Modifier.weight(1f)) {
+                            Text(networkFileTitle(file),fontSize=TextSize.body)
+                            file.availability?.let {Text(stringResource(networkStatusText(it)),fontSize=TextSize.caption)}
+                            file.problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.caption)}
+                        }
                     }
                 }
             }

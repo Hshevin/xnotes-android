@@ -259,12 +259,12 @@ fun workspaceToolbarLayout(paged: ToolbarLayout, canvas: ToolbarLayout): Toolbar
 }
 
 /** Classify every new button here: the exhaustive when prevents silent placement defaults. */
-enum class ToolbarDocument { NOTE, PDF, CANVAS }
+enum class ToolbarDocument { NOTE, PDF, CANVAS, MAP }
 private enum class ToolbarScope(val supported: Set<ToolbarDocument>, val perDocument: Boolean) {
-    COMMON(ToolbarDocument.entries.toSet(), false),
+    COMMON(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF, ToolbarDocument.CANVAS), false),
     PAGED_TOOL(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), false),
     PDF_TOOL(setOf(ToolbarDocument.PDF), false),
-    ALL_VIEW(ToolbarDocument.entries.toSet(), true),
+    ALL_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF, ToolbarDocument.CANVAS), true),
     PAGED_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), true),
     CANVAS_VIEW(setOf(ToolbarDocument.CANVAS), true),
 }
@@ -298,6 +298,12 @@ fun ToolbarLayout.forDocumentControls(document: Boolean, documents: Set<ToolbarD
 fun documentToolbarLayout(layout: ToolbarLayout, canvas: Boolean, pdf: Boolean,
     documents: Set<ToolbarDocument> = pagedDocuments): ToolbarLayout {
     val kind = if (canvas) ToolbarDocument.CANVAS else if (pdf) ToolbarDocument.PDF else ToolbarDocument.NOTE
+    return documentToolbarLayout(layout, kind, documents)
+}
+
+/** Map controls have their own editor; no native tool is implicitly applicable to a map. */
+fun documentToolbarLayout(layout: ToolbarLayout, kind: ToolbarDocument,
+    documents: Set<ToolbarDocument> = pagedDocuments): ToolbarLayout {
     return ToolbarLayout(layout.forDocumentControls(true, documents).sections.map { section ->
         ToolbarSection(section.visibleEntries.filter { kind in it.item.scope.supported })
     }.filter { it.hasVisible })

@@ -1,0 +1,70 @@
+{
+  "masterBefore": "ef6ffa295dfd33056402e64ea0e0cdff5a656c0a",
+  "source": "c97f58f9676e9e1a75906184778269b6dd6c00c1",
+  "tests": 4567,
+  "suites": 480,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "fullRun": {
+    "prefix": "progress-merge-full",
+    "tests": 4567,
+    "failures": 2
+  },
+  "suiteReplacement": {
+    "prefix": "progress-merge-final",
+    "class": "com.xnotes.pen.EditorCurrentPageReferenceHostTest",
+    "tests": 12,
+    "failures": 0
+  },
+  "manifestDelta": [
+    "app/src/test/java/com/xnotes/pen/EditorCurrentPageReferenceHostTest.kt"
+  ],
+  "inputCount": 1293,
+  "sourceInputsSha256": "7c29f54b15d243d5332e3e3a5c2f006a1e6c4fd09c413f01c575d2c6d8f3e27d",
+  "sourceInputsMatchCurrent": true,
+  "android": "Source compilation only; instrumentation and target device not executed",
+  "coldDraftsExcluded": true,
+  "commands": {
+    "progress-merge-full": [
+      "./gradlew",
+      "--offline",
+      "--no-daemon",
+      "--continue",
+      "--project-cache-dir",
+      "/private/tmp/xnotes-mind-map-progress-merge-cache",
+      "-I",
+      "tmp/progress-merge.init.gradle",
+      ":app:compileDebugKotlin",
+      ":app:testDebugUnitTest",
+      ":app:compileDebugAndroidTestKotlin"
+    ],
+    "progress-merge-final": [
+      "./gradlew",
+      "--offline",
+      "--no-daemon",
+      "--continue",
+      "--project-cache-dir",
+      "/private/tmp/xnotes-mind-map-progress-merge-cache",
+      "-I",
+      "tmp/progress-merge.init.gradle",
+      ":app:compileDebugKotlin",
+      ":app:testDebugUnitTest",
+      "--tests",
+      "com.xnotes.pen.EditorCurrentPageReferenceHostTest",
+      ":app:compileDebugAndroidTestKotlin"
+    ]
+  },
+  "validationLimits": [
+    "JVM/host tests are not Android instrumentation or hardware acceptance",
+    "No APK, installation, push, remote branch, Git configuration change or Release",
+    "Cold restore work remains paused and uncommitted in its original worktree"
+  ],
+  "independentReview": {
+    "verdict": "PASS",
+    "openRequired": [],
+    "auditSha256": "c233237ef04fe3ad401fa1011f8d7eab501bd9398b70ffd93e04db06b3c6bb9a",
+    "currentInputsMatched": true,
+    "draftsUnchanged": true
+  }
+}

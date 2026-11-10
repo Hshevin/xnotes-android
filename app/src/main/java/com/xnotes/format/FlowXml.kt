@@ -314,7 +314,8 @@ object FlowXml {
     // --- read ---
 
     /** Populate [flow] from [bytes]; malformed XML leaves it untouched (loads empty). */
-    fun readInto(flow: TextFlow, bytes: ByteArray) {
+    fun readInto(flow:TextFlow,bytes:ByteArray) {readObservedInto(flow,bytes)}
+    internal fun readObservedInto(flow:TextFlow,bytes:ByteArray):Boolean {
         val root = try {
             DocumentBuilderFactory.newInstance()
                 .apply { isNamespaceAware = true }
@@ -322,7 +323,7 @@ object FlowXml {
                 .parse(ByteArrayInputStream(bytes))
                 .documentElement
         } catch (_: Exception) {
-            return
+            return false
         }
 
         flow.paragraphs.clear()
@@ -362,7 +363,7 @@ object FlowXml {
         readBlocks(body, styles, flow.paragraphs)
         joinQuotes(flow.paragraphs, styles.quotes)
         normalizeTables(flow)
-        flow.touch()
+        flow.touch();return true
     }
 
     /** Neighbouring paragraphs with one quote number share one container, of the kind the first names. */

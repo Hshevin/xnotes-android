@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="file_relation_group">用户手工关联</string>
+    <string name="file_relation_open">在原画布中编辑</string>
+    <string name="file_relation_notice">这些线由用户在文件卡片之间明确建立，与内容引用分开。</string>
+    <string name="file_relation_direction">%1$s → %2$s</string>
+    <string name="file_relation_undirected">%1$s ↔ %2$s</string>
+    <string name="file_relation_count">用户关联 · %1$d 条记录</string>
+    <string name="file_relation_from_canvas">画布：%1$s</string>
+    <string name="file_relation_empty_refs">没有显示的内容引用</string>
+    <string name="file_relation_return_notice">关闭画布后返回当前文件。</string>
+    <string name="file_relation_filter_summary">已筛选 · 排除 %1$d 条关联</string>
+</resources>

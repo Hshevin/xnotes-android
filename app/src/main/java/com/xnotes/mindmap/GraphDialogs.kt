@@ -136,7 +136,7 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
 @Composable
 internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,
                                 open:((MapSourceNavigationTicket)->Unit)?=null,focus:MapSourcePanelFocus?=null,
-                                focusHandled:(Any)->Unit={},feedback:Int?=null,close:()->Unit) {
+                                focusHandled:(Any)->Unit={},feedback:Int?=null,targetEditsEnabled:Boolean=true,close:()->Unit) {
     val node=snapshot.node
     val scroll=rememberLazyListState()
     val sourceIds=node.sources.map {it.id}
@@ -149,7 +149,7 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
         focusHandled(pending.token)
     }
     val alive=remember(editor) {java.util.concurrent.atomic.AtomicBoolean(true)}
-    DisposableEffect(editor) {onDispose {alive.set(false);editor.close()}}
+    DisposableEffect(editor) {onDispose {alive.set(false);editor.detach()}}
     SideEffect {editor.sync(snapshot)}
     fun dismiss(confirmNotes:Boolean=true) {
         if(alive.get() && (!confirmNotes || editor.commitNotes())) {alive.set(false);editor.close();close()}
@@ -159,7 +159,11 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
         Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
     }},text={
         LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
-            item { Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body) }
+            item {
+                Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body)
+                if(node.fileCardId!=null && node.sources.singleOrNull()?.scope==SourceScope.PDF_ORIGINAL)
+                    Text(stringResource(R.string.network_original_card_notice),fontSize=TextSize.caption)
+            }
             item {
                 Text(stringResource(R.string.graph_preview_backup_notice),fontSize=TextSize.caption)
                 Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
@@ -176,11 +180,15 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 var noteFocused by remember(s.id) {mutableStateOf(false)}
                 // Bind the visible row before click; remove/undo must not let an old UI mint a new lifetime.
                 val navigation=if(open!=null) editor.captureNavigation(s.id,s.target) else null
+                val rangeEdit=if(node.fileCardId==null && targetEditsEnabled && !LocalInkBusy.current)
+                    editor.captureTargetEdit(s.id,s.target,SourceTargetEditMode.RANGE) else null
+                val replaceEdit=if(node.fileCardId==null && targetEditsEnabled && !LocalInkBusy.current)
+                    editor.captureTargetEdit(s.id,s.target,SourceTargetEditMode.REPLACE) else null
                 LaunchedEffect(editor,s.id,s.target) {if(alive.get()) editor.showPreview(s.id,s.target)}
                 Text(s.fileName,fontSize=TextSize.title)
                 Text(sourceScopeLabel(s),fontSize=TextSize.caption)
                 SourcePreviewImage(editor.previewAsset(s.id))
-                if(s.lastPreview?.target?.let {it!=s.target}==true) Text(stringResource(R.string.graph_preview_old_target),fontSize=TextSize.caption)
+                if(s.hasHistoricalPreview) Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
                 if(s.id in editor.busySourceIds) Text(stringResource(R.string.graph_preview_working),fontSize=TextSize.caption)
                 if(s.id in editor.failedSourceIds) Text(stringResource(R.string.graph_preview_failed),fontSize=TextSize.caption)
                 Text(stringResource(when(s.status) {
@@ -199,6 +207,10 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                     }
                     MapButton(R.string.graph_preview_check,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.check(s.id,s.target)}
                     MapButton(R.string.graph_preview_refresh,enabled=s.id !in editor.busySourceIds) {if(alive.get()) editor.refresh(s.id,s.target)}
+                }
+                if(node.fileCardId==null) Row(horizontalArrangement=Arrangement.spacedBy(Space.s4)) {
+                    MapButton(R.string.source_target_adjust,enabled=rangeEdit!=null) {if(alive.get() && rangeEdit!=null && editor.commitNotes()) editor.startTargetEdit(rangeEdit)}
+                    MapButton(R.string.source_target_replace,enabled=replaceEdit!=null) {if(alive.get() && replaceEdit!=null && editor.commitNotes()) editor.startTargetEdit(replaceEdit)}
                 }
                 OutlinedTextField(editor.noteDraft(s.id) ?: s.note,{ note -> if(alive.get()) editor.draftNote(s,noteTicket,note) },enabled=!LocalInkBusy.current,
                     modifier=Modifier.onFocusChanged {state->
@@ -250,8 +262,21 @@ internal fun SourcePreviewImage(asset:MapPreviewAsset?) {
 }
 
 @Composable
-internal fun sourceScopeLabel(source:MapSource)=if(source.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-    else source.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
+internal fun sourceScopeLabel(source:MapSource):String {
+    val range=sourceRangeLabel(source.scope,source.lastKnownPage)
+    return if(source.region!=null || source.originalPdf?.userRegion!=null)
+        stringResource(R.string.graph_backlinks_range_region,range) else range
+}
+
+@Composable
+internal fun sourceRangeLabel(scope:SourceScope,lastKnownPage:Int?):String=when(scope) {
+    SourceScope.FILE->stringResource(R.string.graph_source_whole_file)
+    SourceScope.CANVAS_REGION->stringResource(R.string.graph_source_canvas_region)
+    SourceScope.PDF_ORIGINAL->lastKnownPage?.let {stringResource(R.string.original_pdf_page_last_known,it)}
+        ?: stringResource(R.string.original_pdf_readonly)
+    SourceScope.PAGE->lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)}
+        ?: stringResource(R.string.graph_source_page_unknown)
+}
 
 /** A text-only actual page directory; rows never decode or read their source independently. */
 @Composable

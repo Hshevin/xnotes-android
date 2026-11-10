@@ -19,52 +19,70 @@ import com.xnotes.ui.theme.*
 
 /** Pickers belong to the reading host, so a retired page cannot clear/rebind an old system result. */
 @Composable
-internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri)->Unit,visible:Boolean=true) {
+internal fun PageToMapFlowHost(editor:Editor,onSave:(Editor)->Unit,onOpenMap:(Uri,Boolean)->Unit,visible:Boolean=true,
+    preferredMap:MapWorkspace.Entry?=null,preferredMapCurrent:(MapWorkspace.Entry)->Boolean={false},
+    visibleSourcePane:com.xnotes.ui.Pane?=null) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
-    val request=editor.openPanes.firstNotNullOfOrNull {it.pageReferenceRequest}
+    val request:com.xnotes.ui.SourceCreationRequest?=editor.openPanes.filter {visibleSourcePane==null || it.pane==visibleSourcePane}.firstNotNullOfOrNull {
+        it.pageReferenceRequest ?: it.canvasRegionReferenceRequest
+    }
     val controller=remember(request?.id) {request?.let {PageToMapController(context,it,scope)}}
     val latest by rememberUpdatedState(controller)
+    val sourceCopyPicker=com.xnotes.ui.rememberNativeDestinationPicker()
     var pickerRequest by rememberSaveable {mutableStateOf<String?>(null)}
     var pickerKind by rememberSaveable {mutableStateOf<String?>(null)}
+    var pickerAccept by remember {mutableStateOf<((Uri)->Boolean)?>(null)}
     fun receive(uri:Uri?,kind:String) {
-        val owner=pickerRequest;val expected=pickerKind
-        pickerRequest=null;pickerKind=null
+        val owner=pickerRequest;val expected=pickerKind;val accept=pickerAccept
+        pickerRequest=null;pickerKind=null;pickerAccept=null
         val current=latest
-        if(uri==null || expected!=kind || owner==null || current?.request?.id!=owner || !current.request.pane.pageReferenceCurrent(current.request)) return
+        if(uri==null || expected!=kind || owner==null || current?.request?.id!=owner || !current.request.current()) return
         val resolver=context.contentResolver
         runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)}
             .onFailure {runCatching {resolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}}
-        if(kind=="OPEN") current.selectMap(uri) else current.createMap(uri)
+        accept?.invoke(uri)
     }
     val choose=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {receive(it,"OPEN")}
     val create=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {receive(it,"NEW")}
     DisposableEffect(controller) {onDispose {controller?.close()}}
     LaunchedEffect(controller) {controller?.start()}
     SideEffect {
-        controller?.takeIf {!it.request.pane.pageReferenceCurrent(it.request)}?.close()
+        controller?.takeIf {!it.request.current()}?.close()
     }
     controller?.takeIf {visible}?.let {flow->
         val openUri=flow.targetUri;val openContext=flow.targetContext
-        PageToMapDialog(flow,pickerRequest!=null,
-            choose={if(pickerRequest==null && flow.request.pane.pageReferenceCurrent(flow.request)) {
-                pickerRequest=flow.request.id;pickerKind="OPEN"
+        PageToMapDialog(flow,pickerRequest!=null || sourceCopyPicker.busy,
+            chooseOpen=preferredMap?.takeIf {it.lease.alive && preferredMapCurrent(it)}?.let {entry->{
+                flow.selectOpenMap(entry) {preferredMapCurrent(entry)};Unit
+            }},
+            choose={if(pickerRequest==null && flow.request.current()) {
+                val accept=flow.mapDestination(false)
+                if(accept!=null) {pickerAccept=accept;pickerRequest=flow.request.id;pickerKind="OPEN"
                 try {choose.launch(arrayOf("application/json","application/octet-stream","*/*"))}
-                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null;pickerAccept=null}
+                }
             }},
-            create={if(pickerRequest==null && flow.request.pane.pageReferenceCurrent(flow.request)) {
-                pickerRequest=flow.request.id;pickerKind="NEW"
+            create={if(pickerRequest==null && flow.request.current()) {
+                val accept=flow.mapDestination(true)
+                if(accept!=null) {pickerAccept=accept;pickerRequest=flow.request.id;pickerKind="NEW"
                 try {create.launch(context.getString(R.string.map_title)+".xmap")}
-                catch(_:Exception) {pickerRequest=null;pickerKind=null}
+                catch(_:Exception) {pickerRequest=null;pickerKind=null;pickerAccept=null}
+                }
             }},
-            save={flow.saveSource {pane->pane.message=context.getString(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry);onSave(pane)}},
+            save={
+                if(!flow.canSaveSourceInPlace && flow.canSaveSourceCopy) {
+                    if(!launchSourceCopy(flow,sourceCopyPicker,context.getString(R.string.graph_region_copy_file_name)) && flow.request.current())
+                        flow.request.pane.message=context.getString(R.string.native_save_picker_busy)
+                } else flow.saveSource {pane->pane.message=context.getString(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry);onSave(pane)}
+            },
             reopen={flow.reopen {flow.request.pane.message=context.getString(R.string.graph_ref_reopened_retry)}},
-            open={flow.openMap(openUri,openContext,onOpenMap)},close={flow.close()})
+            open={flow.openMap(openUri,openContext) {uri->onOpenMap(uri,flow.request.flushNativeOnPresent)}},close={flow.close()})
     }
 }
 
 @Composable
-private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:()->Unit,create:()->Unit,
+private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,chooseOpen:(()->Unit)?,choose:()->Unit,create:()->Unit,
                             save:()->Unit,reopen:()->Unit,open:()->Unit,close:()->Unit) {
     val session=flow.targetSession
     val doc=session?.document
@@ -74,11 +92,14 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
     val palette=LocalPalette.current
     val targetContext=flow.targetContext
     val confirmation=flow.confirmationToken
+    val modeContext=flow.sourceModeContext
+    val restoreOffer=flow.originalRestoreOffer
     val newBranch=(flow.destination as? MapReferenceDestination.New)?.node?.parent
     val branchEditing=newBranch!=null && (session?.textDraft!=null || session?.textRestore!=null)
     CompositionLocalProvider(LocalInkBusy provides false) {
-        AlertDialog(onDismissRequest=close,title={Text(stringResource(R.string.graph_reference_this_page),fontSize=TextSize.heading)},text={
+        AlertDialog(onDismissRequest=close,title={Text(stringResource(flow.request.titleRes),fontSize=TextSize.heading)},text={
             LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                flow.request.contextNoticeRes?.let {notice->item {Text(stringResource(notice),fontSize=TextSize.caption)}}
                 flow.source?.let {source->item {
                     Text(source.fileName,fontSize=TextSize.title)
                     Text(sourceScopeLabel(source),fontSize=TextSize.caption)
@@ -87,9 +108,38 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                     PageToMapStep.PREPARING,PageToMapStep.TARGET_LOADING,PageToMapStep.CONFIRMING,PageToMapStep.SAVING->item {
                         Text(stringResource(if(step==PageToMapStep.SAVING) R.string.map_saving else R.string.graph_ref_preparing),fontSize=TextSize.body)
                     }
+                    PageToMapStep.SOURCE_MODE->item {
+                        Text(stringResource(R.string.graph_source_mode_notice),fontSize=TextSize.body)
+                        Text(stringResource(R.string.graph_source_mode_original_retention),fontSize=TextSize.caption)
+                        flow.sourceModeIssue?.let {issue->Text(stringResource(when(issue) {
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_REGION->R.string.graph_source_original_region_unavailable
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_UNAVAILABLE->R.string.graph_source_original_unavailable
+                            com.xnotes.ui.SourceCreationIssue.ORIGINAL_CHANGED->R.string.graph_source_original_changed
+                        }),fontSize=TextSize.body)}
+                        if(com.xnotes.ui.SourceCreationMode.NOTE_PAGE in flow.sourceModes)
+                            MapButton(R.string.graph_source_mode_note) {flow.selectSourceMode(com.xnotes.ui.SourceCreationMode.NOTE_PAGE,modeContext)}
+                        if(com.xnotes.ui.SourceCreationMode.PDF_ORIGINAL in flow.sourceModes)
+                            MapButton(R.string.graph_source_mode_original) {flow.selectSourceMode(com.xnotes.ui.SourceCreationMode.PDF_ORIGINAL,modeContext)}
+                    }
+                    PageToMapStep.ORIGINAL_RESTORE_REQUIRED->item {
+                        Text(stringResource(R.string.graph_source_original_restore_notice),fontSize=TextSize.body)
+                        MapButton(R.string.graph_source_original_restore) {flow.restoreOriginal(restoreOffer)}
+                    }
                     PageToMapStep.SAVE_REQUIRED->item {
-                        Text(stringResource(if(flow.sourceNeedsIndependentSave) R.string.graph_ref_save_copy_then_retry else R.string.graph_ref_save_then_retry),fontSize=TextSize.body)
-                        MapButton(R.string.save_as_ellipsis,onClick=save)
+                        Text(stringResource(when {
+                            flow.canSaveSourceInPlace->R.string.graph_ref_save_in_place_notice
+                            flow.canSaveSourceCopy->R.string.graph_region_save_copy_notice
+                            flow.sourceNeedsIndependentSave->R.string.graph_ref_save_copy_then_retry
+                            else->R.string.graph_ref_save_then_retry
+                        }),fontSize=TextSize.body)
+                        MapButton(when {flow.canSaveSourceInPlace->R.string.save;flow.canSaveSourceCopy->R.string.graph_region_save_copy;else->R.string.save_as_ellipsis},enabled=!pickerBusy,onClick=save)
+                    }
+                    PageToMapStep.SOURCE_COPY_RETAINED->item {
+                        Text(stringResource(R.string.graph_region_copy_retained),fontSize=TextSize.body)
+                        MapButton(R.string.graph_region_continue_copy) {flow.continueSourceCopy()}
+                    }
+                    PageToMapStep.SOURCE_COPY_WRITTEN->item {
+                        Text(stringResource(R.string.graph_region_copy_written),fontSize=TextSize.body)
                     }
                     PageToMapStep.ENABLE_REQUIRED->item {
                         Text(stringResource(R.string.graph_ref_enable_notice),fontSize=TextSize.body)
@@ -106,6 +156,7 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                     PageToMapStep.DESTINATION->item {
                         Text(stringResource(R.string.graph_ref_destination_notice),fontSize=TextSize.body)
                         if(pickerBusy) Text(stringResource(R.string.native_save_picker_busy),fontSize=TextSize.caption)
+                        chooseOpen?.let {MapButton(R.string.graph_ref_other_pane_map,enabled=!pickerBusy,onClick=it)}
                         MapButton(R.string.graph_ref_choose_map,enabled=!pickerBusy,onClick=choose)
                         MapButton(R.string.map_new,enabled=!pickerBusy,onClick=create)
                     }
@@ -168,10 +219,19 @@ private fun PageToMapDialog(flow:PageToMapController,pickerBusy:Boolean,choose:(
                     }
                     PageToMapStep.CLOSED->Unit
                 }
+                if(flow.canChangeSourceMode && step!=PageToMapStep.SOURCE_MODE) item {
+                    MapButton(R.string.graph_source_mode_change,enabled=!pickerBusy) {flow.changeSourceMode()}
+                }
             }
         },confirmButton={
             if(step==PageToMapStep.TARGET) MapButton(R.string.graph_ref_add,enabled=flow.destination!=null && !branchEditing && session?.inkContact!=true && session?.closing!=true && session?.replacingDocument!=true) {flow.confirm(confirmation)}
             else if(step==PageToMapStep.ADDED) MapButton(R.string.map_done,onClick=close)
         },dismissButton={MapButton(if(hasImport) R.string.map_close else R.string.cancel,onClick=close)})
     }
+}
+
+/** The real Canvas fallback consumer: its callback belongs to the original flow generation. */
+internal fun launchSourceCopy(flow:PageToMapController,picker:com.xnotes.ui.NativeDestinationPicker,name:String):Boolean {
+    val accept=flow.sourceCopyDestination(name) ?: return false
+    return picker.launch(name) {uri->if(uri!=null) accept(uri)}
 }

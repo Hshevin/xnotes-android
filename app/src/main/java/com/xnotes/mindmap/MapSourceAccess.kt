@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.xnotes.core.util.DocumentKind
+import com.xnotes.core.geometry.Rect
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.storage.NativeSourceSnapshot
 import com.xnotes.storage.ReferenceContractViolation
@@ -32,7 +33,7 @@ internal object MapSourceAccess {
         runCatching {context.contentResolver.takePersistableUriPermission(uri,flags)}
             .onFailure {if(write) runCatching {context.contentResolver.takePersistableUriPermission(uri,read)}}
     }
-    private fun <T> withRememberedPermission(context:Context,uri:Uri,writeAccess:Boolean=false,block:()->T):T=
+    internal fun <T> withRememberedPermission(context:Context,uri:Uri,writeAccess:Boolean=false,block:()->T):T=
         synchronized(permissionLocks.getOrPut(uri.toString()) {Any()}) {
         val resolver=context.contentResolver
         val read=android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -72,6 +73,28 @@ internal object MapSourceAccess {
             }
             DocumentKind.SPLIT -> error("Unsupported source kind")
         }
+    }
+    /** Canvas region creation supplies the required type and UUID; a display suffix is never type evidence. */
+    fun offerCanvas(context:Context,uri:Uri,documentId:String,checkActive:()->Unit={}):MapSourceOffer=withRememberedPermission(context,uri) {
+        MapSourceTarget(documentId,SourceScope.FILE).validate();checkActive()
+        val storage=NotebookStorage.get(context)
+        val displayName=name(context,uri)
+        storage.openSource(uri.toString(),DocumentKind.CANVAS,checkActive).use {source->
+            val catalog=source.referenceCatalog()
+            if(catalog.documentId!=documentId) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            val header=BundleHeader.read(source.file) {checkActive();false}
+            checkActive();storage.registry.registerObserved(header,DocumentKind.CANVAS.extension,displayName,uri.toString(),uniqueSource=true)
+            unique(storage,documentId);checkActive()
+            MapSourceOffer.observed(uri,DocumentKind.CANVAS,displayName,
+                MapSource(documentId=documentId,fileName=displayName,sourceVersion=catalog.sha256),catalog)
+        }
+    }
+    fun selectCanvasRegion(context:Context,expected:MapSourceOffer,region:Rect,checkActive:()->Unit={}):MapSource {
+        require(expected.kind==DocumentKind.CANVAS)
+        MapSourceTarget(expected.fileSource.documentId,SourceScope.CANVAS_REGION,region=region).validate()
+        val actual=offerCanvas(context,expected.uri,expected.fileSource.documentId,checkActive);same(expected,actual)
+        return actual.fileSource.copy(id=expected.fileSource.id,scope=SourceScope.CANVAS_REGION,region=region)
+            .also {it.validate();checkActive()}
     }
     private fun same(expected:MapSourceOffer,actual:MapSourceOffer) {
         if(expected.kind!=actual.kind || expected.fileSource.documentId!=actual.fileSource.documentId)

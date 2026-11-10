@@ -25,6 +25,7 @@ internal class FileNetworkHostActions(
     val cancel:(FileNetworkWorkspace.Entry)->Unit,
     val feedback:(FileNetworkWorkspace.Entry)->BacklinkProblem?,
     val openCanvas:(FileNetworkWorkspace.Entry,NetworkCanvasOpenRequest)->Boolean={_,_->false},
+    val openRelation:(FileNetworkWorkspace.Entry,MapFileRelationRow)->Boolean={_,_->false},
 )
 
 private data class NetworkOpeningVisual(val report:LocalFileNetworkReport,val scene:LocalNetworkScene)
@@ -44,7 +45,14 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
     val observedControls=remember(entry) {longArrayOf(controls)}
     val labels=LocalNetworkLabels(stringResource(R.string.network_file),stringResource(R.string.network_concept),
         stringResource(R.string.map_ink_node),stringResource(R.string.graph_reference),
-        stringResource(R.string.network_reference_count),stringResource(R.string.graph_belongs),stringResource(R.string.network_empty_overview))
+        stringResource(R.string.network_reference_count),stringResource(R.string.graph_belongs),stringResource(R.string.network_empty_overview),
+        userRelation=stringResource(R.string.file_relation_group),
+        fileKinds=mapOf(NetworkFileKind.NOTE to stringResource(R.string.network_filter_kind_note),
+            NetworkFileKind.CANVAS to stringResource(R.string.network_filter_kind_canvas),
+            NetworkFileKind.MAP to stringResource(R.string.network_filter_kind_map),
+            NetworkFileKind.PDF_ORIGINAL to stringResource(R.string.network_filter_kind_pdf_original)),
+        availability=mapOf(SourceStatus.TRASHED to stringResource(R.string.graph_status_trashed),
+            SourceStatus.UNAVAILABLE to stringResource(R.string.graph_status_unavailable)))
     val busy=actions.busy()
     var openingVisual by remember(entry) {mutableStateOf<NetworkOpeningVisual?>(null)}
     val held=openingVisual.takeIf {busy}
@@ -96,6 +104,10 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                             openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
                             if(actions.open(entry,anchor,target)) localProblem=null
                             else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
+                        },openRelation={row->
+                            openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
+                            if(actions.openRelation(entry,row)) localProblem=null
+                            else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
                         })}
                     if(maxWidth>=LayerSidebarWidth*2) Row(Modifier.fillMaxSize()) {
                         canvas(Modifier.weight(1f).fillMaxHeight())
@@ -111,6 +123,9 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
                         Column(Modifier.padding(Space.s8)) {
                             currentReport?.let {data->
                                 Text(stringResource(R.string.network_counts,data.files.size,data.concepts.size,data.checkedMaps),fontSize=TextSize.caption)
+                                if(data.fileRelations.isNotEmpty()) Text(stringResource(R.string.file_relation_count,data.fileRelations.size),fontSize=TextSize.caption)
+                                if(data.filterActive && data.filteredFileRelations>0)
+                                    Text(stringResource(R.string.file_relation_filter_summary,data.filteredFileRelations),fontSize=TextSize.caption)
                                 if(!data.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
                                 if(data.limited) Text(stringResource(R.string.graph_backlinks_problem_limit),fontSize=TextSize.body)
                                 if(data.filterActive) Text(stringResource(R.string.network_filter_summary,data.filteredConcepts),fontSize=TextSize.caption)
@@ -129,7 +144,8 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
 
 @Composable
 private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetworkReport?,modifier:Modifier,
-    controls:Long,enabled:Boolean,open:(LocalNetworkEvidence,LocalNetworkEvidence)->Unit) {
+    controls:Long,enabled:Boolean,open:(LocalNetworkEvidence,LocalNetworkEvidence)->Unit,
+    openRelation:(MapFileRelationRow)->Unit) {
     val p=entry.presentation
     val selectedNode=p.selectedNode;val selectedEdge=p.selectedEdge
     val concepts=report?.concepts.orEmpty()
@@ -140,11 +156,17 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
         selectedNode is NetworkSceneNodeKey.File->concepts.filter {c->c.location.graphId==selectedNode.documentId || c.members.any {it.fileId==selectedNode.documentId}}
         else->emptyList()
     }
+    val selectedRelations=when {
+        selectedEdge is NetworkSceneEdgeKey.UserRelation->report?.aggregatedFileRelations?.firstOrNull {it.key==selectedEdge.key}?.rows.orEmpty()
+        selectedNode is NetworkSceneNodeKey.File->report?.fileRelations.orEmpty().filter {selectedNode.documentId in it.fileIds}
+        else->emptyList()
+    }
     LazyColumn(modifier.padding(Space.s12),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
         item {
             Text(stringResource(R.string.network_explanation),fontSize=TextSize.heading)
             if(selectedEdge is NetworkSceneEdgeKey.Belongs) Text(stringResource(R.string.network_ownership),fontSize=TextSize.body)
-            else Text(stringResource(R.string.network_content_evidence),fontSize=TextSize.caption)
+            else Text(stringResource(if(selectedEdge is NetworkSceneEdgeKey.UserRelation) R.string.file_relation_notice
+                else R.string.network_content_evidence),fontSize=TextSize.caption)
             val file=when {
                 selectedEdge is NetworkSceneEdgeKey.References->selectedEdge.fileId
                 selectedNode is NetworkSceneNodeKey.File->selectedNode.documentId
@@ -155,9 +177,14 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             if(selectedNode is NetworkSceneNodeKey.File) {
                 val id=selectedNode.documentId
                 val expanded=id in entry.controller.expandedFiles
-                Text(report?.files?.firstOrNull {it.documentId==id}?.observedNames?.firstOrNull().orEmpty()
-                    .ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
-                if(selected.isEmpty()) Text(stringResource(R.string.network_file_no_displayed_refs),fontSize=TextSize.caption)
+                report?.files?.firstOrNull {it.documentId==id}?.let {file->
+                    Text(networkFileTitle(file),fontSize=TextSize.body)
+                    file.availability?.let {Text(stringResource(networkStatusText(it)),fontSize=TextSize.caption)}
+                    file.problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.caption)}
+                    if(file.kind==NetworkFileKind.PDF_ORIGINAL)
+                        Text(stringResource(R.string.network_original_folder_notice),fontSize=TextSize.caption)
+                }
+                if(selected.isEmpty() && selectedRelations.isEmpty()) Text(stringResource(R.string.network_file_no_displayed_refs),fontSize=TextSize.caption)
                 if(entry.controller.browseMode!=NetworkBrowseMode.LIBRARY &&
                     (entry.controller.browseMode==NetworkBrowseMode.LOCAL && id==entry.query.focusId ||
                         entry.controller.browseMode==NetworkBrowseMode.FILES && id in entry.controller.centreFiles))
@@ -172,9 +199,15 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             for(candidate in p.candidates) {
                 val c=concepts.firstOrNull {it.key==when(candidate) {
                     is NetworkSceneEdgeKey.References->candidate.concept;is NetworkSceneEdgeKey.Belongs->candidate.concept
+                    is NetworkSceneEdgeKey.UserRelation->null
                 }}
-                NetworkSelectButton(stringResource(R.string.network_edge_choice,c?.title.orEmpty(),
-                    stringResource(if(candidate is NetworkSceneEdgeKey.References) R.string.graph_referenced else R.string.graph_belongs))) {
+                val manual=(candidate as? NetworkSceneEdgeKey.UserRelation)?.let {edge->
+                    report?.aggregatedFileRelations?.firstOrNull {it.key==edge.key}?.rows?.firstOrNull()
+                }
+                val title=if(manual!=null) fileRelationTitle(manual) else c?.title.orEmpty()
+                val type=if(manual!=null) stringResource(fileRelationKindText(manual.relation.kind)) else
+                    stringResource(if(candidate is NetworkSceneEdgeKey.References) R.string.graph_referenced else R.string.graph_belongs)
+                NetworkSelectButton(stringResource(R.string.network_edge_choice,title,type)) {
                     p.selectEdge(candidate,p.candidates)
                 }
             }
@@ -184,13 +217,21 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
             Text(stringResource(networkProblemText(issue.problem)),fontSize=TextSize.caption)
         }}
         report?.takeIf {it.omittedIssues>0}?.let {item("omitted") {Text(stringResource(R.string.graph_backlinks_omitted_issues,it.omittedIssues),fontSize=TextSize.caption)}}
-        if(report!=null && concepts.isEmpty()) item {Text(stringResource(when {
+        if(report!=null && concepts.isEmpty() && report.fileRelations.isEmpty()) item {Text(stringResource(when {
             !report.complete->R.string.graph_backlinks_empty_partial
             report.filterActive->R.string.network_filter_empty
             report.browseMode!=NetworkBrowseMode.LOCAL && report.files.isNotEmpty()->R.string.network_no_displayed_refs
             report.browseMode!=NetworkBrowseMode.LOCAL->R.string.network_empty_overview
             else->R.string.network_empty
         }),fontSize=TextSize.body)}
+        if(selectedRelations.isNotEmpty()) item("manual:heading") {
+            Text(stringResource(R.string.file_relation_group),fontSize=TextSize.heading)
+            Text(stringResource(R.string.file_relation_notice),fontSize=TextSize.caption)
+        }
+        for(row in selectedRelations) item("manual:"+row.key.stableKey) {
+            if(row.key in report?.contextFileRelations.orEmpty()) Text(stringResource(R.string.network_expansion_context),fontSize=TextSize.caption)
+            FileRelationEvidenceRow(row,enabled) {openRelation(row)}
+        }
         for(c in selected) {
             item("concept:${c.key.stableKey}") {Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
                 Text(c.location.title,fontSize=TextSize.body,fontWeight=FontWeight.SemiBold)
@@ -203,6 +244,15 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                         .ifBlank {stringResource(R.string.network_file)}
                     Text(stringResource(if(origin.kind==NetworkOriginKind.SOURCE) R.string.network_origin_source else R.string.network_origin_owner,
                         file,origin.depth),fontSize=TextSize.caption)
+                    if(origin.relationPath.isNotEmpty()) {
+                        Text(stringResource(R.string.file_relation_group),fontSize=TextSize.caption)
+                        for(step in origin.relationPath) {
+                            Text(stringResource(R.string.file_relation_from_canvas,step.location.title),fontSize=TextSize.caption)
+                            Text(stringResource(if(step.relation.directed) R.string.file_relation_direction else R.string.file_relation_undirected,
+                                step.fromTitle,step.toTitle),fontSize=TextSize.caption)
+                            if(step.relation.label.isNotBlank()) Text(step.relation.label,fontSize=TextSize.caption)
+                        }
+                    }
                     if(origin.path.isNotEmpty()) {
                         Text(stringResource(R.string.network_expansion_path),fontSize=TextSize.caption)
                         for(step in origin.path) Text(stringResource(R.string.network_expansion_path_step,step.location.title,
@@ -224,11 +274,18 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
                     Text(row.sourceFileName.ifBlank {stringResource(R.string.network_file)},fontSize=TextSize.body)
                     if(report?.filterActive==true && evidence.fileId !in report.matchedFiles)
                         Text(stringResource(R.string.network_filter_context),fontSize=TextSize.caption)
-                    val range=if(row.target.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-                        else row.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
-                    Text(if(row.target.region!=null) stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)
+                    val range=sourceRangeLabel(row.target.scope,row.lastKnownPage)
+                    Text(if(row.target.scope==SourceScope.PAGE && row.target.region!=null || row.target.originalPdf?.userRegion!=null)
+                        stringResource(R.string.graph_backlinks_range_region,range) else range,fontSize=TextSize.caption)
+                    if(row.hasHistoricalPreview) Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
                     if(row.sourceNote.isNotBlank()) Text(row.sourceNote,fontSize=TextSize.body)
-                    Text(stringResource(networkStatusText(row.status)),fontSize=TextSize.caption)
+                    val state=report?.targetStates?.get(row.target)
+                    val status=stringResource(networkStatusText(row.status))
+                    Text(if(state?.metadataChecked==true && row.target.scope==SourceScope.PDF_ORIGINAL && state.statusOverride==null)
+                        stringResource(R.string.network_original_cached_status,status) else status,fontSize=TextSize.caption)
+                    state?.problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.caption)}
+                    if(row.target.scope==SourceScope.PDF_ORIGINAL)
+                        Text(stringResource(R.string.network_original_metadata_notice),fontSize=TextSize.caption)
                     row.blocked?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.caption)}
                     MapButton(R.string.network_open_reference,enabled=enabled && anchor!=null && row.blocked==null && anchor.row.blocked==null) {
                         if(anchor!=null) open(anchor,evidence)
@@ -239,7 +296,7 @@ private fun NetworkDetails(entry:FileNetworkWorkspace.Entry,report:LocalFileNetw
         }
         if(report?.files?.isNotEmpty()==true) item {Text(stringResource(R.string.network_files),fontSize=TextSize.heading)}
         for(file in report?.files.orEmpty()) item("file:${file.documentId}") {
-            NetworkSelectButton(file.observedNames.firstOrNull().orEmpty().ifBlank {stringResource(R.string.network_file)},enabled) {
+            NetworkSelectButton(networkFileTitle(file),enabled) {
                 p.selectNode(NetworkSceneNodeKey.File(file.documentId))
             }
         }

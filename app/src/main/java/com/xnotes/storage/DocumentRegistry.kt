@@ -6,12 +6,13 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.io.File
 import java.util.UUID
 
-/** Private index only. Documents and immutable resources remain independently recoverable files. IO callers only. */
-class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 2) {
+/** Native location index plus authoritative independent-original identities. IO callers only. */
+class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(context.noBackupFilesDir, "document-registry.db").absolutePath, null, 3) {
     private val liveLeases = java.util.concurrent.ConcurrentHashMap<String,String>()
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         createPageContracts(db)
+        createOriginalPdfs(db)
         db.execSQL("CREATE TABLE documents(id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL)")
         db.execSQL("CREATE TABLE locations(uri TEXT PRIMARY KEY, location_key TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL REFERENCES documents(id), available INTEGER NOT NULL DEFAULT 1)")
         db.execSQL("CREATE INDEX locations_document ON locations(document_id,available)")
@@ -23,24 +24,82 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("CREATE TABLE migrations(uri TEXT PRIMARY KEY, original TEXT NOT NULL, candidate TEXT NOT NULL, source_hash TEXT NOT NULL, document_id TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion==1 && newVersion==2) {"Unsupported registry upgrade"}
-        createPageContracts(db)
+        check(oldVersion in 1..2 && newVersion==3) {"Unsupported registry upgrade"}
+        if(oldVersion<2) createPageContracts(db)
+        createOriginalPdfs(db)
     }
+    private fun createOriginalPdfs(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE original_pdf_documents(id TEXT PRIMARY KEY NOT NULL,resource_sha TEXT NOT NULL UNIQUE,title TEXT NOT NULL,page_count INTEGER NOT NULL,generation INTEGER NOT NULL,deleted INTEGER NOT NULL,row_schema INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE original_pdf_pages(document_id TEXT NOT NULL REFERENCES original_pdf_documents(id),ordinal INTEGER NOT NULL,page_id TEXT NOT NULL UNIQUE,PRIMARY KEY(document_id,ordinal))")
+    }
+    internal fun <T> originalPdfTransaction(block:(SQLiteDatabase)->T):T=transaction(block)
     /** No location/document FK: losing a location or removing an index row must not erase evidence. */
     private fun createPageContracts(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
     }
+    private class MutationFrame {
+        val nativeIdentities=mutableSetOf<String>()
+        val structuralIdentities=mutableSetOf<String>()
+        val notifications=mutableListOf<AutoCloseable>()
+    }
+    private val mutationFrame=ThreadLocal<MutationFrame?>()
     private fun <T> transaction(block: (SQLiteDatabase) -> T): T {
-        val db = writableDatabase
+        val db=writableDatabase
+        val outer=mutationFrame.get()==null
+        val frame=mutationFrame.get() ?: MutationFrame()
+        // Wrapper nesting shares the owner frame. An externally begun SQLite transaction has
+        // no observable commit hook here, so do not accept writes which could strand its token.
+        check(!outer || !db.inTransaction()) {"Registry writes require a registry-owned transaction"}
         db.beginTransaction()
-        try { val result = block(db); db.setTransactionSuccessful(); return result } finally { db.endTransaction() }
+        if(outer) mutationFrame.set(frame)
+        try {val result=block(db);db.setTransactionSuccessful();return result}
+        finally {
+            try {db.endTransaction()}
+            finally {if(outer) {
+                mutationFrame.remove()
+                // Do not announce END before a surrounding SQLite transaction has actually ended.
+                if(!db.inTransaction()) frame.notifications.asReversed().forEach {it.close()}
+            }}
+        }
+    }
+    /** Only a newly introduced cross-domain identity retires network reads. Existing map reads
+     * register the same actor routinely and must not invalidate their own valid network handoff. */
+    private fun observeNativeIdentityInsertion(db:SQLiteDatabase,id:String) {
+        val first=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {!it.moveToFirst()}
+        if(!first) return
+        val reserved=db.rawQuery("SELECT 1 FROM original_pdf_documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
+        if(!reserved) return
+        val frame=checkNotNull(mutationFrame.get())
+        if(frame.nativeIdentities.add(id)) frame.notifications+=OriginalPdfNetworkEpoch.forDatabase(databaseName).begin()
+    }
+    /** Pure-memory continuation check; capture before reading the actual identity structure. */
+    internal fun identityObservation(id:String):DocumentRegistryIdentityEpoch.Ticket {
+        require(UUID.fromString(id).toString()==id)
+        return DocumentRegistryIdentityEpoch.forDatabase(databaseName).observe(id)
+    }
+    private data class IdentityPosition(val id:String,val uri:String,val available:Int)
+    private fun identityPosition(db:SQLiteDatabase,key:String):IdentityPosition? = db.rawQuery(
+        "SELECT document_id,uri,available FROM locations WHERE location_key=?",arrayOf(key),
+    ).use {c->if(c.moveToFirst()) IdentityPosition(c.getString(0),c.getString(1),c.getInt(2)) else null}
+    private fun beginIdentityChanges(ids:Set<String>) {
+        val frame=checkNotNull(mutationFrame.get())
+        val fresh=ids.filterTo(linkedSetOf()) {frame.structuralIdentities.add(it)}
+        if(fresh.isNotEmpty()) frame.notifications+=DocumentRegistryIdentityEpoch.forDatabase(databaseName).begin(fresh)
     }
     fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
         register(db,id,kind,name,uri,pageReferences)
     }
     private fun register(db:SQLiteDatabase,id:String,kind:String,name:String,uri:String,pageReferences:Boolean) {
         require(UUID.fromString(id).toString() == id)
-        db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(locationKey(uri),uri))
+        val key=locationKey(uri)
+        val position=identityPosition(db,key)
+        val known=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
+        val pages=if(pageReferences) db.rawQuery("SELECT 1 FROM page_reference_contracts WHERE document_id=?",arrayOf(id)).use {it.moveToFirst()} else true
+        // Display-name refreshes and the same already-known URI do not retire valid readers.
+        if(!known || !pages || position==null || position.id!=id || position.uri!=uri || position.available!=1)
+            beginIdentityChanges(setOfNotNull(id,position?.id))
+        observeNativeIdentityInsertion(db,id)
+        db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(key,uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         db.execSQL("INSERT OR IGNORE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(uri,locationKey(uri), id))
@@ -156,13 +215,21 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     fun moved(old: String, new: String) = transaction { db ->
         val oldKey = locationKey(old)
         val newKey = locationKey(new)
+        val source=identityPosition(db,oldKey)
+        val destination=if(oldKey!=newKey) identityPosition(db,newKey) else null
         // Called only after a successful filesystem move. A reused destination may have a stale row.
-        if (idAt(old) != null && oldKey != newKey) {
+        if(source!=null && (oldKey!=newKey || source.uri!=new || source.available!=1))
+            beginIdentityChanges(setOfNotNull(source.id,destination?.id))
+        if (source != null && oldKey != newKey) {
             db.execSQL("DELETE FROM locations WHERE location_key=?", arrayOf(newKey))
         }
         db.execSQL("UPDATE locations SET uri=?,location_key=?,available=1 WHERE location_key=?", arrayOf(new,newKey,oldKey))
     }
-    fun markUnavailable(uri: String) { writableDatabase.execSQL("UPDATE locations SET available=0 WHERE location_key=?", arrayOf(locationKey(uri))) }
+    fun markUnavailable(uri: String) = transaction {db->
+        val key=locationKey(uri);val position=identityPosition(db,key)
+        if(position!=null && position.available!=0) beginIdentityChanges(setOf(position.id))
+        db.execSQL("UPDATE locations SET available=0 WHERE location_key=?",arrayOf(key))
+    }
     fun referenceIds(owner: String): Set<String> = readableDatabase.rawQuery("SELECT resource_id FROM resource_refs WHERE owner=?",arrayOf(owner)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun owners(prefix: String): Set<String> = readableDatabase.rawQuery("SELECT DISTINCT owner FROM resource_refs WHERE owner LIKE ?",arrayOf("$prefix%" )).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
     fun knownLocations(): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations",null).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }

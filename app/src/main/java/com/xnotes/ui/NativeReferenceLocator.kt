@@ -21,6 +21,7 @@ internal class NativeReferenceLocator(private val state:CanvasState,private val 
     private var page:Page?=null
     private var hint:Rect?=null
     private var pending=false
+    private var enteredHost=false
     private var expires:Runnable?=null
     private var observer:ViewTreeObserver?=null
     private var previousFrame:List<Any?>?=null
@@ -30,15 +31,16 @@ internal class NativeReferenceLocator(private val state:CanvasState,private val 
             override fun onViewAttachedToWindow(v:View) {applyIfReady()}
             override fun onViewDetachedFromWindow(v:View) {
                 removeObserver();previousFrame=null
-                // An unshown navigation waits for its next actual host; an old shown mark never replays.
-                if(!pending) clear()
+                // A request made before its first host may wait; leaving an entered host retires it,
+                // even if that host did not reach its second stable navigation frame.
+                if(enteredHost || !pending) clear()
             }
         })
     }
     private fun removeObserver() {observer?.takeIf {it.isAlive}?.removeOnPreDrawListener(beforeDraw);observer=null}
     fun clear() {
         expires?.let(handler::removeCallbacks);expires=null
-        removeObserver();previousFrame=null;model=null;page=null;hint=null;pending=false
+        removeObserver();previousFrame=null;model=null;page=null;hint=null;pending=false;enteredHost=false
     }
     /** A fresh contact is the reader's new intent; never move its active camera on a later frame. */
     fun cancelPending() {if(pending) clear()}
@@ -58,6 +60,7 @@ internal class NativeReferenceLocator(private val state:CanvasState,private val 
     /** Layout callbacks only arm observation; detached viewport dimensions are never a layout proof. */
     fun applyIfReady() {
         if(!pending || !view.isAttachedToWindow) return
+        enteredHost=true
         val actual=view.viewTreeObserver
         if(observer!==actual) {removeObserver();observer=actual;previousFrame=null;actual.addOnPreDrawListener(beforeDraw)}
         view.requestRender()

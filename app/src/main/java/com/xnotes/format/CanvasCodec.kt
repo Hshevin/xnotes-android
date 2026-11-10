@@ -499,7 +499,28 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
      * out to fresh temp files there (never held in RAM) and the caller owns their lifetime; a null
      * dir skips them, which is what a validation-only read wants.
      */
-    fun read(input: InputStream, imageDir: File? = null): InfiniteDocument {
+    fun read(input: InputStream, imageDir: File? = null): InfiniteDocument = readDocument(input,imageDir,false).document
+
+    /** Preserve ordinary tolerance while reporting whether this actual decode lost any items. */
+    internal fun readObserved(input:InputStream,imageDir:File):ObservedRead = readDocument(input,imageDir,false).let {
+        ObservedRead(it.document,if(it.complete) CompleteRead.capture(it.document,it.items) else null)
+    }
+    internal class ObservedRead(val document:InfiniteDocument,val complete:CompleteRead?)
+
+    /** Every manifest item must survive this decode before a reference may become an editable source. */
+    internal fun readComplete(input:InputStream,imageDir:File):CompleteRead = readDocument(input,imageDir,true).let {
+        CompleteRead.capture(it.document,it.items)
+    }
+    internal class CompleteRead private constructor(val document:InfiniteDocument,items:List<CanvasItem>) {
+        private val items=items.toList()
+        internal fun matches(actual:InfiniteDocument)=actual===document && actual.items.size==items.size &&
+            items.indices.all {actual.items[it]===items[it]}
+        companion object {
+            internal fun capture(document:InfiniteDocument,items:List<CanvasItem>)=CompleteRead(document,items)
+        }
+    }
+    private class DecodedDocument(val document:InfiniteDocument,val items:List<CanvasItem>,val complete:Boolean)
+    private fun readDocument(input:InputStream,imageDir:File?,requireCompleteItems:Boolean):DecodedDocument {
         val created=ArrayList<File>()
         try {
             var manifest: ParsedManifest? = null
@@ -521,7 +542,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                             // materialized as bytes, a String, or a DOM.
                             if (manifest == null) {
                                 manifest = try {
-                                    parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)))
+                                    parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)),requireCompleteItems)
                                 } catch (_: JsonPullException) {
                                     throw XCanvasFormatException(NOT_XCANVAS)
                                 }
@@ -568,6 +589,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                     is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
                 }
                 if (item == null) {
+                    if(requireCompleteItems) throw XCanvasFormatException("A canvas item asset could not be decoded")
                     dropped++
                 } else {
                     items.add(spec.index - dropped, item)
@@ -582,7 +604,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             doc.layers.restore(m.layers.entries, m.layers.activeId)
             require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
             doc.addAll(items)
-            return doc
+            return DecodedDocument(doc,items,m.completeItems && dropped==0)
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
             created.forEach {runCatching {it.delete()}}
@@ -631,6 +653,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     private class ParsedManifest {
         var formatOk = false
+        var completeItems = true
         var writer = 0
         var created: Long? = null
         var dpi = PageSize.DEFAULT_DPI
@@ -676,7 +699,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val layerId: String? = com.xnotes.core.model.DrawingLayers.DEFAULT,
     ) : Pending(index, asset)
 
-    private fun parseManifest(p: JsonPull): ParsedManifest {
+    private fun parseManifest(p:JsonPull,requireCompleteItems:Boolean):ParsedManifest {
         val m = ParsedManifest()
         p.beginObject()
         while (p.hasNext()) {
@@ -693,7 +716,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "layers" -> m.layers = LayerJson.read(p)
                 "view" -> m.view = parseWaypoint(p, named = false)
                 "waypoints" -> parseWaypoints(p, m.waypoints)
-                "items" -> parseItems(p, m.items, m.images, m.glue)
+                "items" -> m.completeItems = parseItems(p,m.items,m.images,m.glue,requireCompleteItems) && m.completeItems
                 else -> p.skipValue()
             }
         }
@@ -757,11 +780,27 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         return Waypoint(if (named) Waypoint.sanitizeName(name) else "", cx, cy, zoom)
     }
 
-    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
+    private sealed interface ParsedItem {
+        class Actual(val item:CanvasItem):ParsedItem
+        class Deferred(val pending:Pending):ParsedItem
+    }
+    private fun parseItems(p:JsonPull,items:MutableList<CanvasItem>,pending:MutableList<Pending>,glue:GlueRead,
+        requireCompleteItems:Boolean):Boolean {
+        if(p.peek()!=JsonPull.Token.BEGIN_ARRAY) {
+            if(requireCompleteItems) throw XCanvasFormatException("A canvas item list could not be decoded")
+            p.skipValue();return false
+        }
+        var complete=true
         p.beginArray()
-        while (p.hasNext()) parseItem(p, items, pending, glue)
+        while(p.hasNext()) {
+            when(val read=parseItem(p,items.size+pending.size,glue,requireCompleteItems)) {
+                is ParsedItem.Actual->items.add(read.item)
+                is ParsedItem.Deferred->pending.add(read.pending)
+                null->complete=false
+            }
+        }
         p.endArray()
+        return complete
     }
 
     /** Union of every kind's fields, so an item parses in one pass whatever its key order. */
@@ -837,8 +876,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var highlighterInverse: Boolean? = null
     }
 
-    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
-        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) return p.skipValue()
+    private fun parseItem(p:JsonPull,index:Int,glue:GlueRead,requireCompleteItems:Boolean):ParsedItem? {
+        if(p.peek()!=JsonPull.Token.BEGIN_OBJECT) {
+            if(requireCompleteItems) throw XCanvasFormatException("A canvas item is not an object")
+            p.skipValue();return null
+        }
         val s = ItemScratch()
         p.beginObject()
         while (p.hasNext()) {
@@ -898,40 +940,36 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             }
         }
         p.endObject()
-        val before = items.size
         val sync = s.rec?.let { SyncMark(it, s.recMs) }
-        when (s.kind) {
-            Stroke.KIND -> items.add(buildStroke(s))
-            ImageItem.KIND -> {
-                val asset = s.asset
-                if (!asset.isNullOrEmpty()) {
-                    pending.add(
-                        PendingImage(
-                            items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.layerId, s.part,
-                        ),
-                    )
-                }
+        val read=when(s.kind) {
+            Stroke.KIND->ParsedItem.Actual(buildStroke(s))
+            ImageItem.KIND->s.asset?.takeIf {it.isNotEmpty()}?.let {asset->
+                ParsedItem.Deferred(PendingImage(index,asset,s.rect,s.srcW,s.srcH,s.orientation,s.angle,
+                    Flip.fromId(s.flip),s.locked,s.id,sync,s.group,s.layerId,s.part))
             }
-            AudioItem.KIND -> {
-                val asset = s.asset
-                if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group, s.layerId))
-                }
+            AudioItem.KIND->s.asset?.takeIf {it.isNotEmpty()}?.let {asset->
+                ParsedItem.Deferred(PendingAudio(index,asset,s.rect,s.rid,s.name,s.durationMs,
+                    s.peaks ?: ByteArray(0),s.locked,s.group,s.layerId))
             }
-            ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
-                val c = s.connector
-                items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
+            ShapeItem.KIND,ShapeItem.GLYPHS_KIND,ShapeItem.FILL_KIND->{
+                val c=s.connector
+                ParsedItem.Actual(if(c!=null && s.kind==ShapeItem.KIND) buildConnector(s,c,glue) else buildShape(s))
             }
-            TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
-            else -> {} // text and any unrecognized kind: skipped (forgiving)
+            TapeItem.KIND->buildTape(s)?.let {ParsedItem.Actual(it)}
+            else->null // The default reader retains its forgiving behavior.
         }
-        if (items.size > before) items[before].layerId = s.layerId
-        if (items.size > before) glue.named(items[before], s.id)
-        // Absent on every canvas written before locking existed, which reads back as unlocked.
-        if (s.locked && items.size > before) items[before].locked = true
-        if (s.group != null && items.size > before) items[before].group = s.group
-        if (sync != null && items.size > before) items[before].sync = sync
+        if(read==null) {
+            if(requireCompleteItems) throw XCanvasFormatException("A canvas item could not be decoded")
+            return null
+        }
+        if(read is ParsedItem.Actual) {
+            val item=read.item
+            item.layerId=s.layerId;glue.named(item,s.id)
+            if(s.locked) item.locked=true
+            if(s.group!=null) item.group=s.group
+            if(sync!=null) item.sync=sync
+        }
+        return read
     }
 
     /** A tape, or null without the points it runs along. A strip or a rectangle keeps its axis's two ends. */

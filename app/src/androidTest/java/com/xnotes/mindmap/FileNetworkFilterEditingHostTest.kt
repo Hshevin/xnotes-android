@@ -41,7 +41,11 @@ class FileNetworkFilterEditingHostTest {
     private fun tree(node:AccessibilityNodeInfo?):List<AccessibilityNodeInfo> = if(node==null) emptyList() else
         listOf(node)+(0 until node.childCount).flatMap {tree(node.getChild(it))}
     private fun nodes()=tree(runner.uiAutomation.rootInActiveWindow)
-    private fun match(node:AccessibilityNodeInfo,label:String)=node.text?.toString()==label || node.contentDescription?.toString()==label
+    private fun match(node:AccessibilityNodeInfo,label:String):Boolean {
+        val text=node.text?.toString()
+        // File choices retain their title and add a visible kind to distinguish a note from its original.
+        return text==label || node.contentDescription?.toString()==label || text?.startsWith("$label · ")==true
+    }
     private fun clickTarget(node:AccessibilityNodeInfo):AccessibilityNodeInfo? {
         var at:AccessibilityNodeInfo?=node
         repeat(6) {val item=at;if(item?.isVisibleToUser==true && item.isEnabled && item.isClickable) return item;at=item?.parent}
@@ -188,4 +192,37 @@ class FileNetworkFilterEditingHostTest {
             fixture.assertUntouched()
         } finally {runBlocking {withTimeout(15000) {fixture.close()}}}
     }
+    @Test fun originalPdfKindIsARealFilterChoiceAndItsFolderRuleIsVisible()=ComposeHostFixture.run {host->
+        val fixture=Fixture(runner.targetContext)
+        val registry=Registry(host.activity)
+        val owner=object:ActivityResultRegistryOwner {override val activityResultRegistry=registry}
+        try {
+            host.onMain {fixture.start()}
+            host.setContent {CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
+                XnotesTheme(Palette.DEFAULT) {FileNetworkWorkspaceHost(fixture.workspace,
+                    FileNetworkHostActions(open={_,_,_->false},close={fixture.workspace.close(fixture.binding,it)},
+                        busy={false},cancel={},feedback={null})) {}}
+            }}
+            host.await("actual network and facts ready") {!fixture.entry.controller.loading && !fixture.entry.controller.filtering &&
+                fixture.entry.controller.report!=null && fixture.entry.presentation.cameraReady}
+            host.onMain {assertTrue(fixture.entry.controller.applyFilter(NetworkFilter(kinds=emptySet())))}
+            host.await("empty kind selection accepted") {!fixture.entry.controller.loading && !fixture.entry.controller.filtering &&
+                fixture.entry.controller.filter.kinds?.isEmpty()==true}
+            val context=host.activity
+            click(context.getString(R.string.network_filter))
+            reveal(context.getString(R.string.network_original_folder_notice))
+            reveal(context.getString(R.string.network_filter_kind_pdf_original))
+            click(context.getString(R.string.network_filter_kind_pdf_original))
+            click(context.getString(R.string.apply))
+            host.await("original kind accepted through the actual dialog") {!fixture.entry.controller.filtering &&
+                fixture.entry.controller.filter.kinds==setOf(NetworkFileKind.PDF_ORIGINAL)}
+            host.onMain {
+                assertTrue(fixture.entry.controller.report!!.concepts.isEmpty())
+                assertEquals(NetworkBrowseMode.LOCAL,fixture.entry.controller.browseMode)
+                assertTrue(registry.launched.isEmpty())
+                fixture.assertUntouched()
+            }
+        } finally {host.disposeContent();runBlocking {withTimeout(15000) {fixture.close()}}}
+    }
+
 }

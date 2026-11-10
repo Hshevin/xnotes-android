@@ -27,6 +27,7 @@ import com.xnotes.mindmap.BacklinkOrigin
 import com.xnotes.mindmap.BacklinkProblem
 import com.xnotes.mindmap.BacklinkRemovalState
 import com.xnotes.mindmap.MapBacklinkController
+import com.xnotes.mindmap.hasHistoricalPreview
 import com.xnotes.mindmap.MapBacklinkRow
 import com.xnotes.mindmap.MapButton
 import com.xnotes.mindmap.NodeKind
@@ -75,7 +76,7 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
         report?.let {
             Text(stringResource(R.string.graph_backlinks_checked,it.checkedMaps),fontSize=TextSize.caption)
             if(!it.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
-            if(it.rows.isEmpty() && !controller.loading) Text(stringResource(if(it.complete) R.string.graph_backlinks_empty_complete else R.string.graph_backlinks_empty_partial),fontSize=TextSize.body)
+            if(it.rows.isEmpty() && it.fileRelations.isEmpty() && !controller.loading) Text(stringResource(if(it.complete) R.string.graph_backlinks_empty_complete else R.string.graph_backlinks_empty_partial),fontSize=TextSize.body)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
             report?.issues?.forEachIndexed {index,issue->item("issue:$index") {
@@ -86,8 +87,24 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
             }}
             report?.takeIf {it.omittedIssues>0}?.let {item("omitted") {Text(stringResource(R.string.graph_backlinks_omitted_issues,it.omittedIssues),fontSize=TextSize.caption)}}
             report?.takeIf {it.excludedMaps>0}?.let {item("excluded") {Text(stringResource(R.string.graph_backlinks_excluded_maps,it.excludedMaps),fontSize=TextSize.caption)}}
+            val manual=report?.fileRelations.orEmpty()
+            if(manual.isNotEmpty()) {
+                item("manual:heading") {
+                    Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
+                        Text(stringResource(R.string.file_relation_group),fontSize=TextSize.title,fontWeight=FontWeight.SemiBold)
+                        Text(stringResource(R.string.file_relation_notice),fontSize=TextSize.caption)
+                        Text(stringResource(R.string.file_relation_return_notice),fontSize=TextSize.caption)
+                    }
+                }
+                items(manual,key={"manual:"+it.key.stableKey}) {row->
+                    com.xnotes.mindmap.FileRelationEvidenceRow(row,enabled=!busy && !controller.loading && hooks?.openRelation!=null) {
+                        controller.captureOpenRelation(row)?.let {hooks?.openRelation?.invoke(it)}
+                    }
+                }
+            }
             val groups=report?.rows.orEmpty().groupBy {row->when {
                 row.target.scope==SourceScope.FILE->BacklinkGroup.WHOLE_FILE
+                row.target.scope==SourceScope.CANVAS_REGION->BacklinkGroup.CANVAS_REGION
                 context.pageId!=null && row.target.pageId==context.pageId->BacklinkGroup.CURRENT_PAGE
                 else->BacklinkGroup.OTHER_PAGE
             }}
@@ -98,6 +115,7 @@ internal fun ReferencesTab(editor:Editor,hooks:BacklinkHostHooks?) {
                     BacklinkGroup.CURRENT_PAGE->R.string.graph_backlinks_current_page
                     BacklinkGroup.OTHER_PAGE->R.string.graph_backlinks_other_pages
                     BacklinkGroup.WHOLE_FILE->R.string.graph_backlinks_whole_file
+                    BacklinkGroup.CANVAS_REGION->R.string.graph_backlinks_canvas_regions
                 }),fontSize=TextSize.title,fontWeight=FontWeight.SemiBold)}
                 items(rows,key={it.key}) {row->BacklinkRow(row,controller,hooks,enabled=!busy && !controller.loading)}
             }
@@ -151,8 +169,8 @@ private fun BacklinkRow(row:MapBacklinkRow,controller:MapBacklinkController,hook
             else->Unit
         }
         row.blocked?.let {Text(stringResource(backlinkProblemLabel(it)),fontSize=TextSize.caption)}
-        if(row.preview?.depictedTarget?.let {it!=row.target}==true)
-            Text(stringResource(R.string.graph_preview_old_target),fontSize=TextSize.caption)
+        if(row.hasHistoricalPreview)
+            Text(stringResource(R.string.graph_preview_historical),fontSize=TextSize.caption)
         SourcePreviewImage(controller.previewAssets[row.key])
         when {
             row.key in controller.previewBusy->Text(stringResource(R.string.graph_backlinks_loading),fontSize=TextSize.caption)
@@ -173,9 +191,9 @@ private fun backlinkNodeTitle(row:MapBacklinkRow)=row.nodeTitle.ifBlank {stringR
 })}
 @Composable
 private fun backlinkRange(row:MapBacklinkRow):String {
-    val range=if(row.target.scope==SourceScope.FILE) stringResource(R.string.graph_source_whole_file)
-        else row.lastKnownPage?.let {stringResource(R.string.graph_source_page_last_known,it)} ?: stringResource(R.string.graph_source_page_unknown)
-    return if(row.target.region!=null) stringResource(R.string.graph_backlinks_range_region,range) else range
+    val range=com.xnotes.mindmap.sourceRangeLabel(row.target.scope,row.lastKnownPage)
+    return if(row.target.scope==SourceScope.PAGE && row.target.region!=null)
+        stringResource(R.string.graph_backlinks_range_region,range) else range
 }
 
 private fun backlinkProblemLabel(problem:BacklinkProblem)=when(problem) {

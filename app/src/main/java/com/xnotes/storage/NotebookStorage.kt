@@ -104,6 +104,20 @@ class NotebookStorage internal constructor(private val context:Context,
     internal fun referenceCatalog(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog =
         openSource(uri,kind,checkActive).use {it.referenceCatalog()}
 
+    /** An explicit unregistered location is identified from its actual frozen manifest, never its name.
+     * This observation does not register, migrate or decode a model. Later opening freezes this kind again.
+     */
+    internal fun referenceKind(uri:String,target:NativeReferenceTarget,checkActive:()->Unit={}):com.xnotes.core.util.DocumentKind = synchronized(lock) {
+        observedSource(uri,null,checkActive).use {source->
+            target.verify(source.referenceCatalog())
+            val kind=source.version.kind
+            val known=registry.kindForId(target.documentId)
+            if(known!=null && known!=kind.extension) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
+            if(registry.locations(target.documentId).size>1) throw NativeReferenceFailure(NativeReferenceIssue.DUPLICATE)
+            checkActive();kind
+        }
+    }
+
     /** Explicit IO-only page-identity upgrade. The caller supplies an actual, still-current source observation. */
     internal fun activatePages(uri:String,expected:NativeSourceVersion,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
         checkActive()
@@ -220,8 +234,15 @@ class NotebookStorage internal constructor(private val context:Context,
     }
 
     /** IO-only, source bytes and their version are from the same owned container. */
-    internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot = synchronized(lock) {
-        purpose(kind.extension) // Reject unsupported document kinds before reading.
+    internal fun openSource(uri:String,kind:com.xnotes.core.util.DocumentKind,checkActive:()->Unit={}):NativeSourceSnapshot =
+        observedSource(uri,kind,checkActive)
+
+    /** Read the actual native manifest kind; never use a display suffix as type evidence. */
+    internal fun openSourceActual(uri:String,checkActive:()->Unit={}):NativeSourceSnapshot =
+        observedSource(uri,null,checkActive)
+
+    private fun observedSource(uri:String,kind:com.xnotes.core.util.DocumentKind?,checkActive:()->Unit):NativeSourceSnapshot = synchronized(lock) {
+        kind?.let {purpose(it.extension)} // Reject unsupported expected kinds before reading.
         if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         checkActive()
         val snapshot=sourceSnapshot(target(uri),checkActive)
@@ -240,7 +261,12 @@ class NotebookStorage internal constructor(private val context:Context,
                 header.identity?.let {registry.expectationForId(it.documentId)},header)
             val ids=header.identity?.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
             if(leasedIds!=ids) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-            val inspected=NativeSourceVersion.inspect(snapshot.file,registry.locationKey(uri),kind,checkActive)
+            val actualKind=kind ?: when(inspect(snapshot.file,checkActive).format) {
+                "xnote"->com.xnotes.core.util.DocumentKind.NOTE
+                "xcanvas"->com.xnotes.core.util.DocumentKind.CANVAS
+                else->throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
+            }
+            val inspected=NativeSourceVersion.inspect(snapshot.file,registry.locationKey(uri),actualKind,checkActive)
             verifyObserved(uri,inspected.info)
             val source=NativeSourceSnapshot.open(snapshot,inspected,pdfResources,requireNotNull(lease),ids,checkActive)
             lease=null // Ownership transfers only on success.
@@ -274,15 +300,18 @@ class NotebookStorage internal constructor(private val context:Context,
     /** Reference opening never enters ensure/migrate or rewrites an embedded PDF container. */
     internal fun prepareReferenceOpen(uri:String,name:String?,target:NativeReferenceTarget,noteCodec:com.xnotes.format.DocumentCodec,
         canvasCodec:com.xnotes.format.CanvasCodec,pdfDir:File,assetRoot:File,timing:com.xnotes.format.DocumentCodec.ReadTiming?,
-        checkActive:()->Unit):PreparedNativeOpen {
+        kind:com.xnotes.core.util.DocumentKind=com.xnotes.core.util.DocumentKind.NOTE,
+        requireCompleteNote:Boolean=false,checkActive:()->Unit):PreparedNativeOpen {
         val source=synchronized(lock) {
-            val held=openSource(uri,com.xnotes.core.util.DocumentKind.NOTE,checkActive)
+            val held=openSource(uri,kind,checkActive)
             try {verifyReferenceSource(uri,name,target,held,checkActive);held}
             catch(error:Throwable) {try {held.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
         }
         var prepared:PreparedNativeOpen?=null
         try {
-            source.use {prepared=PreparedNativeOpen.read(it,pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,timing,checkActive)}
+            source.use {prepared=PreparedNativeOpen.read(it,pdfResources,noteCodec,canvasCodec,pdfDir,assetRoot,timing,
+                requireCompleteCanvas=kind==com.xnotes.core.util.DocumentKind.CANVAS,
+                requireCompleteNote=requireCompleteNote,checkActive=checkActive)}
             return requireNotNull(prepared)
         } catch(error:Throwable) {
             try {prepared?.close()} catch(close:Throwable) {error.addSuppressed(close)}
@@ -292,9 +321,10 @@ class NotebookStorage internal constructor(private val context:Context,
     internal fun verifyReferenceSource(uri:String,name:String?,target:NativeReferenceTarget,source:NativeSourceSnapshot,
                                       checkActive:()->Unit) = synchronized(lock) {
         checkActive();target.verify(source.referenceCatalog())
+        val kind=source.version.kind
         val observedName=name?.takeIf {it.isNotBlank()} ?: registry.nameForId(target.documentId)?.takeIf {it.isNotBlank()}
-            ?: com.xnotes.core.util.DocumentKind.withSuffix(context.getString(com.xnotes.R.string.untitled),com.xnotes.core.util.DocumentKind.NOTE)
-        registry.registerObserved(BundleHeader.read(source.file) {checkActive();false},"xnote",observedName,uri)
+            ?: com.xnotes.core.util.DocumentKind.withSuffix(context.getString(com.xnotes.R.string.untitled),kind)
+        registry.registerObserved(BundleHeader.read(source.file) {checkActive();false},kind.extension,observedName,uri)
         if(registry.locations(target.documentId).size!=1) throw NativeReferenceFailure(NativeReferenceIssue.DUPLICATE)
         checkActive()
     }

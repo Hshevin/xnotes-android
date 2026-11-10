@@ -138,15 +138,29 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         surfaces.addView(view, 0, android.widget.FrameLayout.LayoutParams(-1, -1))
         surfaces.addView(pad, 1, android.widget.FrameLayout.LayoutParams(-1, -1))
+        if(referenceLocatorState.isInitialized()) referenceLocator.bindSurface()
         return surfaces
     }
 
     val viewport: CanvasViewport get() = view.viewport
+    private val referenceLocatorState=lazy {
+        CanvasReferenceLocator({document},{view},{viewport},toolOverlay,{appliedInitialView}) {
+            zoomPercent=Math.round(viewport.zoom*100).toInt()
+            refreshSelectionMenu();toolOverlay.invalidate();view.publish()
+        }
+    }
+    private val referenceLocator get()=referenceLocatorState.value
+    internal fun showReferenceRegion(document:InfiniteDocument,region:Rect?):ReferenceRegionReveal = referenceLocator.show(document,region)
+    private fun cancelReferenceLocation() {if(referenceLocatorState.isInitialized()) referenceLocator.clear()}
+    private fun referenceContact(event:android.view.MotionEvent) {
+        if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN || event.actionMasked==android.view.MotionEvent.ACTION_POINTER_DOWN)
+            cancelReferenceLocation()
+    }
 
     val interaction = InfiniteInteraction(
         viewport = view.viewport,
         requestRender = { view.publish(); toolOverlay.invalidate() },
-        onViewChanged = { onViewChanged() },
+        onViewChanged = { cancelReferenceLocation();onViewChanged() },
         setInteractive = { active, linger -> view.setInteractive(active, linger) },
         configFor = { configFor(it) },
         onWetStroke = { publishWetStroke(it) },
@@ -299,6 +313,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Decode ownership follows document installation, not the replaceable native surfaces. */
     private var imageDecodeBinding: Any = Any()
+    internal val presentationModelIdentity:Any get()=imageDecodeBinding
 
     /** One low-priority thread decoding images, so a big photo never stalls a frame. */
     private val decodeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
@@ -362,7 +377,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     init {
         scene.reset(imageDecodeBinding)
         interaction.canEditLayer = { document.layers.writable }
-        view.input = { event -> beforePenInput(event); proPenInput.touch(event) { interaction.onTouch(event) } }
+        view.input = { event -> referenceContact(event);beforePenInput(event); proPenInput.touch(event) { interaction.onTouch(event) } }
         view.crossPaneTouchGate.shouldBlock = { otherPenInContact() }
         view.genericMotion = { beforePenInput(it); proPenInput.motion(it); interaction.onGenericMotion(it) }
         view.onInputLost = { proPenInput.surfaceDetached() }
@@ -698,6 +713,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         selectionMenuRect = null
     }
 
+    /** Freeze the settled selection's world AABB, without accepting any unfinished edit. */
+    fun sourceSelectionRegion():Rect? {
+        if(interaction.mode!=CanvasPointerMode.IDLE || stylusInContact || hasPendingContentTransaction) return null
+        return selection.box?.corners()?.let {Rect.bounding(it)}?.takeIf(::validCanvasSourceRegion)?.copy()
+    }
+    /** The screenshot's own frozen world rectangle; menu chrome is in a different coordinate space. */
+    fun sourceCaptureRegion():Rect? {
+        if(interaction.mode!=CanvasPointerMode.IDLE || stylusInContact || hasPendingContentTransaction) return null
+        return interaction.captureRect?.takeIf(::validCanvasSourceRegion)?.copy()
+    }
+
     /** Delete whatever is selected, as one undoable edit. */
     override fun deleteSelection() {
         val items = selection.items
@@ -906,6 +932,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     private fun drawToolOverlay(canvas: android.graphics.Canvas) {
+        if(referenceLocatorState.isInitialized()) referenceLocator.draw(canvas)
         interaction.rulerController.draw(canvas, devicePxPerDp, viewport.zoom, document.dpi.toDouble(), view.darkAppearance)
         val rect = interaction.captureRect?.let { viewport.contentToViewport(it) } ?: return
         val line = (2 * devicePxPerDp).toFloat()
@@ -1156,6 +1183,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override fun panWhileEditing(dxFinger: Float, dyFinger: Float) {
+        cancelReferenceLocation()
         if (editingLabel == null) return
         viewport.panByViewport(dxFinger.toDouble(), dyFinger.toDouble())
         onViewChanged()
@@ -2181,6 +2209,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Bring ink the playback just reached into the middle of the view, the zoom kept; nothing when it is on screen. */
     private fun followInk(item: CanvasItem) {
+        cancelReferenceLocation()
         val b = item.paintBounds()
         val v = viewport.visibleContentRect()
         if (v.contains(b.topLeft) && v.contains(Pt(b.right, b.bottom))) return
@@ -2533,6 +2562,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Show more of the canvas toward ([dx], [dy]) by an eighth of the view, as the arrow keys do. */
     private fun panStep(dx: Int, dy: Int) {
+        cancelReferenceLocation()
         viewport.panByViewport(-dx * viewport.widthPx / PAN_STEPS, -dy * viewport.heightPx / PAN_STEPS)
         onViewChanged()
         view.publish()
@@ -2548,6 +2578,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     fun zoomBy(factor: Double) {
+        cancelReferenceLocation()
         if (zoomLocked) return
         viewport.zoomAroundCenter(viewport.zoom * factor)
         onViewChanged()
@@ -2601,6 +2632,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     fun replaceDocument(next: InfiniteDocument) {
+        cancelReferenceLocation()
         AudioRecording.stopFor(this) // closing the canvas places its recording
         AudioPlayback.closeFor(this)
         // A completed drag can still have a worker result queued. Always retire its generation.
@@ -2658,6 +2690,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Frame every item on the canvas. */
     fun zoomToFit() {
+        cancelReferenceLocation()
         if (zoomLocked) return
         val bounds = document.contentBounds()
         if (bounds == null) {
@@ -2703,6 +2736,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     fun jumpTo(waypoint: Waypoint) {
+        cancelReferenceLocation()
         viewport.apply(waypoint)
         onViewChanged()
         view.publish()
@@ -2726,6 +2760,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** A tap on the minimap: centre the view on whatever was tapped. */
     fun minimapTap(vx: Double, vy: Double): Boolean {
+        cancelReferenceLocation()
         if (!minimapVisible) return false
         val panel = Minimap.panel(viewport.widthPx, viewport.heightPx, viewport.insetRight, viewport.insetBottom)
         if (!panel.contains(Pt(vx, vy))) return false

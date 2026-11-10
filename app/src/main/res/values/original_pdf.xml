@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="original_pdf_library_title">Original PDFs</string>
+    <string name="original_pdf_library_notice">Retained originals remain available when annotation notes are deleted. Removing an original here keeps references and their last previews.</string>
+    <string name="original_pdf_backup_notice">A map copy does not include these PDFs or the information needed to restore their references. Full reference backup is not available yet.</string>
+    <string name="original_pdf_empty">No retained originals. Choose original PDF when creating a page or region reference.</string>
+    <string name="original_pdf_pages">%1$d pages</string>
+    <string name="original_pdf_deleted">Deleted from original library</string>
+    <string name="original_pdf_open">Read original</string>
+    <string name="original_pdf_delete">Remove original</string>
+    <string name="original_pdf_restore">Restore original</string>
+    <string name="original_pdf_relink">Relink original</string>
+    <string name="original_pdf_delete_title">Remove this original?</string>
+    <string name="original_pdf_delete_notice">References will be unavailable until this original is restored. Annotation notes and their shared original remain protected independently.</string>
+    <string name="original_pdf_restore_notice">Restore or relink only the same original PDF to keep existing references working.</string>
+    <string name="original_pdf_choose_file">Choose the same PDF</string>
+    <string name="original_pdf_missing">The retained original is missing or unreadable. Choose the same PDF to restore it.</string>
+    <string name="original_pdf_unavailable">The original could not be read or changed. Existing references were kept.</string>
+    <string name="original_pdf_changed">This action is out of date. Refresh the library and try again.</string>
+    <string name="original_pdf_limited">The list reached its limit and may be incomplete.</string>
+    <string name="original_pdf_readonly">Original PDF · read only</string>
+    <string name="original_pdf_back_library">Return to original library</string>
+    <string name="original_pdf_page_last_known">Original PDF · last checked page %1$d</string>
+    <string name="original_pdf_refresh">Refresh</string>
+</resources>

@@ -135,7 +135,7 @@ class PageToMapEditingHostTest {
                     XnotesTheme(editor.palette) {
                         Box(Modifier.fillMaxSize()) {
                             SidePanel(editor)
-                            PageToMapFlowHost(editor,{savesRequested.incrementAndGet()},{mapOpens+=it})
+                            PageToMapFlowHost(editor,{savesRequested.incrementAndGet()},{uri,_->mapOpens+=uri})
                         }
                     }
                 }

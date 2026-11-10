@@ -34,7 +34,7 @@ class NetworkFilterControllerTest {
             val c=withContext(Dispatchers.Main) {LocalFileNetworkController(f.context,scope,NetworkQuery(d.source.documentId,"Center",listOf(f.tree.toString())))}
             try {
                 withContext(Dispatchers.Main) {assertTrue(c.refresh())}
-                await {!c.loading && c.report!=null}
+                await {!c.loading && !c.filtering && c.report!=null}
                 block(f,c,d,file)
             } finally {withContext(Dispatchers.Main) {c.close()};scope.cancel()}
         }
@@ -100,7 +100,7 @@ class NetworkFilterControllerTest {
         withContext(Dispatchers.Main) {
             assertTrue(c.refresh())
         }
-        await {!c.loading && !c.filtering}
+        await {!c.loading && !c.filtering && !c.filtering}
         withContext(Dispatchers.Main) {
             val latest=c.report
             assertTrue(c.applyFilter(NetworkFilter(kinds=setOf(NetworkFileKind.CANVAS))))
@@ -118,7 +118,7 @@ class NetworkFilterControllerTest {
             f.storage.registry.register(uuid,"xnote","Source $index",provider.uri("item-$index").toString())
         }}
         val lease=withContext(Dispatchers.Main) {MapDocuments.acquire(f.context,f.uri(file)).also(f.leases::add)}
-        await {!lease.session.loading && !c.loading &&
+        await {!lease.session.loading && !c.loading && !c.filtering &&
             c.report?.concepts?.singleOrNull()?.members?.all {it.row.origin==BacklinkOrigin.LIVE}==true}
         val entered=CountDownLatch(1);val release=CountDownLatch(1);val queries=AtomicInteger()
         var oldSignal:android.os.CancellationSignal?=null
@@ -170,7 +170,7 @@ class NetworkFilterControllerTest {
             f.storage.registry.writableDatabase.execSQL("DELETE FROM locations WHERE document_id=?",arrayOf(d.target.documentId))
         }
         withContext(Dispatchers.Main) {assertTrue(c.refresh())}
-        await {!c.loading && !c.filtering}
+        await {!c.loading && !c.filtering && !c.filtering}
         withContext(Dispatchers.Main) {
             assertEquals(1,c.report!!.concepts.size);assertEquals(setOf(d.target.documentId),c.report!!.matchedFiles)
             assertTrue(c.applyFilter(NetworkFilter(kind.fileIds,kind.kinds,provider.folder())))

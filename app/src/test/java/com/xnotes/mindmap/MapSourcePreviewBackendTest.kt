@@ -55,7 +55,7 @@ import org.robolectric.shadows.ShadowContentResolver
 @Config(manifest=Config.NONE,sdk=[35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MapSourcePreviewBackendTest {
-    private class Provider(val root:File):ContentProvider() {
+    internal class Provider(val root:File):ContentProvider() {
         var reads=0;var writes=0
         var allowWrites=false
         var afterTruncate:(()->Unit)?=null
@@ -79,7 +79,7 @@ class MapSourcePreviewBackendTest {
             return ParcelFileDescriptor.open(file(uri),ParcelFileDescriptor.MODE_READ_ONLY)
         }
     }
-    private class Fixture(initializeCatalogs:Boolean=true):AutoCloseable {
+    internal class Fixture(initializeCatalogs:Boolean=true):AutoCloseable {
         val base=RuntimeEnvironment.getApplication()
         val root=File(base.cacheDir,"preview-backend-${UUID.randomUUID()}").apply {mkdirs()}
         val context=object:ContextWrapper(base) {
@@ -305,4 +305,77 @@ class MapSourcePreviewBackendTest {
             assertSame(face,FontCatalog.resolve(FontFace("Fira Sans"),false,false))
         }
     }
+    @Test fun canvasRegionUsesItsFixedNegativeWorldFrameAndExcludesOutsideContent()=Fixture().use {f->
+        val doc=InfiniteDocument().apply {background=background.copy(pattern=PagePattern.NONE);add(shape(-20.0,-20.0));add(shape(1000.0,1000.0))}
+        val uri=f.uri("fixed-region.xcanvas")
+        fun write() {f.provider.file(uri).outputStream().use {f.canvasCodec.write(doc,it)}}
+        write();f.storage.registry.register(doc.identity.documentId,"xcanvas","fixed-region.xcanvas",uri.toString())
+        val target=MapSourceTarget(doc.identity.documentId,SourceScope.CANVAS_REGION,region=Rect(-40.0,-40.0,80.0,80.0))
+        val bytes=f.provider.file(uri).readBytes();val rows=f.load(listOf(target,target.copy(region=Rect(9000.0,9000.0,80.0,80.0))))
+        assertEquals(1,f.provider.reads);assertEquals(SourceStatus.CURRENT,rows[0].status)
+        val image=requireNotNull(rows[0].asset);assertEquals(Color.BLACK,pixel(image,128,128));assertEquals(Color.WHITE,pixel(image,10,10))
+        assertEquals(SourceStatus.EMPTY,rows[1].status);assertNull(rows[1].asset)
+        assertArrayEquals(bytes,f.provider.file(uri).readBytes());assertTrue(f.assetsGone())
+        doc.removeAll(listOf(doc.items.last()));write()
+        assertEquals(image.key,f.load(listOf(target)).single().asset!!.key);assertEquals(0,f.provider.writes)
+    }
+
+    @Test fun canvasRegionRespectsHiddenLayersAndCannotBeUsedForNoteFiles()=Fixture().use {f->
+        val doc=InfiniteDocument().apply {add(shape(-20.0,-20.0));layers.update(DrawingLayers.DEFAULT) {it.copy(visible=false)}}
+        val uri=f.uri("hidden-region.xcanvas");f.provider.file(uri).outputStream().use {f.canvasCodec.write(doc,it)}
+        f.storage.registry.register(doc.identity.documentId,"xcanvas","hidden-region.xcanvas",uri.toString())
+        val target=MapSourceTarget(doc.identity.documentId,SourceScope.CANVAS_REGION,region=Rect(-40.0,-40.0,80.0,80.0))
+        val empty=f.load(listOf(target)).single();assertEquals(SourceStatus.EMPTY,empty.status);assertNull(empty.asset)
+        val note=note();f.note(note)
+        val wrong=f.load(listOf(target.copy(documentId=note.identity.documentId))).single()
+        assertEquals(SourceStatus.UNAVAILABLE,wrong.status);assertNull(wrong.asset)
+        assertEquals(0,f.provider.writes);assertTrue(f.assetsGone())
+    }
+
+    @Test fun unknownCanvasItemsFailPreviewInsteadOfFalselyProvingAnEmptyRegion()=Fixture().use {f->
+        val doc=InfiniteDocument();val uri=f.uri("unknown-region.xcanvas")
+        f.provider.file(uri).outputStream().use {f.canvasCodec.write(doc,it)}
+        val file=f.provider.file(uri)
+        val entries=java.util.zip.ZipFile(file).use {zip->zip.entries().asSequence().map {it.name to zip.getInputStream(it).readBytes()}.toList()}
+        java.util.zip.ZipOutputStream(file.outputStream()).use {zip->for((name,data) in entries) {
+            zip.putNextEntry(java.util.zip.ZipEntry(name))
+            zip.write(if(name=="manifest.json") org.json.JSONObject(String(data)).apply {
+                getJSONArray("items").put(org.json.JSONObject().put("kind","future-kind"))
+            }.toString().toByteArray() else data);zip.closeEntry()
+        }}
+        f.storage.registry.register(doc.identity.documentId,"xcanvas","unknown-region.xcanvas",uri.toString())
+        val bytes=file.readBytes();val target=MapSourceTarget(doc.identity.documentId,SourceScope.CANVAS_REGION,region=Rect(0.0,0.0,100.0,100.0))
+        val read=f.load(listOf(target)).single()
+        assertEquals(SourceStatus.UNAVAILABLE,read.status);assertTrue(read.failedPreview);assertNull(read.asset)
+        assertArrayEquals(bytes,file.readBytes());assertEquals(0,f.provider.writes);assertTrue(f.assetsGone())
+    }
+
+    @Test fun canvasRegionPatternPhaseStaysInWorldCoordinatesAcrossAdjacentCrops()=Fixture().use {f->
+        val doc=InfiniteDocument().apply {background=background.copy(pattern=PagePattern.GRID,patternColor=Rgba(0,0,0),spacing=20.0)}
+        NativeDocumentPreview(f.context,AndroidTextMeasurer(),null).use {painter->
+            val a=painter.canvasRegion(doc,Rect(-20.0,-20.0,80.0,80.0),80)
+            val b=painter.canvasRegion(doc,Rect(0.0,-20.0,80.0,80.0),80)
+            try {
+                assertEquals(80,a.width);assertEquals(80,a.height)
+                for(y in 2 until 78) for(x in 2 until 58) assertEquals("world pixel $x,$y",a.getPixel(x+20,y),b.getPixel(x,y))
+                assertTrue((0 until 80).any {a.getPixel(it,20)!=Color.WHITE})
+            } finally {a.recycle();b.recycle()}
+        }
+    }
+
+    @Test fun typedCanvasOfferAndRegionSelectionUseActualFormatAndExactVersionDespiteItsDisplaySuffix()=Fixture().use {f->
+        val doc=InfiniteDocument();val uri=f.uri("misleading.xnote")
+        f.provider.file(uri).outputStream().use {f.canvasCodec.write(doc,it)}
+        val bytes=f.provider.file(uri).readBytes();val offer=MapSourceAccess.offerCanvas(f.context,uri,doc.identity.documentId)
+        assertEquals(com.xnotes.core.util.DocumentKind.CANVAS,offer.kind)
+        val rect=Rect(-50.0,-70.0,80.0,90.0);val source=MapSourceAccess.selectCanvasRegion(f.context,offer,rect)
+        assertEquals(SourceScope.CANVAS_REGION,source.scope);assertEquals(rect,source.region);assertNull(source.pageId)
+        assertArrayEquals(bytes,f.provider.file(uri).readBytes())
+        doc.add(shape(10.0,10.0));f.provider.file(uri).outputStream().use {f.canvasCodec.write(doc,it)}
+        assertThrows(Exception::class.java) {MapSourceAccess.selectCanvasRegion(f.context,offer,rect)}
+        val note=note();val noteUri=f.note(note)
+        assertThrows(Exception::class.java) {MapSourceAccess.offerCanvas(f.context,noteUri,note.identity.documentId)}
+        assertEquals(0,f.provider.writes)
+    }
+
 }

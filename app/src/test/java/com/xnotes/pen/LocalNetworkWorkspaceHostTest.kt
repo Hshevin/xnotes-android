@@ -57,10 +57,20 @@ class LocalNetworkWorkspaceHostTest {
         val entry=withContext(Dispatchers.Main) {f.networks.admit(f.binding,NetworkQuery.library("Library",
             listOf(com.xnotes.platform.AppStorageDocumentsProvider.treeUri(f.native.context).toString())))!!}
         var flow:NetworkToCanvasController?=null
+        fun selectionReady():Boolean {
+            val c=entry.controller;val report=c.report
+            return !c.loading && !c.filtering && c.browseMode==NetworkBrowseMode.FILES && c.centreFiles==ids &&
+                report?.browseMode==NetworkBrowseMode.FILES && report.centreFiles==ids &&
+                c.captureFileCardMetadataGuard()?.invoke()==true
+        }
         try {
-            f.await {!entry.controller.loading && entry.controller.fileChoices.map {it.documentId}.containsAll(ids)}
+            f.await {!entry.controller.loading && !entry.controller.filtering &&
+                entry.controller.captureFileCardMetadataGuard()?.invoke()==true &&
+                entry.controller.fileChoices.map {it.documentId}.containsAll(ids)}
             withContext(Dispatchers.Main) {assertTrue(entry.controller.showCollection(ids))}
-            f.await {!entry.controller.loading && entry.controller.browseMode==NetworkBrowseMode.FILES}
+            // The scan ends before asynchronous metadata projection. The real Add action waits
+            // for filtering and the report's actual FILES frame, not just the requested mode.
+            f.await {selectionReady()}
             fun selection():NetworkCanvasSelection {
                 val p=entry.presentation
                 val scene=entry.builder.build(entry.controller.report!!,LocalNetworkLabels("File","Concept","Ink","Reference","References %d","Belongs"))
@@ -69,7 +79,14 @@ class LocalNetworkWorkspaceHostTest {
                 val plan=p.prepareCamera(attach,size)!!
                 assertTrue(p.finishCamera(plan,LocalNetworkCamera(MindMapView.Viewport(.8f,93f,-41f),1000,700,1f)))
                 p.selectNode(NetworkSceneNodeKey.File(ids.first()))
-                return requireNotNull(NetworkCanvasSelection.capture(entry,scene))
+                return requireNotNull(NetworkCanvasSelection.capture(entry,scene)) {
+                    val c=entry.controller
+                    "Current file selection unavailable: loading=${c.loading}, filtering=${c.filtering}, mode=${c.browseMode}, "+
+                        "report=${c.report?.browseMode}/${c.report?.centreFiles}, centres=${c.centreFiles}, "+
+                        "metadata=${c.captureFileCardMetadataGuard()?.invoke()}, choices="+ids.sorted().joinToString {id->
+                            c.fileChoices.firstOrNull {it.documentId==id}.let {"$id:${it?.kind}/${it?.problem}/${it?.cardTarget}"}
+                        }
+                }
             }
             withContext(Dispatchers.Main) {
                 flow=NetworkToCanvasController(f.native.context,selection(),f.scope)
@@ -97,8 +114,7 @@ class LocalNetworkWorkspaceHostTest {
                 assertTrue(f.coordinator.resume(entry,f.maps.current!!,closeMap=true));accepted
             }
             f.await {!f.coordinator.busy && f.networks.visible && f.maps.current==null}
-            f.await {!entry.controller.loading && !entry.controller.filtering &&
-                MapDocuments.observations(f.native.context).none {it.uri==Uri.fromFile(destination)}}
+            f.await {selectionReady() && MapDocuments.observations(f.native.context).none {it.uri==Uri.fromFile(destination)}}
             withContext(Dispatchers.Main) {
                 assertSame(entry,f.networks.current);assertEquals(ids,entry.controller.centreFiles)
                 assertEquals(MindMapView.Viewport(.8f,93f,-41f),entry.presentation.camera!!.viewport)

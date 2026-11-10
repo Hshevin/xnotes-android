@@ -16,10 +16,12 @@ internal sealed interface NetworkSceneNodeKey {
 internal sealed interface NetworkSceneEdgeKey {
     data class References(val concept:NetworkConceptKey,val fileId:String):NetworkSceneEdgeKey
     data class Belongs(val concept:NetworkConceptKey):NetworkSceneEdgeKey
+    data class UserRelation(val key:NetworkFileRelationKey):NetworkSceneEdgeKey
 }
 /** Strings only: the retained geometry never owns a Context or a resource-dependent callback. */
 internal data class LocalNetworkLabels(val file:String,val concept:String,val ink:String,val reference:String,
-    val references:String,val belongs:String,val empty:String="")
+    val references:String,val belongs:String,val empty:String="",val userRelation:String="",
+    val fileKinds:Map<NetworkFileKind,String> = emptyMap(),val availability:Map<SourceStatus,String> = emptyMap())
 internal data class LocalNetworkScene(val document:MindMapDocument,val nodes:Map<String,NetworkSceneNodeKey>,
     val edges:Map<String,NetworkSceneEdgeKey>)
 
@@ -35,6 +37,7 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
     private fun edgeId(key:NetworkSceneEdgeKey)=hash(when(key) {
         is NetworkSceneEdgeKey.References->encode("reference",key.concept.stableKey,key.fileId)
         is NetworkSceneEdgeKey.Belongs->encode("belongs",key.concept.stableKey)
+        is NetworkSceneEdgeKey.UserRelation->encode("user-relation",key.key.stableKey)
     })
     private fun hash(value:String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") {"%02x".format(Locale.ROOT,it)}
@@ -80,7 +83,11 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
         val model=nodes.map {(id,key)->
             val point=positions.getValue(key)
             val text=when(key) {
-                is NetworkSceneNodeKey.File->labels.file+"\n"+files.getValue(key.documentId).observedNames.firstOrNull().orEmpty().ifBlank {labels.file}
+                is NetworkSceneNodeKey.File->files.getValue(key.documentId).let {file->
+                    listOfNotNull(labels.fileKinds[file.kind] ?: labels.file,
+                        file.observedNames.firstOrNull().orEmpty().ifBlank {labels.file},
+                        labels.availability[file.availability]).joinToString("\n")
+                }
                 is NetworkSceneNodeKey.Concept->{val c=concepts.getValue(key.key)
                     labels.concept+"\n"+c.title.ifBlank {when(c.kind) {NodeKind.INK->labels.ink;NodeKind.REFERENCE->labels.reference;else->labels.concept}}}
             }
@@ -99,6 +106,14 @@ internal class LocalNetworkSceneBuilder(private val maxPositions:Int=16384) {
             }
             val key=NetworkSceneEdgeKey.Belongs(c.key);val id=edgeId(key);edges[id]=key
             relations+=MapRelation(id,from,nodeId(NetworkSceneNodeKey.File(c.location.graphId)),RelationKind.BELONGS_TO,labels.belongs)
+        }
+        for(group in report.aggregatedFileRelations.sortedBy {it.key.stableKey}) {
+            val key=NetworkSceneEdgeKey.UserRelation(group.key);val id=edgeId(key);edges[id]=key
+            val notes=group.rows.map {it.relation.label.trim()}.filter {it.isNotEmpty()}.distinct()
+            val label=listOf(labels.userRelation,notes.joinToString(" / ").take(BacklinkBudget.NOTE_CHARS),
+                if(group.rows.size>1) "(${group.rows.size})" else "").filter {it.isNotBlank()}.joinToString(" · ")
+            relations+=MapRelation(id,nodeId(NetworkSceneNodeKey.File(group.key.fromFileId)),
+                nodeId(NetworkSceneNodeKey.File(group.key.toFileId)),group.key.kind,label)
         }
         val document=MindMapDocument(id=UUID.nameUUIDFromBytes(encode("file-network",report.focusDocumentId).toByteArray(Charsets.UTF_8)).toString(),
             nodes=model,relations=relations)
