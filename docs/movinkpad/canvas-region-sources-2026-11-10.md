@@ -32,7 +32,7 @@ Canvas 的已完成选区／套索与截图区域菜单提供“引用此区域�
 本机命令沿隔离输出与缓存：
 
 ```sh
-JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home ANDROID_HOME=/Users/kita/Library/Android/sdk ./gradlew --offline --no-daemon --project-cache-dir /private/tmp/xnotes-mind-map-region-continue-cache -I tmp/build-mind-map-region-continue.gradle :app:testDebugUnitTest --tests '*CanvasRegion*Test' --tests com.xnotes.pen.PageToMapFlowConsumerTest --tests com.xnotes.pen.NativeCanvasReferenceHostTest :app:compileDebugAndroidTestKotlin
+JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home ANDROID_HOME=$ANDROID_HOME ./gradlew --offline --no-daemon --project-cache-dir /private/tmp/xnotes-mind-map-region-continue-cache -I tmp/build-mind-map-region-continue.gradle :app:testDebugUnitTest --tests '*CanvasRegion*Test' --tests com.xnotes.pen.PageToMapFlowConsumerTest --tests com.xnotes.pen.NativeCanvasReferenceHostTest :app:compileDebugAndroidTestKotlin
 ```
 
 真实Android／SAF、配置重建／杀进程、MovinkPad Pro 14／Android 15／Pro Pen 3、掌触／Surface／GPU／性能未运行，单独保留验收。
@@ -43,7 +43,7 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home ANDROID_HOM
 
 ## 实际验证与审核
 
-- 新树 `/Users/kita/.codex/worktrees/mind-map-region-continue/xnotes`，分支 `codex/mind-map-region-continue`，从 `4f413d16` 创建；45 个当时未提交文件经 SHA-256 校验复制，原树原样保留并在最终再次核对。
+- 新树 `<工作树 mind-map-region-continue>/xnotes`，分支 `codex/mind-map-region-continue`，从 `4f413d16` 创建；45 个当时未提交文件经 SHA-256 校验复制，原树原样保留并在最终再次核对。
 - 32941：生产／Android 测试源码编译通过，208 项中 206 通过；两项新夹具假设错误（PNG 场景未启用真实光栅模式、错类型被拒时本就不会尝试渲染），修正后在 68191 的三个流程／预览用例通过。原产品边界断言保留。
 - 独审发现并修复两个实际入口问题：Canvas 无路径保存误入 NOTE 专用另存入口；已经进入宿主的 pending 定位在卸载后复活。后者将旧 Locator 临时恢复，68191 精确新增用例真实失败；立即恢复修复版，最终 6 项 Locator 全通过。
 - 78922：251 项中 250 通过，Android 测试源码编译通过；1112 个 Kotlin／Java／资源与构建输入运行前后全同。唯一超时是后加持久化流程把轮询 delay 放入夹具不推进未来回调的 Main；只移回测试 worker，未改产品或降低断言。

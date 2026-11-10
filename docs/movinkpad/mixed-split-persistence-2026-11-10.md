@@ -6,7 +6,7 @@
 
 2026-11-10 用户明确要求基于当前工作树新建后继续。从干净提交
 `d706ebd1104e34005bcb45f444243429f8551557` 创建
-`/Users/kita/.codex/worktrees/mind-map-mixed-persistence/xnotes`，分支
+`<工作树 mind-map-mixed-persistence>/xnotes`，分支
 `codex/mind-map-mixed-persistence`。原 pair-open 工作树保留。
 仅实现、相关编译与测试、文档及本地提交；不打包、安装、推送、合并或发布。
 

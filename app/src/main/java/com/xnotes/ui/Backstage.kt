@@ -1092,6 +1092,9 @@ private fun ExplorerSection(
     val stack = remember(root) { mutableStateListOf<Pair<String, String>>() }
     val currentDocId = if (stack.isEmpty()) rootDocId else stack.last().first
     var refreshKey by remember(root) { mutableIntStateOf(0) }
+    // Lists this explorer again and tells the other pane's home too: both browse the same folder,
+    // so a file made, renamed, moved or deleted here is stale over there until it relists.
+    fun listAgain() { refreshKey++; editor.notifyTreeChanged() }
     var fieldError by remember(root) { mutableStateOf<String?>(null) }
     var renaming by remember(root) { mutableStateOf<BrowseEntry?>(null) }
     val selection = remember(root) { mutableStateListOf<BrowseEntry>() }
@@ -1103,7 +1106,7 @@ private fun ExplorerSection(
             editor.mergeNotes(order.map { it.documentUri }, name) { made ->
                 if (made == null) return@mergeNotes
                 selection.clear()
-                refreshKey++
+                listAgain()
                 editor.say(
                     context.getString(R.string.merged_into, com.xnotes.core.util.DocumentKind.stripSuffix(made.name)),
                     context.getString(R.string.open) to { calls.openFile(made.uri) },
@@ -1382,7 +1385,7 @@ private fun ExplorerSection(
         selection.clear(); opError = null
         scope.launch {
             val (trashed, failed) = withContext(Dispatchers.IO) { editor.trashEntries(root, items) }
-            refreshKey++
+            listAgain()
             if (trashed.isNotEmpty()) {
                 val what = if (trashed.size == 1) context.getString(R.string.moved_one_to_trash, entryLabel(trashed.first().entry)) else context.resources.getQuantityString(R.plurals.moved_items_to_trash, trashed.size, trashed.size)
                 editor.say(what, context.getString(R.string.undo) to { editor.undoTrash(root, trashed) })
@@ -1398,7 +1401,7 @@ private fun ExplorerSection(
             withContext(Dispatchers.IO) {
                 items.groupBy { it.parentDocId }.forEach { (parent, list) -> editor.setItemColors(root, parent, list.associate { it.name to c }) }
             }
-            refreshKey++
+            listAgain()
         }
     }
     val host = remember(root) {
@@ -1441,7 +1444,7 @@ private fun ExplorerSection(
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) { editor.setNotePinned(e.documentUri, !editor.isNotePinned(e.documentUri)) }
                         if (!ok) opError = context.getString(R.string.err_pin_note)
-                        refreshKey++
+                        listAgain()
                     }
                 },
                 share = { callsNow.value.shareFile(it.documentUri) },
@@ -1503,7 +1506,7 @@ private fun ExplorerSection(
                 else editor.copyEntriesInto(root, clip.entries, currentDocId)
                 done == clip.entries.size
             }
-            refreshKey++
+            listAgain()
             if (allOk) clipboard = null else opError = context.getString(R.string.err_paste_some)
         }
     }
@@ -1735,7 +1738,7 @@ private fun ExplorerSection(
                                     val carried = items.filter { it.documentUri != target }
                                     editor.moveEntriesInto(root, carried, targetDocId) == carried.size
                                 }
-                                selection.clear(); refreshKey++
+                                selection.clear(); listAgain()
                                 if (!ok) opError = context.getString(R.string.err_move_some)
                             }
                         }
@@ -2018,7 +2021,7 @@ private fun ExplorerSection(
     LaunchedEffect(pendingImports) {
         if (pendingImports.isNotEmpty()) {
             val n = editor.commitImportsAsync(root, currentDocId)
-            refreshKey++
+            listAgain()
             if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
         }
     }
@@ -2045,7 +2048,7 @@ private fun ExplorerSection(
                     if (uri != null) {
                         fieldError = null
                         onCreateMode(CreateMode.NONE)
-                        refreshKey++
+                        listAgain()
                         callsNow.value.openFile(uri)
                     } else {
                         fieldError = context.getString(R.string.err_create_note)
@@ -2085,7 +2088,7 @@ private fun ExplorerSection(
                         // commitImportAsync drives the "Importing…" dialog and runs the copy off-thread.
                         val uri = editor.commitImportAsync(root, currentDocId, n)
                         when {
-                            uri != null -> refreshKey++
+                            uri != null -> listAgain()
                             editor.pendingImport != null -> fieldError = context.getString( // genuine failure; keep the prompt
                                 if (editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_save_that_note,
                             )
@@ -2094,18 +2097,18 @@ private fun ExplorerSection(
                     }
                     isFolder -> scope.launch {
                         val ok = withContext(Dispatchers.IO) { editor.createFolder(root, currentDocId, n) }
-                        if (ok) { onCreateMode(CreateMode.NONE); refreshKey++ } else fieldError = context.getString(R.string.err_create_folder)
+                        if (ok) { onCreateMode(CreateMode.NONE); listAgain() } else fieldError = context.getString(R.string.err_create_folder)
                     }
                     createMode == CreateMode.MIND_MAP -> scope.launch {
                         val uri = withContext(Dispatchers.IO) { editor.createBlankMindMapFile(root, currentDocId, n) }
-                        if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++; calls.openFile(uri) }
+                        if (uri != null) { onCreateMode(CreateMode.NONE); listAgain(); calls.openFile(uri) }
                         else fieldError = context.getString(R.string.map_create_error)
                     }
                     createMode == CreateMode.CANVAS -> scope.launch {
                         val uri = withContext(Dispatchers.IO) { editor.createBlankCanvasFile(root, currentDocId, n) }
                         if (uri != null) {
                             onCreateMode(CreateMode.NONE)
-                            refreshKey++
+                            listAgain()
                             // Open straight away, like a new note: a canvas is for sketching on the spot.
                             // In a split pane the open path refuses a canvas and says why; the new
                             // file stays in the list to open on its own.
@@ -2115,7 +2118,7 @@ private fun ExplorerSection(
                     else -> scope.launch {
                         // Just create the note in the explorer — it opens only when the user taps it.
                         val uri = withContext(Dispatchers.IO) { editor.createBlankNoteFile(root, currentDocId, n) }
-                        if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++ } else fieldError = context.getString(R.string.err_create_note)
+                        if (uri != null) { onCreateMode(CreateMode.NONE); listAgain() } else fieldError = context.getString(R.string.err_create_note)
                     }
                 }
             },
@@ -2142,10 +2145,10 @@ private fun ExplorerSection(
                     if (entry.color != null) {
                         scope.launch {
                             withContext(Dispatchers.IO) { editor.moveItemColor(root, entry.parentDocId, entry.name, newName) }
-                            refreshKey++
+                            listAgain()
                         }
                     } else {
-                        refreshKey++
+                        listAgain()
                     }
                 }
             },
@@ -2165,7 +2168,7 @@ private fun ExplorerSection(
                 moving = null
                 scope.launch {
                     val moved = withContext(Dispatchers.IO) { editor.moveEntriesInto(root, items, target) }
-                    selection.clear(); refreshKey++
+                    selection.clear(); listAgain()
                     opError = if (moved < items.size) context.getString(R.string.err_move_some) else null
                 }
             },
@@ -2203,7 +2206,7 @@ private fun ExplorerSection(
                             }
                             ok
                         }
-                        refreshKey++
+                        listAgain()
                         if (!allOk) opError = context.getString(R.string.err_delete_some)
                     }
                 }) { Text(stringResource(R.string.delete)) }

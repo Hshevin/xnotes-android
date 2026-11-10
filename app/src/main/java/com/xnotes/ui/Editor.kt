@@ -1590,7 +1590,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** An independent editor returned; reload file metadata and previews without touching open notes. */
     fun refreshStoredFile(uri: String?) {
         uri?.let { invalidateThumb(it) }
-        treeVersion++
+        notifyTreeChanged()
+    }
+
+    /**
+     * Files were created, renamed, moved, deleted or restyled on disk: every pane home in this
+     * workspace lists again, not only the one whose explorer did it. Both panes browse the same
+     * folder, so a note made on the left must show up on the right without reopening its home.
+     */
+    fun notifyTreeChanged() {
+        val root = sibling?.takeIf { it.secondary === this } ?: this
+        root.treeVersion++
+        root.secondary?.let { it.treeVersion++ }
     }
 
     /** Bumped on every preferences change so open panes refresh (e.g. after an .scm import). */
@@ -4398,7 +4409,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val saved = viewKey(snap.document.path)?.let { viewStates.get(it) }
             installViewOverrides(saved?.overrides ?: snap.viewOverrides)
             state.pendingInitialView = when {
-                saved != null -> InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY)
+                saved != null -> InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY, saved.fitWidth)
                 snap.zoom > 0.0 -> InitialView.Restore(snap.zoom, snap.scrollX, snap.scrollY)
                 else -> InitialView.FitWidth
             }
@@ -7878,7 +7889,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             (!state.didInitialFit || state.viewportW <= 0)) return // nothing meaningful established yet
         val key = viewKey(currentUri) ?: return
         val position=if(includePendingRestore) readingPositionForPersistence() else readingPosition()
-        viewStates.put(key, position.zoom, position.x, position.y, position.overrides)
+        // Remember whether the view was riding the fit-width magnet, so a pane of another width
+        // (a split, say) refits instead of reapplying a zoom that no longer fits it.
+        val pending=(state.pendingInitialView as? InitialView.Restore)?.takeIf {includePendingRestore}
+        val fitWidth=pending?.fitWidth ?: state.fitWidthActive
+        viewStates.put(key, position.zoom, position.x, position.y, position.overrides, fitWidth)
     }
 
     /** Update the global View-menu defaults (the menu's "Default for all notes" checkbox),
@@ -8000,7 +8015,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val saved = viewKey(path)?.let { viewStates.get(it) }
         installViewOverrides(saved?.overrides ?: com.xnotes.canvas.ViewOverrides())
         state.pendingInitialView =
-            if (saved != null) InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY) else InitialView.FitWidth
+            if (saved != null) InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY, saved.fitWidth) else InitialView.FitWidth
         state.didInitialFit = false
         if (state.viewportW > 0) state.establishInitialView()
     }
@@ -8612,7 +8627,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun undoTrash(treeUri: String, items: List<TrashItem>) {
         autosaveScope.launch {
             withContext(Dispatchers.IO) { items.forEach { restoreTrash(treeUri, it) } }
-            treeVersion++
+            notifyTreeChanged()
         }
     }
 
@@ -9804,7 +9819,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             if (importCancelled.get()) return@launch onDone(null)
             if (made == null) message = appContext.getString(R.string.err_merge_notes)
-            else viewStates.get(documentKey(uris.first()))?.let { v -> viewStates.put(documentKey(made.uri), v.zoom, v.scrollX, v.scrollY, v.overrides) }
+            else viewStates.get(documentKey(uris.first()))?.let { v -> viewStates.put(documentKey(made.uri), v.zoom, v.scrollX, v.scrollY, v.overrides, v.fitWidth) }
             onDone(made)
         }
     }
@@ -11920,15 +11935,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private val splitRecentWriter by lazy {SplitRecentWriter.forFilesDir(appContext.filesDir)}
-    var hasSavedSplit by mutableStateOf(false)
-        private set
-    init {
-        autosaveScope.launch {
-            splitRecentWriter.state.collect {recent->
-                if(sessionOwner.isCurrent()) hasSavedSplit=recent.loaded && recent.read is SplitArrangementRead.Ready
-            }
-        }
-    }
+    /**
+     * Whether a readable recent arrangement is on disk right now. A plain read of the shared writer's
+     * state: the home screen observes that StateFlow itself, and a per-editor collector on the
+     * never-cancelled [autosaveScope] kept every released secondary pane and every recreated
+     * activity's primary editor alive for the life of the process.
+     */
+    val hasSavedSplit:Boolean get()=splitRecentWriter.state.value.let {it.loaded && it.read is SplitArrangementRead.Ready}
 
     /** Await writes without overwriting an externally changed clean file. */
     suspend fun flushSplitDocument(): Boolean {

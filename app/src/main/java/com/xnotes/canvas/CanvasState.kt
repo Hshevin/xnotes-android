@@ -91,8 +91,12 @@ sealed class InitialView {
     /** Fit the page width and start at the first page. */
     object FitWidth : InitialView()
 
-    /** Reapply a remembered zoom + scroll. */
-    class Restore(val zoom: Double, val scrollX: Double, val scrollY: Double) : InitialView()
+    /**
+     * Reapply a remembered zoom + scroll. With [fitWidth], the view was riding the fit-width
+     * magnet when remembered, so it refits this viewport's width (keeping the same content under
+     * the top edge) instead of reapplying a zoom recorded in a pane of another width.
+     */
+    class Restore(val zoom: Double, val scrollX: Double, val scrollY: Double, val fitWidth: Boolean = false) : InitialView()
 }
 
 /**
@@ -1243,11 +1247,26 @@ class CanvasState(
     fun establishInitialView() {
         if (viewportW <= 0 || viewportH <= 0) return
         when (val v = pendingInitialView) {
-            is InitialView.Restore -> setView(v.zoom, v.scrollX, v.scrollY)
+            is InitialView.Restore -> if (v.fitWidth) restoreFitWidth(v) else setView(v.zoom, v.scrollX, v.scrollY)
             else -> resetViewToFitWidth()
         }
         pendingInitialView = null
         didInitialFit = true
+    }
+
+    /**
+     * Restore a view that was at fit width when remembered: fit this viewport's width and scale
+     * the scroll so the same content stays under the top edge. In a pane of the same width this
+     * is exactly the remembered view; in a narrower or wider one (a split pane after a single-pane
+     * session) the page fills the width instead of sitting at an old zoom pinned to one side.
+     */
+    private fun restoreFitWidth(v: InitialView.Restore) {
+        val fit = fitWidthZoom()
+        if (fit <= 0.0 || v.zoom <= 0.0) return setView(v.zoom, v.scrollX, v.scrollY)
+        setView(fit, minScrollX(), v.scrollY * fit / v.zoom)
+        fitWidthActive = true
+        fitHeightActive = false
+        clampScroll()
     }
 
     // --- page cache ---

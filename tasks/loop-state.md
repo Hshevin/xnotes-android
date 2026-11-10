@@ -1,7 +1,7 @@
 # 思维导图与文件关系网络：当前恢复点
 
 目标：完整思维导图需求尚未完成，持续开发 paused；本轮仅按用户要求合并已提交进展到本地 master，不恢复冷启动开发。overall complete=false。
-工作树：/Users/kita/Documents/ChatGPT/笔记/xnotes，主分支 master。合并前 ef6ffa29，来源 c97f58f9，采用 --no-ff 保两侧37/66提交；冷恢复开发树和全部10个未提交草稿保留。各旧阶段 tmp 证据仍在相应开发树；本轮原始证据在主线 tmp/progress-merge-*，构建/cache独立为 /private/tmp/xnotes-mind-map-progress-merge-build 与 -cache。
+工作树：<仓库根>，主分支 master。合并前 ef6ffa29，来源 c97f58f9，采用 --no-ff 保两侧37/66提交；冷恢复开发树和全部10个未提交草稿保留。各旧阶段 tmp 证据仍在相应开发树；本轮原始证据在主线 tmp/progress-merge-*，构建/cache独立为 /private/tmp/xnotes-mind-map-progress-merge-build 与 -cache。
 授权：本轮仅本地合并、必要兼容修复、相关编译／测试、文档和本地提交。未打包 APK、安装、推送、改Git配置或发布；持续开发暂停。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
