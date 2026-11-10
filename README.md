@@ -8,7 +8,7 @@
 
 最新本地覆盖更新：[0.9.8 / Release 98 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release98-arm64.apk)，沿用正式包名与签名，包含 AI 模板文字 / 图像模型自选，以及无限画布退出分屏黑屏修复；三键、黑白界面、图层、分屏湿墨与黑屏、单份 PDF 重新关联已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。见 [打包与验证记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
 
-最新主线独立测试版：[master test6 ARM64 APK](build/branch-tests/master-test6/XNotes-master-c1d6d5a5-test6-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，数据独立。包含思维导图、来源引用、混合分屏及冷恢复更新；登记表升级后的回退限制见下方提醒。JVM 4,777 项通过，Android 模拟器 439 项中 76 项失败，待排查与真机验证。见 [打包记录](docs/movinkpad/master-test6-2026-11-11.md)。
+最新主线独立测试版：[master test7 ARM64 APK](build/branch-tests/master-test7/XNotes-master-e4739bd6-test7-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。包含导图／网络／原件库入口的文件身份校验修复，14 项定向 JVM 回归通过；本轮未重跑 Android 测试，不代表 test6 的 76 项平台失败全部解决。见 [打包记录](docs/movinkpad/master-test7-2026-11-11.md)。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 
