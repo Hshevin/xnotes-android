@@ -1,0 +1,43 @@
+{
+  "sourceBase": "61ba44c3594081c389049090f154b0d297c2a4f8",
+  "tests": 39,
+  "suites": 2,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "inputCount": 1300,
+  "currentInputsMatch": true,
+  "sourceReview": "PASS",
+  "evidenceReview": "PASS",
+  "reviewer": "cold_marker_source_review",
+  "openRequired": [],
+  "androidSourceMethods": 9,
+  "androidExecuted": false,
+  "mainColdRestoreConnected": false,
+  "rawPrefix": "cold-marker-green",
+  "codeCommits": [
+    "39812473",
+    "7dc75587"
+  ],
+  "command": [
+    "./gradlew",
+    "--offline",
+    "--no-daemon",
+    "--continue",
+    "--project-cache-dir",
+    "/private/tmp/xnotes-mind-map-cold-restore-cache",
+    "-I",
+    "tmp/build-mixed-persistence.gradle",
+    ":app:compileDebugKotlin",
+    ":app:testDebugUnitTest",
+    "--tests",
+    "com.xnotes.ui.LastPresentationCodecTest",
+    "--tests",
+    "com.xnotes.ui.LastPresentationStoreTest",
+    ":app:compileDebugAndroidTestKotlin"
+  ],
+  "runnerSha256": "ce0c1c359bf935bcd5c839deefe9501a7e09a8ef559bc3e36682a12b9a22a907",
+  "initSha256": "e73a30b634b7f62d771c9b3fe8e118324434c5c3cc95ec8da8a0c86b341f4d08",
+  "inputManifestSha256": "b782cadc451e3ea103380050ec92052b4a53d5128f46cfbe6d8cc6d7196db56c",
+  "hardwareExecuted": false
+}

@@ -1,17 +1,30 @@
 # 思维导图与文件关系网络：当前恢复点
 
-目标：完整思维导图需求尚未完成，持续开发 paused；本轮仅按用户要求合并已提交进展到本地 master，不恢复冷启动开发。overall complete=false。
-工作树：/Users/kita/Documents/ChatGPT/笔记/xnotes，主分支 master。合并前 ef6ffa29，来源 c97f58f9，采用 --no-ff 保两侧37/66提交；冷恢复开发树和全部10个未提交草稿保留。各旧阶段 tmp 证据仍在相应开发树；本轮原始证据在主线 tmp/progress-merge-*，构建/cache独立为 /private/tmp/xnotes-mind-map-progress-merge-build 与 -cache。
-授权：本轮仅本地合并、必要兼容修复、相关编译／测试、文档和本地提交。未打包 APK、安装、推送、改Git配置或发布；持续开发暂停。
+目标：按完整思维导图需求继续推进，active，overall complete=false。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
+工作树：/Users/kita/.codex/worktrees/mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master8d12bacf与实际拉取origin/master8ee33799，基线61ba44c3594081c389049090f154b0d297c2a4f8；草稿先保独立stash 3520e9648b6b20fa4da9459411267de7c14a9536，源代码／测试／计划8文件逐SHA恢复，README采用较新主线说明，当前检查点合并双方记录。构建/cache仍独立为/private/tmp/xnotes-mind-map-cold-restore-build与-cache。
+授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户当前明确继续已撤销原暂停请求。
 需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
-## 当前阶段：已提交进展合入主线（verified）
+## 当前阶段：S3a0 最后呈现协议与存储（verified，已本地提交）
+
+主线更新基线61ba44c3，Codec/DTO39812473、Store/Attempt7dc75587；4生产类完成，
+39唯一JVM全绿，Android9方法SOURCE已编译未执行。独审闭合ASCII escape、成功
+move后written事实与末IO后current三Required；1300完整输入SHA和raw XML/runner/init
+独立审计一致。证据tmp/cold-marker-green-*及verified-summary.json，主题记录
+ docs/movinkpad/mixed-cold-restore-2026-11-10.md。全部已知构建终态。
+
+下一S3a1：受保护NOTE工作副本分阶段准备/采用、真实源权限/另存、Native共享
+提交门和owner/queue代次末票。录音恢复actual model与durable交付要求仍未闭合，
+不能借S3a0通过启用半套Native producer或宣称Main冷启动完成。只读实现依赖检查
+进行中，完整计划须独审后再实现；整体active/complete=false。
+
+## 已验证阶段：已提交进展合入主线（verified）
 
 冲突保两侧修复，新增来源入口接事务唯一性／读权限回滚，schema未来版本断言
 随当前版本递增。完整4567中2个测试误join常驻collector；只改该夹具并整套12
 复验，全有效480套4567唯一0失败/错误/跳过。1293输入最终匹配，生产与仪器
 源码编译通过，真实Android/硬件未跑。详见docs/movinkpad/mind-map-progress-merge-2026-11-10.md。
-未提交LastPresentation草稿不在主线，冷恢复尚未完成，旧目标仍paused。
+主线合并时未提交LastPresentation草稿不在主线；用户随后要求同步主线并继续，当前状态以上方S3a0为准。
 
 ## 已验证阶段：S2 actual mixed 保存与显式打开（verified，已本地提交）
 
