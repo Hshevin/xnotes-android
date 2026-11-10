@@ -658,15 +658,15 @@ class MapSession() : ViewModel() {
                 val version=revision
                 val result=withContext(Dispatchers.IO) {lock.withLock {
                     if(version!=revision || connectedEpoch!=epoch || replacingDocument) null
-                    else runCatching {if(overwrite) store.overwrite(doc) else store.save(doc)}.also {
+                    else runCatching {if(overwrite) store.overwriteAndVerify(doc) else store.saveAndVerify(doc)}.also {
                         if(store.journalReady) durableRevision=version
                     }
                 }} ?: return@async MapSaveOutcome.Changed(version)
                 if(result.isSuccess) discoveryFailed=!MapBacklinkDiscovery.rememberActual(app,storedUri,doc.id)
                 val latest=history===expectedHistory && connectedEpoch==epoch && revision==version && !replacingDocument
-                result.fold({
+                result.fold({sourceSha256->
                     if(latest) {dirty=false;saveFailed=false;recovered=false;conflict=false}
-                    MapSaveOutcome.Written(version,latest)
+                    MapSaveOutcome.Written(version,latest,sourceSha256)
                 },{error->
                     if(error is java.util.concurrent.CancellationException) throw error
                     if(latest) {saveFailed=true;conflict=error is MapConflict}

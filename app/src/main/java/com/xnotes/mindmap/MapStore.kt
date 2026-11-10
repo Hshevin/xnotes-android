@@ -143,6 +143,16 @@ class MapStore(directory: File, key: String, private val target: MapTarget, lega
         checkpoint(doc, pending = false)
     }
 
+    /** The caller holds the actual URI lock, so this is the just-verified publication, not a later read. */
+    internal fun saveAndVerify(doc:MindMapDocument):String {
+        save(doc)
+        return requireNotNull(expectedHash)
+    }
+    internal fun overwriteAndVerify(doc:MindMapDocument):String {
+        overwrite(doc)
+        return requireNotNull(expectedHash)
+    }
+
     /**
      * Explicit conflict choice "keep this version": accept whatever the destination holds now as the
      * base, then save normally, so the journal stays ahead of the write and verification still runs.
