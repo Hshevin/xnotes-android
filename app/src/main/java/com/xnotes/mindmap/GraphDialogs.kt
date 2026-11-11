@@ -52,7 +52,14 @@ private fun RelationChoice(label:String,onClick:()->Unit) {
 @Composable
 internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
                                   change:(MapRelation?,MapRelation?)->RelationEditResult,newRelation:MapRelation?=null,
-                                  existingRelationId:String?=null,onSelectExisting:(String)->Unit={},close:()->Unit) {
+                                  existingRelationId:String?=null,onSelectExisting:(String)->Unit={},close:()->Unit) =
+    GraphRelationsContent(doc,selected,change,newRelation,existingRelationId,onSelectExisting,DialogFrame,Modifier.heightIn(max=MindMapNodeListHeight),close)
+
+@Composable
+internal fun GraphRelationsContent(doc:MindMapDocument,selected:String?,
+                                   change:(MapRelation?,MapRelation?)->RelationEditResult,newRelation:MapRelation?=null,
+                                   existingRelationId:String?=null,onSelectExisting:(String)->Unit={},
+                                   frame:MapFrame,listModifier:Modifier,close:()->Unit) {
     var draft by remember {mutableStateOf(existingRelationId?.let {id->doc.relations.firstOrNull {it.id==id}?.let {RelationDraft(it,it)}}
         ?: newRelation?.let {RelationDraft(null,it)})}
     var creatingFrom by remember {mutableStateOf<String?>(null)}
@@ -82,8 +89,8 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
             RelationEditResult.Invalid -> message=R.string.graph_invalid
         }
     }
-    AlertDialog(onDismissRequest=::dismiss,title={Text(stringResource(R.string.graph_relations),fontSize=TextSize.heading)},text={
-        LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s4)) {
+    frame({Text(stringResource(R.string.graph_relations),fontSize=TextSize.heading)},{
+        LazyColumn(listModifier,verticalArrangement=Arrangement.spacedBy(Space.s4)) {
             if(!valid) item {Text(stringResource(R.string.graph_relation_changed),fontSize=TextSize.body)}
             message?.let {id->item {Text(stringResource(id),fontSize=TextSize.body)}}
             if(choosing!=null && edit!=null) {
@@ -128,15 +135,26 @@ internal fun GraphRelationsDialog(doc:MindMapDocument,selected:String?,
                 }
             }
         }
-    },confirmButton={MapButton(if(choosing!=null || creatingFrom!=null) R.string.graph_back else R.string.map_done,enabled=valid || choosing!=null || creatingFrom!=null) {
-        if(alive.get()) when {choosing!=null->choosing=null;creatingFrom!=null->creatingFrom=null
-            edit==null->dismiss();draft?.token===edit.token->accept(change(edit.initial,draft!!.edge))}
-    }},dismissButton={MapButton(R.string.cancel,onClick=::dismiss)})
+    },{
+        MapButton(R.string.cancel,onClick=::dismiss)
+        MapButton(if(choosing!=null || creatingFrom!=null) R.string.graph_back else R.string.map_done,enabled=valid || choosing!=null || creatingFrom!=null) {
+            if(alive.get()) when {choosing!=null->choosing=null;creatingFrom!=null->creatingFrom=null
+                edit==null->dismiss();draft?.token===edit.token->accept(change(edit.initial,draft!!.edge))}
+        }
+    },::dismiss)
 }
 @Composable
 internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,
                                 open:((MapSourceNavigationTicket)->Unit)?=null,focus:MapSourcePanelFocus?=null,
-                                focusHandled:(Any)->Unit={},feedback:Int?=null,targetEditsEnabled:Boolean=true,close:()->Unit) {
+                                focusHandled:(Any)->Unit={},feedback:Int?=null,targetEditsEnabled:Boolean=true,close:()->Unit) =
+    GraphSourcesContent(snapshot,editor,add,addEnabled,open,focus,focusHandled,feedback,targetEditsEnabled,
+        DialogFrame,Modifier.heightIn(max=MindMapNodeListHeight),close)
+
+@Composable
+internal fun GraphSourcesContent(snapshot:SourceEditSnapshot,editor:SourceListEditor,add:()->Unit,addEnabled:Boolean=true,
+                                 open:((MapSourceNavigationTicket)->Unit)?=null,focus:MapSourcePanelFocus?=null,
+                                 focusHandled:(Any)->Unit={},feedback:Int?=null,targetEditsEnabled:Boolean=true,
+                                 frame:MapFrame,listModifier:Modifier,close:()->Unit) {
     val node=snapshot.node
     val scroll=rememberLazyListState()
     val sourceIds=node.sources.map {it.id}
@@ -154,11 +172,11 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
     fun dismiss(confirmNotes:Boolean=true) {
         if(alive.get() && (!confirmNotes || editor.commitNotes())) {alive.set(false);editor.close();close()}
     }
-    AlertDialog(onDismissRequest={dismiss()},title={Column {
-        if(node.text.isNotBlank()) Text(node.text.take(256),fontSize=TextSize.heading)
+    frame({Column {
+        if(node.text.isNotBlank()) Text(node.text.take(256),fontSize=TextSize.heading,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         Text(stringResource(R.string.graph_sources_count,node.sources.size),fontSize=TextSize.heading)
-    }},text={
-        LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),state=scroll) {
+    }},{
+        LazyColumn(listModifier,state=scroll) {
             item {
                 Text(stringResource(if(node.fileCardId!=null) R.string.graph_file_card_notice else R.string.graph_sources_notice),fontSize=TextSize.body)
                 if(node.fileCardId!=null && node.sources.singleOrNull()?.scope==SourceScope.PDF_ORIGINAL)
@@ -231,10 +249,11 @@ internal fun GraphSourcesDialog(snapshot:SourceEditSnapshot,editor:SourceListEdi
                 HorizontalDivider()
             }
         }
-    },confirmButton={if(node.fileCardId==null) MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get() && editor.commitNotes()) add()}},dismissButton={Row {
+    },{
         if(editor.hasNoteDrafts) MapButton(R.string.cancel) {dismiss(false)}
         MapButton(R.string.map_done) {dismiss()}
-    }})
+        if(node.fileCardId==null) MapButton(R.string.graph_add_source,enabled=addEnabled){if(alive.get() && editor.commitNotes()) add()}
+    },{dismiss()})
 }
 
 /** Only validated immutable PNG assets enter Android's decoder; late unpublished bitmaps are ours. */
@@ -280,7 +299,12 @@ internal fun sourceRangeLabel(scope:SourceScope,lastKnownPage:Int?):String=when(
 
 /** A text-only actual page directory; rows never decode or read their source independently. */
 @Composable
-internal fun GraphSourceChoiceDialog(choice:MapSourceChoice,controller:MapSourcePickerController) {
+internal fun GraphSourceChoiceDialog(choice:MapSourceChoice,controller:MapSourcePickerController) =
+    GraphSourceChoiceContent(choice,controller,DialogFrame,Modifier.heightIn(max=MindMapNodeListHeight))
+
+/** Runs after the system file picker returned; page activation keeps its explicit consent dialog. */
+@Composable
+internal fun GraphSourceChoiceContent(choice:MapSourceChoice,controller:MapSourcePickerController,frame:MapFrame,listModifier:Modifier) {
     var confirming by remember(choice.requestId) {mutableStateOf<MapSourceChoice?>(null)}
     CompositionLocalProvider(LocalInkBusy provides false) {
         val consent=confirming
@@ -289,8 +313,9 @@ internal fun GraphSourceChoiceDialog(choice:MapSourceChoice,controller:MapSource
                 text={Text(stringResource(R.string.graph_source_enable_notice),fontSize=TextSize.body)},
                 confirmButton={MapButton(R.string.graph_source_enable_confirm) {controller.activatePages(consent);confirming=null}},
                 dismissButton={MapButton(R.string.cancel) {confirming=null}})
-        } else AlertDialog(onDismissRequest={controller.cancel(choice)},title={Text(stringResource(R.string.graph_source_choose),fontSize=TextSize.heading)},
-            text={LazyColumn(Modifier.heightIn(max=MindMapNodeListHeight),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+        }
+        if(consent==null || frame!==DialogFrame) frame({Text(stringResource(R.string.graph_source_choose),fontSize=TextSize.heading)},
+            {LazyColumn(listModifier,verticalArrangement=Arrangement.spacedBy(Space.s8)) {
                 choice.offer?.let {offer->item {Text(offer.name,fontSize=TextSize.title)}}
                 if(choice.busy) item {Text(stringResource(R.string.graph_source_loading),fontSize=TextSize.body)}
                 if(choice.problem!=null) item {Text(stringResource(when(choice.problem) {
@@ -317,6 +342,6 @@ internal fun GraphSourceChoiceDialog(choice:MapSourceChoice,controller:MapSource
                         else -> Unit // Canvas/map sources deliberately offer the whole document only.
                     }
                 }
-            }},confirmButton={},dismissButton={MapButton(R.string.cancel) {controller.cancel(choice)}})
+            }},{MapButton(R.string.cancel) {controller.cancel(choice)}},{controller.cancel(choice)})
     }
 }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_menu">菜单</string>
+    <string name="map_menu_nodes">节点</string>
+    <string name="map_menu_sources">来源</string>
+    <string name="map_menu_relations">连线</string>
+    <string name="map_menu_layout">版面</string>
+    <string name="map_menu_hide">收起菜单</string>
+    <string name="map_menu_no_selection">未选择节点</string>
+    <string name="map_menu_create">新建</string>
+    <string name="map_menu_node_actions">所选节点</string>
+    <string name="map_menu_view">视图</string>
+    <string name="map_creation_in_progress">请先创建或取消新节点；草稿尚未保存。</string>
+    <string name="map_layout_preview_pending">请先确认或取消布局预览。</string>
+    <string name="map_sources_select_node">选择一个节点后，在此显示其来源。</string>
+    <string name="map_sources_show_selected">显示所选节点</string>
+    <string name="map_create_child">新建子节点</string>
+    <string name="map_create_sibling">新建同级节点</string>
+    <string name="map_create_free">新建自由节点</string>
+    <string name="map_create_under">上级：%1$s</string>
+    <string name="map_create_sources_optional">来源可以留空，创建后仍可添加或修改。</string>
+    <string name="map_create_confirm">创建</string>
+    <string name="map_create_parent_changed">上级节点已被删除或替换。请取消，并从当前导图重新开始。</string>
+</resources>

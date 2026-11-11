@@ -65,6 +65,10 @@ val MindMapCompactPaneHeight = 640.dp
 /** Longest node name beside the enlarged ink editor's Back button. */
 val MindMapInkTitleWidth = 200.dp
 
+/** In-pane map menu: overlays the graph so the native View keeps its size; never covers the last canvas strip. */
+val MindMapMenuWidth = 360.dp
+val MindMapMenuMinCanvas = 160.dp
+
 /** Last source image shown within the graph's existing scrollable source dialog. */
 val MindMapSourcePreviewHeight = 144.dp
 

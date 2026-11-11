@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_menu">Menu</string>
+    <string name="map_menu_nodes">Nodes</string>
+    <string name="map_menu_sources">Sources</string>
+    <string name="map_menu_relations">Links</string>
+    <string name="map_menu_layout">Layout</string>
+    <string name="map_menu_hide">Hide menu</string>
+    <string name="map_menu_no_selection">No node selected</string>
+    <string name="map_menu_create">Create</string>
+    <string name="map_menu_node_actions">Selected node</string>
+    <string name="map_menu_view">View</string>
+    <string name="map_creation_in_progress">Create or cancel the new node first. Its draft is not saved yet.</string>
+    <string name="map_layout_preview_pending">Confirm or cancel the layout preview first.</string>
+    <string name="map_sources_select_node">Select a node, then show its sources here.</string>
+    <string name="map_sources_show_selected">Show selected node</string>
+    <string name="map_create_child">New child node</string>
+    <string name="map_create_sibling">New sibling node</string>
+    <string name="map_create_free">New free node</string>
+    <string name="map_create_under">Parent: %1$s</string>
+    <string name="map_create_sources_optional">Sources are optional. You can still add or change them after creating the node.</string>
+    <string name="map_create_confirm">Create</string>
+    <string name="map_create_parent_changed">The parent node was removed or replaced. Cancel and start again from the current map.</string>
+</resources>

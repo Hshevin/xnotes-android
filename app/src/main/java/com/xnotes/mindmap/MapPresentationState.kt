@@ -83,6 +83,10 @@ class MapPresentationState internal constructor() {
     private fun requestCameraRestore() {
         protectedCamera=camera!=null;restoredView.clear();restoreVersion=Math.incrementExact(restoreVersion)
     }
+    /** The menu's own text fields resize an IME-padded graph; return to the ordinary bookmark afterwards. */
+    internal fun restoreAfterPanelInput() {if(camera!=null) requestCameraRestore()}
+    /** The non-modal source page stays open while the user pans; that camera becomes the bookmark again. */
+    internal fun releaseSourceCamera() {if(sourcesFor!=null && restoredView.get()!=null) protectedCamera=false}
     internal fun closeSources() {retireSourceEditor();cancelPendingBacklinkFocus();sourcesFor=null;sourceFocus=null;requestCameraRestore()}
     internal fun requestBacklinkFocus(session:MapSession,ticket:MapBacklinkFocusTicket):Boolean {
         synchronize(session)
