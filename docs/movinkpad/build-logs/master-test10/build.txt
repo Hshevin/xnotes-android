@@ -1,0 +1,81 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:extractDebugSupportedLocales
+> Task :app:generateDebugLocaleConfig UP-TO-DATE
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:parseDebugLocalResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:configureCMakeDebug[arm64-v8a]
+> Task :app:buildCMakeDebug[arm64-v8a]
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugUnitTestManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:compileDebugKotlin
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/MainActivity.kt:3075:32 Condition is always 'true'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/MainActivity.kt:3108:29 Condition is always 'true'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/platform/Pdf.kt:444:38 'fun appendRawCommands(p0: String!): Unit' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/platform/Pdf.kt:448:38 'fun appendRawCommands(p0: String!): Unit' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/AboutPane.kt:89:103 'field versionCode: Int' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/AudioRecording.kt:325:36 Condition is always 'false'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/TextFormatBar.kt:154:36 'val Icons.Filled.FormatAlignLeft: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.FormatAlignLeft.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/TextFormatBar.kt:156:37 'val Icons.Filled.FormatAlignRight: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.FormatAlignRight.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/MainActivity.kt:3075:32 Condition is always 'true'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/MainActivity.kt:3108:29 Condition is always 'true'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/platform/Pdf.kt:444:38 'fun appendRawCommands(p0: String!): Unit' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/platform/Pdf.kt:448:38 'fun appendRawCommands(p0: String!): Unit' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/AboutPane.kt:89:103 'field versionCode: Int' is deprecated. Deprecated in Java.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/AudioRecording.kt:325:36 Condition is always 'false'.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/TextFormatBar.kt:154:36 'val Icons.Filled.FormatAlignLeft: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.FormatAlignLeft.
+w: file://<workspace>/tmp/master-test2/source/app/src/main/java/com/xnotes/ui/TextFormatBar.kt:156:37 'val Icons.Filled.FormatAlignRight: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.FormatAlignRight.
+
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes
+> Task :app:mergeDebugJavaResource
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 3m 8s
+49 actionable tasks: 27 executed, 22 up-to-date
