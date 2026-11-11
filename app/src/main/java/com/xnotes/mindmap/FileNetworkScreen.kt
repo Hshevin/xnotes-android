@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -15,6 +17,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.xnotes.R
+import com.xnotes.ui.Tooltip
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.*
 
 /** Actions stay with the current Main composition; the retained workspace stores no such callbacks. */
@@ -30,16 +34,37 @@ internal class FileNetworkHostActions(
 
 private data class NetworkOpeningVisual(val report:LocalFileNetworkReport,val scene:LocalNetworkScene)
 
+private class FileNetworkPaneHost(val actions:FileNetworkHostActions,val picker:NetworkCanvasPicker)
+/** Actions and the canvas picker for Home's network pane, kept above Home so a pane rebuild never drops a result. */
+private val LocalFileNetworkPaneHost=compositionLocalOf<FileNetworkPaneHost?> {null}
+
+/**
+ * With [embedded], a Home pane shows the network beside its sidebar ([FileNetworkPane]) and the native host stays
+ * composed underneath; otherwise the network replaces the native host while visible.
+ */
 @Composable
 internal fun FileNetworkWorkspaceHost(workspace:FileNetworkWorkspace,actions:FileNetworkHostActions,
-    nativeContent:@Composable ()->Unit) {
+    embedded:Boolean=false,nativeContent:@Composable ()->Unit) {
     val picker=rememberNetworkCanvasPicker()
-    if(!workspace.visible) nativeContent()
-    workspace.current?.takeIf {workspace.visible}?.let {entry->key(entry) {FileNetworkScreen(entry,actions,picker)}}
+    val fullscreen=workspace.visible && !embedded
+    if(!fullscreen) CompositionLocalProvider(LocalFileNetworkPaneHost provides FileNetworkPaneHost(actions,picker)) {nativeContent()}
+    workspace.current?.takeIf {fullscreen}?.let {entry->key(entry) {FileNetworkScreen(entry,actions,picker,null)}}
 }
 
+/** Home's network pane; the host leaves it (closing the network) when Home moves to another view. */
 @Composable
-private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetworkHostActions,picker:NetworkCanvasPicker) {
+internal fun FileNetworkPane(workspace:FileNetworkWorkspace,sidebarOpen:Boolean,onShowSidebar:()->Unit) {
+    val host=LocalFileNetworkPaneHost.current ?: return
+    workspace.current?.takeIf {workspace.visible}?.let {entry->
+        key(entry) {FileNetworkScreen(entry,host.actions,host.picker,NetworkPaneChrome(sidebarOpen,onShowSidebar))}
+    }
+}
+
+private class NetworkPaneChrome(val sidebarOpen:Boolean,val onShowSidebar:()->Unit)
+
+@Composable
+private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetworkHostActions,picker:NetworkCanvasPicker,
+    pane:NetworkPaneChrome?) {
     val controller=entry.controller;val currentReport=controller.report;val presentation=entry.presentation
     val controls=controller.filterRevision
     val observedControls=remember(entry) {longArrayOf(controls)}
@@ -60,82 +85,100 @@ private fun FileNetworkScreen(entry:FileNetworkWorkspace.Entry,actions:FileNetwo
     // Do not feed an undisplayed LOADING report into the stable-position builder either.
     val scene=held?.scene ?: remember(report,labels) {report?.let {entry.builder.build(it,labels)}}
     var localProblem by remember(entry) {mutableStateOf<BacklinkProblem?>(null)}
-    BackHandler {if(busy) actions.cancel(entry) else actions.close(entry)}
-    val dark=LocalPalette.current.isDark
-    XnotesTheme(monochromePalette(dark)) {
+    // In a Home pane, back goes through Home's own handler, which leaves the pane only for the focused Home.
+    if(pane==null) BackHandler {if(busy) actions.cancel(entry) else actions.close(entry)}
+    val title=stringResource(if(controller.browseMode==NetworkBrowseMode.LOCAL) R.string.network_title else R.string.network_library_title)
+    val frame:@Composable (@Composable ColumnScope.()->Unit)->Unit=if(pane==null) {body->
+        XnotesTheme(monochromePalette(LocalPalette.current.isDark)) {
+            Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
+                Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding(),content=body)
+            }
+        }
+    } else {body->
+        CompositionLocalProvider(LocalInkBusy provides false) {Column(Modifier.fillMaxSize().imePadding(),content=body)}
+    }
+    frame {
         SideEffect {
             if(observedControls[0]!=controls) {observedControls[0]=controls;presentation.invalidateInput()}
             scene?.let(presentation::reconcile);if(!busy) openingVisual=null
         }
-        Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
-                    MapButton(R.string.map_close) {actions.close(entry)}
-                    Text(stringResource(if(controller.browseMode==NetworkBrowseMode.LOCAL) R.string.network_title else R.string.network_library_title),
-                        fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
-                    NetworkScopeControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
-                    NetworkToCanvasFlow(entry,scene,enabled=!busy && !controller.loading && !controller.filtering,picker=picker,
-                        openCanvas=actions.openCanvas)
-                    NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
-                    if(controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
-                        if(controller.collapseAll(controls)) presentation.invalidateInput()
-                    }
-                    MapButton(R.string.network_refresh,enabled=!busy && !controller.loading && !controller.filtering) {localProblem=null;controller.refresh()}
-                    MapButton(R.string.network_fit,enabled=presentation.idle && !busy && scene!=null) {presentation.requestFit()}
-                    if(controller.loading || controller.filtering) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
-                    if(busy) MapButton(R.string.cancel) {actions.cancel(entry)}
+        if(pane!=null) Row(Modifier.fillMaxWidth().heightIn(min=HomeToolHeaderHeight),verticalAlignment=Alignment.CenterVertically) {
+            if(!pane.sidebarOpen) Tooltip(stringResource(R.string.show_sidebar)) {
+                IconButton(onClick=pane.onShowSidebar) {
+                    Icon(XnotesIcons.menu,stringResource(R.string.show_sidebar),tint=LocalPalette.current.text.toComposeColor(),modifier=Modifier.size(Space.s24))
                 }
-                Text(when(controller.browseMode) {
-                    NetworkBrowseMode.LOCAL->entry.query.title
-                    NetworkBrowseMode.FILES->stringResource(R.string.network_scope_centres,controller.centreFiles.size)
-                    NetworkBrowseMode.LIBRARY->stringResource(R.string.network_scope_inventory)
-                },Modifier.padding(horizontal=Space.s12),fontSize=TextSize.body,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
-                Text(stringResource(R.string.network_semantics),Modifier.padding(Space.s12),fontSize=TextSize.caption)
-                HorizontalDivider()
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    val canvas:@Composable (Modifier)->Unit={modifier->
-                        scene?.let {LocalNetworkCanvas(it,presentation,true,modifier)} ?: Box(modifier)
+            }
+            Text(title,color=LocalPalette.current.text.toComposeColor(),fontWeight=FontWeight.Bold,
+                fontSize=TextSize.headline,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
+            MapButton(R.string.map_close) {actions.close(entry)}
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).then(if(pane==null) Modifier.padding(horizontal=Space.s8) else Modifier),
+            verticalAlignment=Alignment.CenterVertically) {
+            if(pane==null) {
+                MapButton(R.string.map_close) {actions.close(entry)}
+                Text(title,fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
+            }
+            NetworkScopeControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
+            NetworkToCanvasFlow(entry,scene,enabled=!busy && !controller.loading && !controller.filtering,picker=picker,
+                openCanvas=actions.openCanvas)
+            NetworkFilterControls(entry,enabled=!busy && !controller.loading && !controller.filtering)
+            if(controller.browseMode!=NetworkBrowseMode.LIBRARY) MapButton(R.string.network_direct_only,enabled=!busy && !controller.loading && !controller.filtering && controller.expandedFiles.isNotEmpty()) {
+                if(controller.collapseAll(controls)) presentation.invalidateInput()
+            }
+            MapButton(R.string.network_refresh,enabled=!busy && !controller.loading && !controller.filtering) {localProblem=null;controller.refresh()}
+            MapButton(R.string.network_fit,enabled=presentation.idle && !busy && scene!=null) {presentation.requestFit()}
+            if(controller.loading || controller.filtering) MapButton(R.string.graph_backlinks_cancel_query) {controller.cancel()}
+            if(busy) MapButton(R.string.cancel) {actions.cancel(entry)}
+        }
+        Text(when(controller.browseMode) {
+            NetworkBrowseMode.LOCAL->entry.query.title
+            NetworkBrowseMode.FILES->stringResource(R.string.network_scope_centres,controller.centreFiles.size)
+            NetworkBrowseMode.LIBRARY->stringResource(R.string.network_scope_inventory)
+        },Modifier.padding(horizontal=Space.s12),fontSize=TextSize.body,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
+        Text(stringResource(R.string.network_semantics),Modifier.padding(Space.s12),fontSize=TextSize.caption)
+        HorizontalDivider()
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val canvas:@Composable (Modifier)->Unit={modifier->
+                scene?.let {LocalNetworkCanvas(it,presentation,true,modifier)} ?: Box(modifier)
+            }
+            val details:@Composable (Modifier)->Unit={modifier->NetworkDetails(entry,report,modifier,controls,
+                enabled=!busy && !controller.loading && !controller.filtering && presentation.idle && presentation.cameraReady,
+                open={anchor,target->
+                    // Acquiring a stored map creates a live LOADING actor. Hold only the visible
+                    // diagram; the controller and final source proofs continue checking live data.
+                    openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
+                    if(actions.open(entry,anchor,target)) localProblem=null
+                    else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
+                },openRelation={row->
+                    openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
+                    if(actions.openRelation(entry,row)) localProblem=null
+                    else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
+                })}
+            if(maxWidth>=LayerSidebarWidth*2) Row(Modifier.fillMaxSize()) {
+                canvas(Modifier.weight(1f).fillMaxHeight())
+                details(Modifier.width(LayerSidebarWidth).fillMaxHeight())
+            } else Column(Modifier.fillMaxSize()) {
+                canvas(Modifier.weight(1f).fillMaxWidth())
+                details(Modifier.fillMaxWidth().heightIn(max=MindMapNodeListHeight))
+            }
+            // Progress and errors must not resize the canvas and retire an in-flight input proof.
+            val problem=actions.feedback(entry) ?: localProblem ?: controller.problem
+            if(currentReport!=null || controller.loading || controller.filtering || busy || problem!=null) Surface(
+                Modifier.align(Alignment.TopStart).padding(Space.s8),color=LocalPalette.current.panel.toComposeColor()) {
+                Column(Modifier.padding(Space.s8)) {
+                    currentReport?.let {data->
+                        Text(stringResource(R.string.network_counts,data.files.size,data.concepts.size,data.checkedMaps),fontSize=TextSize.caption)
+                        if(data.fileRelations.isNotEmpty()) Text(stringResource(R.string.file_relation_count,data.fileRelations.size),fontSize=TextSize.caption)
+                        if(data.filterActive && data.filteredFileRelations>0)
+                            Text(stringResource(R.string.file_relation_filter_summary,data.filteredFileRelations),fontSize=TextSize.caption)
+                        if(!data.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
+                        if(data.limited) Text(stringResource(R.string.graph_backlinks_problem_limit),fontSize=TextSize.body)
+                        if(data.filterActive) Text(stringResource(R.string.network_filter_summary,data.filteredConcepts),fontSize=TextSize.caption)
+                        if(data.unknownFilterFiles.isNotEmpty()) Text(stringResource(R.string.network_filter_unknown,data.unknownFilterFiles.size),fontSize=TextSize.caption)
                     }
-                    val details:@Composable (Modifier)->Unit={modifier->NetworkDetails(entry,report,modifier,controls,
-                        enabled=!busy && !controller.loading && !controller.filtering && presentation.idle && presentation.cameraReady,
-                        open={anchor,target->
-                            // Acquiring a stored map creates a live LOADING actor. Hold only the visible
-                            // diagram; the controller and final source proofs continue checking live data.
-                            openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
-                            if(actions.open(entry,anchor,target)) localProblem=null
-                            else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
-                        },openRelation={row->
-                            openingVisual=if(report!=null && scene!=null) NetworkOpeningVisual(report,scene) else null
-                            if(actions.openRelation(entry,row)) localProblem=null
-                            else {openingVisual=null;localProblem=BacklinkProblem.CHANGED}
-                        })}
-                    if(maxWidth>=LayerSidebarWidth*2) Row(Modifier.fillMaxSize()) {
-                        canvas(Modifier.weight(1f).fillMaxHeight())
-                        details(Modifier.width(LayerSidebarWidth).fillMaxHeight())
-                    } else Column(Modifier.fillMaxSize()) {
-                        canvas(Modifier.weight(1f).fillMaxWidth())
-                        details(Modifier.fillMaxWidth().heightIn(max=MindMapNodeListHeight))
-                    }
-                    // Progress and errors must not resize the canvas and retire an in-flight input proof.
-                    val problem=actions.feedback(entry) ?: localProblem ?: controller.problem
-                    if(currentReport!=null || controller.loading || controller.filtering || busy || problem!=null) Surface(
-                        Modifier.align(Alignment.TopStart).padding(Space.s8),color=LocalPalette.current.panel.toComposeColor()) {
-                        Column(Modifier.padding(Space.s8)) {
-                            currentReport?.let {data->
-                                Text(stringResource(R.string.network_counts,data.files.size,data.concepts.size,data.checkedMaps),fontSize=TextSize.caption)
-                                if(data.fileRelations.isNotEmpty()) Text(stringResource(R.string.file_relation_count,data.fileRelations.size),fontSize=TextSize.caption)
-                                if(data.filterActive && data.filteredFileRelations>0)
-                                    Text(stringResource(R.string.file_relation_filter_summary,data.filteredFileRelations),fontSize=TextSize.caption)
-                                if(!data.complete) Text(stringResource(R.string.graph_backlinks_partial),fontSize=TextSize.body)
-                                if(data.limited) Text(stringResource(R.string.graph_backlinks_problem_limit),fontSize=TextSize.body)
-                                if(data.filterActive) Text(stringResource(R.string.network_filter_summary,data.filteredConcepts),fontSize=TextSize.caption)
-                                if(data.unknownFilterFiles.isNotEmpty()) Text(stringResource(R.string.network_filter_unknown,data.unknownFilterFiles.size),fontSize=TextSize.caption)
-                            }
-                            if(controller.filtering) Text(stringResource(R.string.network_filter_checking),fontSize=TextSize.body)
-                            if(controller.loading || busy) Text(stringResource(if(busy) R.string.network_opening_snapshot else R.string.graph_backlinks_loading),fontSize=TextSize.body)
-                            problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.body)}
-                        }
-                    }
+                    if(controller.filtering) Text(stringResource(R.string.network_filter_checking),fontSize=TextSize.body)
+                    if(controller.loading || busy) Text(stringResource(if(busy) R.string.network_opening_snapshot else R.string.graph_backlinks_loading),fontSize=TextSize.body)
+                    problem?.let {Text(stringResource(networkProblemText(it)),fontSize=TextSize.body)}
                 }
             }
         }

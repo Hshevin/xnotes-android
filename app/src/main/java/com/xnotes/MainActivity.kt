@@ -615,7 +615,7 @@ private fun EditorScreen(
         maps.clearFailure()
     }}
     val recoveryPreview=remember(editor) {com.xnotes.ui.RecoveryPreviewController(context.applicationContext)}
-    if(!graphicsVisible) com.xnotes.ui.RecoveryPreviewHost(recoveryPreview)
+    DisposableEffect(recoveryPreview) {onDispose {recoveryPreview.dispose()}}
     val snackbar = remember { SnackbarHostState() }
     // The LaTeX renderer resolves its fonts through the composition, so this is the
     // only place it can be built; the flow reaches it through MathRendering after.
@@ -1676,15 +1676,51 @@ private fun EditorScreen(
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
-    var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
-    // The Home (main menu, or one pane's Home) whose sidebar shows the library pane, like AI.
-    var originalLibraryOwner by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
-    fun originalLibraryHome(target:Editor?)=target?.pane?.name ?: "main"
-    // Opening a note over the main menu covers its Home; the library never stays open unseen.
-    val originalLibraryCovered=originalLibraryOwner=="main" && !mainMenu && (editor.noteOpen || editor.canvasOpen)
-    LaunchedEffect(originalLibrary.visible,originalLibraryCovered,originals.current) {
-        if(originalLibrary.visible && originalLibraryCovered && originals.current==null) originalLibrary.close()
+    // Sidebar tools — the original library, the file network and recovery material — show as a pane of the Home
+    // (main menu, or one pane's Home) that opened them, like AI. One table decides where each shows and how it is
+    // released; each tool's own model keeps its request, lease and picker rules.
+    val homeTools=androidx.compose.runtime.saveable.rememberSaveable(saver=com.xnotes.ui.HomeToolOwners.Saver) {com.xnotes.ui.HomeToolOwners()}
+    val homeToolOrder=remember {listOf(com.xnotes.ui.BackstageView.ORIGINALS,com.xnotes.ui.BackstageView.NETWORK,com.xnotes.ui.BackstageView.RECOVERY)}
+    fun homeShown(home:String)=if(home==com.xnotes.ui.HomeToolOwners.MAIN)
+        mainMenu || mixedLayout==null && paneHomes.isEmpty() && !editor.noteOpen && !editor.canvasOpen
+        else !mainMenu && paneHomes.keys.any {it.name==home}
+    // A network explored from a native page has no Home and keeps its own full-screen host.
+    fun homeNetwork()=networks.current?.takeIf {!it.query.hasLocalFocus}
+    fun toolVisible(tool:com.xnotes.ui.BackstageView)=when(tool) {
+        com.xnotes.ui.BackstageView.ORIGINALS->originalLibrary.visible
+        com.xnotes.ui.BackstageView.NETWORK->networks.visible && homeNetwork()!=null
+        com.xnotes.ui.BackstageView.RECOVERY->recoveryPreview.state!=null
+        else->false
     }
+    fun toolAt(target:Editor?):com.xnotes.ui.BackstageView? {
+        val home=com.xnotes.ui.HomeToolOwners.key(target)
+        return if(!homeShown(home)) null else homeToolOrder.firstOrNull {toolVisible(it) && homeTools.owner(it)==home}
+    }
+    fun closeNetwork(entry:com.xnotes.mindmap.FileNetworkWorkspace.Entry) {
+        backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner)
+        networkCoordinator.close(entry)
+    }
+    // Leaving a tool's pane releases the tool; one handed to the read-only reader or a map is no longer visible
+    // here and stays for the return.
+    fun releaseTool(tool:com.xnotes.ui.BackstageView) {when(tool) {
+        com.xnotes.ui.BackstageView.ORIGINALS->if(originalLibrary.visible && originals.current==null) originalLibrary.close()
+        com.xnotes.ui.BackstageView.NETWORK->homeNetwork()?.takeIf {networks.visible}?.let(::closeNetwork)
+        com.xnotes.ui.BackstageView.RECOVERY->recoveryPreview.closePreview()
+        else->Unit
+    }}
+    // Opening a note over the main menu covers its Home: the library and recovery never stay open unseen. A Home
+    // network instead falls back to its full-screen host, since returning from a source page may land there.
+    val coveredTools=listOf(com.xnotes.ui.BackstageView.ORIGINALS,com.xnotes.ui.BackstageView.RECOVERY).filter {tool->
+        toolVisible(tool) && homeTools.owner(tool)?.let {!homeShown(it)}==true
+    }
+    LaunchedEffect(coveredTools) {coveredTools.forEach(::releaseTool)}
+    val networkHome=homeTools.owner(com.xnotes.ui.BackstageView.NETWORK)?.takeIf {homeNetwork()!=null}
+    // While the owning Home's release is still parking, show neither the pane nor the full-screen fallback.
+    val networkEmbedded=networkHome!=null && (homeShown(networkHome) || networkCoordinator.busy)
+    LaunchedEffect(networks.current) {
+        if(networks.current==null) homeTools.forget(com.xnotes.ui.BackstageView.NETWORK)
+    }
+    var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
     fun openOriginalLibrary(target:Editor?) {
         com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)?.let {
             editor.message=context.getString(it);return
@@ -1692,7 +1728,7 @@ private fun EditorScreen(
         if(originalLibraryLaunch!=null || originalLibrary.visible || originals.current!=null || maps.visible || networks.visible) return
         coldPresentation?.retireIntent()
         val launch=Any();originalLibraryLaunch=launch
-        originalLibraryOwner=originalLibraryHome(target)
+        homeTools.claim(com.xnotes.ui.BackstageView.ORIGINALS,target)
         val current=captureMapHost()
         scope.launch {
             try {
@@ -2103,6 +2139,8 @@ private fun EditorScreen(
             return true
         } finally {gate?.close()}
     }
+    // Above the read-only reader too, so the recovery destination picker never loses a pending result.
+    com.xnotes.ui.RecoveryPreviewPickerHost(recoveryPreview) {
     com.xnotes.mindmap.OriginalPdfWorkspaceHost(originals,onClose={originalNavigator.close()}) {
     val openLibraryOriginal:(com.xnotes.storage.OriginalPdfCatalog.Observation,()->Boolean)->Boolean={observation,current->
         val record=observation.record
@@ -2110,6 +2148,8 @@ private fun EditorScreen(
             pageId=record.pages.first(),originalPdf=com.xnotes.mindmap.PdfOriginalProjection(record.sha256,0))
         originalNavigator.openLibrary(target,current)
     }
+    // Recovery opened outside any Home (the cold-start problem bar) keeps its dialog.
+    if(!graphicsVisible && homeTools.owner(com.xnotes.ui.BackstageView.RECOVERY)==null) com.xnotes.ui.RecoveryPreviewDialog(recoveryPreview)
     com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary) {
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->scope.launch {closeMapEntry(entry)}},hooks={entry->
         val back=networks.returnEntry(entry)
@@ -2141,7 +2181,7 @@ private fun EditorScreen(
                 }
                 guarded!=null && backlinkNavigator.openNetwork(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
             }
-        },close={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.close(entry)},
+        },close={entry->closeNetwork(entry)},
         busy={backlinkNavigator.busy || fileRelationNavigator.busy || networkCoordinator.busy},
         cancel={entry->backlinkNavigator.cancelNetwork(entry.controller.requestOwner);fileRelationNavigator.cancel(entry.controller.requestOwner);networkCoordinator.cancel(entry)},
         feedback={entry->backlinkNavigator.failureForNetwork(entry.controller.requestOwner)
@@ -2156,7 +2196,7 @@ private fun EditorScreen(
                 }
                 guarded!=null && fileRelationNavigator.open(guarded) {map->networks.parkForMap(mapBinding,entry,map)}
             }
-        })) {
+        }),embedded=networkEmbedded) {
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     var coldActionBusy by remember {mutableStateOf(false)}
     Scaffold(
@@ -2167,18 +2207,18 @@ private fun EditorScreen(
                     onRetry={scope.launch {
                         coldActionBusy=true
                         try {coldPresentation?.bootstrap(retry=true)} finally {coldActionBusy=false}
-                    }},onRecovery={recoveryPreview.open(editor)},onReset={scope.launch {
+                    }},onRecovery={homeTools.forget(com.xnotes.ui.BackstageView.RECOVERY);recoveryPreview.open(editor)},onReset={scope.launch {
                         coldActionBusy=true
                         try {if(coldPresentation?.resetLayout()!=true) editor.message=context.getString(R.string.last_presentation_reset_failed)}
                         finally {coldActionBusy=false}
                     }})
             }
-            if(maps.current?.sourceReturn!=null || networks.current!=null || libraryNetworkLaunch?.let {
+            if(maps.current?.sourceReturn!=null || networks.current!=null && !networks.visible || libraryNetworkLaunch?.let {
             networkCoordinator.canCancel(it) || networkCoordinator.failureFor(it)!=null
         }==true) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
-                val network=networks.current
+                val network=networks.current?.takeIf {!networks.visible}
                 val libraryLaunch=libraryNetworkLaunch
                 val issue=sourceNavigator.failure
                 val networkIssue=libraryLaunch?.let {networkCoordinator.failureFor(it)} ?: network?.let {networkCoordinator.failureFor(it)}
@@ -2210,15 +2250,15 @@ private fun EditorScreen(
             // BASE LAYER: backstage is the root of the stack — always present underneath.
             val home: @Composable (Editor?) -> Unit = { target ->
                 androidx.compose.runtime.key(target?.pane) {
-                val libraryHere=originalLibrary.visible && originalLibraryOwner==originalLibraryHome(target)
+                val tool=toolAt(target)
                 com.xnotes.ui.Backstage(
                 editor = target ?: editor,
-                view = if (libraryHere) com.xnotes.ui.BackstageView.ORIGINALS
-                    else if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
+                view = tool ?: if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
                 onSelectView = {
-                    // Leaving the library pane for any other Home view releases the library itself.
-                    if (libraryHere && it != com.xnotes.ui.BackstageView.ORIGINALS) originalLibrary.close()
-                    if (it == com.xnotes.ui.BackstageView.ORIGINALS) Unit
+                    // Leaving a tool's pane for any other Home view releases the tool itself; the view picked
+                    // shows once it has gone (a network first parks the host again).
+                    if (tool != null && it != tool) releaseTool(tool)
+                    if (it.tool) Unit
                     else if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it)
                 },
                 allowSplits = target == null,
@@ -2226,28 +2266,36 @@ private fun EditorScreen(
                 allowNativePairs = true,
                 canRestoreSplit = recentState.loaded && recentState.read is com.xnotes.ui.SplitArrangementRead.Ready,
                 initialDocument = target?.let { paneHomes[it.pane] },
-                onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
+                onPreviewRecovery = {
+                    homeTools.claim(com.xnotes.ui.BackstageView.RECOVERY,target)
+                    recoveryPreview.open(target ?: editor)
+                },
                 onOpenOriginalPdfs = { openOriginalLibrary(target) },
-                originalPdfsPane = if (!libraryHere) null else { sidebarOpen, showSidebar ->
-                    // A Home removed under the library (its pane closed) releases it; the read-only reader
-                    // replacing Home, or an Activity rebuild, keeps it for the return.
-                    DisposableEffect(Unit) {
-                        onDispose {
-                            if (originalLibrary.visible && originals.current == null &&
-                                (context as? android.app.Activity)?.isChangingConfigurations != true) originalLibrary.close()
+                toolPane = tool?.let { shown -> { sidebarOpen, showSidebar ->
+                    androidx.compose.runtime.key(shown) {
+                        // A Home removed or covered under its pane releases the tool; the read-only reader or a
+                        // map replacing Home, or an Activity rebuild, keeps it for the return.
+                        com.xnotes.ui.HomeToolLease { releaseTool(shown) }
+                        when (shown) {
+                            com.xnotes.ui.BackstageView.ORIGINALS ->
+                                com.xnotes.mindmap.OriginalPdfLibraryPane(originalLibrary, openLibraryOriginal, sidebarOpen, showSidebar)
+                            com.xnotes.ui.BackstageView.NETWORK -> com.xnotes.mindmap.FileNetworkPane(networks, sidebarOpen, showSidebar)
+                            else -> com.xnotes.ui.RecoveryPreviewPane(recoveryPreview, sidebarOpen, showSidebar)
                         }
                     }
-                    com.xnotes.mindmap.OriginalPdfLibraryPane(originalLibrary, openLibraryOriginal, sidebarOpen, showSidebar)
-                },
+                } },
                 onOpenNetwork = {
                     val issue=com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)
                     if(issue!=null) editor.message=context.getString(issue)
                     else if(!networkCoordinator.busy) {
+                        // Only one graphical tool shows at a time: the library leaves its Home pane first.
+                        if(originalLibrary.visible && originals.current==null) originalLibrary.close()
                         val request=com.xnotes.mindmap.LibraryNetworkLaunchRequest.capture(
                             context.getString(R.string.network_library_title),editor.workspaceRoots(),captureMapHost())
                         libraryNetworkLaunch=request
                         if(request==null || !networkCoordinator.openLibrary(request))
                             editor.message=context.getString(com.xnotes.mindmap.networkProblemText(com.xnotes.mindmap.BacklinkProblem.CHANGED))
+                        else homeTools.claim(com.xnotes.ui.BackstageView.NETWORK,target)
                     }
                 },
                 backEnabled = target == null || (maps.splitPresentation.layout?.focusedPane ?: homeFocus) == target.pane,
@@ -2559,6 +2607,7 @@ private fun EditorScreen(
             } }
 
         }
+    }
     }
     }
     }

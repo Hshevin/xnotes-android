@@ -166,7 +166,10 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, ORIGINALS }
+enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, ORIGINALS, NETWORK, RECOVERY;
+    /** A sidebar tool whose pane belongs to a host-owned presentation: the host decides when it shows and releases it. */
+    val tool: Boolean get() = this == ORIGINALS || this == NETWORK || this == RECOVERY
+}
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
 private enum class CreateMode { NONE, FILE, CANVAS, MIND_MAP, FOLDER }
@@ -240,8 +243,8 @@ fun Backstage(
     onOpenNetwork: (() -> Unit)? = null,
     /** Retained PDF originals have independent identities and a read-only reader. */
     onOpenOriginalPdfs: (() -> Unit)? = null,
-    /** The original library's pane, shown beside the sidebar for [BackstageView.ORIGINALS]; null falls back to Home. */
-    originalPdfsPane: (@Composable (sidebarOpen: Boolean, onShowSidebar: () -> Unit) -> Unit)? = null,
+    /** The host's pane for a tool view ([BackstageView.tool]), shown beside the sidebar; null falls back to Home. */
+    toolPane: (@Composable (sidebarOpen: Boolean, onShowSidebar: () -> Unit) -> Unit)? = null,
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -268,7 +271,7 @@ fun Backstage(
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
-        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs, originalPdfsPane)
+        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs, toolPane)
     }
 }
 
@@ -309,7 +312,7 @@ private fun BackstageContent(
     onPreviewRecovery: () -> Unit,
     onOpenNetwork: (() -> Unit)?,
     onOpenOriginalPdfs: (() -> Unit)?,
-    originalPdfsPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
+    toolPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
 ) {
     val palette = LocalPalette.current
     var createMode by remember { mutableStateOf(CreateMode.NONE) }
@@ -327,6 +330,11 @@ private fun BackstageContent(
         onSelectView(v)
         animateClose = false
         drawerOpen = false
+    }
+    val openTool: (BackstageView, () -> Unit) -> Unit = { tool, open ->
+        if (view != tool && view.tool) selectView(BackstageView.HOME)
+        animateClose = false; drawerOpen = false
+        if (view != tool) open()
     }
     // A sidebar pick the explorer has yet to act on, and the folder or colour filter it is showing.
     var explorerNav by remember { mutableStateOf<ExplorerNav?>(null) }
@@ -404,10 +412,11 @@ private fun BackstageContent(
             onForgetColor = { c -> scope.launch { withContext(Dispatchers.IO) { editor.setColorName(c, null) } } },
             onOpenPin = { selectView(BackstageView.HOME); explorerNav = ExplorerNav(it.uri) },
             onUnpin = { editor.unpinFolder(it.uri) },
-            // The library pane is left first, so its host releases it before another presentation starts.
-            onPreviewRecovery = { if (view == BackstageView.ORIGINALS) selectView(BackstageView.HOME); animateClose=false;drawerOpen=false;onPreviewRecovery() },
-            onOpenNetwork = onOpenNetwork?.let {open->{if (view == BackstageView.ORIGINALS) selectView(BackstageView.HOME); animateClose=false;drawerOpen=false;open()}},
-            onOpenOriginalPdfs = onOpenOriginalPdfs?.let {open->{animateClose=false;drawerOpen=false;open()}},
+            // Another tool's pane is left first, so its host releases it before this presentation starts;
+            // picking the tool already shown only closes the drawer.
+            onPreviewRecovery = { openTool(BackstageView.RECOVERY, onPreviewRecovery) },
+            onOpenNetwork = onOpenNetwork?.let {open->{openTool(BackstageView.NETWORK, open)}},
+            onOpenOriginalPdfs = onOpenOriginalPdfs?.let {open->{openTool(BackstageView.ORIGINALS, open)}},
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -433,7 +442,7 @@ private fun BackstageContent(
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
-                originalPdfsPane,
+                toolPane,
             )
             AnimatedVisibility(
                 visible = drawerOpen,
@@ -467,7 +476,7 @@ private fun BackstageContent(
                 },
                 editor, view, compact, true, { setRailed(false) }, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
-                originalPdfsPane,
+                toolPane,
             )
             // Both stay composed so a fold never pays to build one; only the current one is measured and placed.
             Layout(
@@ -556,10 +565,10 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 Command(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-                nav.onOpenNetwork?.let {open->Command(XnotesIcons.map, stringResource(R.string.network_library_title), onClick=open)}
+                nav.onOpenNetwork?.let {open->Command(XnotesIcons.map, stringResource(R.string.network_library_title), selected = nav.view == BackstageView.NETWORK, onClick=open)}
                 nav.onOpenOriginalPdfs?.let {open->Command(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), selected = nav.view == BackstageView.ORIGINALS, onClick=open)}
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-                Command(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
+                Command(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.colors.isNotEmpty()) {
                     SidebarLabel(stringResource(R.string.toolbar_colours))
@@ -613,10 +622,10 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
             Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-                nav.onOpenNetwork?.let {open->RailItem(XnotesIcons.map, stringResource(R.string.network_library_title), onClick=open)}
+                nav.onOpenNetwork?.let {open->RailItem(XnotesIcons.map, stringResource(R.string.network_library_title), selected = nav.view == BackstageView.NETWORK, onClick=open)}
                 nav.onOpenOriginalPdfs?.let {open->RailItem(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), selected = nav.view == BackstageView.ORIGINALS, onClick=open)}
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-                RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials)) { nav.onPreviewRecovery() }
+                RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
                 nav.pins.forEachIndexed { i, pin ->
@@ -656,7 +665,7 @@ private fun BackstageMain(
     onBackup: (Boolean) -> Unit,
     link: ExplorerLink,
     onOpenPreferences: () -> Unit,
-    originalPdfsPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
+    toolPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
@@ -736,7 +745,7 @@ private fun BackstageMain(
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
-                BackstageView.ORIGINALS -> if (originalPdfsPane != null) originalPdfsPane(sidebarOpen, onShowSidebar)
+                BackstageView.ORIGINALS, BackstageView.NETWORK, BackstageView.RECOVERY -> if (toolPane != null) toolPane(sidebarOpen, onShowSidebar)
                     else HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
             }
         }
