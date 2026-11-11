@@ -1,6 +1,7 @@
 package com.xnotes.mindmap
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -57,6 +58,10 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                         }
                     }
                 }
+                // Keep the confirmation row fixed while ink properties remain reachable above the IME.
+                Column(Modifier.fillMaxWidth().weight(1f).then(
+                    if(current.kind == NodeKind.INK) Modifier.verticalScroll(rememberScrollState()) else Modifier
+                ), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
                 if (problem) Text(stringResource(problemLabel), fontSize = TextSize.body)
                 notice?.let {Text(it,fontSize=TextSize.body,maxLines=3,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}
                 if(current.fileCardId!=null) Text(stringResource(R.string.graph_file_card_notice),fontSize=TextSize.caption)
@@ -78,7 +83,7 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                     MapButton(R.string.map_larger,enabled=current.width<4096 && current.height<4096) {
                         commit(current.copy(width=(current.width*1.5).coerceAtMost(4096.0),height=(current.height*1.5).coerceAtMost(4096.0)))
                     }
-                    Spacer(Modifier.weight(1f))
+                }
                 }
             }
         }

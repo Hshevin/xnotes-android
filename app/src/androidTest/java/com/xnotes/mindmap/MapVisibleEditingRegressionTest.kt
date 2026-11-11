@@ -12,6 +12,8 @@ import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 /** Checks the actual Main host and pixels; existence of a sized AndroidView is insufficient. */
 class MapVisibleEditingRegressionTest {
@@ -56,7 +58,17 @@ class MapVisibleEditingRegressionTest {
                 views(activity.window.decorView).any { it is MindMapView && it.width > 0 && it.height > 0 } } }
             val graph = main { views(activity.window.decorView).filterIsInstance<MindMapView>().single() }
             test(activity, main { maps.current!!.session }, graph)
-        } finally { main { activity.finish() }; runner.waitForIdleSync() }
+        } finally {
+            val closing = main {
+                val maps = activity.mapWorkspace
+                maps?.current?.let { entry ->
+                    entry.session.textDraft?.let { entry.session.cancelTextDraft(it.token) }
+                    maps.close(entry)
+                }
+            }
+            if (closing != null) runBlocking { withTimeout(15000) { closing.join() } }
+            main { activity.finish() }; runner.waitForIdleSync()
+        }
         // Keep source files until host ownership has ended; test profile cleanup removes them.
     }
     @Test fun mainGraphBecomesInteractiveAndActuallyPaintsItsInitialNode() = scenario { _, _, graph ->
@@ -80,4 +92,47 @@ class MapVisibleEditingRegressionTest {
         } }
         assertEquals(main { session.selected }, main { session.textDraft!!.nodeId })
     }
+    @Test fun enlargedInkShowsItsBackButtonAboveThePadAndReturnsToInteractiveGraph() = scenario { activity, session, graph ->
+        await("initial canvas enabled") { main { graph.isEnabled } }
+        click(activity.getString(R.string.map_add_ink))
+        await("enlarged pad") { main { views(activity.window.decorView).any { it is InkPadView && it.height > 0 } } }
+        val padBounds = main { Rect().also { rect ->
+            assertTrue(views(activity.window.decorView).filterIsInstance<InkPadView>().single().getGlobalVisibleRect(rect))
+        } }
+        val backs = nodes(runner.uiAutomation.rootInActiveWindow).filter {
+            it.isVisibleToUser && (it.text?.toString() == activity.getString(R.string.map_close) ||
+                it.contentDescription?.toString() == activity.getString(R.string.map_close))
+        }
+        val back = backs.firstOrNull { n -> Rect().also(n::getBoundsInScreen).let { it.bottom <= padBounds.top } }
+        assertNotNull("Back must have visible bounds above the native ink pad", back)
+        val rect = Rect().also(requireNotNull(back)::getBoundsInScreen)
+        val shot = requireNotNull(runner.uiAutomation.takeScreenshot())
+        try {
+            val colours = hashSetOf<Int>()
+            for (y in rect.top until rect.bottom) for (x in rect.left until rect.right)
+                colours += shot.getPixel(x,y)
+            assertTrue("Back icon/text must be painted, not covered by a uniform pad background", colours.size > 2)
+        } finally { shot.recycle() }
+        click(activity.getString(R.string.map_close))
+        await("enlarged editor closed and graph interactive") { main {
+            views(activity.window.decorView).none { it is InkPadView } && graph.isEnabled
+        } }
+        assertEquals(1, main { session.document!!.nodes.count { it.kind == NodeKind.INK } })
+    }
+
+    @Test fun inkPadCannotPaintOutsideItsOwnBoundsOnAnUnclippedHostCanvas() = main {
+        val bitmap = android.graphics.Bitmap.createBitmap(240, 200, android.graphics.Bitmap.Config.ARGB_8888)
+        try {
+            val sentinel = android.graphics.Color.MAGENTA
+            bitmap.eraseColor(sentinel)
+            val canvas = android.graphics.Canvas(bitmap)
+            val pad = InkPadView(runner.targetContext)
+            pad.layout(0, 0, 100, 80)
+            canvas.save(); canvas.translate(50f, 60f); pad.draw(canvas); canvas.restore()
+            assertEquals("Drawing must preserve the toolbar area above the pad", sentinel, bitmap.getPixel(70, 30))
+            assertEquals("Drawing must preserve the neighboring pane", sentinel, bitmap.getPixel(190, 100))
+            assertNotEquals("The pad itself must still paint", sentinel, bitmap.getPixel(100, 100))
+        } finally { bitmap.recycle() }
+    }
+
 }

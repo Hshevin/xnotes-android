@@ -77,14 +77,14 @@ class MainMixedEntryPointsHostTest {
         val noteFile:File,val importFile:File,val savedFile:File?,val savedRequest:MixedSplitRequest?) {
         val ownedArrangements=mutableListOf<File>()
     }
-    private fun scenario(savedFixture:Boolean=false,typedFixture:Boolean=false,malformedFixture:Boolean=false,test:(Scene)->Unit) {
+    private fun scenario(savedFixture:Boolean=false,typedFixture:Boolean=false,malformedFixture:Boolean=false,appStorageFixture:Boolean=false,test:(Scene)->Unit) {
         val base=runner.targetContext
         val recovery=listOf("session","session-b").flatMap {slot->
             listOf("document.xnote","session.json","canvas.xcanvas","canvas-session.json").map {File(base.filesDir,"$slot/$it")}
         }
         assertTrue("Use an empty instrumentation profile; recovery is never replaced",recovery.none {it.exists()})
         val token=UUID.randomUUID().toString()
-        val folder=File(base.cacheDir,"mixed-entrypoints-$token").apply {mkdirs()}
+        val folder=File(if(appStorageFixture) com.xnotes.platform.AppStorageDocumentsProvider.rootDir(base) else base.cacheDir,"mixed-entrypoints-$token").apply {mkdirs()}
         val note=File(folder,"source.xnote")
         val model=Document(mutableListOf(Page(500.0,500.0))).apply {enableReferenceAnchors()}
         note.outputStream().use {DocumentCodec(AndroidImageCodec(),AndroidTextMeasurer()).write(model.fixedWriteSnapshot(),it)}
@@ -121,9 +121,17 @@ class MainMixedEntryPointsHostTest {
                     tree.filterIsInstance<ImageView>().none {it.drawable is AnimationDrawable}}}}
             val native=main {requireNotNull(host.documentEditor)};val maps=main {requireNotNull(host.mapWorkspace)}
             main {assertTrue(native.openPanes.isEmpty());assertNull(maps.current)}
+            val locations=if(appStorageFixture) runBlocking(Dispatchers.IO) {
+                // Exercise the real controlled creation and AppStorage provider used by the Home menu.
+                assertTrue(note.delete());assertTrue(map.delete())
+                val tree=com.xnotes.platform.AppStorageDocumentsProvider.treeUri(base).toString()
+                val parent="root/${folder.name}"
+                requireNotNull(native.createBlankNoteFile(tree,parent,"source")) to
+                    Uri.parse(requireNotNull(native.createBlankMindMapFile(tree,parent,"map")))
+            } else Uri.fromFile(note).toString() to Uri.fromFile(map)
             runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {
-                assertTrue(native.openSingleFromHome(Uri.fromFile(note).toString(),note.name))
-                assertTrue(maps.open(Uri.fromFile(map),"Map",flushNativeOnPresent=false,
+                assertTrue(native.openSingleFromHome(locations.first,note.name))
+                assertTrue(maps.open(locations.second,"Map",flushNativeOnPresent=false,
                     preparePresentation={native.awaitMapSourceParking()?.let {proof->({proof.current()})}}))
             }}}
             await("actual full Map") {main {maps.visible && !maps.opening && graph(host)?.width?.let {it>0}==true}}
@@ -277,7 +285,9 @@ class MainMixedEntryPointsHostTest {
         }
     }
 
-    @Test fun theActualSaveSplitButtonPublishesTypedNamedAndRecentWithoutChangingTools()=scenario {s->
+    @Test fun theActualSaveSplitButtonPublishesTypedNamedAndRecentWithoutChangingTools()=scenario { verifySavedSplit(it) }
+    @Test fun newlyCreatedAppStorageDocumentsSaveMixedArrangementThroughTheActualButton()=scenario(appStorageFixture=true) { verifySavedSplit(it) }
+    private fun verifySavedSplit(s:Scene) {
         val recent=File(runner.targetContext.filesDir,"saved-split.json")
         assertFalse("This fixture never replaces someone else's recent arrangement",recent.exists())
         val before=SplitArrangementStore(runner.targetContext.filesDir)
