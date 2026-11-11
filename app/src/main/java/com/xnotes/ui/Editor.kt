@@ -5839,12 +5839,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         stillCurrent:()->Boolean={true}):PreparedMixedNoteArrangementSave? {
         val root=sibling?.takeIf {it.secondary===this} ?: this
         if(root!==this) return root.prepareMixedNoteArrangementSave(nativePane,stillCurrent)
-        val target=if(nativePane==Pane.PRIMARY) this else secondary ?: return com.xnotes.mindmap.MixedSaveTrace.reject("note: no secondary pane")
+        val target=if(nativePane==Pane.PRIMARY) this else secondary ?: return null
         val owner=target.documentOwner;val doc=target.state.document
         if(!stillCurrent() || !target.noteOpen || target.canvasOpen || target.missingDocument!=null ||
-            !owner.noteOpen || owner.canvasOpen || owner.state.document!==doc || owner.incompleteNoteModel.get()===doc)
-            return com.xnotes.mindmap.MixedSaveTrace.reject("note: not an open complete note (current=${stillCurrent()} incomplete=${owner.incompleteNoteModel.get()===doc} missing=${target.missingDocument!=null})")
-        val path=doc.path ?: return com.xnotes.mindmap.MixedSaveTrace.reject("note: no path")
+            !owner.noteOpen || owner.canvasOpen || owner.state.document!==doc || owner.incompleteNoteModel.get()===doc) return null
+        val path=doc.path ?: return null
         val identity=doc.identity;val scope=doc.pageReferenceScope
         val slots=hostParkingSlots();val missing=slots.map {it.pane.missingDocument}
         val operation=Any();mixedNoteArrangementSaveRequest=operation
@@ -5854,7 +5853,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             slots.zip(missing).all {(slot,placeholder)->slot.pane.missingDocument===placeholder}
         fun requestCurrent()=mixedNoteArrangementSaveRequest===operation && stillCurrent() && actualOwnerCurrent() &&
             slots.none {it.pane.opening || it.pane.nativeOpenRequest!=null}
-        if(!requestCurrent()) return com.xnotes.mindmap.MixedSaveTrace.reject("note: request not current before write")
+        if(!requestCurrent()) return null
         val pending=owner.noteWriteJob
         val completed=kotlinx.coroutines.CompletableDeferred<Boolean>()
         var acceptedWrite=false
@@ -5866,30 +5865,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             try {
                 pending?.join();owner.canvasWriteJob?.join();owner.awaitSessionEncoders()
                 previousSettled=true
-                if(!requestCurrent()) {com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: request changed while earlier writes settled");return@launch}
+                if(!requestCurrent()) return@launch
                 // A cached path or clean bit is not a source baseline.
-                val initial=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: run {
-                    com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: no source observation (present=${owner.noteSourceObservation!=null})");return@launch}
+                val initial=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: return@launch
                 owner.pageReferenceProtection=PageReferenceProtection(doc,initial.version.locationKey)
                 owner.commitNoteTextForSave();owner.flowText.endSession()
-                if(!owner.awaitNoteCapture(doc) || !requestCurrent()) {com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: capture or request changed");return@launch}
-                val base=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: run {com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: source observation lost");return@launch}
+                if(!owner.awaitNoteCapture(doc) || !requestCurrent()) return@launch
+                val base=owner.noteSourceObservation?.takeIf {it.sameOrigin(owner)} ?: return@launch
                 if(doc.dirty) {
                     val snapshot=doc.fixedWriteSnapshot();val revision=doc.bodyRevision
                     doc.dirty=false;owner.dirty=false;restoreDirty=true
                     // The owner's accepted write outlives a cancelled arrangement request.
                     acceptedWrite=true
-                    val version=withContext(Dispatchers.IO) {owner.writeNoteSafely(path,snapshot,base.version)} ?: run {com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: write failed");return@launch}
+                    val version=withContext(Dispatchers.IO) {owner.writeNoteSafely(path,snapshot,base.version)} ?: return@launch
                     restoreDirty=false
-                    if(!actualOwnerCurrent() || owner.noteSourceObservation!==base) {com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: owner changed after write");return@launch}
+                    if(!actualOwnerCurrent() || owner.noteSourceObservation!==base) return@launch
                     doc.dirty=doc.dirty || doc.bodyRevision!=revision;owner.dirty=doc.dirty
                     owner.observePublishedNote(doc,version,revision)
                     owner.invalidateThumb(path);owner.requestWorkingSession()
                 }
                 success=requestCurrent() && owner.noteSourceObservation?.matches(owner)==true && !owner.noteTransactionsPending(doc)
-                if(!success) com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: after write request=${requestCurrent()} matches=${owner.noteSourceObservation?.matches(owner)==true} pending=${owner.noteTransactionsPending(doc)}")
             } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
-            catch(error:Exception) {success=false;com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("note: exception ${error::class.java.simpleName}")}
+            catch(_:Exception) {success=false}
             finally {
                 if(restoreDirty) {doc.dirty=true;if(owner.state.document===doc) owner.dirty=true}
                 owner.endPageReferenceSave(doc);owner.contentTransactionChanged();completed.complete(success)
@@ -5899,16 +5896,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         job.invokeOnCompletion {if(!completed.isCompleted) completed.complete(false)}
         try {
             job.join()
-            if(!completed.await() || !requestCurrent()) return com.xnotes.mindmap.MixedSaveTrace.reject("note: write stage not current")
+            if(!completed.await() || !requestCurrent()) return null
             // The write's Main notification may have just registered its own recovery encoder.
             afterInputDispatch()
             for(slot in slots) {slot.pane.noteWriteJob?.join();slot.pane.canvasWriteJob?.join();slot.pane.awaitSessionEncoders()}
-            if(!requestCurrent()) return com.xnotes.mindmap.MixedSaveTrace.reject("note: request changed after encoders")
-            val parking=awaitMapSourceParking() ?: return com.xnotes.mindmap.MixedSaveTrace.reject("note: host parking refused")
-            val published=owner.noteSourceObservation?.takeIf {it.matches(owner)} ?: return com.xnotes.mindmap.MixedSaveTrace.reject("note: published observation does not match")
+            if(!requestCurrent()) return null
+            val parking=awaitMapSourceParking() ?: return null
+            val published=owner.noteSourceObservation?.takeIf {it.matches(owner)} ?: return null
             val position=target.readingPositionForPersistence()
             fun current()=requestCurrent() && parking.current() && owner.noteSourceObservation===published && published.matches(owner)
-            if(!current()) return com.xnotes.mindmap.MixedSaveTrace.reject("note: not current after parking (request=${requestCurrent()} parking=${parking.current()})")
+            if(!current()) return null
             return PreparedMixedNoteArrangementSave(nativePane,
                 SplitSourceRef(doc.identity.documentId,path,doc.displayName),position,published.version,::current,verify={
                     if(!current()) null else try {
