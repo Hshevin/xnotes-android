@@ -50,6 +50,6 @@ test8 仍报无法保存，`xnotes.split` 明确停在 `source saves or proofs`�
 
 ## 本阶段源码验证
 
-- 集成后的 `InkPadDrawingRegressionTest` 2 项、`OriginalPdfLibraryHostTest` 2 项、`ColdMainPresentationHostTest` 8 项，共 12 项通过，无失败/错误/跳过。
+- 集成后的 `mindmap.InkPadDrawingRegressionTest` 2 项通过；核对 XML 后修正另外两类测试的包名过滤器，单独运行 `pen.OriginalPdfLibraryHostTest` 2 项与 `pen.ColdMainPresentationHostTest` 8 项，均通过。合计 12 项，无失败/错误/跳过。
 - 主程序及 Android 测试源码编译通过，包含新增手写打开/同级节点和原件库面板切换用例。未生成新 APK，因此这些新增 Android 用例未执行，原件库新布局与绘制修复的实际画面尚未验收。
 - 模拟器显示尺寸和 density 已恢复默认并关闭；原 test8 测试数据保留。
