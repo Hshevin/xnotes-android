@@ -1,0 +1,4 @@
+master-test8 identity/signature/ARM64/flags/alignment PASS
+master-test9 identity/signature/ARM64/flags/alignment PASS
+{'tests': 4802, 'failures': 0, 'errors': 0, 'skipped': 0}
+57137536 80636b878cc1df3c439836179a440c35390a64b3737f4227d0dbb22b8b8b583e
