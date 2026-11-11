@@ -29,6 +29,8 @@ import com.xnotes.storage.RecoveryCopyResult
 import com.xnotes.ui.theme.MinTouchTarget
 import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
+import com.xnotes.ui.theme.HomeToolHeaderHeight
+import com.xnotes.ui.theme.toComposeColor
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
@@ -261,8 +263,43 @@ internal class RecoveryPreviewController(context:Context) {
 /** Pending registration is saved independently of the preview's non-restorable publication owner. */
 @Composable
 internal fun RecoveryPreviewHost(controller:RecoveryPreviewController) {
+    val saved=rememberRecoveryPicker(controller)
+    DisposableEffect(controller) {onDispose {controller.dispose()}}
+    RecoveryDialog(controller,saved)
+}
+
+/** The preview as a dialog for a request with no Home pane to show it, under [RecoveryPreviewPickerHost]. */
+@Composable
+internal fun RecoveryPreviewDialog(controller:RecoveryPreviewController) {
+    RecoveryDialog(controller,LocalRecoveryPickerState.current ?: return)
+}
+
+@Composable
+private fun RecoveryDialog(controller:RecoveryPreviewController,saved:DestinationPickerState) {
+    val state=controller.state ?: return
+    val actions=controller.actions() ?: return
+    AlertDialog(onDismissRequest=actions::closePreview,title={Text(stringResource(R.string.recovery_materials),fontSize=TextSize.heading)},text={
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(Space.s12)) {
+            RecoveryPreviewBody(controller,state,actions,saved)
+        }
+    },confirmButton={RecoveryButton(R.string.close_preview){actions.closePreview()}})
+}
+
+private val LocalRecoveryPickerState=compositionLocalOf<DestinationPickerState?> {null}
+
+/**
+ * Keeps the destination picker registered above Home, so a Home pane rebuild or a graphical presentation never
+ * drops a pending result; the host disposes [controller] itself. [content] may show [RecoveryPreviewPane].
+ */
+@Composable
+internal fun RecoveryPreviewPickerHost(controller:RecoveryPreviewController,content:@Composable ()->Unit) {
+    val saved=rememberRecoveryPicker(controller)
+    CompositionLocalProvider(LocalRecoveryPickerState provides saved,content=content)
+}
+
+@Composable
+private fun rememberRecoveryPicker(controller:RecoveryPreviewController):DestinationPickerState {
     val picker=rememberNativeDestinationPicker()
-    val saved=picker.saved
     DisposableEffect(controller,picker) {
         controller.attachPicker {request->
             val owner="${controller.pickerNamespace}:${request.id}"
@@ -276,52 +313,78 @@ internal fun RecoveryPreviewHost(controller:RecoveryPreviewController) {
             }
             check(launched) {"A destination is still outstanding or unavailable"}
         }
-        onDispose {controller.detachPicker();controller.dispose()}
+        onDispose {controller.detachPicker()}
     }
+    return picker.saved
+}
+
+/** Home's recovery pane beside the sidebar; the preview stays read-only and closing it retires its request. */
+@Composable
+internal fun RecoveryPreviewPane(controller:RecoveryPreviewController,sidebarOpen:Boolean,onShowSidebar:()->Unit) {
+    val saved=LocalRecoveryPickerState.current ?: return
     val state=controller.state ?: return
     val actions=controller.actions() ?: return
-    val context=LocalContext.current
-    val previewHeight=LocalConfiguration.current.screenHeightDp.dp/3
-    AlertDialog(onDismissRequest=actions::closePreview,title={Text(stringResource(R.string.recovery_materials),fontSize=TextSize.heading)},text={
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(Space.s12)) {
-            Text(stringResource(if(state.pane==Pane.PRIMARY) R.string.recovery_preview_primary else R.string.recovery_preview_secondary),fontSize=TextSize.caption)
-            when(state.phase) {
-                RecoveryPreviewPhase.LOADING->Text(stringResource(R.string.recovery_preview_loading),fontSize=TextSize.body)
-                RecoveryPreviewPhase.ABSENT->{
-                    Text(stringResource(if(state.artifacts.isEmpty()) R.string.recovery_preview_empty else R.string.recovery_preview_choose),fontSize=TextSize.body)
-                    for(artifact in RecoveryLegacyArtifact.entries) if(artifact in state.artifacts) {
-                        RecoveryButton(if(artifact==RecoveryLegacyArtifact.NOTE) R.string.recovery_preview_note else R.string.recovery_preview_canvas) {actions.choose(artifact)}
-                    }
-                }
-                RecoveryPreviewPhase.CLEARED->Text(stringResource(R.string.recovery_preview_cleared),fontSize=TextSize.body)
-                RecoveryPreviewPhase.SOURCE_REQUIRED->Text(stringResource(R.string.recovery_preview_source_required),fontSize=TextSize.body)
-                RecoveryPreviewPhase.INVALID->Text(stringResource(R.string.recovery_preview_failed),fontSize=TextSize.body)
-                RecoveryPreviewPhase.READY->{
-                    Text(state.displayName ?: stringResource(R.string.recovery_preview_historical),fontSize=TextSize.title)
-                    Text(stringResource(R.string.recovery_preview_details,
-                        stringResource(if(state.kind==DocumentKind.CANVAS) R.string.kind_canvas else R.string.kind_note),
-                        android.text.format.Formatter.formatShortFileSize(context,state.byteSize)),fontSize=TextSize.caption)
-                    Text(stringResource(R.string.recovery_preview_body),fontSize=TextSize.body)
-                    if(state.rendering) Text(stringResource(R.string.recovery_preview_loading),fontSize=TextSize.body)
-                    if(state.renderFailed) Text(stringResource(R.string.recovery_preview_failed),fontSize=TextSize.body)
-                    state.image?.let {Image(it,null,Modifier.fillMaxWidth().height(previewHeight),contentScale=ContentScale.Fit)}
-                    Row(horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
-                        RecoveryButton(R.string.recovery_preview_previous,state.page>0 && !state.busy) {actions.page(state.page-1)}
-                        Text(stringResource(R.string.recovery_preview_page,state.page+1,state.pageCount),fontSize=TextSize.body)
-                        RecoveryButton(R.string.recovery_preview_next,state.page+1<state.pageCount && !state.busy) {actions.page(state.page+1)}
-                    }
-                    RecoveryButton(R.string.recovery_preview_save_copy,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestCopy()}
+    val palette=com.xnotes.ui.theme.LocalPalette.current
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().heightIn(min=HomeToolHeaderHeight),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+            if(!sidebarOpen) Tooltip(stringResource(R.string.show_sidebar)) {
+                IconButton(onClick=onShowSidebar) {
+                    Icon(com.xnotes.ui.icons.XnotesIcons.menu,stringResource(R.string.show_sidebar),tint=palette.text.toComposeColor(),modifier=Modifier.size(Space.s24))
                 }
             }
-            if(state.busy) Text(stringResource(R.string.recovery_copy_working),fontSize=TextSize.body)
-            if(controller.pickerPending || saved.pending!=null) Text(stringResource(R.string.recovery_picker_waiting),fontSize=TextSize.caption)
-            if(state.retryFailed) Text(stringResource(R.string.recovery_copy_retry_failed),fontSize=TextSize.body)
-            state.error?.let {Text(it,fontSize=TextSize.body)}
-            if(state.hasPending) RecoveryButton(R.string.recovery_copy_continue,!state.busy) {actions.completePending()}
-            state.saved?.let {Text(stringResource(R.string.recovery_copy_saved),fontSize=TextSize.title);Text(it.name,fontSize=TextSize.body);Text(it.uri,fontSize=TextSize.caption)}
-            RecoveryButton(R.string.recovery_copy_resume_pick,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestResumePicker()}
+            Text(stringResource(R.string.recovery_materials),color=palette.text.toComposeColor(),fontWeight=androidx.compose.ui.text.font.FontWeight.Bold,
+                fontSize=TextSize.headline,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
+            RecoveryButton(R.string.close_preview) {actions.closePreview()}
         }
-    },confirmButton={RecoveryButton(R.string.close_preview){actions.closePreview()}})
+        HorizontalDivider(color=palette.border.toComposeColor())
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical=Space.s16),
+            verticalArrangement=Arrangement.spacedBy(Space.s12)) {
+            RecoveryPreviewBody(controller,state,actions,saved)
+        }
+    }
+}
+
+@Composable
+private fun RecoveryPreviewBody(controller:RecoveryPreviewController,state:RecoveryPreviewUi,actions:RecoveryPreviewActions,
+    saved:DestinationPickerState) {
+    val context=LocalContext.current
+    val previewHeight=LocalConfiguration.current.screenHeightDp.dp/3
+    Text(stringResource(if(state.pane==Pane.PRIMARY) R.string.recovery_preview_primary else R.string.recovery_preview_secondary),fontSize=TextSize.caption)
+    when(state.phase) {
+        RecoveryPreviewPhase.LOADING->Text(stringResource(R.string.recovery_preview_loading),fontSize=TextSize.body)
+        RecoveryPreviewPhase.ABSENT->{
+            Text(stringResource(if(state.artifacts.isEmpty()) R.string.recovery_preview_empty else R.string.recovery_preview_choose),fontSize=TextSize.body)
+            for(artifact in RecoveryLegacyArtifact.entries) if(artifact in state.artifacts) {
+                RecoveryButton(if(artifact==RecoveryLegacyArtifact.NOTE) R.string.recovery_preview_note else R.string.recovery_preview_canvas) {actions.choose(artifact)}
+            }
+        }
+        RecoveryPreviewPhase.CLEARED->Text(stringResource(R.string.recovery_preview_cleared),fontSize=TextSize.body)
+        RecoveryPreviewPhase.SOURCE_REQUIRED->Text(stringResource(R.string.recovery_preview_source_required),fontSize=TextSize.body)
+        RecoveryPreviewPhase.INVALID->Text(stringResource(R.string.recovery_preview_failed),fontSize=TextSize.body)
+        RecoveryPreviewPhase.READY->{
+            Text(state.displayName ?: stringResource(R.string.recovery_preview_historical),fontSize=TextSize.title)
+            Text(stringResource(R.string.recovery_preview_details,
+                stringResource(if(state.kind==DocumentKind.CANVAS) R.string.kind_canvas else R.string.kind_note),
+                android.text.format.Formatter.formatShortFileSize(context,state.byteSize)),fontSize=TextSize.caption)
+            Text(stringResource(R.string.recovery_preview_body),fontSize=TextSize.body)
+            if(state.rendering) Text(stringResource(R.string.recovery_preview_loading),fontSize=TextSize.body)
+            if(state.renderFailed) Text(stringResource(R.string.recovery_preview_failed),fontSize=TextSize.body)
+            state.image?.let {Image(it,null,Modifier.fillMaxWidth().height(previewHeight),contentScale=ContentScale.Fit)}
+            Row(horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
+                RecoveryButton(R.string.recovery_preview_previous,state.page>0 && !state.busy) {actions.page(state.page-1)}
+                Text(stringResource(R.string.recovery_preview_page,state.page+1,state.pageCount),fontSize=TextSize.body)
+                RecoveryButton(R.string.recovery_preview_next,state.page+1<state.pageCount && !state.busy) {actions.page(state.page+1)}
+            }
+            RecoveryButton(R.string.recovery_preview_save_copy,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestCopy()}
+        }
+    }
+    if(state.busy) Text(stringResource(R.string.recovery_copy_working),fontSize=TextSize.body)
+    if(controller.pickerPending || saved.pending!=null) Text(stringResource(R.string.recovery_picker_waiting),fontSize=TextSize.caption)
+    if(state.retryFailed) Text(stringResource(R.string.recovery_copy_retry_failed),fontSize=TextSize.body)
+    state.error?.let {Text(it,fontSize=TextSize.body)}
+    if(state.hasPending) RecoveryButton(R.string.recovery_copy_continue,!state.busy) {actions.completePending()}
+    state.saved?.let {Text(stringResource(R.string.recovery_copy_saved),fontSize=TextSize.title);Text(it.name,fontSize=TextSize.body);Text(it.uri,fontSize=TextSize.caption)}
+    RecoveryButton(R.string.recovery_copy_resume_pick,!state.busy && !state.hasPending && saved.pending==null && saved.interrupted==null && !controller.pickerPending && controller.pickerAvailable) {actions.requestResumePicker()}
 }
 
 @Composable

@@ -81,6 +81,8 @@ object ReferenceLocatorStyle {
     val Inset = Space.s4
 }
 
+/** Home sidebar tool panes (original library, file network, recovery) follow the Home/AI pane header dimensions. */
+val HomeToolHeaderHeight = 56.dp
 /** Original library header follows the Home/AI pane header dimensions. */
-val OriginalPdfLibraryHeaderHeight = 56.dp
+val OriginalPdfLibraryHeaderHeight = HomeToolHeaderHeight
 val OriginalPdfLibrarySearchWidth = 300.dp
