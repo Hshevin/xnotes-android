@@ -141,6 +141,7 @@ class MindMapView(context: Context) : View(context) {
     private var before: MindMapDocument? = null
     private var preview: MindMapDocument? = null
     private var dropTarget: String? = null
+    private var sourcePress:String?=null
     private data class RelationPress(val document:MindMapDocument,val id:String)
     private var relationPress:RelationPress?=null
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -159,8 +160,10 @@ class MindMapView(context: Context) : View(context) {
             cancelled = true; preview = null
             return true
         }
-        override fun onLongPress(e: MotionEvent) { if (!dragging) hit(e.x, e.y)?.takeUnless {it.kind==NodeKind.INK}?.let { onEdit(it.id) }; cancelGesture() }
-    })
+    }).apply {
+        // A pause before moving must not steal a node drag. Double-tap still opens editing.
+        setIsLongpressEnabled(false)
+    }
     private val nodeSelector=MapNodeSelectionGesture(
         {document},{nodeSelections},{x,y->point(x,y)},{scale.toDouble()},slop.toDouble(),
         {x,y->x>=0 && y>=0 && x<width && y<height},
@@ -496,7 +499,7 @@ class MindMapView(context: Context) : View(context) {
         }
         return true
     }
-    private fun cancelGesture() { relationPress=null;cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
+    private fun cancelGesture() { sourcePress=null;relationPress=null;cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
     private fun inkBody(n:MapNode,p:Pt):Boolean = n.kind==NodeKind.INK &&
         p.x in n.x+8..n.x+n.width-8 && p.y in n.y+8..n.y+n.height-(if(n.sources.isEmpty()) 8 else 28)
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -556,13 +559,6 @@ class MindMapView(context: Context) : View(context) {
         if(relationPress!=null && e.actionMasked==MotionEvent.ACTION_UP && (e.flags and 0x20)!=0) {
             cancelGesture();pointer=-1;cancelDetectors();return true
         }
-        if(e.actionMasked==MotionEvent.ACTION_DOWN && e.getToolType(0)==MotionEvent.TOOL_TYPE_FINGER) {
-            val n=hit(e.x,e.y)
-            if(n!=null && inkBody(n,point(e.x,e.y))) {
-                scaleDetector.onTouchEvent(e);gestures.onTouchEvent(e)
-                cancelGesture();pointer=-1;selected=n.id;onSelect(n.id);return true
-            }
-        }
         val stylus = (0 until e.pointerCount).any { e.getToolType(it) == MotionEvent.TOOL_TYPE_STYLUS || e.getToolType(it) == MotionEvent.TOOL_TYPE_ERASER }
         // A second pointer while the pen owns a drag is a palm, never a pinch or a new drag.
         if (pointer >= 0 && e.findPointerIndex(pointer) >= 0 && e.getToolType(e.findPointerIndex(pointer)) in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER)) {
@@ -584,10 +580,7 @@ class MindMapView(context: Context) : View(context) {
                     relationPress=null
                     val id = dragged
                     if (id != null) {
-                        val base = before ?: return true
-                        preview = base.translate(id, ((x - downX) / scale).toDouble(), ((y - downY) / scale).toDouble())
-                        val excluded = base.descendants(id)
-                        dropTarget = document.visible(expandedAncestors).lastOrNull { it.id !in excluded && it.bounds.contains(point(x, y)) }?.id
+                        updateNodeDrag(id,x,y)
                     } else { panX += x - lastX; panY += y - lastY }
                     invalidate()
                 }
@@ -603,25 +596,39 @@ class MindMapView(context: Context) : View(context) {
                     pressed.document===document && relationVisible(pressed.id)) {
                     updateSelection(null,pressed.id);onSelectRelation(pressed.id)
                 }
-                if (!cancelled && dragging && (e.flags and 0x20) == 0) preview?.let { moved ->
-                    val parent = dropTarget
-                    onChange(if (parent != null) moved.reparent(requireNotNull(dragged), parent) else moved)
-                }
+                val x=e.getX(i);val y=e.getY(i)
+                val valid=!cancelled && (e.flags and 0x20)==0 && before===document &&
+                    x>=0 && x<width && y>=0 && y<height
+                val distance=hypot((x-downX).toDouble(),(y-downY).toDouble())
+                val source=sourcePress?.takeIf {valid && !dragging && distance<=slop}
+                val moved=if(valid && dragging && dragged!=null) {
+                    updateNodeDrag(requireNotNull(dragged),x,y)
+                    preview?.let {next->dropTarget?.let {next.reparent(requireNotNull(dragged),it)} ?: next}
+                } else null
                 if(pressed!=null || e.actionMasked==MotionEvent.ACTION_POINTER_UP) cancelDetectors()
                 if(pressed!=null) relationDrain=e.actionMasked==MotionEvent.ACTION_POINTER_UP
                 cancelGesture(); pointer = -1
                 parent?.requestDisallowInterceptTouchEvent(false)
+                // Release the captured gesture before a host callback opens a panel or replaces the model.
+                if(moved!=null) onChange(moved)
+                if(source!=null) onSources(source)
             }
             MotionEvent.ACTION_CANCEL -> { cancelGesture(); pointer = -1; parent?.requestDisallowInterceptTouchEvent(false) }
         }
         return true
+    }
+    private fun updateNodeDrag(id:String,x:Float,y:Float) {
+        val base=before?.takeIf {it===document} ?: return
+        preview=base.translate(id,((x-downX)/scale).toDouble(),((y-downY)/scale).toDouble())
+        val excluded=base.descendants(id)
+        dropTarget=base.visible(expandedAncestors).lastOrNull {it.id !in excluded && it.bounds.contains(point(x,y))}?.id
     }
     private fun begin(e: MotionEvent, index: Int) {
         parent?.requestDisallowInterceptTouchEvent(true)
         pointer = e.getPointerId(index)
         downX = e.getX(index); downY = e.getY(index); lastX = downX; lastY = downY
         dragging = false; cancelled = false; before = document; preview = null; dropTarget = null
-        relationPress=null
+        relationPress=null;sourcePress=null
         val node=hit(downX,downY)
         dragged = node?.id
         if(node==null && (e.actionMasked==MotionEvent.ACTION_DOWN || isPen(e,index))) {
@@ -630,7 +637,7 @@ class MindMapView(context: Context) : View(context) {
         updateSelection(dragged,null)
         onSelect(dragged)
         if(node != null && node.sources.isNotEmpty() && point(downX,downY).y >= node.y+node.height-28) {
-            cancelled=true;dragged=null;onSources(node.id)
+            sourcePress=node.id
         }
     }
     override fun onWindowFocusChanged(hasWindowFocus:Boolean) {

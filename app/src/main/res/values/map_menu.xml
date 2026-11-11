@@ -22,4 +22,10 @@
     <string name="map_create_confirm">Create</string>
     <string name="map_create_parent_changed">The parent node was removed or replaced. Cancel and start again from the current map.</string>
     <string name="map_node_list">Node list</string>
+    <string name="map_ink_line">Line</string>
+    <string name="map_ink_rectangle_select">Rectangle selection</string>
+    <string name="map_ink_settings">Stroke width</string>
+    <string name="map_return_to_canvas">Back to map</string>
+    <string name="map_cancel_and_return">Cancel and return</string>
+    <string name="map_dock_title">Menu · drag to dock</string>
 </resources>

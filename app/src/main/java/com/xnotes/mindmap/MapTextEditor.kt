@@ -1,6 +1,17 @@
 package com.xnotes.mindmap
 
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import com.xnotes.R
+import com.xnotes.ui.theme.Space
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.input.TextFieldValue
 import com.xnotes.canvas.EditingField
 import com.xnotes.core.geometry.Pt
@@ -48,7 +59,7 @@ internal class MapTextHost(
     }
 }
 @Composable
-internal fun MapTextEditor(session:MapSession,draft:MapTextDraft,graph:MindMapView,dark:Boolean,revision:Int) {
+internal fun MapTextEditor(session:MapSession,draft:MapTextDraft,graph:MindMapView,dark:Boolean,revision:Int,onDone:()->Unit,onCancel:()->Unit) {
     val node=session.document?.nodes?.firstOrNull {it.id==draft.nodeId && it.kind==NodeKind.TEXT} ?: return
     val painter=remember {MapPainter()}
     val contentY=node.y+maxOf(12.0,(node.height-painter.textHeight(draft.initialText,node.width))/2)
@@ -57,4 +68,22 @@ internal fun MapTextEditor(session:MapSession,draft:MapTextDraft,graph:MindMapVi
         graph.contentScale(),FontFace.SANS,if(dark) Rgba(255,255,255,255) else Rgba(0,0,0,255),draft.value.text)
     val host=remember(draft.token,graph,dark) {MapTextHost(session,draft.token,graph,dark)}
     key(draft.token) {TextEditorOverlay(host,field,caretGeometryRevision=revision)}
+    // Keep confirmation beside the edited node, inside the pane even after panning or IME resize.
+    Box(Modifier.fillMaxSize()) {
+        val density=LocalDensity.current
+        val gap=with(density) {Space.s8.toPx()}
+        val paneWidth=graph.width.toFloat()
+        val paneHeight=graph.height.toFloat()
+        var actionsSize by remember(draft.token) {mutableStateOf(IntSize.Zero)}
+        val bottom=graph.screenPoint(Pt(node.x,node.y+node.height))
+        Surface(Modifier.offset {
+            IntOffset(bottom.x.roundToInt().coerceIn(0,(paneWidth-actionsSize.width).toInt().coerceAtLeast(0)),
+                (bottom.y+gap).roundToInt().coerceIn(0,(paneHeight-actionsSize.height).toInt().coerceAtLeast(0)))
+        }.onSizeChanged {actionsSize=it}.testTag("map-text-actions")) {
+            Row {
+                MapButton(R.string.map_done,onClick=onDone)
+                MapButton(R.string.map_cancel_and_return,onClick=onCancel)
+            }
+        }
+    }
 }

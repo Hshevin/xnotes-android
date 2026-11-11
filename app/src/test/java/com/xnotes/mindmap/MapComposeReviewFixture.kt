@@ -31,6 +31,7 @@ import java.time.Duration
 internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     // Own the frame clock/dispatcher per host: cached AndroidUiDispatcher instances can refer
     // to a previous Robolectric test's looper after that Activity has been destroyed.
+    private val renderTarget=android.graphics.Bitmap.createBitmap(1800,1400,android.graphics.Bitmap.Config.ARGB_8888)
     private val frames=BroadcastFrameClock()
     private val dispatcher=android.os.Handler(Looper.getMainLooper()).asCoroutineDispatcher()
     private val scope=CoroutineScope(SupervisorJob()+dispatcher+frames)
@@ -51,9 +52,11 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
             frames.sendFrame(android.os.SystemClock.uptimeMillis()*1_000_000L)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
             windowRoots().forEach {view->
+                views(view).forEach {it.forceLayout()}
                 view.measure(View.MeasureSpec.makeMeasureSpec(1800,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1400,View.MeasureSpec.EXACTLY))
                 view.layout(0,0,1800,1400)
                 view.viewTreeObserver.dispatchOnPreDraw()
+                view.draw(android.graphics.Canvas(renderTarget))
             }
             // Compose also schedules snapshot/frame work outside this virtual looper. Yielding
             // alone can keep a whole-suite worker ahead of that work for every retry.
@@ -83,6 +86,23 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     private fun semantics():List<SemanticsNode> = ownedViews().mapNotNull {view->
         view.javaClass.methods.firstOrNull {it.name=="getSemanticsOwner" && it.parameterCount==0}?.invoke(view) as? SemanticsOwner
     }.flatMap {nodes(it.rootSemanticsNode)}
+    fun taggedBounds(tag:String):androidx.compose.ui.geometry.Rect {
+        repeat(60) {
+            semantics().firstOrNull {it.config.getOrNull(SemanticsProperties.TestTag)==tag}?.boundsInWindow?.takeIf {it.width>0 && it.height>0}?.let {return it}
+            settle()
+        }
+        error("Missing tag $tag; draft=${session.textDraft}; semantics=${semantics().map {"${it.boundsInWindow}: ${it.config}"}}")
+    }
+    fun touch(x:Float,y:Float,action:Int,downTime:Long) {
+        val event=android.view.MotionEvent.obtain(downTime,android.os.SystemClock.uptimeMillis(),action,x,y,0)
+        try {activity.window.decorView.dispatchTouchEvent(event)} finally {event.recycle()}
+        settle()
+    }
+    fun tapAt(x:Float,y:Float) {
+        val time=android.os.SystemClock.uptimeMillis()
+        touch(x,y,android.view.MotionEvent.ACTION_DOWN,time)
+        touch(x,y,android.view.MotionEvent.ACTION_UP,time)
+    }
     fun clickAction(id:Int):()->Boolean {
         val label=activity.getString(id)
         repeat(60) {
@@ -112,6 +132,7 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
         session.save();await {!session.saving}
         host.pause().stop().destroy()
         recomposer.cancel();scope.cancel()
+        renderTarget.recycle()
         file.delete()
     }
 }

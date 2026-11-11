@@ -102,8 +102,8 @@ class MapVisibleEditingRegressionTest {
             assertTrue(views(activity.window.decorView).filterIsInstance<InkPadView>().single().getGlobalVisibleRect(rect))
         } }
         val backs = nodes(runner.uiAutomation.rootInActiveWindow).filter {
-            it.isVisibleToUser && (it.text?.toString() == activity.getString(R.string.map_close) ||
-                it.contentDescription?.toString() == activity.getString(R.string.map_close))
+            it.isVisibleToUser && (it.text?.toString() == activity.getString(R.string.map_return_to_canvas) ||
+                it.contentDescription?.toString() == activity.getString(R.string.map_return_to_canvas))
         }
         val back = backs.firstOrNull { n -> Rect().also(n::getBoundsInScreen).let { it.bottom <= padBounds.top } }
         assertNotNull("Back must have visible bounds above the native ink pad", back)
@@ -115,7 +115,7 @@ class MapVisibleEditingRegressionTest {
                 colours += shot.getPixel(x,y)
             assertTrue("Back icon/text must be painted, not covered by a uniform pad background", colours.size > 2)
         } finally { shot.recycle() }
-        click(activity.getString(R.string.map_close))
+        click(activity.getString(R.string.map_return_to_canvas))
         await("enlarged editor closed and graph interactive") { main {
             views(activity.window.decorView).none { it is InkPadView } && graph.isEnabled
         } }
@@ -131,7 +131,7 @@ class MapVisibleEditingRegressionTest {
         click(activity.getString(R.string.ink_enlarge))
         await("existing ink pad drawn") {main {views(activity.window.decorView).any {it is InkPadView && it.isShown && it.width>0}}}
         runner.waitForIdleSync()
-        click(activity.getString(R.string.map_close))
+        click(activity.getString(R.string.map_return_to_canvas))
         await("existing ink pad closed") {main {views(activity.window.decorView).none {it is InkPadView}}}
         click(activity.getString(R.string.map_add_sibling))
         click(activity.getString(R.string.map_create_confirm))
@@ -141,7 +141,7 @@ class MapVisibleEditingRegressionTest {
         }}
         runner.waitForIdleSync()
         assertEquals("root",main {session.document!!.nodes.single {it.id==session.selected}.parent})
-        click(activity.getString(R.string.map_close))
+        click(activity.getString(R.string.map_return_to_canvas))
     }
 
     @Test fun inkPadCannotPaintOutsideItsOwnBoundsOnAnUnclippedHostCanvas() = main {

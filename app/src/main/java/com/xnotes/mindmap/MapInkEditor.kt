@@ -30,15 +30,13 @@ import com.xnotes.ui.theme.*
 @Composable
 internal fun MapInkEditor(session:MapSession,node:MapNode,close:()->Unit) {
   CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
-    val takeFocus=LocalMapActionFocus.current
     Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
       Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // The enlarged editor covers the structure rows; its own docked bar keeps Back always visible.
             MapInkToolbar(session,node,floating=false,leading={
-                ToolbarIcon(XnotesIcons.prev,stringResource(R.string.map_close)) {if(!session.inkContact && takeFocus()) close()}
                 Label(node.text,Modifier.widthIn(max=MindMapInkTitleWidth))
-            })
+            },trailing={MapButton(R.string.map_return_to_canvas,onClick=close)})
             HorizontalDivider()
             // Compose does not clip an AndroidView's canvas to its bounds; without it the pad's
             // background paints over the bar above.
@@ -63,11 +61,11 @@ internal fun MapInkEditor(session:MapSession,node:MapNode,close:()->Unit) {
 
 /**
  * The ordinary note toolbar's frame and buttons, driving only what a map ink node supports:
- * pen, stroke eraser and lasso, the pen width, and the shared map history. Tools never change
+ * pen, straight line, stroke eraser, lasso and rectangle selection, width, and shared history. Tools never change
  * while a stroke is in contact ([LocalInkBusy]); re-tapping the armed pen opens its width, as on a note.
  */
 @Composable
-internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,leading:(@Composable ()->Unit)?=null) {
+internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,leading:(@Composable ()->Unit)?=null,trailing:(@Composable ()->Unit)?=null) {
     val look=LocalToolbarLook.current
     // The map pane owns this bar and always lays it across its own area: docked along the top of the
     // enlarged editor, or as a pill floating along the bottom of the graph, its tips opening inward.
@@ -82,7 +80,7 @@ internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,lead
         var widthOpen by remember {mutableStateOf(false)}
         // A stroke closes the width popup for good rather than hiding it until pen-up.
         LaunchedEffect(busy) {if(busy) widthOpen=false}
-        ToolbarFrame(armed=session.inkMode,leading=leading) {
+        ToolbarFrame(armed=session.inkMode,leading=leading,trailing=trailing) {
             @Composable fun tool(mode:InkMode,icon:ImageVector,label:Int) {
                 val armed=focused && session.inkMode==mode
                 ToolbarIcon(icon,stringResource(label),active=armed,enabled=idle,glideKey=mode,
@@ -93,8 +91,11 @@ internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,lead
                     }
                 }
             }
+            tool(InkMode.PEN,ImageVector.vectorResource(R.drawable.ic_stroke_regular),R.string.map_pen)
             Box {
-                tool(InkMode.PEN,ImageVector.vectorResource(R.drawable.ic_stroke_regular),R.string.map_pen)
+                ToolbarIcon(XnotesIcons.edit,stringResource(R.string.map_ink_settings),enabled=idle) {
+                    if(!session.inkContact && takeFocus()) widthOpen=!widthOpen
+                }
                 if(widthOpen && !busy) DropdownMenu(expanded=true,onDismissRequest={widthOpen=false}) {
                     Column(Modifier.width(MindMapPenSliderWidth).padding(horizontal=Space.s16,vertical=Space.s8)) {
                         PopupTitle(stringResource(R.string.map_pen))
@@ -104,8 +105,10 @@ internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,lead
                     }
                 }
             }
+            tool(InkMode.LINE,XnotesIcons.minus,R.string.map_ink_line)
             tool(InkMode.ERASER,XnotesIcons.eraser,R.string.map_eraser)
             tool(InkMode.LASSO,XnotesIcons.lasso,R.string.map_lasso)
+            tool(InkMode.RECT_SELECT,XnotesIcons.select,R.string.map_ink_rectangle_select)
             Separator()
             ToolbarIcon(XnotesIcons.fit,stringResource(R.string.ink_fit_content),enabled=idle) {
                 if(!session.inkContact && takeFocus()) session.operate {it.update(node.id) {n->n.fitInkContent()}}

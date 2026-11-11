@@ -22,4 +22,10 @@
     <string name="map_create_confirm">创建</string>
     <string name="map_create_parent_changed">上级节点已被删除或替换。请取消，并从当前导图重新开始。</string>
     <string name="map_node_list">节点列表</string>
+    <string name="map_ink_line">直线</string>
+    <string name="map_ink_rectangle_select">框选</string>
+    <string name="map_ink_settings">笔画粗细</string>
+    <string name="map_return_to_canvas">返回导图</string>
+    <string name="map_cancel_and_return">取消并返回</string>
+    <string name="map_dock_title">菜单 · 拖动停靠</string>
 </resources>

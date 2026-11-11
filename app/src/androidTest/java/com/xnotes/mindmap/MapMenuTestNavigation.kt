@@ -25,6 +25,6 @@ internal fun openMapMenuPage(tab:Int) {
         }
         error("Missing map menu action: ${runner.targetContext.getString(id)}")
     }
-    if(button(R.string.map_menu_hide)==null) click(R.string.map_menu)
+    if(button(R.string.map_return_to_canvas)==null) click(R.string.map_menu)
     click(tab)
 }

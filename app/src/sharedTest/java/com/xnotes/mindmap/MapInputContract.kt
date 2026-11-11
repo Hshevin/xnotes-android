@@ -62,7 +62,7 @@ abstract class MapInputContract {
         send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
         send(v,MotionEvent.ACTION_MOVE,(p.x+50).toFloat(),(p.y+30).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
         send(v,MotionEvent.ACTION_UP,(p.x+50).toFloat(),(p.y+30).toFloat(),MotionEvent.TOOL_TYPE_FINGER)
-        assertEquals(before,v.document);assertNull(v.selectedRelation)
+        assertNotEquals(before,v.document);assertSame(before.node("ink").ink,v.document.node("ink").ink);assertNull(v.selectedRelation)
     }
     @Test fun cancelledOrFarReleaseNeverSelectsThePressedRelation()=ui {context->
         for(case in 0..2) {
@@ -362,14 +362,95 @@ abstract class MapInputContract {
         assertTrue(result.ink.single().points.last().y>n.height)
         assertEquals(v.document,MapCodec.decode(MapCodec.encode(v.document)))
     }
-    @Test fun fingerOnInkBodyDoesNotMoveNode() = ui { context ->
+    @Test fun fingerOnInkBodyMovesNodeOnceAndPreservesInk() = ui { context ->
         val doc=MindMapDocument(nodes=listOf(MapNode(id="ink",parent=null,kind=NodeKind.INK)))
         val v=MindMapView(context).apply {document=doc;layout(0,0,500,400);fit()}
-        var commits=0;v.onChange={commits++}
+        var commits=0;v.onChange={commits++;v.document=it}
+        val scale=v.contentScale()
         send(v,MotionEvent.ACTION_DOWN,250f,200f,type=MotionEvent.TOOL_TYPE_FINGER)
         send(v,MotionEvent.ACTION_MOVE,300f,230f,type=MotionEvent.TOOL_TYPE_FINGER)
         send(v,MotionEvent.ACTION_UP,300f,230f,type=MotionEvent.TOOL_TYPE_FINGER)
-        assertEquals(0,commits);assertEquals(doc,v.document)
+        assertEquals(1,commits)
+        assertEquals(doc.root.x+50/scale,v.document.root.x,.001)
+        assertEquals(doc.root.y+30/scale,v.document.root.y,.001)
+        assertSame(doc.root.ink,v.document.root.ink)
+    }
+    @Test fun fingerInkDragUsesReleasePositionAndCancellationNeverWrites() = ui { context ->
+        for(cancel in listOf(false,true)) {
+            val doc=MindMapDocument(nodes=listOf(MapNode(id="ink",parent=null,kind=NodeKind.INK)))
+            val v=MindMapView(context).apply {document=doc;layout(0,0,500,400);fit()}
+            val scale=v.contentScale();var commits=0
+            v.onChange={commits++;v.document=it}
+            send(v,MotionEvent.ACTION_DOWN,250f,200f,type=MotionEvent.TOOL_TYPE_FINGER)
+            send(v,MotionEvent.ACTION_MOVE,280f,220f,type=MotionEvent.TOOL_TYPE_FINGER)
+            assertEquals(doc,v.document)
+            send(v,if(cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP,320f,250f,type=MotionEvent.TOOL_TYPE_FINGER)
+            assertEquals(if(cancel) 0 else 1,commits)
+            assertEquals(doc.root.x+(if(cancel) 0.0 else 70/scale),v.document.root.x,.001)
+            assertSame(doc.root.ink,v.document.root.ink)
+        }
+    }
+    @Test fun draggingSourceFooterDoesNotOpenAPanel() = ui { context ->
+        val node=MapNode(id="root",parent=null,sources=listOf(MapSource(documentId="00000000-0000-0000-0000-000000000001")))
+        val v=MindMapView(context).apply {document=MindMapDocument(nodes=listOf(node));layout(0,0,500,400);fit()}
+        val p=v.screenPoint(com.xnotes.core.geometry.Pt(node.x+node.width/2,node.y+node.height-14))
+        var opened=0;var commits=0
+        v.onSources={opened++};v.onChange={commits++;v.document=it}
+        send(v,MotionEvent.ACTION_DOWN,p.x.toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(0,opened)
+        send(v,MotionEvent.ACTION_MOVE,(p.x+50).toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        send(v,MotionEvent.ACTION_UP,(p.x+65).toFloat(),p.y.toFloat(),MotionEvent.TOOL_TYPE_FINGER)
+        assertEquals(0,opened);assertEquals(1,commits)
+    }
+    @Test fun lineToolKeepsOnlyActualEndpointsAndFreezesWidthUntilRelease() = ui { context ->
+        val v=pad(context);v.mode=InkMode.LINE;v.penWidth=5.0
+        send(v,MotionEvent.ACTION_DOWN,20f,20f)
+        send(v,MotionEvent.ACTION_MOVE,40f,80f)
+        v.penWidth=8.0
+        send(v,MotionEvent.ACTION_UP,100f,40f)
+        val stroke=v.ink.single()
+        assertEquals(2,stroke.points.size);assertEquals(5.0,stroke.width,.001)
+        assertEquals(20.0,stroke.points.first().x,.001);assertEquals(40.0,stroke.points.last().y,.001)
+        assertEquals(.7,stroke.points.first().pressure,.001)
+        val before=v.ink
+        send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_MOVE,70f,70f)
+        send(v,MotionEvent.ACTION_CANCEL)
+        assertSame(before,v.ink)
+    }
+    @Test fun rectangleSelectionMovesOnlySelectedInkAndCancelsWithoutHistory() = ui { context ->
+        for(reverse in listOf(false,true)) {
+            val v=pad(context)
+            val first=MapInk(listOf(InkPoint(20.0,20.0),InkPoint(40.0,40.0)))
+            val other=MapInk(listOf(InkPoint(120.0,120.0),InkPoint(140.0,140.0)))
+            v.ink=listOf(first,other);v.mode=InkMode.RECT_SELECT
+            var commits=0;v.onCommit={commits++;v.ink=it}
+            send(v,MotionEvent.ACTION_DOWN,if(reverse) 60f else 10f,if(reverse) 60f else 10f)
+            send(v,MotionEvent.ACTION_UP,if(reverse) 10f else 60f,if(reverse) 10f else 60f)
+            assertEquals(0,commits)
+            send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_MOVE,80f,80f)
+            send(v,MotionEvent.ACTION_CANCEL)
+            assertEquals(listOf(first,other),v.ink);assertEquals(0,commits)
+            send(v,MotionEvent.ACTION_DOWN,30f,30f);send(v,MotionEvent.ACTION_UP,80f,80f)
+            assertEquals(1,commits);assertEquals(70.0,v.ink.first().points.first().x,.001)
+            assertSame(other,v.ink.last())
+        }
+    }
+    @Test fun rectangleCanSelectTheMiddleOfASparseStraightLine() = ui { context ->
+        val v=pad(context);v.mode=InkMode.RECT_SELECT
+        v.ink=listOf(MapInk(listOf(InkPoint(10.0,50.0),InkPoint(150.0,50.0))))
+        send(v,MotionEvent.ACTION_DOWN,60f,40f);send(v,MotionEvent.ACTION_UP,90f,60f)
+        send(v,MotionEvent.ACTION_DOWN,70f,50f);send(v,MotionEvent.ACTION_UP,80f,70f)
+        assertEquals(20.0,v.ink.single().points.first().x,.001)
+        assertEquals(70.0,v.ink.single().points.first().y,.001)
+    }
+    @Test fun lineCanUseTheLastTwoPointsOfTheInkBudget() = ui { context ->
+        val v=pad(context);v.mode=InkMode.LINE
+        val existing=MapInk(List(MindMapDocument.MAX_POINTS-2) {InkPoint(1.0,1.0)})
+        v.ink=listOf(existing);var limits=0;v.onLimit={limits++}
+        send(v,MotionEvent.ACTION_DOWN,20f,20f);send(v,MotionEvent.ACTION_MOVE,40f,80f)
+        send(v,MotionEvent.ACTION_UP,100f,40f)
+        assertEquals(0,limits);assertEquals(2,v.ink.size);assertSame(existing,v.ink.first())
+        assertEquals(2,v.ink.last().points.size)
     }
     @Test fun nodeInkLostFocusDiscardsOnlyLiveStroke() = ui { context ->
         val v=pad(context)

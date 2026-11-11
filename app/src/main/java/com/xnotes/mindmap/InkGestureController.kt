@@ -39,7 +39,7 @@ class InkGestureController {
     private var preview:List<MapInk>?=null
     private var rejected=false
     private var beforePointCount=0
-    val displayInk get() = if(active && tool==InkMode.PEN && points.isNotEmpty() && !rejected)
+    val displayInk get() = if(active && (tool==InkMode.PEN || tool==InkMode.LINE) && points.isNotEmpty() && !rejected)
         (preview ?: ink)+MapInk(points.toList(),strokeWidth) else preview ?: ink
 
     fun handle(e:MotionEvent, transform:(Float,Float)->Pt, canStart:(Pt)->Boolean):Boolean {
@@ -53,7 +53,7 @@ class InkGestureController {
                 pointer=e.getPointerId(i);mapper=transform;down=p;before=ink;beforePointCount=before.sumOf {it.points.size};oldSelection=selection
                 tool=if(e.getToolType(i)==MotionEvent.TOOL_TYPE_ERASER) InkMode.ERASER else mode
                 strokeWidth=width;preview=null;points.clear();rejected=false
-                moving=tool==InkMode.LASSO && selectedBounds()?.outset(8.0)?.contains(p)==true
+                moving=(tool==InkMode.LASSO || tool==InkMode.RECT_SELECT) && selectedBounds()?.outset(8.0)?.contains(p)==true
                 if(!moving) selection=emptySet()
                 onContact(true);sample(e,i)
             }
@@ -74,13 +74,16 @@ class InkGestureController {
                 val next=when {
                     rejected->null
                     moving->preview
-                    tool==InkMode.PEN && points.isNotEmpty()->before+MapInk(points.toList(),strokeWidth)
+                    (tool==InkMode.PEN || tool==InkMode.LINE) && points.isNotEmpty()->before+MapInk(points.toList(),strokeWidth)
                     tool==InkMode.ERASER->preview
                     else->null
                 }
-                if(!rejected && tool==InkMode.LASSO && !moving) {
-                    val polygon=points.map {Pt(it.x,it.y)}
-                    selection=before.indices.filterTo(hashSetOf()) {i->before[i].points.any {Geometry.pointInPolygon(polygon,Pt(it.x,it.y))}}
+                if(!rejected && (tool==InkMode.LASSO || tool==InkMode.RECT_SELECT) && !moving) {
+                    val polygon=if(tool==InkMode.RECT_SELECT) {
+                        val end=points.lastOrNull()?.let {Pt(it.x,it.y)} ?: down
+                        listOf(down,Pt(end.x,down.y),end,Pt(down.x,end.y))
+                    } else points.map {Pt(it.x,it.y)}
+                    selection=before.indices.filterTo(hashSetOf()) {i->intersectsSelection(before[i],polygon)}
                 }
                 // Release ownership before callback; session can now atomically commit this one operation.
                 val expected=before
@@ -100,8 +103,9 @@ class InkGestureController {
         val p=mapper(if(h==null)e.getX(i) else e.getHistoricalX(i,h),if(h==null)e.getY(i) else e.getHistoricalY(i,h))
         val pressure=(if(h==null)e.getPressure(i) else e.getHistoricalPressure(i,h)).toDouble()
         val time=(if(h==null)e.eventTime else e.getHistoricalEventTime(h)).toDouble()
+        val nextCount=if(tool==InkMode.LINE) minOf(points.size+1,2) else points.size+1
         if(!p.x.isFinite() || !p.y.isFinite() || kotlin.math.abs(p.x)>MindMapDocument.MAX_COORD || kotlin.math.abs(p.y)>MindMapDocument.MAX_COORD ||
-            (tool==InkMode.PEN && beforePointCount+points.size>=MindMapDocument.MAX_POINTS) || points.size>=MindMapDocument.MAX_POINTS) {
+            ((tool==InkMode.PEN || tool==InkMode.LINE) && beforePointCount+nextCount>MindMapDocument.MAX_POINTS) || nextCount>MindMapDocument.MAX_POINTS) {
             rejected=true;preview=null;points.clear();onLimit();return
         }
         if(tool==InkMode.ERASER) {
@@ -109,7 +113,16 @@ class InkGestureController {
             preview=(preview ?: before).filterNot {s->s.points.any {Geometry.distancePointToSegment(Pt(it.x,it.y),a,p)<=10+s.width/2} ||
                 s.points.zipWithNext().any {(c,d)->Geometry.distanceSegmentToSegment(a,p,Pt(c.x,c.y),Pt(d.x,d.y))<=10+s.width/2}}
         }
+        // A line stores only the actual first and final samples; its preview follows the tip.
+        if(tool==InkMode.LINE && points.size>1) points.removeAt(1)
         points.add(InkPoint(p.x,p.y,pressure,time))
+    }
+    private fun intersectsSelection(stroke:MapInk,polygon:List<Pt>):Boolean {
+        if(polygon.size<3) return false
+        val edges=polygon.zipWithNext()+listOf(polygon.last() to polygon.first())
+        val samples=stroke.points.map {Pt(it.x,it.y)}
+        if(samples.any {p->Geometry.pointInPolygon(polygon,p) || edges.any {(a,b)->Geometry.distancePointToSegment(p,a,b)<1e-8}}) return true
+        return samples.zipWithNext().any {(a,b)->edges.any {(c,d)->Geometry.distanceSegmentToSegment(a,b,c,d)<1e-8}}
     }
     private fun move(p:Pt) {
         val dx=p.x-down.x;val dy=p.y-down.y
@@ -118,9 +131,13 @@ class InkGestureController {
     private fun selectedBounds():Rect?=selection.mapNotNull {ink.getOrNull(it)}.flatMap {s->s.points.map {Pt(it.x,it.y)}}.takeIf {it.isNotEmpty()}?.let(Rect::bounding)
     fun drawSelection(canvas:Canvas,color:Int,scale:Float) {
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {this.color=color;style=Paint.Style.STROKE;strokeWidth=1/scale}
-        if(active && tool==InkMode.LASSO && !moving && points.isNotEmpty()) {
+        if(active && (tool==InkMode.LASSO || tool==InkMode.RECT_SELECT) && !moving && points.isNotEmpty()) {
             val path=Path().apply {moveTo(points.first().x.toFloat(),points.first().y.toFloat());points.drop(1).forEach {lineTo(it.x.toFloat(),it.y.toFloat())}}
-            canvas.drawPath(path,paint)
+            if(tool==InkMode.RECT_SELECT) {
+                val end=points.last()
+                canvas.drawRect(minOf(down.x,end.x).toFloat(),minOf(down.y,end.y).toFloat(),
+                    maxOf(down.x,end.x).toFloat(),maxOf(down.y,end.y).toFloat(),paint)
+            } else canvas.drawPath(path,paint)
         }
         selectedBounds()?.let {canvas.drawRect(it.left.toFloat(),it.top.toFloat(),it.right.toFloat(),it.bottom.toFloat(),paint)}
     }

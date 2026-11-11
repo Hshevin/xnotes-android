@@ -7,7 +7,7 @@ import android.view.MotionEvent
 import android.view.View
 import com.xnotes.core.geometry.Pt
 
-enum class InkMode { PEN, ERASER, LASSO }
+enum class InkMode { PEN, ERASER, LASSO, LINE, RECT_SELECT }
 
 /** Enlarged host for the same transaction engine used by the graph. */
 class InkPadView(context:Context):View(context) {

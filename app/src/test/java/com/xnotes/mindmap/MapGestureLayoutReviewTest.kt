@@ -78,7 +78,7 @@ class MapGestureLayoutReviewTest {
             f.click(R.string.map_menu_nodes);f.click(R.string.map_done)
             assertEquals("Unconfirmed title",f.session.document!!.node(f.session.selected!!).text)
             f.session.undo();assertEquals(before,f.session.document)
-            f.click(R.string.map_menu_hide);assertFalse(f.visible(R.string.map_node_list))
+            f.click(R.string.map_return_to_canvas);assertFalse(f.visible(R.string.map_node_list))
             assertEquals(dimensions,view.width to view.height)
         }
     }

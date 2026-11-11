@@ -253,8 +253,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         /**
          * One in-pane menu replaces the former stack of dialogs. It overlays the graph, so the native View (and any
          * stroke in progress) keeps its size and camera. Pages stay composed while hidden: switching pages or
-         * folding the menu never commits or drops a draft. Creation and layout preview lock their page until
-         * confirmed or cancelled. System file pickers and destructive confirmations stay platform dialogs.
+         * folding preserves existing-node drafts. Folding cancels new-node creation and layout previews;
+         * their tabs remain locked while open. System file pickers and destructive confirmations stay platform dialogs.
          */
         @Composable
         fun MapMenu(doc:MindMapDocument,node:MapNode?) {
@@ -265,13 +265,19 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             val lockedTab=when {draft!=null->MapMenuTab.NODES;proposed!=null->MapMenuTab.LAYOUT;else->null}
             val tab=lockedTab ?: MapMenuTab.valueOf(menuTabName)
             val shown=(menuOpen || lockedTab!=null || choice!=null) && !enlarged && textDraft==null && textRestore==null
-            fun hide() {focus.clearFocus();keyboard?.hide();menuOpen=false}
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                val panelWidth=minOf(MindMapMenuWidth,maxWidth-MindMapMenuMinCanvas).coerceAtLeast(MindMapMenuMinCanvas)
-                MapMenuPage(shown,Modifier.align(Alignment.TopEnd).width(panelWidth).fillMaxHeight()) {
-                  Surface(color=palette.panel.toComposeColor(),modifier=Modifier.fillMaxSize()) { Row(Modifier.fillMaxSize()) {
-                    VerticalDivider()
-                    Column(Modifier.fillMaxSize()) {
+            fun hide() {
+                sourceController.state?.let(sourceController::cancel)
+                session.connectedDraft?.let {session.cancelConnectedNode(it.token)}
+                proposed=null
+                focus.clearFocus();keyboard?.hide();menuOpen=false
+            }
+            MapMenuPage(shown,Modifier.fillMaxSize()) {
+                MapDockPanel(enabled=!session.inkContact,onOutsideTap=::hide,handle={
+                    Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically) {
+                        Text(stringResource(R.string.map_dock_title),fontSize=TextSize.title,modifier=Modifier.weight(1f))
+                        MapButton(R.string.map_return_to_canvas) {hide()}
+                    }
+                }) {
                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s4)) {
                             for(t in MapMenuTab.entries) MapButton(when(t) {
                                 MapMenuTab.NODES->R.string.map_menu_nodes;MapMenuTab.SOURCES->R.string.map_menu_sources
@@ -281,7 +287,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                 if(t==MapMenuTab.RELATIONS) relationsAlive=true
                                 if(t==MapMenuTab.SOURCES && presentationState.sourcesFor==null) showSources(session.selected)
                             }
-                            MapButton(R.string.map_menu_hide,enabled=lockedTab==null && choice==null) {hide()}
                         }
                         if(lockedTab!=null) Text(stringResource(if(draft!=null) R.string.map_creation_in_progress else R.string.map_layout_preview_pending),
                             fontSize=TextSize.caption,modifier=Modifier.padding(horizontal=Space.s8))
@@ -446,8 +451,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                 GraphSourceChoiceContent(c,sourceController,PanelFrame,Modifier.fillMaxSize())
                             }}
                         }
-                    }
-                  } }
                 }
             }
         }
@@ -461,8 +464,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             Column(Modifier.fillMaxSize()) {
                 if(textDraft!=null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
-                        MapButton(R.string.map_done) {endText(true)}
-                        MapButton(R.string.cancel) {endText(false)}
                         Text(stringResource(R.string.map_edit),fontSize=TextSize.title,modifier=Modifier.align(Alignment.CenterVertically).padding(horizontal=Space.s12))
                         session.problemText()?.let {Text(stringResource(it),fontSize=TextSize.body,maxLines=1,modifier=Modifier.align(Alignment.CenterVertically))}
                     }
@@ -574,7 +575,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
                     }
-                    if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,viewRevision)}
+                    if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,viewRevision,onDone={endText(true)},onCancel={endText(false)})}
                     // In-place ink settings appear only for a selected ink node, over the graph so the
                     // native View keeps its size (and any stroke) when the selection changes.
                     if(!nodeMode && !enlarged && textDraft==null && connectingFrom==null) node?.takeIf {it.kind==NodeKind.INK}?.let {n->
