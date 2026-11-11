@@ -38,8 +38,11 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
             problem = false; refresh();onDraftChange(current.copy(text=text))
         } catch (_: IllegalArgumentException) { problem = true }
     }
-    Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
-        Surface(Modifier.fillMaxSize(.94f).imePadding()) {
+    // The dialog takes the IME insets itself: a panned window could push the action row off screen,
+    // so the panel instead shrinks to the space above the keyboard and its text field gives way.
+    Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false)) {
+      Box(Modifier.fillMaxSize().systemBarsPadding().imePadding(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        Surface(Modifier.fillMaxSize(.94f)) {
             Column(Modifier.fillMaxSize().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
                 // Actions sit with the title: a tall text field and the soft keyboard must never cover them.
                 Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -79,5 +82,6 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                 }
             }
         }
+      }
     }
 }

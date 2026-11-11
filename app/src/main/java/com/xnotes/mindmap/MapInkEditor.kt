@@ -14,6 +14,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
 import com.xnotes.settings.ToolbarPosition
 import com.xnotes.ui.Label
+import com.xnotes.ui.DropdownMenu
 import com.xnotes.ui.LocalEmbeddedToolbar
 import com.xnotes.ui.LocalToolbarFocused
 import com.xnotes.ui.LocalToolbarLook
@@ -29,12 +30,13 @@ import com.xnotes.ui.theme.*
 @Composable
 internal fun MapInkEditor(session:MapSession,node:MapNode,close:()->Unit) {
   CompositionLocalProvider(LocalInkBusy provides session.inkContact) {
+    val takeFocus=LocalMapActionFocus.current
     Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
       Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // The enlarged editor covers the structure rows; its own docked bar keeps Back always visible.
             MapInkToolbar(session,node,floating=false,leading={
-                ToolbarIcon(XnotesIcons.prev,stringResource(R.string.map_close),onClick=close)
+                ToolbarIcon(XnotesIcons.prev,stringResource(R.string.map_close)) {if(!session.inkContact && takeFocus()) close()}
                 Label(node.text,Modifier.widthIn(max=MindMapInkTitleWidth))
             })
             HorizontalDivider()
@@ -67,18 +69,28 @@ internal fun MapInkEditor(session:MapSession,node:MapNode,close:()->Unit) {
 @Composable
 internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,leading:(@Composable ()->Unit)?=null) {
     val look=LocalToolbarLook.current
-    // The map pane owns this bar; it always runs across the top of its own area.
-    CompositionLocalProvider(LocalToolbarLook provides look.copy(position=ToolbarPosition.TOP,floating=floating),
+    // The map pane owns this bar and always lays it across its own area: docked along the top of the
+    // enlarged editor, or as a pill floating along the bottom of the graph, its tips opening inward.
+    CompositionLocalProvider(LocalToolbarLook provides look.copy(position=if(floating) ToolbarPosition.BOTTOM else ToolbarPosition.TOP,floating=floating),
         LocalEmbeddedToolbar provides false) {
         val busy=LocalInkBusy.current
+        // Stroke contact alone keeps the bar's look steady and is refused in each click instead,
+        // so the icons do not flash disabled for every stroke; other busy states disable them.
+        val idle=!busy || session.inkContact
         val focused=LocalToolbarFocused.current
+        val takeFocus=LocalMapActionFocus.current
         var widthOpen by remember {mutableStateOf(false)}
+        // A stroke closes the width popup for good rather than hiding it until pen-up.
+        LaunchedEffect(busy) {if(busy) widthOpen=false}
         ToolbarFrame(armed=session.inkMode,leading=leading) {
-            @Composable fun tool(mode:InkMode,icon:androidx.compose.ui.graphics.vector.ImageVector,label:Int) {
+            @Composable fun tool(mode:InkMode,icon:ImageVector,label:Int) {
                 val armed=focused && session.inkMode==mode
-                ToolbarIcon(icon,stringResource(label),active=armed,enabled=!busy,glideKey=mode,
+                ToolbarIcon(icon,stringResource(label),active=armed,enabled=idle,glideKey=mode,
                     hint=if(armed && mode==InkMode.PEN) stringResource(R.string.tip_tap_for_settings) else null) {
-                    if(armed && mode==InkMode.PEN) widthOpen=true else {session.inkMode=mode;widthOpen=false}
+                    // An unfocused split pane first claims focus; a refused claim changes nothing here.
+                    if(!session.inkContact && takeFocus()) {
+                        if(armed && mode==InkMode.PEN) widthOpen=true else {session.inkMode=mode;widthOpen=false}
+                    }
                 }
             }
             Box {
@@ -87,7 +99,7 @@ internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,lead
                     Column(Modifier.width(MindMapPenSliderWidth).padding(horizontal=Space.s16,vertical=Space.s8)) {
                         PopupTitle(stringResource(R.string.map_pen))
                         SliderRow(stringResource(R.string.map_pen_width),session.inkWidth.toFloat(),1f..8f,enabled=!busy) {
-                            session.inkWidth=it.toDouble()
+                            if(!session.inkContact) session.inkWidth=it.toDouble()
                         }
                     }
                 }
@@ -95,12 +107,16 @@ internal fun MapInkToolbar(session:MapSession,node:MapNode,floating:Boolean,lead
             tool(InkMode.ERASER,XnotesIcons.eraser,R.string.map_eraser)
             tool(InkMode.LASSO,XnotesIcons.lasso,R.string.map_lasso)
             Separator()
-            ToolbarIcon(XnotesIcons.fit,stringResource(R.string.ink_fit_content),enabled=!busy) {
-                session.operate {it.update(node.id) {n->n.fitInkContent()}}
+            ToolbarIcon(XnotesIcons.fit,stringResource(R.string.ink_fit_content),enabled=idle) {
+                if(!session.inkContact && takeFocus()) session.operate {it.update(node.id) {n->n.fitInkContent()}}
             }
             Separator()
-            ToolbarIcon(XnotesIcons.undo,stringResource(R.string.undo),enabled=!busy && session.canUndo) {session.undo()}
-            ToolbarIcon(XnotesIcons.redo,stringResource(R.string.redo),enabled=!busy && session.canRedo) {session.redo()}
+            ToolbarIcon(XnotesIcons.undo,stringResource(R.string.undo),enabled=idle && session.canUndo) {
+                if(!session.inkContact && takeFocus()) session.undo()
+            }
+            ToolbarIcon(XnotesIcons.redo,stringResource(R.string.redo),enabled=idle && session.canRedo) {
+                if(!session.inkContact && takeFocus()) session.redo()
+            }
         }
     }
 }
