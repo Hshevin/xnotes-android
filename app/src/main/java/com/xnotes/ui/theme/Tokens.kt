@@ -59,6 +59,9 @@ val MindMapNodeListHeight = 400.dp
 
 val MindMapPenSliderWidth = 240.dp
 
+/** Below this pane height (a top/bottom split) the map folds its graph actions into one row and drops the hint. */
+val MindMapCompactPaneHeight = 640.dp
+
 /** Longest node name beside the enlarged ink editor's Back button. */
 val MindMapInkTitleWidth = 200.dp
 

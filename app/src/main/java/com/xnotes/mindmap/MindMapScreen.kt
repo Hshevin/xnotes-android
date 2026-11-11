@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -28,7 +29,7 @@ import com.xnotes.settings.SettingsRepository
 import com.xnotes.ui.theme.*
 
 internal val LocalInkBusy=staticCompositionLocalOf {false}
-private val LocalMapActionFocus=staticCompositionLocalOf<()->Boolean> {{true}}
+internal val LocalMapActionFocus=staticCompositionLocalOf<()->Boolean> {{true}}
 
 @Composable
 fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:MapPresentationState?=null,hostHooks:MapHostHooks?=null) {
@@ -223,7 +224,10 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 onDispose {graph.removeCallbacks(takeFocus);graph.removeOnAttachStateChangeListener(listener)}
             }
         }
-        Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
+        // Measured outside the IME padding, so the keyboard never reflows the action rows.
+        var paneHeight by remember { mutableIntStateOf(0) }
+        val compact = paneHeight > 0 && with(density) { paneHeight.toDp() } < MindMapCompactPaneHeight
+        Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize().onSizeChanged { paneHeight = it.height }) {
           CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null || session.replacingDocument || navigationBusy)) {
           Box(Modifier.fillMaxSize().then(if(hostHooks?.embedded==true) Modifier
                 else Modifier.windowInsetsPadding(WindowInsets.systemBars).imePadding())) {
@@ -281,7 +285,25 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             if (accepted) { session.selected = added; editing = added }
                         }
                     }
-                    // One structure row: node-selection mode swaps the creation actions for alignment.
+                    val graphActions: @Composable RowScope.() -> Unit = {
+                        MapButton(R.string.graph_free,enabled=!nodeMode) { addFree=true }
+                        MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
+                        MapButton(R.string.graph_relations,enabled=!nodeMode) { relationToEdit=null;pendingRelation=null;graphTools=true }
+                        MapButton(R.string.graph_connect_canvas,enabled=!nodeMode && node!=null,selected=connectingFrom!=null) {
+                            if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
+                        }
+                        MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) { showSources(node?.id) }
+                        MapButton(R.string.map_nodes,enabled=!nodeMode) { choosing = true; reparenting = false }
+                        MapButton(R.string.map_change_parent, enabled = !nodeMode && node?.parent != null && !session.closing) { choosing = true; reparenting = true }
+                        MapButton(R.string.map_layout, enabled = !nodeMode && !session.closing) { layoutMenu=true }
+                        MapButton(R.string.map_fit) { view?.fit() }
+                        MapButton(R.string.map_zoom_in) { view?.zoomBy(1.25f) }
+                        MapButton(R.string.map_zoom_out) { view?.zoomBy(.8f) }
+                        Text(node?.text.orEmpty().take(80), fontSize = TextSize.body,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
+                    }
+                    // One structure row: node-selection mode swaps the creation actions for alignment. A short
+                    // pane (a top/bottom split) scrolls the graph actions along the same row to keep the canvas.
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                         MapButton(R.string.graph_node_selection,selected=nodeMode,enabled=!session.closing) {session.setNodeSelectionMode(!nodeMode)}
                         if(nodeMode) {
@@ -309,24 +331,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.centralRoot?.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
+                        if(compact) graphActions()
                     }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
-                        MapButton(R.string.graph_free,enabled=!nodeMode) { addFree=true }
-                        MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
-                        MapButton(R.string.graph_relations,enabled=!nodeMode) { relationToEdit=null;pendingRelation=null;graphTools=true }
-                        MapButton(R.string.graph_connect_canvas,enabled=!nodeMode && node!=null,selected=connectingFrom!=null) {
-                            if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
-                        }
-                        MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) { showSources(node?.id) }
-                        MapButton(R.string.map_nodes,enabled=!nodeMode) { choosing = true; reparenting = false }
-                        MapButton(R.string.map_change_parent, enabled = !nodeMode && node?.parent != null && !session.closing) { choosing = true; reparenting = true }
-                        MapButton(R.string.map_layout, enabled = !nodeMode && !session.closing) { layoutMenu=true }
-                        MapButton(R.string.map_fit) { view?.fit() }
-                        MapButton(R.string.map_zoom_in) { view?.zoomBy(1.25f) }
-                        MapButton(R.string.map_zoom_out) { view?.zoomBy(.8f) }
-                        Text(node?.text.orEmpty().take(80), fontSize = TextSize.body,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
-                    }
+                    if(!compact) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {graphActions()}
                 }
                 val problem = if(geometryChanged && !session.limitError) R.string.graph_geometry_changed else session.problemText()
                 HorizontalDivider()
@@ -388,7 +395,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         MapButton(R.string.cancel) {view?.cancelConnection()}
                     }
                 }
-                if(textDraft==null) Text(stringResource(if(nodeMode) R.string.graph_node_selection_hint else R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
+                if(textDraft==null && !compact) Text(stringResource(if(nodeMode) R.string.graph_node_selection_hint else R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
             // Enlarged ink covers the whole pane, structure rows included, while the graph View keeps its size.
             editing?.let { id -> session.document?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.INK}?.let { n ->
