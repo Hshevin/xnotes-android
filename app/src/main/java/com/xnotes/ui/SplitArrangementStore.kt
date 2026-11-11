@@ -4,10 +4,15 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
 import java.nio.channels.Channels
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.FileSystemException
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption.READ
+import java.nio.file.attribute.BasicFileAttributes
 
 internal sealed interface SplitArrangementRead {
     data object Absent:SplitArrangementRead
@@ -15,11 +20,39 @@ internal sealed interface SplitArrangementRead {
     data class Ready(val request:SplitOpenRequest):SplitArrangementRead
 }
 
+/** Named create-new publication when the platform refuses hard links; see [SplitArrangementStore.FileOps.publishNew]. */
+private fun renameOverReservation(target:Path,stage:Path) {
+    Files.createFile(target) // O_EXCL: an existing name throws FileAlreadyExistsException.
+    val reservation=Files.readAttributes(target,BasicFileAttributes::class.java,NOFOLLOW_LINKS).fileKey()
+    try {Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE)}
+    catch(error:Exception) {
+        // Remove only the still-empty reservation this call created.
+        try {
+            val now=Files.readAttributes(target,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
+            if(now.isRegularFile && now.size()==0L && now.fileKey()==reservation) Files.deleteIfExists(target)
+        } catch(cleanup:Exception) {error.addSuppressed(cleanup)}
+        throw error
+    }
+}
+
 /** Only private arrangement JSON is accessed here. Source references are never opened. */
 internal class SplitArrangementStore(private val filesDir:File,private val fileOps:FileOps=SystemFileOps) {
     internal interface FileOps {
         fun createLink(link:Path,existing:Path)
         fun deleteIfExists(path:Path)
+        /**
+         * Publishes [stage] under the new name [target] without replacing anything there. Android
+         * forbids apps from hard-linking their own files (SELinux denies `link`), so a refused link
+         * reserves the name exclusively and atomically renames the complete stage over that
+         * reservation. A name collision or any other failure still reaches the caller unchanged.
+         */
+        fun publishNew(target:Path,stage:Path) {
+            try {createLink(target,stage)}
+            catch(refused:FileSystemException) {
+                if(refused is FileAlreadyExistsException || refused is NoSuchFileException) throw refused
+                renameOverReservation(target,stage)
+            } catch(_:UnsupportedOperationException) {renameOverReservation(target,stage)}
+        }
     }
     private object SystemFileOps:FileOps {
         override fun createLink(link:Path,existing:Path) {Files.createLink(link,existing)}

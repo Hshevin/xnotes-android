@@ -19,7 +19,7 @@ internal class PreparedSplitPublication internal constructor(
     private var published:File?=null
     val publishedFile:File? get()=synchronized(this) {published}
 
-    /** createLink is the commit. No cleanup or subsequent caller cancellation can revoke it. */
+    /** publishNew is the commit. No cleanup or subsequent caller cancellation can revoke it. */
     fun commit():File?=synchronized(this) {
         if(consumed || closed) return@synchronized null
         consumed=true
@@ -29,13 +29,17 @@ internal class PreparedSplitPublication internal constructor(
                 require(SplitArrangementPaths.directory(filesDir,create=false)==folder)
                 val candidate=File(folder,stem+(if(sequence==0) "" else "_$sequence")+".xsplit")
                 try {
-                    fileOps.createLink(candidate.toPath(),stage)
+                    fileOps.publishNew(candidate.toPath(),stage)
                     published=candidate
                     return@synchronized candidate
                 } catch(_:FileAlreadyExistsException) {continue}
             }
             null
-        } catch(_:Exception) {null}
+        } catch(error:Exception) {
+            // Only the failure type: a platform refusal must stay distinguishable from a source check.
+            runCatching {android.util.Log.w("xnotes.split","Arrangement publication failed: ${error::class.java.simpleName}")}
+            null
+        }
     }
 
     fun close() {
