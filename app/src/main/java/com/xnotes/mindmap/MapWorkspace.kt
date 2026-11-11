@@ -371,31 +371,35 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
         prepareNative:suspend (com.xnotes.ui.Pane,()->Boolean)->com.xnotes.ui.PreparedMixedNoteArrangementSave?,
         stillCurrent:()->Boolean={true},
     ):PreparedMixedArrangementSave? {
-        val entry=current ?: return null
-        val layout=splitPresentation.layout ?: return null
+        val entry=current ?: return MixedSaveTrace.reject("map: no current entry")
+        val layout=splitPresentation.layout ?: return MixedSaveTrace.reject("map: no split layout")
         val epoch=entry.session.interactionEpoch
         val routeGeneration=generation;val layoutGeneration=splitPresentation.generation
-        val documentId=entry.session.document?.id ?: return null
+        val documentId=entry.session.document?.id ?: return MixedSaveTrace.reject("map: no document")
         fun actorReady()=MapDocuments.observations(app).any {it.session===entry.session && it.key==MapSaves.key(entry.uri) &&
             !it.creating && !it.failed && !it.closing && !it.replacing && !it.loading}
         fun routeCurrent()=active && current===entry && visible && !opening && generation==routeGeneration &&
             entry.lease.alive && entry.session.interactionEpoch==epoch && entry.session.document?.id==documentId &&
             splitPresentation.layout==layout && splitPresentation.generation==layoutGeneration && !layout.nativeHome &&
             stillCurrent() && actorReady() && entry.session.canParkSourceNavigation
-        if(!routeCurrent()) return null
+        if(!routeCurrent()) return MixedSaveTrace.reject("map: route not current before native (actor ready=${actorReady()}, park=${entry.session.canParkSourceNavigation}, caller=${stillCurrent()})")
         try {
-            val native=prepareNative(layout.nativePane,::routeCurrent) ?: return null
-            if(!routeCurrent() || !native.current() || native.nativePane!=layout.nativePane) return null
+            val native=prepareNative(layout.nativePane,::routeCurrent) ?: return MixedSaveTrace.reject("native: preparation rejected")
+            if(!routeCurrent() || !native.current() || native.nativePane!=layout.nativePane)
+                return MixedSaveTrace.reject("after native: route=${routeCurrent()} native=${native.current()}")
             // Even a shared actor needs this operation's actual successful save, not the lease retirement waiver.
-            val written=entry.session.saveAttempt().await() as? MapSaveOutcome.Written ?: return null
-            val sha=written.sourceSha256 ?: return null
-            if(!written.latest || !routeCurrent() || !native.current() || entry.session.dirty || entry.session.saving) return null
-            val document=entry.session.document ?: return null
+            val outcome=entry.session.saveAttempt().await()
+            val written=outcome as? MapSaveOutcome.Written ?: return MixedSaveTrace.reject("map save outcome ${outcome::class.simpleName}")
+            val sha=written.sourceSha256 ?: return MixedSaveTrace.reject("map save without digest")
+            if(!written.latest || !routeCurrent() || !native.current() || entry.session.dirty || entry.session.saving)
+                return MixedSaveTrace.reject("after map save: latest=${written.latest} route=${routeCurrent()} native=${native.current()} dirty=${entry.session.dirty} saving=${entry.session.saving}")
+            val document=entry.session.document ?: return MixedSaveTrace.reject("map document closed")
             val revision=entry.session.contentRevision
-            if(written.capturedRevision!=revision) return null
+            if(written.capturedRevision!=revision) return MixedSaveTrace.reject("map revision changed after save")
             val access=MapPairAccess(app)
             val initial=access.initial(entry.uri)
-            if(!routeCurrent() || !native.current() || initial.id!=documentId || initial.sha256!=sha) return null
+            if(!routeCurrent() || !native.current() || initial.id!=documentId || initial.sha256!=sha)
+                return MixedSaveTrace.reject("map initial read: id=${initial.id==documentId} sha=${initial.sha256==sha}")
             val source=access.prepare(entry.uri,entry.lease,initial,requireLoadBaseline=false,expectedPublicationSha256=sha)
             val request=com.xnotes.ui.MixedSplitRequest(
                 com.xnotes.ui.SplitSourceRef(documentId,entry.uri.toString(),entry.title),native.source,layout,
@@ -404,22 +408,22 @@ internal class MapWorkspace(context:Context,private val scope:CoroutineScope) {
             com.xnotes.ui.SplitOpenCodec.encodeMixed(request)
             fun current()=routeCurrent() && native.current() && source.current() && entry.session.document===document &&
                 entry.session.contentRevision==revision && !entry.session.dirty && !entry.session.saving
-            if(!current()) return null
+            if(!current()) return MixedSaveTrace.reject("map pair not current after encoding")
             return PreparedMixedArrangementSave(request,listOfNotNull(entry.title,native.source.title).joinToString(" + "),::current) {commit->
-                if(!current()) null else {
+                if(!current()) MixedSaveTrace.reject("publish: pair changed") else {
                     val nativeSource=native.verifySource()
-                    if(nativeSource==null || !current() || !nativeSource()) null else {
+                    if(nativeSource==null || !current() || !nativeSource()) MixedSaveTrace.reject("publish: native source verification ${nativeSource!=null}") else {
                         var published:java.io.File?=null
                         source.finish {
                             if(!current() || !nativeSource()) false
                             else {published=commit();published!=null}
                         }
-                        published
+                        published ?: MixedSaveTrace.reject("publish: final map read or commit rejected")
                     }
                 }
             }
         } catch(cancelled:java.util.concurrent.CancellationException) {throw cancelled}
-        catch(_:Exception) {return null}
+        catch(error:Exception) {return MixedSaveTrace.reject("exception ${error::class.java.simpleName}")}
     }
 
     /** Called after both Native initial reads, before Native guard/save and the last source IO. */

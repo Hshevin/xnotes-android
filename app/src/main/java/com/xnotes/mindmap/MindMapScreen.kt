@@ -143,11 +143,12 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         val latestIme by rememberUpdatedState(imeBottom)
         val latestCameraReady by rememberUpdatedState(cameraReady)
-        DisposableEffect(view,presentationState,session) {
-            val owned=view
+        // Capture the key at composition: the AndroidView factory publishes `view` during the same apply,
+        // before effects run, so reading it inside the effect would let the key change dispose the live View.
+        val composedView=view
+        DisposableEffect(composedView,presentationState,session) {
             onDispose {
-                if(owned!=null && latestCameraReady) presentationState.capture(session,owned,latestIme)
-                if(view===owned) view=null
+                if(composedView!=null && latestCameraReady) presentationState.capture(session,composedView,latestIme)
             }
         }
         LaunchedEffect(view,graphEpoch,session.document?.id,imeBottom,geometry,textDraft?.token,textRestore?.token,presentationState.restoreVersion,
@@ -224,8 +225,9 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         }
         Surface(color = palette.panel.toComposeColor(), modifier = Modifier.fillMaxSize()) {
           CompositionLocalProvider(LocalInkBusy provides (session.inkContact || enlarged || textRestore!=null || session.replacingDocument || navigationBusy)) {
-            Column(Modifier.fillMaxSize().then(if(hostHooks?.embedded==true) Modifier
+          Box(Modifier.fillMaxSize().then(if(hostHooks?.embedded==true) Modifier
                 else Modifier.windowInsetsPadding(WindowInsets.systemBars).imePadding())) {
+            Column(Modifier.fillMaxSize()) {
                 if(textDraft!=null) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                         MapButton(R.string.map_done) {endText(true)}
@@ -268,6 +270,18 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 val nodeMode=session.nodeSelectionMode
                 if (doc != null && textDraft==null) {
                     val actionCapture=session.captureNodes(doc,session.selectedNodes)
+                    fun add(kind: NodeKind, sibling: Boolean) {
+                        val parent = if (sibling) node?.parent else node?.id
+                        if (parent != null) {
+                            var added: String? = null
+                            val accepted = session.operate {
+                                val (next, id) = it.add(parent, kind, context.getString(if (kind == NodeKind.TEXT) R.string.map_topic else R.string.map_ink_node))
+                                added = id; next
+                            }
+                            if (accepted) { session.selected = added; editing = added }
+                        }
+                    }
+                    // One structure row: node-selection mode swaps the creation actions for alignment.
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
                         MapButton(R.string.graph_node_selection,selected=nodeMode,enabled=!session.closing) {session.setNodeSelectionMode(!nodeMode)}
                         if(nodeMode) {
@@ -279,40 +293,22 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             },enabled=actionCapture!=null && doc.canAlignNodes(actionCapture.ids) && !session.closing) {
                                 actionCapture?.let {session.alignNodes(it,alignment)}
                             }
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
-                        fun add(kind: NodeKind, sibling: Boolean) {
-                            val parent = if (sibling) node?.parent else node?.id
-                            if (parent != null) {
-                                var added: String? = null
-                                val accepted = session.operate {
-                                    val (next, id) = it.add(parent, kind, context.getString(if (kind == NodeKind.TEXT) R.string.map_topic else R.string.map_ink_node))
-                                    added = id; next
-                                }
-                                if (accepted) { session.selected = added; editing = added }
+                        } else {
+                            MapButton(R.string.map_add_text, enabled = node != null && !session.closing) { add(NodeKind.TEXT, false) }
+                            MapButton(R.string.map_add_ink, enabled = node != null && !session.closing) { add(NodeKind.INK, false) }
+                            MapButton(R.string.map_add_sibling, enabled = node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
+                            MapButton(when {relation!=null->R.string.graph_edit_relation;node?.kind==NodeKind.INK->R.string.ink_enlarge;else->R.string.map_edit},
+                                enabled = (node != null || relation!=null) && !session.closing) {
+                                if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
                             }
-                        }
-                        MapButton(R.string.map_add_text, enabled = !nodeMode && node != null && !session.closing) { add(NodeKind.TEXT, false) }
-                        MapButton(R.string.map_add_ink, enabled = !nodeMode && node != null && !session.closing) { add(NodeKind.INK, false) }
-                        MapButton(R.string.map_add_sibling, enabled = !nodeMode && node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
-                        MapButton(when {relation!=null->R.string.graph_edit_relation;node?.kind==NodeKind.INK->R.string.ink_enlarge;else->R.string.map_edit},
-                            enabled = !nodeMode && (node != null || relation!=null) && !session.closing) {
-                            if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
-                        }
-                        MapButton(if (node?.let {session.isEffectivelyCollapsed(it.id)} == true) R.string.map_expand else R.string.map_collapse, enabled = !nodeMode && node != null && doc.children(node.id).isNotEmpty()) {
-                            node?.let {session.toggleCollapse(it.id)}
+                            MapButton(R.string.ink_properties,enabled=node!=null){propertiesFor=node?.id}
+                            MapButton(if (node?.let {session.isEffectivelyCollapsed(it.id)} == true) R.string.map_expand else R.string.map_collapse, enabled = node != null && doc.children(node.id).isNotEmpty()) {
+                                node?.let {session.toggleCollapse(it.id)}
+                            }
                         }
                         MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.centralRoot?.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
-                    }
-                    run {
-                        CompositionLocalProvider(LocalInkBusy provides (LocalInkBusy.current || nodeMode)) {MapInkTools(session)}
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                            MapButton(R.string.ink_fit_content,enabled=!nodeMode && node?.kind==NodeKind.INK){node?.let {n->session.operate {it.update(n.id) {it.fitInkContent()}}}}
-                            MapButton(R.string.ink_properties,enabled=!nodeMode && node!=null){propertiesFor=node?.id}
-                        }
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {
                         MapButton(R.string.graph_free,enabled=!nodeMode) { addFree=true }
@@ -336,7 +332,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 HorizontalDivider()
                 Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                     when {
-                        doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize().alpha(if(cameraReady) 1f else 0f), update = { v ->
+                        doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize().alpha(if(cameraReady) 1f else 0f),
+                            onRelease = { released -> if(view===released) view=null }, update = { v ->
                             v.isEnabled=cameraReady && !(navigationBusy && !session.hasUnconfirmedContent) && !enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
                             v.onViewportChanged={
                                 viewRevision++
@@ -370,9 +367,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
                     }
                     if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,viewRevision)}
-                    editing?.let { id -> doc?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.INK}?.let { n ->
-                        MapInkEditor(session,n) {editing=null}
-                    } }
+                    // In-place ink settings appear only for a selected ink node, over the graph so the
+                    // native View keeps its size (and any stroke) when the selection changes.
+                    if(!nodeMode && !enlarged && textDraft==null && connectingFrom==null) node?.takeIf {it.kind==NodeKind.INK}?.let {n->
+                        Box(Modifier.align(Alignment.BottomCenter).padding(Space.s8)) {MapInkToolbar(session,n,floating=true)}
+                    }
                     problem?.takeIf {textDraft==null}?.let { message -> Column(Modifier.align(Alignment.TopStart)) {
                         Text(stringResource(message),fontSize=TextSize.body,modifier=Modifier.fillMaxWidth().background(palette.panel.toComposeColor()).padding(Space.s12))
                         if(session.saveFailed && session.recoverySafe) MapButton(R.string.map_close_recovery) {
@@ -391,6 +390,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 }
                 if(textDraft==null) Text(stringResource(if(nodeMode) R.string.graph_node_selection_hint else R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
+            // Enlarged ink covers the whole pane, structure rows included, while the graph View keeps its size.
+            editing?.let { id -> session.document?.nodes?.firstOrNull {it.id==id && it.kind==NodeKind.INK}?.let { n ->
+                MapInkEditor(session,n) {editing=null}
+            } }
+          }
           }
         }
         propertiesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id == id }?.let { node ->

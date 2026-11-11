@@ -41,7 +41,20 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
     Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
         Surface(Modifier.fillMaxSize(.94f).imePadding()) {
             Column(Modifier.fillMaxSize().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-                Text(stringResource(title ?: if (current.kind == NodeKind.INK) R.string.map_ink_node else R.string.map_edit), fontSize = TextSize.heading)
+                // Actions sit with the title: a tall text field and the soft keyboard must never cover them.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(stringResource(title ?: if (current.kind == NodeKind.INK) R.string.map_ink_node else R.string.map_edit), fontSize = TextSize.heading,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    MapButton(R.string.cancel, onClick = ::dismiss)
+                    MapButton(R.string.map_done) {
+                        if(alive.get()) {
+                            val next = current.copy(text = text, height = if (current.kind == NodeKind.TEXT) painter.measuredHeight(text, current.width) else current.height)
+                            try { history.document.update(node.id) {next.copy(parent = null, free = false)}.validate(); if (!onConfirm(next)) problem = true }
+                            catch (_: IllegalArgumentException) { problem = true }
+                        }
+                    }
+                }
+                if (problem) Text(stringResource(problemLabel), fontSize = TextSize.body)
                 notice?.let {Text(it,fontSize=TextSize.body,maxLines=3,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}
                 if(current.fileCardId!=null) Text(stringResource(R.string.graph_file_card_notice),fontSize=TextSize.caption)
                 else Row {
@@ -63,17 +76,6 @@ internal fun MapNodeDialog(node: MapNode, onDismiss: () -> Unit, onConfirm: (Map
                         commit(current.copy(width=(current.width*1.5).coerceAtMost(4096.0),height=(current.height*1.5).coerceAtMost(4096.0)))
                     }
                     Spacer(Modifier.weight(1f))
-                }
-                if (problem) Text(stringResource(problemLabel), fontSize = TextSize.body)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    MapButton(R.string.cancel, onClick = ::dismiss)
-                    MapButton(R.string.map_done) {
-                        if(alive.get()) {
-                            val next = current.copy(text = text, height = if (current.kind == NodeKind.TEXT) painter.measuredHeight(text, current.width) else current.height)
-                            try { history.document.update(node.id) {next.copy(parent = null, free = false)}.validate(); if (!onConfirm(next)) problem = true }
-                            catch (_: IllegalArgumentException) { problem = true }
-                        }
-                    }
                 }
             }
         }

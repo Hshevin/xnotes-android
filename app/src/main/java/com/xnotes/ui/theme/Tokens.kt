@@ -57,7 +57,10 @@ val LayerThumbnailSize = 48.dp
 /** Scrollable outline and parent chooser in the independent mind map editor. */
 val MindMapNodeListHeight = 400.dp
 
-val MindMapPenSliderWidth = 160.dp
+val MindMapPenSliderWidth = 240.dp
+
+/** Longest node name beside the enlarged ink editor's Back button. */
+val MindMapInkTitleWidth = 200.dp
 
 /** Last source image shown within the graph's existing scrollable source dialog. */
 val MindMapSourcePreviewHeight = 144.dp

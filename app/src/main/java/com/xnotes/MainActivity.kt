@@ -1473,18 +1473,23 @@ private fun EditorScreen(
                     editor.prepareMixedNoteArrangementSave(pane) {valid() && current()}
                 },stillCurrent=::current)
                 if(capture!=null && current()) {
-                    if(attempt.prepare(capture.request,capture.name)) capture.publish {attempt.commit()}
+                    if(!attempt.prepare(capture.request,capture.name)) com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("arrangement stage could not be prepared")
+                    else if(capture.publish {attempt.commit()}==null) com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("arrangement publication refused")
                     if(attempt.publishedFile!=null && current()) {
                         editor.persistMixedNotePresentation(capture.request.layout.nativePane)
                         val outcome=recentWriter.submit(ticket,com.xnotes.ui.SplitOpenRequest.Mixed(capture.request)).await()
                         if(current()) editor.message=context.getString(if(outcome===com.xnotes.ui.SplitRecentWrite.Written)
                             R.string.split_saved else R.string.mixed_split_saved_recent_failed)
                     } else if(attempt.publishedFile==null && current()) editor.message=context.getString(R.string.mixed_split_save_failed)
-                } else if(current()) editor.message=context.getString(R.string.mixed_split_save_failed)
+                } else {
+                    if(capture!=null) com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("host changed after preparation")
+                    if(current()) editor.message=context.getString(R.string.mixed_split_save_failed)
+                }
             } catch(cancelled:java.util.concurrent.CancellationException) {
                 if(attempt.publishedFile!=null && current()) editor.message=context.getString(R.string.mixed_split_saved_recent_failed)
                 throw cancelled
-            } catch(_:Exception) {
+            } catch(error:Exception) {
+                com.xnotes.mindmap.MixedSaveTrace.reject<Unit>("exception ${error::class.java.simpleName}")
                 if(current()) editor.message=context.getString(if(attempt.publishedFile!=null) R.string.mixed_split_saved_recent_failed else R.string.mixed_split_save_failed)
             } finally {
                 attempt.close()
