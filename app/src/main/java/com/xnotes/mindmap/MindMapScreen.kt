@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,7 +52,11 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         val targetPicker=LocalSourceTargetPickerHost.current ?: rememberSourceTargetPickerHost()
         val pendingTargetPickerId=targetPicker.pendingId
         val graphEpoch=session.interactionEpoch
-        var graphTools by remember(graphEpoch) { mutableStateOf(false) }
+        // Relations stay composed once visited; a new serial starts a fresh relation page (canvas edge, list reset).
+        var relationsAlive by remember(graphEpoch) { mutableStateOf(false) }
+        var relationSerial by remember(graphEpoch) { mutableIntStateOf(0) }
+        var menuOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        var menuTabName by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(MapMenuTab.NODES.name) }
         var pendingRelation by remember(graphEpoch) {mutableStateOf<MapRelation?>(null)}
         var relationToEdit by remember(graphEpoch) {mutableStateOf<String?>(null)}
         var connectingFrom by remember {mutableStateOf<String?>(null)}
@@ -60,8 +65,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             val request=connectedPickerId;connectedPickerId=null
             if(request!=null) sourceController.receive(request,uri)
         }
-        var addFree by remember { mutableStateOf(false) }
-        var layoutMenu by remember(graphEpoch) { mutableStateOf(false) }
         var proposed by remember(graphEpoch) { mutableStateOf<MindMapDocument?>(null) }
         var geometryChanged by remember(graphEpoch) { mutableStateOf(false) }
         val sourcePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -96,9 +99,13 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         val imeBottom = WindowInsets.ime.getBottom(density)
         val textDraft = session.textDraft
         val textRestore = session.textRestore
+        fun openMenu(tab:MapMenuTab) {menuTabName=tab.name;menuOpen=true}
+        fun openRelations(edge:MapRelation?,existing:String?) {
+            relationToEdit=existing;pendingRelation=edge;relationsAlive=true;relationSerial++;openMenu(MapMenuTab.RELATIONS)
+        }
         fun editExistingRelation(id:String) {
             if(session.document?.relations?.none {it.id==id}!=false || !session.selectRelation(id)) return
-            relationToEdit=id;pendingRelation=null;graphTools=true
+            openRelations(null,id)
         }
         fun endText(confirm:Boolean) {
             val draft=session.textDraft ?: return
@@ -122,7 +129,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         fun showSources(id:String?):Boolean {
             val graph=view ?: return false
             if(id==null || navigationBusy) return false
-            return presentationState.showSources(session,graph,id,imeBottom,cameraReady)
+            return presentationState.showSources(session,graph,id,imeBottom,cameraReady).also {if(it) openMenu(MapMenuTab.SOURCES)}
         }
         fun openSource(ticket:MapSourceNavigationTicket) {
             val hooks=hostHooks ?: return
@@ -199,6 +206,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             else if(editing!=null) editing=null
             else if(connectingFrom!=null) view?.cancelConnection()
             else if(session.inkContact) {if(session.nodeSelectionMode) view?.cancelNodeSelectionGesture() else view?.inkInput?.cancel()}
+            else if(proposed!=null) proposed=null
+            else if(menuOpen) {focus.clearFocus();keyboard?.hide();menuOpen=false}
             else if (!session.closing) close()
         }
         val palette = LocalPalette.current
@@ -223,6 +232,223 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 graph.addOnAttachStateChangeListener(listener)
                 graph.post(takeFocus)
                 onDispose {graph.removeCallbacks(takeFocus);graph.removeOnAttachStateChangeListener(listener)}
+            }
+        }
+        // The menu panel's own fields can raise the IME over an IME-padded graph; restore its ordinary camera afterwards.
+        var panelIme by remember { mutableStateOf(false) }
+        LaunchedEffect(imeBottom!=0,textDraft?.token,textRestore?.token) {
+            if(imeBottom!=0) {if(textDraft==null && textRestore==null) panelIme=true}
+            else if(panelIme) {panelIme=false;if(textDraft==null && textRestore==null) presentationState.restoreAfterPanelInput()}
+        }
+        fun addNode(anchor:MapNode?,kind:NodeKind,sibling:Boolean) {
+            // Only a draft opens here; node, hierarchy and sources commit together on confirmation.
+            anchor ?: return
+            session.beginNodeCreation(if(sibling) NodePlacement.SIBLING else NodePlacement.CHILD,anchor.id,kind,defaultNodeTitle(context,kind))
+        }
+        val pendingSourceFocus=presentationState.sourceFocus
+        val currentSourceFocus=pendingSourceFocus?.takeIf {session.currentSourceNavigation(it.source)!=null}
+        SideEffect {if(pendingSourceFocus!=null && currentSourceFocus==null) presentationState.consumeSourceFocus(pendingSourceFocus.token)}
+        // Backlink focus and a failed source jump reopen the source list directly; surface it in the menu.
+        LaunchedEffect(presentationState.sourcesFor) {if(presentationState.sourcesFor!=null) openMenu(MapMenuTab.SOURCES)}
+        /**
+         * One in-pane menu replaces the former stack of dialogs. It overlays the graph, so the native View (and any
+         * stroke in progress) keeps its size and camera. Pages stay composed while hidden: switching pages or
+         * folding the menu never commits or drops a draft. Creation and layout preview lock their page until
+         * confirmed or cancelled. System file pickers and destructive confirmations stay platform dialogs.
+         */
+        @Composable
+        fun MapMenu(doc:MindMapDocument,node:MapNode?) {
+            fun add(kind:NodeKind,sibling:Boolean)=addNode(node,kind,sibling)
+            val draft=session.connectedDraft
+            val choice=sourceController.state
+            val nodeMode=session.nodeSelectionMode
+            val lockedTab=when {draft!=null->MapMenuTab.NODES;proposed!=null->MapMenuTab.LAYOUT;else->null}
+            val tab=lockedTab ?: MapMenuTab.valueOf(menuTabName)
+            val shown=(menuOpen || lockedTab!=null || choice!=null) && !enlarged && textDraft==null && textRestore==null
+            fun hide() {focus.clearFocus();keyboard?.hide();menuOpen=false}
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val panelWidth=minOf(MindMapMenuWidth,maxWidth-MindMapMenuMinCanvas).coerceAtLeast(MindMapMenuMinCanvas)
+                MapMenuPage(shown,Modifier.align(Alignment.TopEnd).width(panelWidth).fillMaxHeight()) {
+                  Surface(color=palette.panel.toComposeColor(),modifier=Modifier.fillMaxSize()) { Row(Modifier.fillMaxSize()) {
+                    VerticalDivider()
+                    Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s4)) {
+                            for(t in MapMenuTab.entries) MapButton(when(t) {
+                                MapMenuTab.NODES->R.string.map_menu_nodes;MapMenuTab.SOURCES->R.string.map_menu_sources
+                                MapMenuTab.RELATIONS->R.string.map_menu_relations;MapMenuTab.LAYOUT->R.string.map_menu_layout
+                            },selected=t==tab,enabled=lockedTab==null || t==lockedTab) {
+                                focus.clearFocus();menuTabName=t.name;menuOpen=true
+                                if(t==MapMenuTab.RELATIONS) relationsAlive=true
+                                if(t==MapMenuTab.SOURCES && presentationState.sourcesFor==null) showSources(session.selected)
+                            }
+                            MapButton(R.string.map_menu_hide,enabled=lockedTab==null && choice==null) {hide()}
+                        }
+                        if(lockedTab!=null) Text(stringResource(if(draft!=null) R.string.map_creation_in_progress else R.string.map_layout_preview_pending),
+                            fontSize=TextSize.caption,modifier=Modifier.padding(horizontal=Space.s8))
+                        HorizontalDivider()
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            // Nodes: overview, properties, node list / parent chooser and the creation draft.
+                            MapMenuPage(tab==MapMenuTab.NODES,Modifier.fillMaxSize()) {
+                                val propsNode=propertiesFor?.let {id->doc.nodes.firstOrNull {it.id==id}}
+                                MapMenuPage(draft==null && !choosing && propsNode==null,Modifier.fillMaxSize()) {
+                                    @OptIn(ExperimentalLayoutApi::class)
+                                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.s8),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                                        Text(node?.let {relationNodeTitle(doc,it.id)} ?: stringResource(R.string.map_menu_no_selection),fontSize=TextSize.title,
+                                            maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                        Text(stringResource(R.string.map_menu_create),fontSize=TextSize.caption)
+                                        FlowRow {
+                                            MapButton(R.string.map_add_text,enabled=!nodeMode && node!=null && !session.closing) {add(NodeKind.TEXT,false)}
+                                            MapButton(R.string.map_add_ink,enabled=!nodeMode && node!=null && !session.closing) {add(NodeKind.INK,false)}
+                                            MapButton(R.string.map_add_sibling,enabled=!nodeMode && node?.parent!=null && !session.closing) {add(node?.kind ?: NodeKind.TEXT,true)}
+                                            MapButton(R.string.graph_free,enabled=!nodeMode && !session.closing) {
+                                                session.beginNodeCreation(NodePlacement.FREE,null,NodeKind.TEXT,defaultNodeTitle(context,NodeKind.TEXT))
+                                            }
+                                        }
+                                        HorizontalDivider()
+                                        Text(stringResource(R.string.map_menu_node_actions),fontSize=TextSize.caption)
+                                        FlowRow {
+                                            MapButton(if(node?.kind==NodeKind.INK) R.string.ink_enlarge else R.string.map_edit,enabled=!nodeMode && node!=null && !session.closing) {
+                                                node?.let {editNode(it.id)}
+                                            }
+                                            MapButton(R.string.ink_properties,enabled=!nodeMode && node!=null) {propertiesFor=node?.id}
+                                            MapButton(if(node?.let {session.isEffectivelyCollapsed(it.id)}==true) R.string.map_expand else R.string.map_collapse,
+                                                enabled=node!=null && doc.children(node.id).isNotEmpty()) {node?.let {session.toggleCollapse(it.id)}}
+                                            MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) {node?.let {n->session.operate {it.detach(n.id)}}}
+                                            MapButton(R.string.map_change_parent,enabled=!nodeMode && node?.parent!=null && !session.closing) {choosing=true;reparenting=true}
+                                            MapButton(R.string.map_nodes,enabled=!nodeMode) {choosing=true;reparenting=false}
+                                            MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) {showSources(node?.id)}
+                                        }
+                                    }
+                                }
+                                propsNode?.let {n->MapMenuPage(draft==null && !choosing,Modifier.fillMaxSize()) {
+                                    key(n.id) {MapNodeEditorContent(n,onDismiss={propertiesFor=null},onConfirm={edited->
+                                        session.editNodeProperties(n.id,edited).also {if(it) propertiesFor=null}
+                                    },previewAssets=doc.previewAssets,modifier=Modifier.fillMaxSize().padding(Space.s8))}
+                                }}
+                                MapMenuPage(draft==null && choosing,Modifier.fillMaxSize()) {
+                                    val id=session.selected
+                                    val excluded=if(reparenting && id!=null) doc.descendants(id) else emptySet()
+                                    Column(Modifier.fillMaxSize().padding(Space.s8)) {
+                                        Row(verticalAlignment=Alignment.CenterVertically) {
+                                            MapButton(R.string.graph_back) {choosing=false}
+                                            Text(stringResource(if(reparenting) R.string.map_change_parent else R.string.map_nodes),fontSize=TextSize.title)
+                                        }
+                                        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                                            val nodes=session.effectiveVisible().filter {it.id !in excluded}
+                                            items(nodes.size,key={nodes[it].id}) {index->
+                                                val n=nodes[index]
+                                                TextButton(onClick={
+                                                    if(reparenting && id!=null) session.operate {it.reparent(id,n.id)}
+                                                    else {session.selected=n.id;view?.centerOn(n.id)}
+                                                    choosing=false
+                                                },enabled=!LocalInkBusy.current,modifier=Modifier.fillMaxWidth().heightIn(min=MinTouchTarget)) {
+                                                    Text(n.text.ifBlank {stringResource(if(n.kind==NodeKind.INK) R.string.map_ink_node else R.string.map_topic)},
+                                                        fontSize=TextSize.body,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                draft?.let {d->NodeCreationContent(session,d,connectedPickerId!=null || session.connectedSourceRequest!=null,{
+                                    if(connectedPickerId==null) session.beginConnectedSource(d.token)?.let {request->
+                                        connectedPickerId=request.id
+                                        try {connectedSourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
+                                        catch(_:Exception) {connectedPickerId=null;session.failConnectedSource(request.id)}
+                                    }
+                                }) {id,kind->
+                                    // Text continues into in-place editing, ink into the enlarged editor.
+                                    if(kind!=NodeKind.REFERENCE) editing=id
+                                }}
+                            }
+                            // Sources: the bound node's list stays composed (note drafts survive page switches).
+                            MapMenuPage(tab==MapMenuTab.SOURCES,Modifier.fillMaxSize()) {
+                                val boundId=presentationState.sourcesFor
+                                val sourceEdit=boundId?.let {session.sourceEditSnapshot(it)}
+                                if(boundId!=null && sourceEdit!=null) {
+                                    val editor=remember(presentationState,session,boundId,sourceEdit.epoch,sourceEdit.documentId) {presentationState.bindSourceEditor(session,sourceEdit)}
+                                    Column(Modifier.fillMaxSize()) {
+                                        val selectedId=session.selected
+                                        if(selectedId!=null && selectedId!=boundId && !nodeMode) MapButton(R.string.map_sources_show_selected,
+                                            enabled=!editor.hasNoteDrafts && pendingSourceRequest==null && sourceController.state==null) {showSources(selectedId)}
+                                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                                            GraphSourcesContent(sourceEdit,editor,{
+                                                if(pendingSourceRequest==null) session.beginExistingSource(boundId)?.let {request->
+                                                    pendingSourceRequest=request
+                                                    try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
+                                                    catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
+                                                }
+                                            },addEnabled=pendingSourceRequest==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null,
+                                                open=if(hostHooks==null || !cameraReady) null else ::openSource,focus=currentSourceFocus,
+                                                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback,
+                                                targetEditsEnabled=pendingSourceRequest==null && connectedPickerId==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null,
+                                                frame=PanelFrame,listModifier=Modifier.fillMaxSize()) {
+                                                listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
+                                                // Keep the system launch occupied until ITS result consumes the old ticket.
+                                                activeExistingSource=null;presentationState.closeSources();focus.clearFocus();keyboard?.hide()
+                                            }
+                                        }
+                                    }
+                                } else Column(Modifier.fillMaxSize().padding(Space.s8),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                                    Text(stringResource(R.string.map_sources_select_node),fontSize=TextSize.body)
+                                    MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) {showSources(node?.id)}
+                                }
+                            }
+                            MapMenuPage(tab==MapMenuTab.RELATIONS,Modifier.fillMaxSize()) {
+                                if(relationsAlive) key(graphEpoch,relationSerial) {
+                                    GraphRelationsContent(doc,session.selected,{initial,next->
+                                        if(session.interactionEpoch!=graphEpoch) RelationEditResult.Conflict else session.changeRelation(initial,next).also {result->
+                                            if(result is RelationEditResult.Duplicate && !session.selectRelation(result.relation.id)) session.selectRelation(null)
+                                        }
+                                    },pendingRelation,relationToEdit,onSelectExisting={id->
+                                        if(session.interactionEpoch==graphEpoch && !session.selectRelation(id)) session.selectRelation(null)
+                                    },frame=PanelFrame,listModifier=Modifier.fillMaxSize()) {
+                                        // Finishing or cancelling returns to a fresh relation list; the menu stays open.
+                                        pendingRelation=null;relationToEdit=null;relationSerial++
+                                    }
+                                }
+                            }
+                            MapMenuPage(tab==MapMenuTab.LAYOUT,Modifier.fillMaxSize()) {
+                                @OptIn(ExperimentalLayoutApi::class)
+                                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.s8),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
+                                    Text(stringResource(R.string.map_layout),fontSize=TextSize.title)
+                                    FlowRow {
+                                        for(direction in MapDirection.entries) MapButton(when(direction) {
+                                            MapDirection.BOTH->R.string.graph_both;MapDirection.RIGHT->R.string.graph_right;MapDirection.DOWN->R.string.graph_vertical
+                                        },selected=proposed?.direction==direction,enabled=!nodeMode && !session.closing && draft==null) {
+                                            session.document?.let {proposed=MapLayout.arrange(it.copy(direction=direction))}
+                                        }
+                                    }
+                                    proposed?.let {preview->
+                                        Text(stringResource(R.string.graph_preview),fontSize=TextSize.title)
+                                        Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)
+                                        Row {
+                                            MapButton(R.string.cancel) {proposed=null}
+                                            MapButton(R.string.map_done) {
+                                                geometryChanged=session.interactionEpoch!=graphEpoch || !session.operate {latest->MapLayout.arrange(latest.copy(direction=preview.direction))}
+                                                proposed=null
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    Text(stringResource(R.string.map_menu_view),fontSize=TextSize.caption)
+                                    FlowRow {
+                                        MapButton(R.string.map_fit) {view?.fit()}
+                                        MapButton(R.string.map_zoom_in) {view?.zoomBy(1.25f)}
+                                        MapButton(R.string.map_zoom_out) {view?.zoomBy(.8f)}
+                                    }
+                                    HorizontalDivider()
+                                    MapButton(R.string.map_help,selected=help) {help=!help}
+                                    if(help) Text(stringResource(R.string.map_help_text),fontSize=TextSize.body)
+                                }
+                            }
+                            // Second step after the system file picker returned; it belongs to the request, not to a page.
+                            choice?.let {c->Surface(color=palette.panel.toComposeColor(),modifier=Modifier.fillMaxSize()) {
+                                GraphSourceChoiceContent(c,sourceController,PanelFrame,Modifier.fillMaxSize())
+                            }}
+                        }
+                    }
+                  } }
+                }
             }
         }
         // Measured outside the IME padding, so the keyboard never reflows the action rows.
@@ -261,7 +487,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                     }), fontSize = TextSize.caption)
                     MapButton(R.string.save, enabled = session.document != null && !session.saving) { session.save() }
                     MapButton(R.string.map_save_copy, enabled = session.document != null && !session.saving) { saveCopy.launch("${title.ifBlank { context.getString(R.string.map_title) }}.xmap") }
-                    MapButton(R.string.map_help) { help = true }
+                    MapButton(R.string.map_help) { help = true;openMenu(MapMenuTab.LAYOUT) }
                 }
                 }
                 if(navigationBusy || navigationFeedback!=null) Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically) {
@@ -275,37 +501,12 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 val nodeMode=session.nodeSelectionMode
                 if (doc != null && textDraft==null) {
                     val actionCapture=session.captureNodes(doc,session.selectedNodes)
-                    fun add(kind: NodeKind, sibling: Boolean) {
-                        val parent = if (sibling) node?.parent else node?.id
-                        if (parent != null) {
-                            var added: String? = null
-                            val accepted = session.operate {
-                                val (next, id) = it.add(parent, kind, context.getString(if (kind == NodeKind.TEXT) R.string.map_topic else R.string.map_ink_node))
-                                added = id; next
-                            }
-                            if (accepted) { session.selected = added; editing = added }
-                        }
-                    }
-                    val graphActions: @Composable RowScope.() -> Unit = {
-                        MapButton(R.string.graph_free,enabled=!nodeMode) { addFree=true }
-                        MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) { node?.let { n -> session.operate { it.detach(n.id) } } }
-                        MapButton(R.string.graph_relations,enabled=!nodeMode) { relationToEdit=null;pendingRelation=null;graphTools=true }
-                        MapButton(R.string.graph_connect_canvas,enabled=!nodeMode && node!=null,selected=connectingFrom!=null) {
-                            if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
-                        }
-                        MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) { showSources(node?.id) }
-                        MapButton(R.string.map_nodes,enabled=!nodeMode) { choosing = true; reparenting = false }
-                        MapButton(R.string.map_change_parent, enabled = !nodeMode && node?.parent != null && !session.closing) { choosing = true; reparenting = true }
-                        MapButton(R.string.map_layout, enabled = !nodeMode && !session.closing) { layoutMenu=true }
-                        MapButton(R.string.map_fit) { view?.fit() }
-                        MapButton(R.string.map_zoom_in) { view?.zoomBy(1.25f) }
-                        MapButton(R.string.map_zoom_out) { view?.zoomBy(.8f) }
-                        Text(node?.text.orEmpty().take(80), fontSize = TextSize.body,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.align(Alignment.CenterVertically).padding(horizontal = Space.s12))
-                    }
-                    // One structure row: node-selection mode swaps the creation actions for alignment. A short
-                    // pane (a top/bottom split) scrolls the graph actions along the same row to keep the canvas.
+                    fun add(kind:NodeKind,sibling:Boolean)=addNode(node,kind,sibling)
+                    // Quick row: frequent edits only. Structure, sources, relations and layout live in the menu.
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8)) {
+                        MapButton(R.string.map_menu,selected=menuOpen,enabled=!session.closing) {
+                            if(menuOpen) {focus.clearFocus();keyboard?.hide()};menuOpen=!menuOpen
+                        }
                         MapButton(R.string.graph_node_selection,selected=nodeMode,enabled=!session.closing) {session.setNodeSelectionMode(!nodeMode)}
                         if(nodeMode) {
                             Text(stringResource(R.string.graph_selected_nodes,session.selectedNodes.size),fontSize=TextSize.body,modifier=Modifier.align(Alignment.CenterVertically))
@@ -322,19 +523,17 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             MapButton(R.string.map_add_sibling, enabled = node?.parent != null && !session.closing) { add(node?.kind ?: NodeKind.TEXT, true) }
                             MapButton(when {relation!=null->R.string.graph_edit_relation;node?.kind==NodeKind.INK->R.string.ink_enlarge;else->R.string.map_edit},
                                 enabled = (node != null || relation!=null) && !session.closing) {
-                                if(relation!=null) editExistingRelation(relation.id) else editing = node?.id
-                            }
-                            MapButton(R.string.ink_properties,enabled=node!=null){propertiesFor=node?.id}
-                            MapButton(if (node?.let {session.isEffectivelyCollapsed(it.id)} == true) R.string.map_expand else R.string.map_collapse, enabled = node != null && doc.children(node.id).isNotEmpty()) {
-                                node?.let {session.toggleCollapse(it.id)}
+                                if(relation!=null) editExistingRelation(relation.id) else node?.let {editNode(it.id)}
                             }
                         }
                         MapButton(R.string.delete, enabled = actionCapture!=null && actionCapture.ids.any {it!=doc.centralRoot?.id} && !session.closing) {deleting=actionCapture}
                         MapButton(R.string.undo, enabled = session.canUndo && !session.closing) { session.undo() }
                         MapButton(R.string.redo, enabled = session.canRedo && !session.closing) { session.redo() }
-                        if(compact) graphActions()
+                        if(!nodeMode) MapButton(R.string.graph_connect_canvas,enabled=node!=null,selected=connectingFrom!=null) {
+                            if(connectingFrom!=null) view?.cancelConnection() else node?.let {view?.beginConnection(it.id)}
+                        }
+                        MapButton(R.string.map_fit) { view?.fit() }
                     }
-                    if(!compact) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = Space.s8)) {graphActions()}
                 }
                 val problem = if(geometryChanged && !session.limitError) R.string.graph_geometry_changed else session.problemText()
                 HorizontalDivider()
@@ -342,13 +541,13 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                     when {
                         doc != null -> AndroidView(factory = { c -> MindMapView(c).also { view = it } }, modifier = Modifier.fillMaxSize().alpha(if(cameraReady) 1f else 0f),
                             onRelease = { released -> if(view===released) view=null }, update = { v ->
-                            v.isEnabled=cameraReady && !(navigationBusy && !session.hasUnconfirmedContent) && !enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
+                            v.isEnabled=cameraReady && proposed==null && !(navigationBusy && !session.hasUnconfirmedContent) && !enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
                             v.onViewportChanged={
                                 viewRevision++
                                 if(cameraReady) presentationState.capture(session,v,imeBottom)
                             }
                             v.onConnectionModeChanged={connectingFrom=it}
-                            v.onConnectionTarget={from,to->relationToEdit=null;pendingRelation=MapRelation(from=from,to=to);graphTools=true}
+                            v.onConnectionTarget={from,to->openRelations(MapRelation(from=from,to=to),null)}
                             v.onConnectionBlank={from,point->session.beginConnectedNode(from,point)}
                             v.editingText=textDraft?.nodeId
                             v.inkInput.mode=session.inkMode;v.inkInput.width=session.inkWidth
@@ -361,6 +560,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             v.onGraphContact={
                                 geometryChanged=false
                                 presentationState.cancelPendingBacklinkFocus()
+                                presentationState.releaseSourceCamera()
                                 if(v.isEnabled && hostHooks?.requestFocus?.invoke()!=false) v.requestFocus()
                             }
                             v.document = proposed ?: doc; v.dark = dark
@@ -395,6 +595,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         Text(stringResource(R.string.graph_connect_hint),fontSize=TextSize.body,modifier=Modifier.weight(1f))
                         MapButton(R.string.cancel) {view?.cancelConnection()}
                     }
+                    if(doc!=null) MapMenu(doc,node)
                 }
                 if(textDraft==null && !compact) Text(stringResource(if(nodeMode) R.string.graph_node_selection_hint else R.string.map_hint), fontSize = TextSize.caption, modifier = Modifier.fillMaxWidth().padding(Space.s8))
             }
@@ -405,68 +606,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
           }
           }
         }
-        propertiesFor?.let { id -> session.document?.nodes?.firstOrNull { it.id == id }?.let { node ->
-            MapNodeDialog(node, onDismiss = { editing = null;propertiesFor=null }, onConfirm = { edited ->
-                session.editNodeProperties(id,edited).also { if (it) {editing = null;propertiesFor=null} }
-            },previewAssets=session.document?.previewAssets.orEmpty())
-        } }
-        session.connectedDraft?.let {draft->ConnectedNodeDialog(session,draft,connectedPickerId!=null || session.connectedSourceRequest!=null) {
-            if(connectedPickerId==null) session.beginConnectedSource(draft.token)?.let {request->
-                connectedPickerId=request.id
-                try {connectedSourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
-                catch(_:Exception) {connectedPickerId=null;session.failConnectedSource(request.id)}
-            }
-        }}
-        if(addFree) AlertDialog(onDismissRequest={addFree=false},title={Text(stringResource(R.string.graph_free),fontSize=TextSize.heading)},text={Column {
-            for(k in NodeKind.entries) MapButton(when(k){NodeKind.TEXT->R.string.map_text_node;NodeKind.INK->R.string.map_ink_node;NodeKind.REFERENCE->R.string.graph_reference}) {
-                var added: String?=null
-                val accepted=session.operate { d -> val n=d.addFree(k,if(k==NodeKind.REFERENCE) "" else context.getString(R.string.map_topic),(d.visible().maxOfOrNull {it.bounds.right} ?: -100.0)+100,(d.centralRoot?.y ?: 0.0)+300+d.nodes.count { it.free }*100);added=n.second;n.first }
-                if(accepted) { session.selected=added;addFree=false;if(k==NodeKind.REFERENCE) showSources(added) else editing=added }
-            }
-        }},confirmButton={MapButton(R.string.cancel){addFree=false}})
-        if(layoutMenu) AlertDialog(onDismissRequest={layoutMenu=false},title={Text(stringResource(R.string.map_layout),fontSize=TextSize.heading)},text={Column {
-            for(direction in MapDirection.entries) MapButton(when(direction){MapDirection.BOTH->R.string.graph_both;MapDirection.RIGHT->R.string.graph_right;MapDirection.DOWN->R.string.graph_vertical}) {
-                session.document?.let { proposed=MapLayout.arrange(it.copy(direction=direction)) };layoutMenu=false
-            }
-        }},confirmButton={MapButton(R.string.cancel){layoutMenu=false}})
-        proposed?.let { preview -> AlertDialog(onDismissRequest={proposed=null},title={Text(stringResource(R.string.graph_preview),fontSize=TextSize.heading)},
-            text={Text(stringResource(R.string.graph_preview_notice),fontSize=TextSize.body)},
-            confirmButton={MapButton(R.string.map_done){
-                geometryChanged=session.interactionEpoch!=graphEpoch || !session.operate {latest->MapLayout.arrange(latest.copy(direction=preview.direction))}
-                proposed=null
-            }},dismissButton={MapButton(R.string.cancel){proposed=null}}) }
-        if(graphTools) session.document?.let { current->
-            key(graphEpoch) {
-                GraphRelationsDialog(current,session.selected,{initial,next->
-                    if(session.interactionEpoch!=graphEpoch) RelationEditResult.Conflict else session.changeRelation(initial,next).also {result->
-                        if(result is RelationEditResult.Duplicate && !session.selectRelation(result.relation.id)) session.selectRelation(null)
-                    }
-                },pendingRelation,relationToEdit,onSelectExisting={id->
-                    if(session.interactionEpoch==graphEpoch && !session.selectRelation(id)) session.selectRelation(null)
-                }){graphTools=false;pendingRelation=null;relationToEdit=null}
-            }
-        }
-        val pendingSourceFocus=presentationState.sourceFocus
-        val currentSourceFocus=pendingSourceFocus?.takeIf {session.currentSourceNavigation(it.source)!=null}
-        SideEffect {if(pendingSourceFocus!=null && currentSourceFocus==null) presentationState.consumeSourceFocus(pendingSourceFocus.token)}
-        if(!session.hasUnconfirmedContent && !enlarged) presentationState.sourcesFor?.let { id -> session.sourceEditSnapshot(id)?.let { sourceEdit ->
-            val editor=remember(presentationState,session,id,sourceEdit.epoch,sourceEdit.documentId) {presentationState.bindSourceEditor(session,sourceEdit)}
-            GraphSourcesDialog(sourceEdit,editor, {
-                if(pendingSourceRequest==null) session.beginExistingSource(id)?.let {request->
-                    pendingSourceRequest=request
-                    try {sourcePicker.launch(arrayOf("application/octet-stream","application/zip"))}
-                    catch(_:Exception) {pendingSourceRequest=null;session.failExistingSource(request)}
-                }
-            },addEnabled=pendingSourceRequest==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null,
-                open=if(hostHooks==null || !cameraReady) null else ::openSource,focus=currentSourceFocus,
-                focusHandled=presentationState::consumeSourceFocus,feedback=navigationFeedback,
-                targetEditsEnabled=pendingSourceRequest==null && connectedPickerId==null && sourceController.state==null && !sourceTargets.hasPending && pendingTargetPickerId==null) {
-                listOfNotNull(pendingSourceRequest,activeExistingSource).distinct().forEach(session::cancelSourceRequest)
-                // Keep the system launch occupied until ITS result consumes the old ticket.
-                activeExistingSource=null;presentationState.closeSources();focus.clearFocus();keyboard?.hide()
-            }
-        } }
-        sourceController.state?.let {GraphSourceChoiceDialog(it,sourceController)}
         sourceTargets.state?.let {shown->SourceTargetEditDialog(sourceTargets,shown,
             filePickerAvailable=pendingTargetPickerId==null && pendingSourceRequest==null && connectedPickerId==null) {slot->
                 if(pendingTargetPickerId!=null || pendingSourceRequest!=null || connectedPickerId!=null) sourceTargets.receivePicker(slot,null)
@@ -482,32 +621,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             text = { Text(stringResource(R.string.graph_delete_nodes_confirm), fontSize = TextSize.body) },
             confirmButton = { MapButton(R.string.delete) { session.deleteNodes(captured);deleting = null } },
             dismissButton = { MapButton(R.string.cancel) { deleting = null } })}
-        if (choosing) {
-            val doc = session.document
-            val id = session.selected
-            val excluded = if (reparenting && doc != null && id != null) doc.descendants(id) else emptySet()
-            AlertDialog(onDismissRequest = { choosing = false },
-                title = { Text(stringResource(if (reparenting) R.string.map_change_parent else R.string.map_nodes), fontSize = TextSize.heading) },
-                text = {
-                    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = MindMapNodeListHeight)) {
-                        val nodes = session.effectiveVisible().filter { it.id !in excluded }
-                        items(nodes.size, key = { nodes[it].id }) { index ->
-                            val n = nodes[index]
-                            TextButton(onClick = {
-                                if (reparenting && id != null) session.operate { it.reparent(id, n.id) }
-                                else { session.selected = n.id; view?.centerOn(n.id) }
-                                choosing = false
-                            }, modifier = Modifier.fillMaxWidth().heightIn(min = MinTouchTarget)) {
-                                Text(n.text.ifBlank { stringResource(if (n.kind == NodeKind.INK) R.string.map_ink_node else R.string.map_topic) },
-                                    fontSize = TextSize.body, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                }, confirmButton = { MapButton(R.string.cancel) { choosing = false } })
-        }
-        if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text(stringResource(R.string.map_help), fontSize = TextSize.heading) },
-            text = { Text(stringResource(R.string.map_help_text), fontSize = TextSize.body) },
-            confirmButton = { MapButton(R.string.map_done) { help = false } })
       }
     }
 }

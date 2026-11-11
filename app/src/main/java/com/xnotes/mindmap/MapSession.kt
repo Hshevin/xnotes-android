@@ -307,8 +307,19 @@ class MapSession() : ViewModel() {
     private fun sourceRequestCurrent(id:String):Boolean {
         existingSourceRequest?.takeIf {it.id==id}?.let {return sourceCurrent(it)}
         val request=connectedSourceRequest?.takeIf {it.id==id} ?: return false
-        return !closing && !replacingDocument && connected(request.token)?.let {it.epoch==request.epoch && it.node?.kind==NodeKind.REFERENCE &&
-            document?.nodes?.any {node->node.id==it.from}==true}==true
+        return !closing && !replacingDocument && connected(request.token)?.let {it.epoch==request.epoch && it.node!=null && anchorCurrent(it)}==true
+    }
+    /** The anchor captured at begin must still be the same live node; FREE has none. */
+    private fun anchorCurrent(draft:ConnectedNodeDraft):Boolean {
+        if(draft.placement==NodePlacement.FREE) return true
+        if(document?.nodes?.none {it.id==draft.from}!=false) return false
+        return draft.anchorLife==null || nodeLifetimes[draft.from]===draft.anchorLife
+    }
+    /** Draft-only validation: the body alone must be storable and its anchor still current. */
+    private fun draftAcceptable(draft:ConnectedNodeDraft,node:MapNode):Boolean {
+        if(draft.placement==NodePlacement.CONNECTED) return document?.connectNewNode(draft.from,node) is ConnectedNodeResult.Applied
+        if(!anchorCurrent(draft)) return false
+        return try {MindMapDocument(nodes=listOf(node.copy(parent=null,free=false))).validate();true} catch(_:IllegalArgumentException) {false}
     }
     private fun retireInvalidSourceRequests() {
         listOfNotNull(existingSourceRequest?.id,connectedSourceRequest?.id).forEach {if(!sourceRequestCurrent(it)) cancelSourceRequest(it)}
@@ -328,7 +339,7 @@ class MapSession() : ViewModel() {
         val request=connectedSourceRequest?.takeIf {it.id==id} ?: return false
         val draft=connected(request.token) ?: return false;val node=draft.node ?: return false
         val next=node.copy(sources=node.sources+source,primarySource=node.primarySource ?: source.id)
-        if(document?.connectNewNode(draft.from,next) !is ConnectedNodeResult.Applied) return false
+        if(!draftAcceptable(draft,next)) return false
         connectedDraft=draft.copy(node=next,problem=null)
         connectedSourceRequest=null;return true
     }
@@ -339,7 +350,44 @@ class MapSession() : ViewModel() {
         if(!center.x.isFinite() || !center.y.isFinite() || kotlin.math.abs(center.x)>MindMapDocument.MAX_COORD || kotlin.math.abs(center.y)>MindMapDocument.MAX_COORD) {
             limitError=true;return false
         }
-        connectedDraft=ConnectedNodeDraft(epoch=connectedEpoch,documentId=doc.id,from=from,center=center)
+        connectedDraft=ConnectedNodeDraft(epoch=connectedEpoch,documentId=doc.id,from=from,center=center,anchorLife=nodeLifetimes[from])
+        return true
+    }
+    /**
+     * Opens a creation draft without touching the document. CHILD anchors on [anchor] itself; SIBLING on
+     * [anchor]'s current parent; FREE needs no anchor. Nothing reaches history until [finishConnectedNode].
+     */
+    internal fun beginNodeCreation(placement:NodePlacement,anchor:String?,kind:NodeKind,text:String):Boolean {
+        if(placement==NodePlacement.CONNECTED || closing || replacingDocument || loading || inkContact || textDraft!=null ||
+            textRestore!=null || connectedDraft!=null || nodeSelectionMode) return false
+        val doc=document ?: return false
+        val from=when(placement) {
+            NodePlacement.CHILD->doc.nodes.firstOrNull {it.id==anchor}?.id ?: return false
+            NodePlacement.SIBLING->doc.nodes.firstOrNull {it.id==anchor}?.parent ?: return false
+            else->""
+        }
+        val draft=ConnectedNodeDraft(epoch=connectedEpoch,documentId=doc.id,from=from,center=com.xnotes.core.geometry.Pt(0.0,0.0),
+            placement=placement,anchorLife=if(placement==NodePlacement.FREE) null else nodeLifetimes[from])
+        val node=MapNode(id=draft.nodeId,parent=null,free=true,kind=kind,text=text)
+        try {MindMapDocument(nodes=listOf(node.copy(free=false))).validate()} catch(_:IllegalArgumentException) {return false}
+        connectedDraft=draft.copy(node=node)
+        return true
+    }
+    /** A kind switch keeps title and chosen sources; size returns to that kind's default card. */
+    internal fun changeConnectedKind(token:String,kind:NodeKind):Boolean {
+        val draft=connected(token)?.takeIf {!closing && !inkContact} ?: return false
+        val node=draft.node ?: return chooseConnectedKind(token,kind)
+        if(node.kind==kind) return true
+        val sized=MapNode(id=node.id,parent=null,kind=kind)
+        connectedDraft=draft.copy(node=node.copy(kind=kind,width=sized.width,height=sized.height),problem=null)
+        return true
+    }
+    /** Draft-only removal; nothing was committed, so nothing enters history. */
+    internal fun removeConnectedSource(token:String,sourceId:String):Boolean {
+        val draft=connected(token)?.takeIf {!closing && !it.loadingSource} ?: return false
+        val node=draft.node?.takeIf {n->n.sources.any {it.id==sourceId}} ?: return false
+        val rest=node.sources.filterNot {it.id==sourceId}
+        connectedDraft=draft.copy(node=node.copy(sources=rest,primarySource=node.primarySource.takeUnless {it==sourceId} ?: rest.firstOrNull()?.id),problem=null)
         return true
     }
     private fun connected(token:String)=connectedDraft?.takeIf {it.token==token && it.epoch==connectedEpoch && it.documentId==document?.id}
@@ -383,16 +431,35 @@ class MapSession() : ViewModel() {
         if(proposed!=null && proposed.id!=node.id) return false
         val body=if(proposed==null) node else node.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height)
         if(body.kind==NodeKind.REFERENCE && body.sources.isEmpty()) return false
-        val centered=body.copy(x=draft.center.x-body.width/2,y=draft.center.y-body.height/2)
-        val result=requireNotNull(document).connectNewNode(draft.from,centered)
+        val doc=requireNotNull(document)
+        val result=when(draft.placement) {
+            NodePlacement.CONNECTED->doc.connectNewNode(draft.from,body.copy(x=draft.center.x-body.width/2,y=draft.center.y-body.height/2))
+            else->placeNewNode(doc,draft,body)
+        }
         if(result is ConnectedNodeResult.Applied && commit(result.document)) {
-            selected=centered.id;cancelConnectedNode(token);return true
+            selected=body.id;cancelConnectedNode(token);return true
         }
         connectedDraft=draft.copy(problem=if(result==ConnectedNodeResult.Conflict) ConnectedDraftProblem.CHANGED else ConnectedDraftProblem.LIMIT)
         return false
     }
+    /** Tree and free placement against the latest graph: parent checked here, layout and node in one frame. */
+    private fun placeNewNode(doc:MindMapDocument,draft:ConnectedNodeDraft,body:MapNode):ConnectedNodeResult {
+        if(doc.nodes.any {it.id==body.id}) return ConnectedNodeResult.Invalid
+        if(!anchorCurrent(draft)) return ConnectedNodeResult.Conflict
+        return try {
+            val next=if(draft.placement==NodePlacement.FREE) {
+                val x=(doc.visible().maxOfOrNull {it.bounds.right} ?: -100.0)+100
+                val y=(doc.centralRoot?.y ?: 0.0)+300+doc.nodes.count {it.free}*100
+                doc.copy(nodes=doc.nodes+body.copy(parent=null,free=true,x=x,y=y)).also {it.validate()}
+            } else {
+                val expanded=doc.update(draft.from) {it.copy(collapsed=false)}
+                MapLayout.arrange(expanded.copy(nodes=expanded.nodes+body.copy(parent=draft.from,free=false,x=0.0,y=0.0)).also {it.validate()})
+            }
+            ConnectedNodeResult.Applied(next)
+        } catch(_:IllegalArgumentException) {ConnectedNodeResult.Invalid}
+    }
     internal fun beginConnectedSource(token:String):ConnectedSourceRequest? {
-        val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node?.kind==NodeKind.REFERENCE && connectedSourceRequest==null &&
+        val draft=connected(token)?.takeIf {!closing && !it.loadingSource && it.node!=null && it.node.fileCardId==null && connectedSourceRequest==null &&
             existingSourceRequest==null && sourcePickerInstance?.state==null && targetEditController?.hasPending!=true} ?: return null
         return ConnectedSourceRequest(token=token,epoch=draft.epoch).also {connectedSourceRequest=it}
     }
