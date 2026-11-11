@@ -36,7 +36,11 @@ class MapRenderTest {
                     view.draw(Canvas(bitmap))
                     for(n in doc.nodes) {
                         val p=view.screenPoint(com.xnotes.core.geometry.Pt(n.x+8,n.y+8))
-                        assertEquals(if(dark) Color.WHITE else Color.BLACK,bitmap.getPixel(p.x.toInt(),p.y.toInt()))
+                        assertEquals(if(dark) Color.BLACK else Color.WHITE,bitmap.getPixel(p.x.toInt(),p.y.toInt()))
+                        val zoom=view.viewport().zoom
+                        val offset=maxOf(4f/zoom,4f)+maxOf(2f/zoom,3f)/2
+                        val ring=view.screenPoint(com.xnotes.core.geometry.Pt(n.x-offset,n.y+8))
+                        assertEquals(if(dark) Color.WHITE else Color.BLACK,bitmap.getPixel(ring.x.toInt(),ring.y.toInt()))
                     }
                     val pixels=IntArray(1000*600);bitmap.getPixels(pixels,0,1000,0,0,1000,600)
                     assertTrue(pixels.all {Color.red(it)==Color.green(it) && Color.green(it)==Color.blue(it)})
@@ -65,18 +69,48 @@ class MapRenderTest {
             }
             fun pixel(id:String):Int {
                 val image=Bitmap.createBitmap(1000,600,Bitmap.Config.ARGB_8888)
-                try {view.draw(Canvas(image));val n=doc.node(id);val p=view.screenPoint(com.xnotes.core.geometry.Pt(n.x+8,n.y+8));return image.getPixel(p.x.toInt(),p.y.toInt())}
+                try {view.draw(Canvas(image));val n=doc.node(id);val zoom=view.viewport().zoom;val offset=maxOf(4f/zoom,4f)+maxOf(2f/zoom,3f)/2;val p=view.screenPoint(com.xnotes.core.geometry.Pt(n.x-offset,n.y+8));return image.getPixel(p.x.toInt(),p.y.toInt())}
                 finally {image.recycle()}
             }
             val paper=if(dark) Color.BLACK else Color.WHITE;val selected=if(dark) Color.WHITE else Color.BLACK
             assertEquals(selected,pixel("a"));assertEquals(paper,pixel("b"))
             event(android.view.MotionEvent.ACTION_DOWN,view.screenPoint(com.xnotes.core.geometry.Pt(-320.0,-20.0)))
             event(android.view.MotionEvent.ACTION_MOVE,view.screenPoint(com.xnotes.core.geometry.Pt(-180.0,100.0)))
-            assertEquals("Only the preview set is inverted",paper,pixel("a"));assertEquals(selected,pixel("b"))
+            assertEquals("Only the preview set has an outline",paper,pixel("a"));assertEquals(selected,pixel("b"))
             event(android.view.MotionEvent.ACTION_CANCEL,view.screenPoint(com.xnotes.core.geometry.Pt(-180.0,100.0)))
             assertEquals(selected,pixel("a"));assertEquals(paper,pixel("b"));assertArrayEquals(bytes,MapCodec.encode(view.document))
         }
     }
+    @Test fun outlinesRemainVisibleAtDifferentZoomsWithoutChangingNodeInteriorsOrAdjacentBorders() {
+        for(dark in listOf(false,true)) for(zoom in listOf(.1f,1f,4f)) {
+            val paper=if(dark) Color.BLACK else Color.WHITE
+            val fg=if(dark) Color.WHITE else Color.BLACK
+            val doc=MindMapDocument(nodes=listOf(
+                MapNode(id="a",parent=null,x=0.0,y=0.0,width=100.0,height=80.0,text=""),
+                MapNode(id="b",parent=null,free=true,x=104.0,y=0.0,width=100.0,height=80.0,text="")))
+            fun render(selected:Set<String>):Bitmap=Bitmap.createBitmap(1000,500,Bitmap.Config.ARGB_8888).also {image->
+                val canvas=Canvas(image);canvas.drawColor(paper);canvas.translate(100f,100f);canvas.scale(zoom,zoom)
+                MapPainter().draw(canvas,doc,dark,selectedNodes=selected,viewZoom=zoom)
+            }
+            val normal=render(emptySet());val selected=render(setOf("b"))
+            try {
+                // Selecting the second node must not clear the already painted first node's right edge.
+                for(y in 102 until (100+78*zoom).toInt()) {
+                    val x=(100+100*zoom).toInt()
+                    assertEquals(normal.getPixel(x,y),selected.getPixel(x,y))
+                }
+                val left=(100+104*zoom).toInt()
+                val top=100
+                val width=(100*zoom).toInt();val height=(80*zoom).toInt()
+                for(y in top+2 until top+height-2) for(x in left+2 until left+width-2)
+                    assertEquals(normal.getPixel(x,y),selected.getPixel(x,y))
+                assertTrue("Outer selection remains visible at $zoom",(left until left+width).any {x->
+                    (top-40 until top-1).any {y->selected.getPixel(x,y)==fg && normal.getPixel(x,y)==paper}
+                })
+            } finally {normal.recycle();selected.recycle()}
+        }
+    }
+
     @Test fun relationLabelGeometryMatchesTheLeftAlignedTruncatedTextAndSelectionIsTransient() {
         val label="relationship description ".repeat(8)
         val doc=MindMapDocument(nodes=listOf(MapNode(id="a",parent=null,width=100.0,x=-300.0),

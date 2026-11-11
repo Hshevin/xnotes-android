@@ -72,7 +72,7 @@
 
 ## 界面
 
-- 仅黑白：纸面、面板、菜单为纯白 #FFFFFF / 纯黑 #000000，夜间反转，选中态完全反转。允许中性灰阶（R = G = B）表现层级（次要文字、分隔线、填充、背景）；不用彩色强调色、渐变或装饰阴影。笔迹颜色与 PDF 属于内容，不受主题约束。
+- 仅黑白：纸面、面板、菜单为纯白 #FFFFFF / 纯黑 #000000，夜间反转，普通控件选中态完全反转；思维导图节点选中保留节点底色与内容颜色，以外圈轮廓标示，单选/多选一致，不整块反色。允许中性灰阶（R = G = B）表现层级（次要文字、分隔线、填充、背景）；不用彩色强调色、渐变或装饰阴影。笔迹颜色与 PDF 属于内容，不受主题约束。
 - 页面上的工具标记（选框、套索、手柄、光标、参考线、文本框边框）须与页面形成对比，而非跟随主题：读取 `CanvasState.palette` / `TextEditHost.overlayPalette`，夜间模式下在 PDF 或浅色页面上改用黑色。无限画布同一视图混有黑纸与白图片，因此 `OverlayTessellator` 在每个标记下垫 1 px 反色描边；其深色取 (1, 1, 1)，因为夜间笔迹会把精确的 (0, 0, 0) 重绘为白色。
 - 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。Release 98 已在 MovinkPad Pro 14 / Android 15 通过日夜间真机视觉验收，见 `docs/movinkpad/device-acceptance-release98-2026-11-08.md`。
 - 用户可见文字放入字符串资源：英文在 `values/`，相同的简体中文在 `values-b+zh+Hans/` 与 `values-zh-rCN/`。AI 界面文字在 `ai.xml`；`ai/` 后端消息经 `AiText.t(AiMsg…)` 与 `ai_messages.xml`；`storage/` 消息经 `StorageText.t(StorageMsg…)` 与 `storage_messages.xml`。持久化键（AI 轮次状态、默认会话标题）与面向模型的提示词保持不变，仅在显示时翻译。

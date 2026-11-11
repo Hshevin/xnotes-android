@@ -152,6 +152,16 @@ class MapPainter {
             text.color=fg
             canvas.drawText(edge.label.take(80),line.labelAnchor.x.toFloat(),line.labelAnchor.y.toFloat(),text)
         }
+        // Paint every selection behind every node, so its cleared gap cannot erase a nearby node.
+        for(n in visible) if(n.id==selected || n.id in selectedNodes) {
+            val (gap,width)=selectionRing(viewZoom)
+            val reach=gap+width
+            if(outside(canvas,n.x-reach,n.y-reach,n.x+n.width+reach,n.y+n.height+reach)) continue
+            val saved=canvas.save()
+            canvas.translate(n.x.toFloat(),n.y.toFloat())
+            drawSelectionRing(canvas,n,gap,width,bg,fg)
+            canvas.restoreToCount(saved)
+        }
         var inkRenderer:AndroidRenderer?=null
         for (n in visible) {
             val collapsed=hiddenCounts[n.id]?.let(collapsedLabel)
@@ -171,7 +181,6 @@ class MapPainter {
             val reach=ring?.let {it.first+it.second} ?: 0f
             if(outside(canvas,left-reach,top-reach,right+reach,bottom+reach)) continue
             canvas.save(); canvas.translate(n.x.toFloat(), n.y.toFloat())
-            ring?.let {(gap,width)->drawSelectionRing(canvas,n,gap,width,bg,fg)}
             paint.style = Paint.Style.FILL; paint.color = bg
             canvas.drawRect(0f, 0f, n.width.toFloat(), n.height.toFloat(), paint)
             paint.style = Paint.Style.STROKE; paint.color = fg; paint.strokeWidth = if (n.id == dropTarget) 6f else 2f

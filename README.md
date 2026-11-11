@@ -60,6 +60,8 @@
 
 ## 思维导图与文件关系网络（源码）
 
+节点选中态已在源码改为外圈轮廓，保留节点底色与内容颜色，单选和多选一致；尚未打包，见[选中态修复记录](docs/movinkpad/mind-map-selection-outline-2026-11-11.md)。
+
 当前主线已修复普通首页导图／网络／原 PDF 原件库共用的文件身份校验缺陷，并补充原件库打开失败反馈；尚未打包，已安装 test6 不会自动获得修复。JVM 与 Android 测试源码编译通过，实际 Android 入口仍待验证，见[修复与验证记录](docs/movinkpad/presentation-file-identity-fix-2026-11-11.md)。
 
 **安装兼容**：本功能使用文档登记表 v3，合并前的旧构建不能读取它。同一包名回装旧版需要先清除数据；清除前须先导出完整备份并处理恢复资料，私有共享 PDF 也会随数据清除。测试优先使用独立分支包名。详见[版本与回装边界](docs/movinkpad/reference-registry-version-policy-2026-11-10.md)。
