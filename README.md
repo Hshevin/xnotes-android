@@ -10,6 +10,8 @@
 
 最新主线独立测试版：[master test7 ARM64 APK](build/branch-tests/master-test7/XNotes-master-e4739bd6-test7-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。包含导图／网络／原件库入口的文件身份校验修复，14 项定向 JVM 回归通过；本轮未重跑 Android 测试，不代表 test6 的 76 项平台失败全部解决。见 [打包记录](docs/movinkpad/master-test7-2026-11-11.md)。
 
+**test7 实际使用警示（2026-11-11）：** API 32 ARM64 模拟器走查发现思维导图主画布持续空白、放大手写操作栏不可见及混合分屏保存失败；局部内容保存可用，但导图可视编辑闭环未通过。另有软键盘遮住确认按钮、上下分屏画图区过小的问题。见[复现步骤与截图](docs/movinkpad/master-test7-map-emulator-2026-11-11.md)；尚未修复，目标真机待验。
+
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
 
 **回装提醒**：当前主线构建会把文档登记表升级到 v3，安装后不能直接回装 Release 98 及更早版本。回装前须先用应用导出完整备份，再清除应用数据；试用主线新功能建议使用独立分支测试包名。详见[版本与回装边界](docs/movinkpad/reference-registry-version-policy-2026-11-10.md)。
