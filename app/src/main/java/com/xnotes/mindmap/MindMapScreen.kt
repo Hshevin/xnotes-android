@@ -145,6 +145,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
         val latestCameraReady by rememberUpdatedState(cameraReady)
         // Capture the key at composition: the AndroidView factory publishes `view` during the same apply,
         // before effects run, so reading it inside the effect would let the key change dispose the live View.
+        // Only the AndroidView's onRelease clears `view`; this effect must not, or the factory never republishes it.
         val composedView=view
         DisposableEffect(composedView,presentationState,session) {
             onDispose {
