@@ -39,14 +39,16 @@ class InkPadView(context:Context):View(context) {
     }
     override fun performClick():Boolean {super.performClick();return true}
     override fun onDraw(canvas:Canvas) {
-        canvas.drawColor(Color.LTGRAY)
+        // An AndroidView canvas is not clipped to the View; drawColor alone would cover sibling chrome.
+        canvas.save();canvas.clipRect(0,0,width,height);canvas.drawColor(Color.LTGRAY)
         val s=scale;val ox=offsetX;val oy=offsetY
-        canvas.save();canvas.translate(ox,oy);canvas.scale(s,s)
+        canvas.translate(ox,oy);canvas.scale(s,s)
         canvas.drawRect(0f,0f,nodeWidth.toFloat(),nodeHeight.toFloat(),android.graphics.Paint().apply {color=Color.WHITE})
         canvas.clipRect(0f,0f,nodeWidth.toFloat(),nodeHeight.toFloat())
         painter.retainInk(input.ink)
         painter.drawInk(canvas,input.displayInk)
         input.drawSelection(canvas,Color.BLACK,s)
+        canvas.restore()
         canvas.restore()
     }
     override fun onTouchEvent(e:MotionEvent):Boolean {
