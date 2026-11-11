@@ -40,7 +40,8 @@ class InkPadView(context:Context):View(context) {
     override fun performClick():Boolean {super.performClick();return true}
     override fun onDraw(canvas:Canvas) {
         // An AndroidView canvas is not clipped to the View; drawColor alone would cover sibling chrome.
-        canvas.save();canvas.clipRect(0,0,width,height);canvas.drawColor(Color.LTGRAY)
+        // One save covers the View clip, node transform and node clip; restoring to its count keeps the stack balanced.
+        val saved=canvas.save();canvas.clipRect(0,0,width,height);canvas.drawColor(Color.LTGRAY)
         val s=scale;val ox=offsetX;val oy=offsetY
         canvas.translate(ox,oy);canvas.scale(s,s)
         canvas.drawRect(0f,0f,nodeWidth.toFloat(),nodeHeight.toFloat(),android.graphics.Paint().apply {color=Color.WHITE})
@@ -48,8 +49,7 @@ class InkPadView(context:Context):View(context) {
         painter.retainInk(input.ink)
         painter.drawInk(canvas,input.displayInk)
         input.drawSelection(canvas,Color.BLACK,s)
-        canvas.restore()
-        canvas.restore()
+        canvas.restoreToCount(saved)
     }
     override fun onTouchEvent(e:MotionEvent):Boolean {
         val s=scale;val ox=offsetX;val oy=offsetY
