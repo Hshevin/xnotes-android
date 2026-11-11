@@ -114,7 +114,7 @@ class MapPainter {
     fun clear() {strokes.clear();layouts.clear();stableInk.clear();temporaryInk.clear();stableDocument=null;cachedFrame=null}
     fun draw(canvas: Canvas, doc: MindMapDocument, dark: Boolean = false, selected: String? = null, dropTarget: String? = null, editingText:String? = null,
              connection:Pair<String,com.xnotes.core.geometry.Pt>?=null,selectedRelation:String?=null,selectedNodes:Set<String> = emptySet(),
-             expanded:Set<String> = emptySet()) {
+             expanded:Set<String> = emptySet(),viewZoom:Float=1f) {
         val bg = if (dark) Color.BLACK else Color.WHITE
         val fg = if (dark) Color.WHITE else Color.BLACK
         val frame=frame(doc,expanded)
@@ -166,11 +166,13 @@ class MapPainter {
             val bottom=maxOf(n.y+n.height,badge?.let {n.y+it.bottom} ?: Double.NEGATIVE_INFINITY,sourceBottom)
             val left=minOf(n.x,badge?.let {n.x+it.left} ?: Double.POSITIVE_INFINITY,if(sources!=null) n.x+16 else Double.POSITIVE_INFINITY)
             val top=minOf(n.y,badge?.let {n.y+it.top} ?: Double.POSITIVE_INFINITY,sourceTop)
-            if(outside(canvas,left,top,right,bottom)) continue
             val active = n.id == selected || n.id in selectedNodes
-            val color = if (active) bg else fg
+            val ring=if(active) selectionRing(viewZoom) else null
+            val reach=ring?.let {it.first+it.second} ?: 0f
+            if(outside(canvas,left-reach,top-reach,right+reach,bottom+reach)) continue
             canvas.save(); canvas.translate(n.x.toFloat(), n.y.toFloat())
-            paint.style = Paint.Style.FILL; paint.color = if (active) fg else bg
+            ring?.let {(gap,width)->drawSelectionRing(canvas,n,gap,width,bg,fg)}
+            paint.style = Paint.Style.FILL; paint.color = bg
             canvas.drawRect(0f, 0f, n.width.toFloat(), n.height.toFloat(), paint)
             paint.style = Paint.Style.STROKE; paint.color = fg; paint.strokeWidth = if (n.id == dropTarget) 6f else 2f
             canvas.drawRect(0f, 0f, n.width.toFloat(), n.height.toFloat(), paint)
@@ -179,16 +181,16 @@ class MapPainter {
                 // The native text overlay paints this node's draft, including any overflow.
             } else if (n.kind != NodeKind.INK || n.ink.isEmpty()) {
                 val layout = layout(n.text.ifEmpty { if(n.kind==NodeKind.REFERENCE) n.sources.firstOrNull()?.fileName.orEmpty() else "" }, n.width)
-                text.color = color
+                text.color = fg
                 canvas.translate(16f, maxOf(12f, (n.height.toFloat() - layout.height) / 2))
                 layout.draw(canvas)
             } else {
                 val renderer=inkRenderer ?: AndroidRenderer(canvas).also {inkRenderer=it}
-                drawInk(renderer,n.ink,color)
+                drawInk(renderer,n.ink,fg)
             }
             canvas.restore()
             if(sources!=null) {
-                text.color=color
+                text.color=fg
                 canvas.drawText(sources,16f,n.height.toFloat()-10f,text)
             }
             if(collapsed!=null && badge!=null) {
@@ -201,6 +203,24 @@ class MapPainter {
             }
             canvas.restore()
         }
+    }
+    /**
+     * Selected nodes keep their own paper and content colours. A detached outline around the
+     * node marks the selection instead of inverting it; its gap and width hold a steady
+     * on-screen size, but never get thinner than the node border when zoomed in.
+     */
+    private fun selectionRing(viewZoom:Float):Pair<Float,Float> {
+        val zoom=viewZoom.takeIf {it.isFinite() && it>0f} ?: 1f
+        return maxOf(Space.s4.value/zoom,4f) to maxOf(Space.s2.value/zoom,3f)
+    }
+    /** Paints under the node body: the gap is cleared to paper so lines do not cross the outline. */
+    private fun drawSelectionRing(canvas:Canvas,n:MapNode,gap:Float,width:Float,bg:Int,fg:Int) {
+        val outer=gap+width
+        paint.style=Paint.Style.FILL;paint.color=bg
+        canvas.drawRect(-outer,-outer,n.width.toFloat()+outer,n.height.toFloat()+outer,paint)
+        val middle=gap+width/2
+        paint.style=Paint.Style.STROKE;paint.color=fg;paint.strokeWidth=width
+        canvas.drawRect(-middle,-middle,n.width.toFloat()+middle,n.height.toFloat()+middle,paint)
     }
     private fun layout(value: String, width: Double): StaticLayout {
         val w = (width - 32).toInt().coerceAtLeast(1)
