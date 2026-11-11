@@ -19,7 +19,7 @@ internal class MapTextHost(
     private val graph:MindMapView,
     dark:Boolean,
 ):TextEditHost {
-    override val overlayPalette=monochromePalette(!dark) // selected node is fully inverted
+    override val overlayPalette=monochromePalette(dark) // selected node keeps its own paper
     override val editingBackground=overlayPalette.panel.toComposeColor()
     override val textBar:com.xnotes.canvas.TextBar?=null
     override val editingValue get()=session.textDraft?.takeIf {it.token==token}?.value
@@ -54,7 +54,7 @@ internal fun MapTextEditor(session:MapSession,draft:MapTextDraft,graph:MindMapVi
     val contentY=node.y+maxOf(12.0,(node.height-painter.textHeight(draft.initialText,node.width))/2)
     val position=graph.screenPoint(Pt(node.x+16,contentY))
     val field=EditingField(position.x,position.y,node.width-32,maxOf(node.height-24,painter.textHeight(draft.value.text,node.width)),18.0,
-        graph.contentScale(),FontFace.SANS,if(dark) Rgba(0,0,0,255) else Rgba(255,255,255,255),draft.value.text)
+        graph.contentScale(),FontFace.SANS,if(dark) Rgba(255,255,255,255) else Rgba(0,0,0,255),draft.value.text)
     val host=remember(draft.token,graph,dark) {MapTextHost(session,draft.token,graph,dark)}
     key(draft.token) {TextEditorOverlay(host,field,caretGeometryRevision=revision)}
 }

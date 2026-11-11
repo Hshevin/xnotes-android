@@ -364,7 +364,7 @@ class MindMapView(context: Context) : View(context) {
         val shown=if(inkInput.active && owner!=null) document.update(owner.id) {it.copy(ink=inkInput.displayInk)} else nodeSelector.preview ?: preview ?: document
         painter.draw(canvas, shown, dark, if(nodeSelectionMode) null else selected, connectionTarget ?: dropTarget,editingText,
             connectionFrom?.let {from->connectionPreview?.let {from to it}},selectedRelation=selectedRelation,
-            selectedNodes=nodeSelector.previewSelection ?: nodeSelections,expanded=expandedAncestors)
+            selectedNodes=nodeSelector.previewSelection ?: nodeSelections,expanded=expandedAncestors,viewZoom=zoom)
         nodeSelector.marquee?.let {r->
             portPaint.color=if(dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
             portPaint.style=android.graphics.Paint.Style.STROKE;portPaint.strokeWidth=Space.s2.value/zoom
@@ -373,7 +373,7 @@ class MindMapView(context: Context) : View(context) {
         if(!readOnlyNavigation && !nodeSelectionMode && owner!=null && selected==owner.id) {
             canvas.save();canvas.translate(owner.x.toFloat(),owner.y.toFloat())
             canvas.clipRect(0f,0f,owner.width.toFloat(),owner.height.toFloat())
-            inkInput.drawSelection(canvas,if(dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE,scale)
+            inkInput.drawSelection(canvas,if(dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK,scale)
             canvas.restore()
         }
         canvas.restore()
