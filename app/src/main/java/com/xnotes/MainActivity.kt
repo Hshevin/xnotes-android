@@ -1677,13 +1677,22 @@ private fun EditorScreen(
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
     var originalLibraryLaunch by remember {mutableStateOf<Any?>(null)}
-    fun openOriginalLibrary() {
+    // The Home (main menu, or one pane's Home) whose sidebar shows the library pane, like AI.
+    var originalLibraryOwner by androidx.compose.runtime.saveable.rememberSaveable {mutableStateOf<String?>(null)}
+    fun originalLibraryHome(target:Editor?)=target?.pane?.name ?: "main"
+    // Opening a note over the main menu covers its Home; the library never stays open unseen.
+    val originalLibraryCovered=originalLibraryOwner=="main" && !mainMenu && (editor.noteOpen || editor.canvasOpen)
+    LaunchedEffect(originalLibrary.visible,originalLibraryCovered,originals.current) {
+        if(originalLibrary.visible && originalLibraryCovered && originals.current==null) originalLibrary.close()
+    }
+    fun openOriginalLibrary(target:Editor?) {
         com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)?.let {
             editor.message=context.getString(it);return
         }
         if(originalLibraryLaunch!=null || originalLibrary.visible || originals.current!=null || maps.visible || networks.visible) return
         coldPresentation?.retireIntent()
         val launch=Any();originalLibraryLaunch=launch
+        originalLibraryOwner=originalLibraryHome(target)
         val current=captureMapHost()
         scope.launch {
             try {
@@ -2095,12 +2104,13 @@ private fun EditorScreen(
         } finally {gate?.close()}
     }
     com.xnotes.mindmap.OriginalPdfWorkspaceHost(originals,onClose={originalNavigator.close()}) {
-    com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary,onOpen={observation,current->
+    val openLibraryOriginal:(com.xnotes.storage.OriginalPdfCatalog.Observation,()->Boolean)->Boolean={observation,current->
         val record=observation.record
         val target=com.xnotes.mindmap.MapSourceTarget(record.id,com.xnotes.mindmap.SourceScope.PDF_ORIGINAL,
             pageId=record.pages.first(),originalPdf=com.xnotes.mindmap.PdfOriginalProjection(record.sha256,0))
         originalNavigator.openLibrary(target,current)
-    }) {
+    }
+    com.xnotes.mindmap.OriginalPdfLibraryHost(originalLibrary) {
     com.xnotes.mindmap.MapWorkspaceHost(maps,onClosed={entry->scope.launch {closeMapEntry(entry)}},hooks={entry->
         val back=networks.returnEntry(entry)
         com.xnotes.mindmap.MapHostHooks(
@@ -2200,17 +2210,35 @@ private fun EditorScreen(
             // BASE LAYER: backstage is the root of the stack — always present underneath.
             val home: @Composable (Editor?) -> Unit = { target ->
                 androidx.compose.runtime.key(target?.pane) {
+                val libraryHere=originalLibrary.visible && originalLibraryOwner==originalLibraryHome(target)
                 com.xnotes.ui.Backstage(
                 editor = target ?: editor,
-                view = if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
-                onSelectView = { if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it) },
+                view = if (libraryHere) com.xnotes.ui.BackstageView.ORIGINALS
+                    else if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
+                onSelectView = {
+                    // Leaving the library pane for any other Home view releases the library itself.
+                    if (libraryHere && it != com.xnotes.ui.BackstageView.ORIGINALS) originalLibrary.close()
+                    if (it == com.xnotes.ui.BackstageView.ORIGINALS) Unit
+                    else if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it)
+                },
                 allowSplits = target == null,
                 allowMapPairs = true,
                 allowNativePairs = true,
                 canRestoreSplit = recentState.loaded && recentState.read is com.xnotes.ui.SplitArrangementRead.Ready,
                 initialDocument = target?.let { paneHomes[it.pane] },
                 onPreviewRecovery = {recoveryPreview.open(target ?: editor)},
-                onOpenOriginalPdfs = ::openOriginalLibrary,
+                onOpenOriginalPdfs = { openOriginalLibrary(target) },
+                originalPdfsPane = if (!libraryHere) null else { sidebarOpen, showSidebar ->
+                    // A Home removed under the library (its pane closed) releases it; the read-only reader
+                    // replacing Home, or an Activity rebuild, keeps it for the return.
+                    DisposableEffect(Unit) {
+                        onDispose {
+                            if (originalLibrary.visible && originals.current == null &&
+                                (context as? android.app.Activity)?.isChangingConfigurations != true) originalLibrary.close()
+                        }
+                    }
+                    com.xnotes.mindmap.OriginalPdfLibraryPane(originalLibrary, openLibraryOriginal, sidebarOpen, showSidebar)
+                },
                 onOpenNetwork = {
                     val issue=com.xnotes.ui.presentationEntryIssue(coldBootstrap?.problem,maps.visible)
                     if(issue!=null) editor.message=context.getString(issue)

@@ -1,6 +1,5 @@
 package com.xnotes.mindmap
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -14,52 +13,71 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.xnotes.R
 import com.xnotes.storage.OriginalPdfCatalog
+import com.xnotes.ui.ExplorerSearchField
+import com.xnotes.ui.Tooltip
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.*
 
-/** The library replaces the native host while open; it never overlays an on-top ink Surface. */
+/** Restore picker for the library pane, kept above Home so a pane rebuild never drops its result. */
+private val LocalOriginalPdfChooser=staticCompositionLocalOf<(String)->Unit> {{}}
+
+/**
+ * The library is a Home pane beside the sidebar, like AI and Trash, so the native host stays composed
+ * underneath; its picker lives here, outside Home, to survive the read-only reader replacing Home.
+ */
 @Composable
-internal fun OriginalPdfLibraryHost(state:OriginalPdfLibraryState,
-    onOpen:(OriginalPdfCatalog.Observation,()->Boolean)->Boolean,nativeContent:@Composable ()->Unit) {
+internal fun OriginalPdfLibraryHost(state:OriginalPdfLibraryState,nativeContent:@Composable ()->Unit) {
     var pickerRequest by rememberSaveable {mutableStateOf<String?>(null)}
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
         val id=pickerRequest;pickerRequest=null
         if(id!=null) state.receiveRestoreFile(id,uri)
     }
-    if(!state.visible) {nativeContent();return}
-    BackHandler {state.close()}
-    val dark=LocalPalette.current.isDark
-    XnotesTheme(monochromePalette(dark)) {
-        CompositionLocalProvider(LocalInkBusy provides false) {
-            OriginalPdfLibraryScreen(state,onOpen,chooseFile={id->
-                if(pickerRequest==null && state.restoreRequest?.id==id && state.needsRestoreFile) {
-                    pickerRequest=id
-                    try {picker.launch(arrayOf("application/pdf"))}
-                    catch(_:Exception) {pickerRequest=null;state.reportUnavailable()}
-                }
-            })
+    val chooseFile:(String)->Unit={id->
+        if(pickerRequest==null && state.restoreRequest?.id==id && state.needsRestoreFile) {
+            pickerRequest=id
+            try {picker.launch(arrayOf("application/pdf"))}
+            catch(_:Exception) {pickerRequest=null;state.reportUnavailable()}
         }
     }
+    CompositionLocalProvider(LocalOriginalPdfChooser provides chooseFile) {nativeContent()}
 }
 
+/** Home's original-library pane; the host closes the library when Home moves to another view. */
 @Composable
-private fun OriginalPdfLibraryScreen(state:OriginalPdfLibraryState,
-    onOpen:(OriginalPdfCatalog.Observation,()->Boolean)->Boolean,chooseFile:(String)->Unit) {
+internal fun OriginalPdfLibraryPane(state:OriginalPdfLibraryState,
+    onOpen:(OriginalPdfCatalog.Observation,()->Boolean)->Boolean,sidebarOpen:Boolean,onShowSidebar:()->Unit) {
+    val chooseFile=LocalOriginalPdfChooser.current
+    val palette=LocalPalette.current
+    var query by rememberSaveable {mutableStateOf("")}
     var deleting by remember {mutableStateOf<OriginalPdfCatalog.Observation?>(null)}
     var restoring by remember {mutableStateOf<OriginalPdfCatalog.Observation?>(null)}
-    Surface(Modifier.fillMaxSize(),color=LocalPalette.current.panel.toComposeColor()) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=Space.s8),
-                verticalAlignment=Alignment.CenterVertically) {
-                MapButton(R.string.map_close) {state.close()}
-                Text(stringResource(R.string.original_pdf_library_title),fontSize=TextSize.title,modifier=Modifier.padding(Space.s12))
-                MapButton(R.string.original_pdf_refresh,enabled=!state.busy && state.restoreRequest==null) {state.refresh()}
+    CompositionLocalProvider(LocalInkBusy provides false) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val searchRoom=maxWidth-(if(sidebarOpen) 0.dp else MinTouchTarget)-MinTouchTarget*2
+                Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
+                    if(!sidebarOpen) Tooltip(stringResource(R.string.show_sidebar)) {
+                        IconButton(onClick=onShowSidebar) {
+                            Icon(XnotesIcons.menu,stringResource(R.string.show_sidebar),tint=palette.text.toComposeColor(),modifier=Modifier.size(24.dp))
+                        }
+                    }
+                    Text(stringResource(R.string.original_pdf_library_title),color=palette.text.toComposeColor(),fontWeight=FontWeight.Bold,
+                        fontSize=TextSize.headline,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
+                    ExplorerSearchField(query,{query=it},expandedWidth=searchRoom.coerceIn(40.dp,300.dp))
+                    MapButton(R.string.original_pdf_refresh,enabled=!state.busy && state.restoreRequest==null) {state.refresh()}
+                }
             }
-            HorizontalDivider()
-            LazyColumn(Modifier.fillMaxSize().padding(Space.s16),verticalArrangement=Arrangement.spacedBy(Space.s12)) {
+            HorizontalDivider(color=palette.border.toComposeColor())
+            val needle=query.trim()
+            val shown=if(needle.isEmpty()) state.records else state.records.filter {it.record.title.contains(needle,ignoreCase=true)}
+            LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(vertical=Space.s16),verticalArrangement=Arrangement.spacedBy(Space.s12)) {
                 item {Text(stringResource(R.string.original_pdf_library_notice),fontSize=TextSize.body)}
-                item {Text(stringResource(R.string.original_pdf_backup_notice),fontSize=TextSize.caption)}
+                item {Text(stringResource(R.string.original_pdf_backup_notice),fontSize=TextSize.caption,color=palette.textDim.toComposeColor())}
                 if(state.busy) item {Text(stringResource(R.string.graph_ref_preparing),fontSize=TextSize.body)}
                 state.failure?.let {failure->item {Text(stringResource(if(failure==OriginalPdfLibraryIssue.CHANGED)
                     R.string.original_pdf_changed else R.string.original_pdf_unavailable),fontSize=TextSize.body)}}
@@ -72,13 +90,15 @@ private fun OriginalPdfLibraryScreen(state:OriginalPdfLibraryState,
                 }}
                 if(!state.busy && state.records.isEmpty() && state.failure==null) item {
                     Text(stringResource(R.string.original_pdf_empty),fontSize=TextSize.body)
+                } else if(state.records.isNotEmpty() && shown.isEmpty()) item {
+                    Text(stringResource(R.string.no_matches),fontSize=TextSize.body,color=palette.textDim.toComposeColor())
                 }
-                items(state.records,key={it.record.id}) {observation->
+                items(shown,key={it.record.id}) {observation->
                     val record=observation.record
                     Column(verticalArrangement=Arrangement.spacedBy(Space.s4)) {
                         Text(record.title,fontSize=TextSize.title)
-                        Text(stringResource(R.string.original_pdf_pages,record.pageCount),fontSize=TextSize.caption)
-                        if(record.deleted) Text(stringResource(R.string.original_pdf_deleted),fontSize=TextSize.caption)
+                        Text(stringResource(R.string.original_pdf_pages,record.pageCount),fontSize=TextSize.caption,color=palette.textDim.toComposeColor())
+                        if(record.deleted) Text(stringResource(R.string.original_pdf_deleted),fontSize=TextSize.caption,color=palette.textDim.toComposeColor())
                         Row(Modifier.horizontalScroll(rememberScrollState())) {
                             if(!record.deleted) {
                                 MapButton(R.string.original_pdf_open,enabled=!state.busy && state.restoreRequest==null) {
@@ -90,7 +110,7 @@ private fun OriginalPdfLibraryScreen(state:OriginalPdfLibraryState,
                             MapButton(if(record.deleted) R.string.original_pdf_restore else R.string.original_pdf_relink,
                                 enabled=!state.busy && state.restoreRequest==null) {restoring=observation}
                         }
-                        HorizontalDivider()
+                        HorizontalDivider(color=palette.border.toComposeColor())
                     }
                 }
                 if(state.limited) item {Text(stringResource(R.string.original_pdf_limited),fontSize=TextSize.caption)}
