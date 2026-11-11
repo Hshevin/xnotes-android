@@ -82,6 +82,7 @@ import com.xnotes.core.model.deepCopy
 import com.xnotes.core.model.snapshot
 import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.model.enableReferenceAnchors
+import com.xnotes.core.model.bindRootReferenceScope
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
@@ -1294,6 +1295,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(!sessionOwner.isCurrent() || documentOwner!==this || !noteOpen || canvasOpen || state.document!==doc ||
             version.kind!=DocumentKind.NOTE || version.documentId!=doc.identity.documentId ||
             doc.path?.let {notebookStorage.registry.locationKey(it)}!=version.locationKey) return
+        if(!doc.hasReferenceAnchors) doc.bindRootReferenceScope()
         noteSourceObservation=NoteSourceObservation(doc,revision,version,doc.identity,doc.hasReferenceAnchors,doc.pageReferenceScope)
     }
     internal fun sourceSelectionRegion():com.xnotes.canvas.PageSourceRegion? =
