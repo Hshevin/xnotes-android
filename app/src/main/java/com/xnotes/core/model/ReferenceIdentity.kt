@@ -48,5 +48,13 @@ internal fun Document.enableReferenceAnchors() {prepareScopedReferenceAnchors();
 internal fun Document.prepareReferenceAnchors() {
     pageReferenceScope?.takeIf {it.parent!=null}?.let {check(identity.documentId==it.documentId) {"Document identity differs from its copy scope"}}
     if(hasReferenceAnchors) prepareScopedReferenceAnchors()
-    else if(pageReferenceScope==null) pageReferenceScope=PageReferenceScope.root(identity.documentId)
+    else bindRootReferenceScope()
+}
+
+/**
+ * An unanchored model's null scope means its own root. Bind that same root before a
+ * source observation captures it, so the first writer snapshot cannot replace the observed scope.
+ */
+internal fun Document.bindRootReferenceScope() {
+    if(pageReferenceScope==null) pageReferenceScope=PageReferenceScope.root(identity.documentId)
 }
