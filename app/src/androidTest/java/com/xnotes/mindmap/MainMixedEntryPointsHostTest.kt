@@ -45,6 +45,26 @@ import org.junit.Test
  * Source compilation is not evidence of Android execution or Surface/GPU acceptance. */
 class MainMixedEntryPointsHostTest {
     private val runner get()=PenTestRunner.instance
+
+    @Test fun defaultPublicationWorksOnTheActualPrivateAndroidFilesystem() {
+        val folder=File(runner.targetContext.filesDir,"split-publication-${UUID.randomUUID()}").apply {mkdirs()}
+        try {
+            val request=MixedSplitRequest(
+                SplitSourceRef(UUID.randomUUID().toString(),"content://fixture/map","Map"),
+                SplitSourceRef(UUID.randomUUID().toString(),"content://fixture/note","Note"),
+                MapSplitLayout(Pane.PRIMARY,Pane.SECONDARY,.37f,false,true),
+                MapPresentationCamera(MindMapView.Viewport(1.5f,-24f,48f),1200,800,2f),
+                Editor.ReadingPosition(1.25,17.0,27.0,ViewOverrides()))
+            val store=SplitArrangementStore(folder)
+            val first=requireNotNull(store.saveNamed(request,"same"))
+            val prepared=requireNotNull(store.prepareNamed(request,"same"))
+            val second=try {requireNotNull(prepared.commit())} finally {prepared.close()}
+            assertNotEquals(first,second)
+            for(file in listOf(first,second))
+                assertEquals(SplitArrangementRead.Ready(SplitOpenRequest.Mixed(request)),store.readManaged(file.toURI().toString()))
+            assertEquals(setOf(first,second).map {it.canonicalFile}.toSet(),File(folder,"splits").listFiles()!!.map {it.canonicalFile}.toSet())
+        } finally {folder.deleteRecursively()}
+    }
     private fun <T> main(action:()->T):T {
         var result:Result<T>?=null;runner.runOnMainSync {result=runCatching(action)}
         return requireNotNull(result).getOrThrow()

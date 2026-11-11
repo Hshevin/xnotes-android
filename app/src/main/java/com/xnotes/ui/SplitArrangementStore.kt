@@ -29,7 +29,7 @@ private fun renameOverReservation(target:Path,stage:Path) {
         // Remove only the still-empty reservation this call created.
         try {
             val now=Files.readAttributes(target,BasicFileAttributes::class.java,NOFOLLOW_LINKS)
-            if(now.isRegularFile && now.size()==0L && now.fileKey()==reservation) Files.deleteIfExists(target)
+            if(reservation!=null && now.isRegularFile && now.size()==0L && now.fileKey()==reservation) Files.deleteIfExists(target)
         } catch(cleanup:Exception) {error.addSuppressed(cleanup)}
         throw error
     }
