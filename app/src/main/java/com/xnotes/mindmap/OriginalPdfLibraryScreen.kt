@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.xnotes.R
 import com.xnotes.storage.OriginalPdfCatalog
 import com.xnotes.ui.ExplorerSearchField
@@ -59,16 +58,16 @@ internal fun OriginalPdfLibraryPane(state:OriginalPdfLibraryState,
     CompositionLocalProvider(LocalInkBusy provides false) {
         Column(Modifier.fillMaxSize().imePadding()) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val searchRoom=maxWidth-(if(sidebarOpen) 0.dp else MinTouchTarget)-MinTouchTarget*2
-                Row(Modifier.fillMaxWidth().heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
+                val searchRoom=maxWidth-MinTouchTarget*(if(sidebarOpen) 2 else 3)
+                Row(Modifier.fillMaxWidth().heightIn(min=OriginalPdfLibraryHeaderHeight),verticalAlignment=Alignment.CenterVertically) {
                     if(!sidebarOpen) Tooltip(stringResource(R.string.show_sidebar)) {
                         IconButton(onClick=onShowSidebar) {
-                            Icon(XnotesIcons.menu,stringResource(R.string.show_sidebar),tint=palette.text.toComposeColor(),modifier=Modifier.size(24.dp))
+                            Icon(XnotesIcons.menu,stringResource(R.string.show_sidebar),tint=palette.text.toComposeColor(),modifier=Modifier.size(Space.s24))
                         }
                     }
                     Text(stringResource(R.string.original_pdf_library_title),color=palette.text.toComposeColor(),fontWeight=FontWeight.Bold,
                         fontSize=TextSize.headline,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
-                    ExplorerSearchField(query,{query=it},expandedWidth=searchRoom.coerceIn(40.dp,300.dp))
+                    ExplorerSearchField(query,{query=it},expandedWidth=searchRoom.coerceIn(Space.s40,OriginalPdfLibrarySearchWidth))
                     MapButton(R.string.original_pdf_refresh,enabled=!state.busy && state.restoreRequest==null) {state.refresh()}
                 }
             }

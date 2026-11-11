@@ -43,10 +43,10 @@ class MapVisibleEditingRegressionTest {
         while (!clickable.isClickable) clickable = requireNotNull(clickable.parent)
         assertTrue(clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK))
     }
-    private fun scenario(test: (MainActivity, MapSession, MindMapView) -> Unit) {
+    private fun scenario(initialNodes:List<MapNode> = listOf(MapNode(id="root", parent=null, text="Visible topic")), test: (MainActivity, MapSession, MindMapView) -> Unit) {
         val base = runner.targetContext
         val file = File.createTempFile("visible-map-", ".xmap", base.cacheDir)
-        file.writeBytes(MapCodec.encode(MindMapDocument(nodes = listOf(MapNode(id="root", parent=null, text="Visible topic")))))
+        file.writeBytes(MapCodec.encode(MindMapDocument(nodes = initialNodes)))
         val activity = runner.startActivitySync(Intent(base, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         try {
             await("Main workspace") { main { activity.mapWorkspace != null && activity.documentEditor != null } }
@@ -120,6 +120,27 @@ class MapVisibleEditingRegressionTest {
         assertEquals(1, main { session.document!!.nodes.count { it.kind == NodeKind.INK } })
     }
 
+    @Test fun openingAnExistingInkNodeAndCreatingItsSiblingBothShowThePad() = scenario(initialNodes=listOf(
+        MapNode(id="root",parent=null,text="Visible topic"),
+        MapNode(id="ink",parent="root",text="Existing ink",kind=NodeKind.INK)
+    )) { activity, session, graph ->
+        await("interactive graph") {main {graph.isEnabled}}
+        click(activity.getString(R.string.map_nodes));click("Existing ink")
+        click(activity.getString(R.string.ink_enlarge))
+        await("existing ink pad drawn") {main {views(activity.window.decorView).any {it is InkPadView && it.isShown && it.width>0}}}
+        runner.waitForIdleSync()
+        click(activity.getString(R.string.map_close))
+        await("existing ink pad closed") {main {views(activity.window.decorView).none {it is InkPadView}}}
+        click(activity.getString(R.string.map_add_sibling))
+        await("ink sibling and pad") {main {
+            session.document!!.nodes.count {it.kind==NodeKind.INK}==2 &&
+                views(activity.window.decorView).any {it is InkPadView && it.isShown && it.width>0}
+        }}
+        runner.waitForIdleSync()
+        assertEquals("root",main {session.document!!.nodes.single {it.id==session.selected}.parent})
+        click(activity.getString(R.string.map_close))
+    }
+
     @Test fun inkPadCannotPaintOutsideItsOwnBoundsOnAnUnclippedHostCanvas() = main {
         val bitmap = android.graphics.Bitmap.createBitmap(240, 200, android.graphics.Bitmap.Config.ARGB_8888)
         try {
@@ -128,7 +149,10 @@ class MapVisibleEditingRegressionTest {
             val canvas = android.graphics.Canvas(bitmap)
             val pad = InkPadView(runner.targetContext)
             pad.layout(0, 0, 100, 80)
-            canvas.save(); canvas.translate(50f, 60f); pad.draw(canvas); canvas.restore()
+            canvas.save(); canvas.translate(50f, 60f)
+            val hostCount=canvas.saveCount
+            repeat(3) {pad.draw(canvas);assertEquals("Drawing must preserve the host canvas stack",hostCount,canvas.saveCount)}
+            canvas.restore()
             assertEquals("Drawing must preserve the toolbar area above the pad", sentinel, bitmap.getPixel(70, 30))
             assertEquals("Drawing must preserve the neighboring pane", sentinel, bitmap.getPixel(190, 100))
             assertNotEquals("The pad itself must still paint", sentinel, bitmap.getPixel(100, 100))

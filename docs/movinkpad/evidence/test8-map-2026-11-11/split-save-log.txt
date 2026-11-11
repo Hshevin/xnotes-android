@@ -1,0 +1,2 @@
+--------- beginning of main
+11-11 20:32:36.290  7321  7321 W xnotes.split: Mixed arrangement save stopped: source saves or proofs

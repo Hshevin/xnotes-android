@@ -80,3 +80,7 @@ object ReferenceLocatorStyle {
     val StrokeWidth = 2.dp
     val Inset = Space.s4
 }
+
+/** Original library header follows the Home/AI pane header dimensions. */
+val OriginalPdfLibraryHeaderHeight = 56.dp
+val OriginalPdfLibrarySearchWidth = 300.dp

@@ -10,6 +10,8 @@
 
 最新主线独立测试版：[master test8 ARM64 APK](build/branch-tests/master-test8/XNotes-master-6eb71cf9-test8-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。包含导图编辑、工具栏和分屏发布修复；4 项定向 JVM 回归通过，本轮未重跑 Android 测试。见 [打包记录](docs/movinkpad/master-test8-2026-11-11.md)。
 
+**test8 实测警示（2026-11-11）：** 主画布与文字输入已可用，但新建/打开放大手写节点和手写同级节点会闪退；混合分屏保存仍失败。绘制崩溃已有源码修复，原件库面板改造已集成，尚未打包或运行修复后 APK。见[实测与修复记录](docs/movinkpad/master-test8-map-emulator-2026-11-11.md)。
+
 **test7 实际使用警示（2026-11-11）：** API 32 ARM64 模拟器走查发现思维导图主画布持续空白、放大手写操作栏不可见及混合分屏保存失败；局部内容保存可用，但导图可视编辑闭环未通过。另有软键盘遮住确认按钮、上下分屏画图区过小的问题。见[复现步骤与截图](docs/movinkpad/master-test7-map-emulator-2026-11-11.md)。源码候选修复已覆盖画布生命周期、复用笔记手写工具栏、键盘避让与分屏文件发布，见[修复与验证记录](docs/movinkpad/mind-map-usability-repair-2026-11-11.md)。未打包新 APK，原 test7 结论不变，修复后 Android 运行与目标真机待验。
 
 分支测试更新：图层与按键录入已更新至 test2，可覆盖各自 test1；新增图层侧栏/缩略图及按键交接、取消、工具栏高亮修复，见[打包记录](docs/movinkpad/branch-tests-2026-11-05.md#test2远端分支更新)。
