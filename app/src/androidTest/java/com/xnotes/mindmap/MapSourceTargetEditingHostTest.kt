@@ -181,7 +181,7 @@ internal class SourceTargetAndroidFixture private constructor(val host:ComposeHo
     }
     fun label(id:Int)=context.getString(id)
     fun currentSource()=session.document!!.root.sources.single()
-    fun openSources() {ui.click(label(R.string.graph_sources));ui.awaitVisible(label(R.string.source_target_adjust))}
+    fun openSources() {openMapMenuPage(R.string.map_menu_sources);ui.awaitVisible(label(R.string.source_target_adjust))}
     fun awaitVisual() {host.await("actual saved source visual") {controller.state?.step==SourceTargetEditStep.VISUAL && controller.image!=null}}
     fun awaitSaved() {host.await("confirmed source target saved") {controller.state?.step==SourceTargetEditStep.SAVED && !session.saving}}
     fun visual()=WindowInspector.getGlobalWindowViews().flatMap(::allViews).filterIsInstance<SourceRegionVisualView>().singleOrNull {it.isShown}

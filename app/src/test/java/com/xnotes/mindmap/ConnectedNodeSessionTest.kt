@@ -35,6 +35,51 @@ class ConnectedNodeSessionTest {
         assertTrue(s.beginConnectedNode("r",Pt(600.0,400.0)));val draft=s.connectedDraft!!
         assertTrue(s.chooseConnectedKind(draft.token,kind));return s.connectedDraft!!
     }
+    @Test fun childAndSiblingSourcesCommitTogetherAndUndoExactlyOnce() {
+        for(placement in listOf(NodePlacement.CHILD,NodePlacement.SIBLING)) {
+            val (s,_)=session();val before=s.document
+            assertTrue(s.beginNodeCreation(placement,if(placement==NodePlacement.CHILD) "r" else "other",NodeKind.TEXT,"Title"))
+            val draft=s.connectedDraft!!;val request=s.beginConnectedSource(draft.token)!!
+            assertTrue(s.receiveConnectedSource(request.id,Uri.parse("file:///source.xnote")))
+            await {s.connectedDraft?.loadingSource==false}
+            assertEquals(before,s.document);assertFalse(s.canUndo)
+            assertTrue(s.finishConnectedNode(draft.token));val node=s.document!!.node(draft.nodeId)
+            assertEquals("r",node.parent);assertEquals(listOf(source),node.sources);assertEquals(source.id,node.primarySource)
+            s.undo();assertEquals(before,s.document);assertFalse(s.canUndo)
+        }
+    }
+    @Test fun cancellingCreationRetiresSourceTicketsWithoutHistory() {
+        for(placement in listOf(NodePlacement.CHILD,NodePlacement.SIBLING,NodePlacement.FREE)) {
+            val (s,_)=session();val before=s.document
+            assertTrue(s.beginNodeCreation(placement,"other",NodeKind.INK,"Draft"))
+            val draft=s.connectedDraft!!;val ticket=s.beginConnectedSource(draft.token)!!
+            s.cancelConnectedNode(draft.token)
+            assertFalse(s.receiveConnectedSource(ticket.id,Uri.parse("file:///late.xnote")))
+            assertFalse(s.finishConnectedNode(draft.token));assertEquals(before,s.document);assertFalse(s.canUndo)
+        }
+    }
+    @Test fun deletedThenRestoredAnchorCannotAcceptAnOldCreationDraft() {
+        for(placement in listOf(NodePlacement.CHILD,NodePlacement.CONNECTED)) {
+            val (s,_)=session()
+            if(placement==NodePlacement.CONNECTED) {
+                assertTrue(s.beginConnectedNode("other",Pt(500.0,500.0)))
+                assertTrue(s.chooseConnectedKind(s.connectedDraft!!.token,NodeKind.TEXT))
+            } else assertTrue(s.beginNodeCreation(placement,"other",NodeKind.TEXT,"Draft"))
+            val draft=s.connectedDraft!!
+            assertTrue(s.operate {it.delete("other")});s.undo();val restored=s.document
+            assertFalse(s.finishConnectedNode(draft.token));assertEquals(restored,s.document)
+            assertEquals(ConnectedDraftProblem.CHANGED,s.connectedDraft!!.problem)
+        }
+    }
+    @Test fun freeReferenceRequiresSourceButCanSwitchToTextWithoutCommittingEarly() {
+        val (s,_)=session();val before=s.document
+        assertTrue(s.beginNodeCreation(NodePlacement.FREE,null,NodeKind.REFERENCE,"Title"))
+        val draft=s.connectedDraft!!;assertFalse(s.finishConnectedNode(draft.token))
+        assertEquals(before,s.document);assertFalse(s.canUndo)
+        assertTrue(s.changeConnectedKind(draft.token,NodeKind.TEXT))
+        assertTrue(s.finishConnectedNode(draft.token));assertTrue(s.document!!.node(draft.nodeId).free)
+        s.undo();assertEquals(before,s.document)
+    }
     @Test fun confirmationUsesLatestContentAndSizeKeepsDropCenterAndOneUndoThenSaves() {
         val (s,file)=session();val draft=start(s,NodeKind.TEXT);val node=draft.node!!
         assertTrue(s.editConnectedNode(draft.token,node.copy(text="Draft",width=400.0,height=160.0)))

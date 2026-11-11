@@ -94,7 +94,7 @@ class MainMixedMapEditingHostTest {
         fun splitThroughButton() {click(label(R.string.map_split_open_beside));awaitMixed()}
         fun openB() {
             main {assertSame(origin,maps.current);origin.session.selected="an"}
-            if(!shown(label(R.string.open))) click(label(R.string.graph_sources))
+            if(!shown(label(R.string.open))) openMapMenuPage(R.string.map_menu_sources)
             click(label(R.string.open));await("actual B in Map slot") {main {maps.current?.session?.document?.id==bId && maps.visible && mixedGeometry()!=null}}
         }
         fun editNode(id:String,text:String) {
@@ -170,7 +170,7 @@ class MainMixedMapEditingHostTest {
         main {child.session.undo();assertEquals("B note source",child.session.document!!.node("bn").text);child.session.redo();child.session.save()}
         await("actual B write") {main {!child.session.saving && !child.session.dirty}}
         assertEquals("B edited in its own pane",MapCodec.decode(f.b.readBytes()).node("bn").text)
-        click(f.label(R.string.graph_sources));click(f.label(R.string.open))
+        openMapMenuPage(R.string.map_menu_sources);click(f.label(R.string.open))
         await("existing NOTE page stays beside Map") {main {f.maps.visible && f.maps.current===child && child.sourceReturn!=null && f.mixedGeometry()!=null}}
         main {
             assertEquals(layout.nativePane,f.maps.splitPresentation.layout!!.focusedPane)

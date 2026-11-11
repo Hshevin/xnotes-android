@@ -9,6 +9,10 @@ import android.view.ViewGroup
 import android.view.inspector.WindowInspector
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.BroadcastFrameClock
+import androidx.compose.runtime.Recomposer
+import kotlinx.coroutines.*
+import kotlinx.coroutines.android.asCoroutineDispatcher
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsActions
@@ -25,18 +29,26 @@ import java.time.Duration
 
 /** Real composed actions, without replacing the production callbacks or document actor. */
 internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
+    // Own the frame clock/dispatcher per host: cached AndroidUiDispatcher instances can refer
+    // to a previous Robolectric test's looper after that Activity has been destroyed.
+    private val frames=BroadcastFrameClock()
+    private val dispatcher=android.os.Handler(Looper.getMainLooper()).asCoroutineDispatcher()
+    private val scope=CoroutineScope(SupervisorJob()+dispatcher+frames)
+    private val recomposer=Recomposer(scope.coroutineContext)
+    private val recomposition=scope.launch {recomposer.runRecomposeAndApplyChanges()}
     private val host=Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
     val activity=host.get()
     val file=File.createTempFile("map-compose-review-",".xmap",activity.cacheDir).apply {writeBytes(MapCodec.encode(document))}
     val session=MapSession().also {it.open(activity,Uri.fromFile(file))}
     init {await { !session.loading };assertFalse(session.loadFailed)}
-    fun content(body:@Composable ()->Unit) {activity.setContent(content=body);settle()}
+    fun content(body:@Composable ()->Unit) {activity.setContent(parent=recomposer,content=body);settle()}
     fun screen(onClose:()->Unit={}) {
         content {MindMapScreen(session,"Review graph",onClose)}
     }
     fun settle() {
         repeat(4) {
             Snapshot.sendApplyNotifications()
+            frames.sendFrame(android.os.SystemClock.uptimeMillis()*1_000_000L)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
             windowRoots().forEach {view->
                 view.measure(View.MeasureSpec.makeMeasureSpec(1800,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1400,View.MeasureSpec.EXACTLY))
@@ -73,7 +85,7 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     }.flatMap {nodes(it.rootSemanticsNode)}
     fun clickAction(id:Int):()->Boolean {
         val label=activity.getString(id)
-        repeat(30) {
+        repeat(60) {
             semantics().firstNotNullOfOrNull {node->
                 val config=node.config
                 if(config.getOrNull(SemanticsProperties.Text)?.any {it.text==label}==true && !config.contains(SemanticsProperties.Disabled))
@@ -85,7 +97,7 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     }
     fun click(id:Int) {assertTrue(clickAction(id)());settle()}
     fun textAction():(AnnotatedString)->Boolean {
-        repeat(30) {
+        repeat(60) {
             semantics().firstNotNullOfOrNull {it.config.getOrNull(SemanticsActions.SetText)?.action}?.let {action->
                 return action
             }
@@ -96,9 +108,10 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     fun enter(value:String) {assertTrue(textAction()(AnnotatedString(value)));settle()}
     fun visible(id:Int)=semantics().any {node->node.config.getOrNull(SemanticsProperties.Text)?.any {it.text==activity.getString(id)}==true}
     override fun close() {
-        activity.setContent {};settle()
+        activity.setContent(parent=recomposer) {};settle()
         session.save();await {!session.saving}
         host.pause().stop().destroy()
+        recomposer.cancel();scope.cancel()
         file.delete()
     }
 }

@@ -110,7 +110,7 @@ class MapPageSourceEditingHostTest {
         fun label(id:Int)=context.getString(id)
         fun chooseSource(test:MapPageSourceEditingHostTest) {
             val before=host.onMain {registry.launches.size}
-            test.click(label(R.string.graph_sources));test.click(label(R.string.graph_add_source))
+            openMapMenuPage(R.string.map_menu_sources);test.click(label(R.string.graph_add_source))
             test.waitUntil {host.onMain {registry.launches.size>before}}
             host.onMain {registry.deliver(registry.launches.last(),Uri.fromFile(source))}
             test.waitUntil {test.visible(label(R.string.graph_source_choose)) && host.onMain {session.sourcePicker.state?.busy==false}}
@@ -169,9 +169,9 @@ class MapPageSourceEditingHostTest {
         f.chooseSource(this);val second=f.context.getString(R.string.graph_source_page_number,2)
         val oldPage=f.host.onMain {composedClick(second)}
         click(f.label(R.string.cancel));click(f.label(R.string.map_done))
-        click(f.label(R.string.graph_sources));click(f.label(R.string.graph_add_source))
+        openMapMenuPage(R.string.map_menu_sources);click(f.label(R.string.graph_add_source))
         val late=f.host.onMain {f.registry.launches.last()};click(f.label(R.string.map_done))
-        click(f.label(R.string.graph_sources))
+        openMapMenuPage(R.string.map_menu_sources)
         val launches=f.host.onMain {f.registry.launches.size}
         waitUntil {runner.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(f.label(R.string.graph_add_source))?.any {!it.isEnabled}==true}
         assertEquals(launches,f.host.onMain {f.registry.launches.size}) // Old system launch still occupies this launcher.

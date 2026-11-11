@@ -12,6 +12,18 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentLinkedQueue
 
 class ReferenceIdentityTest {
+    @Test fun observingAnUnanchoredRootKeepsTheSameScopeAcrossSnapshotsWithoutEnablingPageIds() {
+        val doc=Document.blank()
+        assertFalse(doc.hasReferenceAnchors)
+        assertNull(doc.pageReferenceScope)
+        doc.bindRootReferenceScope()
+        val scope=requireNotNull(doc.pageReferenceScope)
+        repeat(2) {doc.snapshot();doc.bindRootReferenceScope();assertSame(scope,doc.pageReferenceScope)}
+        assertFalse(doc.hasReferenceAnchors)
+        assertTrue(doc.pages.all {it.referenceIdentity.id==null})
+        assertEquals(doc.identity.documentId,scope.documentId)
+    }
+
     private fun ink()=Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(1.0,2.0,.7)))
     @Test fun identityIsAssignedOnceAndConcurrentReadersSeeOneStableUuid() {
         val identity=ReferenceIdentity();assertNull(identity.id)

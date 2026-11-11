@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.xnotes.R
 import com.xnotes.ui.theme.*
 
@@ -36,7 +37,7 @@ internal enum class MapMenuTab { NODES,SOURCES,RELATIONS,LAYOUT }
  */
 @Composable
 internal fun MapMenuPage(shown:Boolean,modifier:Modifier=Modifier,content:@Composable BoxScope.()->Unit) {
-    Box(modifier.layout {measurable,constraints->
+    Box(modifier.then(if(shown) Modifier else Modifier.clearAndSetSemantics {}).layout {measurable,constraints->
         val placeable=measurable.measure(constraints)
         if(shown) layout(placeable.width,placeable.height) {placeable.place(0,0)} else layout(0,0) {}
     },content=content)

@@ -428,6 +428,7 @@ class MapSession() : ViewModel() {
     internal fun finishConnectedNode(token:String,proposed:MapNode?=null):Boolean {
         val draft=connected(token)?.takeIf {!closing && !inkContact && !it.loadingSource && connectedSourceRequest==null} ?: return false
         val node=draft.node ?: return false
+        if(!anchorCurrent(draft)) {connectedDraft=draft.copy(problem=ConnectedDraftProblem.CHANGED);return false}
         if(proposed!=null && proposed.id!=node.id) return false
         val body=if(proposed==null) node else node.copy(text=proposed.text,kind=proposed.kind,width=proposed.width,height=proposed.height)
         if(body.kind==NodeKind.REFERENCE && body.sources.isEmpty()) return false

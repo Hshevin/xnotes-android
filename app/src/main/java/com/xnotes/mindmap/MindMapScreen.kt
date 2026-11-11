@@ -288,7 +288,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         HorizontalDivider()
                         Box(Modifier.weight(1f).fillMaxWidth()) {
                             // Nodes: overview, properties, node list / parent chooser and the creation draft.
-                            MapMenuPage(tab==MapMenuTab.NODES,Modifier.fillMaxSize()) {
+                            MapMenuPage(choice==null && tab==MapMenuTab.NODES,Modifier.fillMaxSize()) {
                                 val propsNode=propertiesFor?.let {id->doc.nodes.firstOrNull {it.id==id}}
                                 MapMenuPage(draft==null && !choosing && propsNode==null,Modifier.fillMaxSize()) {
                                     @OptIn(ExperimentalLayoutApi::class)
@@ -315,7 +315,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                                 enabled=node!=null && doc.children(node.id).isNotEmpty()) {node?.let {session.toggleCollapse(it.id)}}
                                             MapButton(R.string.graph_detach,enabled=!nodeMode && node?.parent!=null) {node?.let {n->session.operate {it.detach(n.id)}}}
                                             MapButton(R.string.map_change_parent,enabled=!nodeMode && node?.parent!=null && !session.closing) {choosing=true;reparenting=true}
-                                            MapButton(R.string.map_nodes,enabled=!nodeMode) {choosing=true;reparenting=false}
+                                            MapButton(R.string.map_node_list,enabled=!nodeMode) {choosing=true;reparenting=false}
                                             MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) {showSources(node?.id)}
                                         }
                                     }
@@ -361,7 +361,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                 }}
                             }
                             // Sources: the bound node's list stays composed (note drafts survive page switches).
-                            MapMenuPage(tab==MapMenuTab.SOURCES,Modifier.fillMaxSize()) {
+                            MapMenuPage(choice==null && tab==MapMenuTab.SOURCES,Modifier.fillMaxSize()) {
                                 val boundId=presentationState.sourcesFor
                                 val sourceEdit=boundId?.let {session.sourceEditSnapshot(it)}
                                 if(boundId!=null && sourceEdit!=null) {
@@ -393,7 +393,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                     MapButton(R.string.graph_sources,enabled=cameraReady && !nodeMode && node!=null) {showSources(node?.id)}
                                 }
                             }
-                            MapMenuPage(tab==MapMenuTab.RELATIONS,Modifier.fillMaxSize()) {
+                            MapMenuPage(choice==null && tab==MapMenuTab.RELATIONS,Modifier.fillMaxSize()) {
                                 if(relationsAlive) key(graphEpoch,relationSerial) {
                                     GraphRelationsContent(doc,session.selected,{initial,next->
                                         if(session.interactionEpoch!=graphEpoch) RelationEditResult.Conflict else session.changeRelation(initial,next).also {result->
@@ -407,7 +407,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                                     }
                                 }
                             }
-                            MapMenuPage(tab==MapMenuTab.LAYOUT,Modifier.fillMaxSize()) {
+                            MapMenuPage(choice==null && tab==MapMenuTab.LAYOUT,Modifier.fillMaxSize()) {
                                 @OptIn(ExperimentalLayoutApi::class)
                                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.s8),verticalArrangement=Arrangement.spacedBy(Space.s8)) {
                                     Text(stringResource(R.string.map_layout),fontSize=TextSize.title)

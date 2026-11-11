@@ -46,7 +46,9 @@ Claude `c2b4ed6d` 将原件库纳入 Backstage 的 ORIGINALS 视图，在侧栏�
 
 ## 分屏保存的新证据
 
-test8 仍报无法保存，`xnotes.split` 明确停在 `source saves or proofs`，尚未到 stage 或发布。上轮硬链接回退不足以解决此实际路径；不能继续把它当作本案例已确认根因。当前保留两侧文档，继续定位来源保存和核验拒绝点。
+test8 仍报无法保存，`xnotes.split` 明确停在 `source saves or proofs`，尚未到 stage 或发布。上轮硬链接回退不足以解决此实际路径；不能继续把它当作本案例已确认根因。模拟器失败时两侧文档均保留。后续 Claude 在实际新建空白 NOTE 加冷启动检查点的 JVM 路径复现：未启用页面身份的笔记最初没有根引用范围，来源观察记录空值，空闲检查点捕获快照时补上范围对象，导致对象身份比较永久失配。`c767ba2c` 在登记来源观察前绑定根范围；不启用页身份，不放宽版本、输入或保存凭据核验。
+
+主代理合并后运行 `MixedNewNoteArrangementHostTest`、`MixedNoteArrangementHostTest`、`MixedSplitPersistenceHostTest` 与 `ReferenceIdentityTest` 通过，并编译 Android 测试源码。新增断言确认重复快照不再替换范围对象且不会启用页面身份。修复后的真实 Android 保存、重开和发布回退仍待包含此提交的远端 APK 验证；test8 的实际失败记录不改写为成功。
 
 ## 本阶段源码验证
 

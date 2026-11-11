@@ -163,7 +163,7 @@ class AndroidMainMapSourceNavigationHostTest {
         }
     }
     private fun sources(f:Scene) {
-        click(f.activity.getString(R.string.graph_sources))
+        openMapMenuPage(R.string.map_menu_sources)
         waitUntil("sources have retained previews") {main {f.entry.session.document!!.node("n").sources.all {it.lastPreview!=null}}}
     }
     @Test fun theSecondSourceOpensItsPermanentPageAndReturnsToItsPannedGraphAndEditedRemark()=scenario {f->

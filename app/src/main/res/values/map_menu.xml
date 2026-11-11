@@ -21,4 +21,5 @@
     <string name="map_create_sources_optional">Sources are optional. You can still add or change them after creating the node.</string>
     <string name="map_create_confirm">Create</string>
     <string name="map_create_parent_changed">The parent node was removed or replaced. Cancel and start again from the current map.</string>
+    <string name="map_node_list">Node list</string>
 </resources>

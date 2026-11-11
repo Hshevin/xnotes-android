@@ -86,6 +86,7 @@ class MapVisibleEditingRegressionTest {
     }
     @Test fun textChildToolbarActionOpensARealEditableDraft() = scenario { activity, session, _ ->
         click(activity.getString(R.string.map_add_text))
+        click(activity.getString(R.string.map_create_confirm))
         await("new child committed") { main { session.document!!.nodes.size == 2 } }
         await("visible text transaction and native input connection") { main {
             session.textDraft != null && activity.currentFocus?.onCreateInputConnection(android.view.inputmethod.EditorInfo()) != null
@@ -95,6 +96,7 @@ class MapVisibleEditingRegressionTest {
     @Test fun enlargedInkShowsItsBackButtonAboveThePadAndReturnsToInteractiveGraph() = scenario { activity, session, graph ->
         await("initial canvas enabled") { main { graph.isEnabled } }
         click(activity.getString(R.string.map_add_ink))
+        click(activity.getString(R.string.map_create_confirm))
         await("enlarged pad") { main { views(activity.window.decorView).any { it is InkPadView && it.height > 0 } } }
         val padBounds = main { Rect().also { rect ->
             assertTrue(views(activity.window.decorView).filterIsInstance<InkPadView>().single().getGlobalVisibleRect(rect))
@@ -125,13 +127,14 @@ class MapVisibleEditingRegressionTest {
         MapNode(id="ink",parent="root",text="Existing ink",kind=NodeKind.INK)
     )) { activity, session, graph ->
         await("interactive graph") {main {graph.isEnabled}}
-        click(activity.getString(R.string.map_nodes));click("Existing ink")
+        click(activity.getString(R.string.map_menu));click(activity.getString(R.string.map_node_list));click("Existing ink")
         click(activity.getString(R.string.ink_enlarge))
         await("existing ink pad drawn") {main {views(activity.window.decorView).any {it is InkPadView && it.isShown && it.width>0}}}
         runner.waitForIdleSync()
         click(activity.getString(R.string.map_close))
         await("existing ink pad closed") {main {views(activity.window.decorView).none {it is InkPadView}}}
         click(activity.getString(R.string.map_add_sibling))
+        click(activity.getString(R.string.map_create_confirm))
         await("ink sibling and pad") {main {
             session.document!!.nodes.count {it.kind==NodeKind.INK}==2 &&
                 views(activity.window.decorView).any {it is InkPadView && it.isShown && it.width>0}

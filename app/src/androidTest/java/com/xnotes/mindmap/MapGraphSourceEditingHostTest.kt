@@ -106,7 +106,7 @@ class MapGraphSourceEditingHostTest {
         fun stopFrames()=main {monitoring=false;Choreographer.getInstance().removeFrameCallback(frame)}
         fun openB() {
             main {assertSame(origin,maps.current);origin.session.selected="n"}
-            if(!shown(label(R.string.open))) click(label(R.string.graph_sources))
+            if(!shown(label(R.string.open))) openMapMenuPage(R.string.map_menu_sources)
             click(label(R.string.open))
             await("actual FILE B actor") {main {maps.visible && maps.current?.session?.document?.id==bDoc.id && graph(activity)?.isEnabled==true}}
         }

@@ -43,9 +43,13 @@ class MapSourceRemarksReviewTest {
         MapComposeReviewFixture(document()).use {f->
             val editor=SourceListEditor(f.session,f.session.sourceEditSnapshot("root")!!);var closed=false
             f.content {GraphSourcesDialog(f.session.sourceEditSnapshot("root")!!,editor,add={}) {closed=true}}
-            val oldText=f.textAction()
+            val shown=f.session.document!!.root.sources.single()
+            val oldTicket=editor.captureNote(shown)
             f.session.operate {it.update("root") {n->n.copy(sources=n.sources.map {s->s.copy(note="Accepted while old field remained")})}}
-            f.settle();assertTrue(oldText(AnnotatedString("Text from the retired field")));f.settle()
+            f.settle()
+            // Compose's SetText semantics action delegates to the CURRENT field after recomposition.
+            // Deliver the retired row's immutable arguments at the same production callback boundary.
+            assertFalse(editor.draftNote(shown,oldTicket,"Text from the retired field"));f.settle()
             f.click(R.string.map_done)
             assertFalse("A retired field must keep its own baseline instead of silently adopting the new note",closed)
             assertTrue(editor.conflict)

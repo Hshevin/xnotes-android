@@ -275,7 +275,7 @@ class MapPageSourceConsumerTest {
         assertTrue((f.provider.reads[f.native.toString()] ?: 0)>reads)
     }
 
-    @Test fun deletingATargetOrChangingTheReferenceDraftKindRetiresAnActivationBeforeItsReadLatchReleases() {
+    @Test fun deletingATargetOrCancellingTheDraftRetiresAnActivationBeforeItsReadLatchReleases() {
         for(connected in listOf(false,true)) scenario {f->
             val token=if(connected) {
                 assertTrue(f.session.beginConnectedNode("r",Pt(600.0,400.0)))
@@ -290,16 +290,33 @@ class MapPageSourceConsumerTest {
             try {
                 assertTrue(f.session.sourcePicker.activatePages(choice));assertTrue(entered.await(5,TimeUnit.SECONDS))
                 val workers=f.session.viewModelScope.coroutineContext[Job]!!.children.toList()
-                if(token!=null) assertTrue(f.session.editConnectedNode(token,f.session.connectedDraft!!.node!!.copy(kind=NodeKind.TEXT,text="New kind")))
+                if(token!=null) f.session.cancelConnectedNode(token)
                 else assertTrue(f.session.operate {it.delete("other")})
                 assertNull(f.session.sourcePicker.state)
                 f.provider.beforeRead=null;release.countDown();await {workers.all {it.isCompleted}}
                 assertEquals(0,f.provider.writes(f.native));assertArrayEquals(before,f.provider.file(f.native).readBytes())
                 assertFalse(f.session.sourcePicker.receive(request,f.native))
                 if(token==null) {f.session.undo();assertNotNull(f.session.document!!.node("other"));assertFalse(f.session.sourcePicker.receive(request,f.native))}
-                else assertEquals(NodeKind.TEXT,f.session.connectedDraft!!.node!!.kind)
+                else assertNull(f.session.connectedDraft)
             } finally {f.provider.beforeRead=null;release.countDown()}
         }
+    }
+
+    @Test fun textChildAcceptsAnActualPageChoiceInTheCreationTransaction()=scenario {f->
+        nativeBundle(f.provider.file(f.native),anchored=true);val before=f.session.document
+        assertTrue(f.session.beginNodeCreation(NodePlacement.CHILD,"r",NodeKind.REFERENCE,"Draft"))
+        val draft=f.session.connectedDraft!!;val request=f.session.beginConnectedSource(draft.token)!!
+        assertTrue(f.session.sourcePicker.receive(request.id,f.native))
+        await {f.session.sourcePicker.state?.let {!it.busy && it.offer!=null}==true}
+        assertTrue(f.session.changeConnectedKind(draft.token,NodeKind.TEXT))
+        val choice=f.session.sourcePicker.state!!;val page=f.pages(choice)[1]
+        assertTrue(f.session.sourcePicker.choosePage(choice,page));await {f.session.sourcePicker.state==null}
+        assertEquals(before,f.session.document)
+        assertTrue(f.session.finishConnectedNode(draft.token));val node=f.session.document!!.node(draft.nodeId)
+        assertEquals(NodeKind.TEXT,node.kind);assertEquals("r",node.parent)
+        assertEquals(page,node.sources.single().pageId);assertEquals(SourceScope.PAGE,node.sources.single().scope)
+        f.session.undo();assertEquals(before,f.session.document)
+        assertEquals(0,f.provider.writes(f.native))
     }
 
     @Test fun aFullReferenceDraftRejectsTheNextSourceWithoutConsumingItsValidExistingSourcesOrTicket()=scenario {f->

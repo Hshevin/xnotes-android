@@ -73,7 +73,7 @@ class MapRelationEditingHostTest {
         val draft=main {s.connectedDraft!!};assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
         click(activity.getString(R.string.map_text_node));enterText("New connected text")
         waitUntil {main {s.connectedDraft?.node?.text=="New connected text"}}
-        click(activity.getString(R.string.map_done));waitUntil {main {s.connectedDraft==null}}
+        click(activity.getString(R.string.map_create_confirm));waitUntil {main {s.connectedDraft==null}}
         val changed=main {s.document!!};val node=changed.node(draft.nodeId)
         assertEquals(draft.center,node.bounds.center);assertEquals("New connected text",node.text);assertTrue(node.free)
         assertEquals(original.nodes,changed.nodes.filter {it.id!=node.id})
@@ -100,7 +100,7 @@ class MapRelationEditingHostTest {
             main {val request=s.beginConnectedSource(draft.token)!!;assertTrue(s.receiveConnectedSource(request.id,Uri.fromFile(file)))}
             waitUntil {main {s.connectedDraft?.node?.sources?.isNotEmpty()==true && s.connectedDraft?.loadingSource==false}}
             assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
-            click(activity.getString(R.string.map_done));waitUntil {main {s.connectedDraft==null}}
+            click(activity.getString(R.string.map_create_confirm));waitUntil {main {s.connectedDraft==null}}
             val added=main {s.document!!.node(draft.nodeId)};assertEquals("Independent title",added.text)
             assertEquals(file.name,added.sources.single().fileName);assertEquals(SourceScope.FILE,added.sources.single().scope)
             assertArrayEquals(bytes,file.readBytes());main {s.undo()};assertEquals(original,main {s.document})
@@ -126,10 +126,10 @@ class MapRelationEditingHostTest {
     }
     @Test fun cancelNewConnectionThenEditEndpointsAndDirectionAsOneUndoStep()=scenario {activity,s->
         val original=main {s.document!!}
-        click(activity.getString(R.string.graph_relations));click(activity.getString(R.string.graph_connect));click(node(activity,3,"C"))
+        openMapMenuPage(R.string.map_menu_relations);click(activity.getString(R.string.graph_connect));click(node(activity,3,"C"))
         assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
         click(activity.getString(R.string.cancel));assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
-        click(activity.getString(R.string.graph_relations))
+        openMapMenuPage(R.string.map_menu_relations)
         click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
         click(activity.getString(R.string.graph_endpoint_to,node(activity,2,"B")));click(node(activity,3,"C"))
         click(activity.getString(R.string.graph_depends));click(activity.getString(R.string.graph_reverse))
@@ -143,7 +143,7 @@ class MapRelationEditingHostTest {
     }
     @Test fun duplicateEditOpensTheExistingLineWithoutCopyingTheDraftOrAddingUndo()=scenario(twoEdges=true) {activity,s->
         val original=main {s.document!!}
-        click(activity.getString(R.string.graph_relations))
+        openMapMenuPage(R.string.map_menu_relations)
         click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
         click(activity.getString(R.string.graph_endpoint_to,node(activity,2,"B")));click(node(activity,3,"C"))
         click(activity.getString(R.string.graph_depends));click(activity.getString(R.string.map_done))
@@ -153,7 +153,7 @@ class MapRelationEditingHostTest {
         click(activity.getString(R.string.cancel))
     }
     @Test fun removingAnEndpointWhileTheDialogIsOpenShowsAConflictWithoutCrashing()=scenario {activity,s->
-        click(activity.getString(R.string.graph_relations))
+        openMapMenuPage(R.string.map_menu_relations)
         click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
         main {s.operate {it.delete("b")}}
         waitUntil {visible(activity.getString(R.string.graph_relation_changed)) && visible(activity.getString(R.string.graph_missing_node))}
@@ -229,7 +229,7 @@ class MapRelationEditingHostTest {
         main {s.undo()};assertEquals(changed,main {s.document})
         main {s.undo()};assertEquals(original,main {s.document});assertFalse(main {s.canUndo})
         main {s.redo();s.redo()};assertEquals(deleted,main {s.document})
-        main {s.selected=null};click(activity.getString(R.string.graph_relations))
+        main {s.selected=null};openMapMenuPage(R.string.map_menu_relations)
         click(activity.getString(R.string.graph_sentence_related,node(activity,1,"A"),node(activity,2,"B")))
         waitUntil {visible("first changed from list") && main {s.selectedRelation=="first"}}
         click(activity.getString(R.string.cancel))
