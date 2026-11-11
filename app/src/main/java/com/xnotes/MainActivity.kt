@@ -1709,14 +1709,16 @@ private fun EditorScreen(
         else->Unit
     }}
     // Opening a note over the main menu covers its Home: the library and recovery never stay open unseen. A Home
-    // network instead falls back to its full-screen host, since returning from a source page may land there.
+    // network retains its native host until its guarded close succeeds, including after its Home disappears.
     val coveredTools=listOf(com.xnotes.ui.BackstageView.ORIGINALS,com.xnotes.ui.BackstageView.RECOVERY).filter {tool->
         toolVisible(tool) && homeTools.owner(tool)?.let {!homeShown(it)}==true
     }
     LaunchedEffect(coveredTools) {coveredTools.forEach(::releaseTool)}
     val networkHome=homeTools.owner(com.xnotes.ui.BackstageView.NETWORK)?.takeIf {homeNetwork()!=null}
-    // While the owning Home's release is still parking, show neither the pane nor the full-screen fallback.
-    val networkEmbedded=networkHome!=null && (homeShown(networkHome) || networkCoordinator.busy)
+    // A failed Home release must never unmount native surfaces without a successful parking proof.
+    // Keep that network embedded (even when its Home disappeared) and offer a guarded close retry below.
+    val networkEmbedded=networkHome!=null
+    val orphanNetwork=networkHome!=null && !homeShown(networkHome) && networks.visible
     LaunchedEffect(networks.current) {
         if(networks.current==null) homeTools.forget(com.xnotes.ui.BackstageView.NETWORK)
     }
@@ -2213,12 +2215,12 @@ private fun EditorScreen(
                         finally {coldActionBusy=false}
                     }})
             }
-            if(maps.current?.sourceReturn!=null || networks.current!=null && !networks.visible || libraryNetworkLaunch?.let {
+            if(maps.current?.sourceReturn!=null || networks.current!=null && (!networks.visible || orphanNetwork) || libraryNetworkLaunch?.let {
             networkCoordinator.canCancel(it) || networkCoordinator.failureFor(it)!=null
         }==true) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
-                val network=networks.current?.takeIf {!networks.visible}
+                val network=networks.current?.takeIf {!networks.visible || orphanNetwork}
                 val libraryLaunch=libraryNetworkLaunch
                 val issue=sourceNavigator.failure
                 val networkIssue=libraryLaunch?.let {networkCoordinator.failureFor(it)} ?: network?.let {networkCoordinator.failureFor(it)}
@@ -2238,8 +2240,8 @@ private fun EditorScreen(
                     if(maps.current?.sourceReturn!=null) androidx.compose.material3.TextButton(onClick={backlinkNavigator.cancel();sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                         Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
                     }
-                    if(network!=null) androidx.compose.material3.TextButton(onClick={networkCoordinator.resume(network)},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
-                        Text(stringResource(R.string.network_return),fontSize=TextSize.body)
+                    if(network!=null) androidx.compose.material3.TextButton(onClick={if(orphanNetwork) closeNetwork(network) else networkCoordinator.resume(network)},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                        Text(stringResource(if(orphanNetwork) R.string.map_close else R.string.network_return),fontSize=TextSize.body)
                     }
                 }
             }

@@ -60,6 +60,8 @@
 
 ## 思维导图与文件关系网络（源码）
 
+首页侧栏的文件关系网络、恢复资料与原 PDF 原件库已在源码统一为右侧工具面板，保留侧栏导航；面板切换、返回及资料保护的验证边界见[统一侧栏记录](docs/movinkpad/sidebar-tools-panels-2026-11-11.md)。尚未打包新 APK。
+
 节点选中态已在源码改为外圈轮廓，保留节点底色与内容颜色，单选和多选一致；尚未打包，见[选中态修复记录](docs/movinkpad/mind-map-selection-outline-2026-11-11.md)。
 
 当前主线已修复普通首页导图／网络／原 PDF 原件库共用的文件身份校验缺陷，并补充原件库打开失败反馈；尚未打包，已安装 test6 不会自动获得修复。JVM 与 Android 测试源码编译通过，实际 Android 入口仍待验证，见[修复与验证记录](docs/movinkpad/presentation-file-identity-fix-2026-11-11.md)。

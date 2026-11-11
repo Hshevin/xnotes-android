@@ -325,16 +325,31 @@ private fun BackstageContent(
     val dismissDrawer = { animateClose = true; drawerOpen = false }
     val setRailed: (Boolean) -> Unit = { editor.showRail(it) }
 
+    var pendingTool by remember { mutableStateOf<Pair<BackstageView, () -> Unit>?>(null) }
     val selectView: (BackstageView) -> Unit = { v ->
+        pendingTool = null
         if (v == BackstageView.HOME) createMode = CreateMode.NONE
         onSelectView(v)
         animateClose = false
         drawerOpen = false
     }
+    // Network closure parks the host asynchronously. Open the requested tool only after Home
+    // confirms the old presentation has left; another sidebar selection cancels this request.
+    LaunchedEffect(view, pendingTool) {
+        if (!view.tool) pendingTool?.let { request ->
+            pendingTool = null
+            request.second()
+        }
+    }
     val openTool: (BackstageView, () -> Unit) -> Unit = { tool, open ->
-        if (view != tool && view.tool) selectView(BackstageView.HOME)
+        if (view != tool && view.tool) {
+            selectView(BackstageView.HOME)
+            pendingTool = tool to open
+        } else {
+            pendingTool = null
+            if (view != tool) open()
+        }
         animateClose = false; drawerOpen = false
-        if (view != tool) open()
     }
     // A sidebar pick the explorer has yet to act on, and the folder or colour filter it is showing.
     var explorerNav by remember { mutableStateOf<ExplorerNav?>(null) }

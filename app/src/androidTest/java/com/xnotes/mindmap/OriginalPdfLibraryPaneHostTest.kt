@@ -58,4 +58,39 @@ class OriginalPdfLibraryPaneHostTest {
             assertSame(editor,main {activity.documentEditor})
         } finally {main {activity.originalLibrary?.close();activity.finish()}}
     }
+    @Test fun sidebarSwitchesNetworkRecoveryOriginalsAndAiWithoutLosingHome() {
+        val activity=runner.startActivitySync(Intent(runner.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        try {
+            await("Home tools ready") {shown(activity.getString(R.string.network_library_title))}
+            val editor=main {activity.documentEditor}
+            click(activity.getString(R.string.network_library_title))
+            await("Network open") {main {activity.networkWorkspace?.visible==true}}
+            click(activity.getString(R.string.original_pdf_library_title))
+            await("One click waits for network closure then opens originals") {main {
+                activity.networkWorkspace?.visible==false && activity.originalLibrary?.visible==true
+            }}
+            click(activity.getString(R.string.network_library_title))
+            await("Network reopens from originals") {main {
+                activity.networkWorkspace?.visible==true && activity.originalLibrary?.visible==false
+            }}
+            await("Recovery remains reachable beside network") {shown(activity.getString(R.string.recovery_materials))}
+            click(activity.getString(R.string.recovery_materials))
+            await("Network released on recovery switch") {main {activity.networkWorkspace?.visible==false}}
+            await("Recovery content shown") {shown(activity.getString(R.string.recovery_copy_resume_pick))}
+            assertSame(editor,main {activity.documentEditor})
+            click(activity.getString(R.string.original_pdf_library_title))
+            await("Originals open") {main {activity.originalLibrary?.visible==true}}
+            assertFalse(shown(activity.getString(R.string.recovery_copy_resume_pick)))
+            click(activity.getString(R.string.ai_label))
+            await("Originals released") {main {activity.originalLibrary?.visible==false}}
+            click(activity.getString(R.string.recovery_materials))
+            await("Recovery reopened") {shown(activity.getString(R.string.recovery_copy_resume_pick))}
+            runner.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            await("Back closes recovery content") {!shown(activity.getString(R.string.recovery_copy_resume_pick))}
+            assertFalse(activity.isFinishing)
+            assertSame(editor,main {activity.documentEditor})
+        } finally {main {activity.originalLibrary?.close();activity.finish()}}
+    }
+
 }
