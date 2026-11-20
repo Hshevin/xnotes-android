@@ -8,7 +8,7 @@
 
 最新本地覆盖更新：[0.9.8 / Release 98 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release98-arm64.apk)，沿用正式包名与签名，包含 AI 模板文字 / 图像模型自选，以及无限画布退出分屏黑屏修复；三键、黑白界面、图层、分屏湿墨与黑屏、单份 PDF 重新关联已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。见 [打包与验证记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
 
-最新主线独立测试版：[master test10 ARM64 APK](build/branch-tests/master-test10/XNotes-master-e1892977-test10-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。包含导图停靠面板、节点拖动及手绘工具改进；4,813 项 JVM 测试通过，Android 与真机待验。见 [打包记录](docs/movinkpad/master-test10-2026-11-12.md)。
+最新主线独立测试版：[master test11 ARM64 APK](build/branch-tests/master-test11/XNotes-master-4a0f3b19-test11-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。合并上游 XNotes 0.9.10（防抖笔、速度笔、吸管、自动滚动、截图调整、PDF 矢量笔迹导出等），PDF 写回保持关闭；4,977 项 JVM 测试通过，Android 与真机待验。见 [打包记录](docs/movinkpad/master-test11-2026-11-20.md)。
 
 **test8 实测警示（2026-11-11）：** 主画布与文字输入已可用，但新建/打开放大手写节点和手写同级节点会闪退；混合分屏保存仍失败。绘制崩溃与新建空白笔记检查点导致的分屏保存失败已有源码修复，侧栏工具面板改造已集成，尚未打包或运行修复后 APK。见[实测与修复记录](docs/movinkpad/master-test8-map-emulator-2026-11-11.md)。
 

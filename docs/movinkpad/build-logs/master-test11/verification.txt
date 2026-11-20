@@ -1,0 +1,7 @@
+master-test11 (source 4a0f3b19)
+package=com.xnotes.movinkpad.branchtest.master versionCode=11 versionName=0.9.10-test-master-11
+label=XNotes master 测试版; debuggable; testOnly absent
+native-code=arm64-v8a only
+signer SHA-256 a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451 (same as test10)
+zipalign -c -P 16 4: OK
+JVM {'tests': 4977, 'failures': 0, 'errors': 0, 'skipped': 0}
