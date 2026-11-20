@@ -28,6 +28,7 @@ import com.xnotes.R
 import com.xnotes.settings.LiveSettings
 import com.xnotes.settings.SettingsRepository
 import com.xnotes.ui.theme.*
+import kotlinx.coroutines.flow.first
 
 internal val LocalInkBusy=staticCompositionLocalOf {false}
 internal val LocalMapActionFocus=staticCompositionLocalOf<()->Boolean> {{true}}
@@ -75,7 +76,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             if(sourceController.state==null && pendingSourceRequest==null) activeExistingSource=null
         }
         var view by remember { mutableStateOf<MindMapView?>(null) }
-        var viewRevision by remember { mutableIntStateOf(0) }
+        var textViewportRevision by remember { mutableIntStateOf(0) }
+        var geometry by remember { mutableStateOf(0 to 0) }
         var editing by remember { mutableStateOf<String?>(null) }
         var propertiesFor by remember {mutableStateOf<String?>(null)}
         var deleting by remember { mutableStateOf<MapNodeSelectionCapture?>(null) }
@@ -114,7 +116,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             focus.clearFocus();keyboard?.hide()
         }
         // The transaction is owned by the session, so IME/host recomposition keeps composition and selection.
-        LaunchedEffect(editing,view,viewRevision) {
+        LaunchedEffect(editing,view,geometry) {
             val id=editing ?: return@LaunchedEffect
             val graph=view ?: return@LaunchedEffect
             if(graph.width>0 && graph.height>0 && session.document?.nodes?.any {it.id==id && it.kind==NodeKind.TEXT}==true &&
@@ -123,7 +125,6 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             }
         }
         // Exiting has one path, including configuration recreation with an outstanding restore.
-        val geometry=remember(viewRevision,view) {Pair(view?.width ?: 0,view?.height ?: 0)}
         var cameraReady by remember(view) {mutableStateOf(false)}
         var textOwnedCamera by remember(view) {mutableStateOf(false)}
         fun showSources(id:String?):Boolean {
@@ -167,10 +168,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                 // Text transactions own their pre-edit camera and their existing restoration path.
                 textOwnedCamera=true;cameraReady=true;return@LaunchedEffect
             }
-            if(imeBottom!=0 || graph.width<=0 || graph.height<=0) return@LaunchedEffect
-            val size=Pair(graph.width,graph.height);val densityAtLayout=graph.resources.displayMetrics.density
-            repeat(2) {withFrameNanos {}}
-            if(size!=Pair(graph.width,graph.height) || densityAtLayout!=graph.resources.displayMetrics.density ||
+            if(imeBottom!=0 || !graph.awaitIdleStableLayout() ||
                 session.interactionEpoch!=graphEpoch || graph.document.id!=session.document?.id) return@LaunchedEffect
             if(!textOwnedCamera) presentationState.restore(session,graph)
             cameraReady=true
@@ -190,10 +188,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             val restore=textRestore ?: return@LaunchedEffect
             focus.clearFocus();keyboard?.hide()
             val graph=view ?: return@LaunchedEffect
-            if(imeBottom!=0 || graph.width<=0 || graph.height<=0) return@LaunchedEffect
-            val size=Pair(graph.width,graph.height)
-            repeat(2) {withFrameNanos {}}
-            if(size!=Pair(graph.width,graph.height)) return@LaunchedEffect
+            if(imeBottom!=0 || !graph.awaitIdleStableLayout()) return@LaunchedEffect
             graph.restoreViewport(restore.viewport,restore.width,restore.height,restore.density)
             session.completeTextRestore(restore.token)
         }
@@ -544,7 +539,8 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                             onRelease = { released -> if(view===released) view=null }, update = { v ->
                             v.isEnabled=cameraReady && proposed==null && !(navigationBusy && !session.hasUnconfirmedContent) && !enlarged && textDraft==null && textRestore==null && session.connectedDraft==null && !session.closing && !session.replacingDocument
                             v.onViewportChanged={
-                                viewRevision++
+                                geometry=v.width to v.height
+                                if(textDraft!=null) textViewportRevision++
                                 if(cameraReady) presentationState.capture(session,v,imeBottom)
                             }
                             v.onConnectionModeChanged={connectingFrom=it}
@@ -575,7 +571,7 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
                         session.loading -> Text(stringResource(R.string.map_loading), modifier = Modifier.align(Alignment.Center), fontSize = TextSize.body)
                         else -> Text(stringResource(R.string.map_open_error), modifier = Modifier.align(Alignment.Center).padding(Space.s24), fontSize = TextSize.body)
                     }
-                    if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,viewRevision,onDone={endText(true)},onCancel={endText(false)})}
+                    if(textDraft!=null) view?.let {MapTextEditor(session,textDraft,it,dark,textViewportRevision,onDone={endText(true)},onCancel={endText(false)})}
                     // In-place ink settings appear only for a selected ink node, over the graph so the
                     // native View keeps its size (and any stroke) when the selection changes.
                     if(!nodeMode && !enlarged && textDraft==null && connectingFrom==null) node?.takeIf {it.kind==NodeKind.INK}?.let {n->
@@ -624,6 +620,19 @@ fun MindMapScreen(session:MapSession,title:String,onClose:()->Unit,presentation:
             dismissButton = { MapButton(R.string.cancel) { deleting = null } })}
       }
     }
+}
+
+private suspend fun MindMapView.awaitIdleStableLayout():Boolean {
+    val oldWidth=width
+    val oldHeight=height
+    val oldDensity=resources.displayMetrics.density
+    if(oldWidth<=0 || oldHeight<=0) return false
+    do {
+        snapshotFlow { touchInProgress }.first { !it }
+        repeat(2) {withFrameNanos {}}
+        if(width!=oldWidth || height!=oldHeight || resources.displayMetrics.density!=oldDensity) return false
+    } while(touchInProgress)
+    return true
 }
 
 @Composable

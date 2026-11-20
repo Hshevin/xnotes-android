@@ -28,7 +28,10 @@ import java.io.File
 import java.time.Duration
 
 /** Real composed actions, without replacing the production callbacks or document actor. */
-internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
+internal class MapComposeReviewFixture(
+    document:MindMapDocument,
+    activityClass:Class<out ComponentActivity> = ComponentActivity::class.java,
+):AutoCloseable {
     // Own the frame clock/dispatcher per host: cached AndroidUiDispatcher instances can refer
     // to a previous Robolectric test's looper after that Activity has been destroyed.
     private val renderTarget=android.graphics.Bitmap.createBitmap(1800,1400,android.graphics.Bitmap.Config.ARGB_8888)
@@ -37,7 +40,7 @@ internal class MapComposeReviewFixture(document:MindMapDocument):AutoCloseable {
     private val scope=CoroutineScope(SupervisorJob()+dispatcher+frames)
     private val recomposer=Recomposer(scope.coroutineContext)
     private val recomposition=scope.launch {recomposer.runRecomposeAndApplyChanges()}
-    private val host=Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
+    private val host=Robolectric.buildActivity(activityClass).setup().visible()
     val activity=host.get()
     val file=File.createTempFile("map-compose-review-",".xmap",activity.cacheDir).apply {writeBytes(MapCodec.encode(document))}
     val session=MapSession().also {it.open(activity,Uri.fromFile(file))}

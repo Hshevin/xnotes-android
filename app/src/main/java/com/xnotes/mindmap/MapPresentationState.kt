@@ -62,10 +62,11 @@ class MapPresentationState internal constructor() {
     }
     /** The caller waits for IME and actual layout stability. Each attached View restores once. */
     internal fun restore(session:MapSession,view:MindMapView,imeBottom:Int=0):Boolean {
-        if(!current(session,view) || !ordinary(session,imeBottom) || view.width<=0 || view.height<=0 || restoredView.get()===view) return false
+        if(!current(session,view) || !ordinary(session,imeBottom) || view.width<=0 || view.height<=0 || view.touchInProgress || restoredView.get()===view) return false
+        // A fresh View keeps its fitted camera. Its later captures belong to the next attachment.
+        restoredView=WeakReference(view)
         val saved=camera ?: return false
         view.restoreViewport(saved.viewport,saved.width,saved.height,saved.density)
-        restoredView=WeakReference(view)
         protectedCamera=sourcesFor!=null
         return true
     }

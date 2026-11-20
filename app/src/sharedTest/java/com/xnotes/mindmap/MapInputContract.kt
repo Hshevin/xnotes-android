@@ -738,12 +738,12 @@ abstract class MapInputContract {
         }
     }
 
-    private fun multi(v:MindMapView,action:Int,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>,oracle:android.view.ScaleGestureDetector?=null,flags:Int=0) {
+    private fun multi(v:MindMapView,action:Int,types:List<Int>,points:List<com.xnotes.core.geometry.Pt>,flags:Int=0) {
         val props=types.mapIndexed {i,type->MotionEvent.PointerProperties().apply {id=if(i==0) 2 else 7;toolType=type}}.toTypedArray()
         val coords=points.map {p->MotionEvent.PointerCoords().apply {x=p.x.toFloat();y=p.y.toFloat();pressure=.7f}}.toTypedArray()
         val e=MotionEvent.obtain(100,time++,action,props.size,props,coords,0,0,1f,1f,888,0,
             if(types.any {it==MotionEvent.TOOL_TYPE_STYLUS}) InputDevice.SOURCE_STYLUS else InputDevice.SOURCE_TOUCHSCREEN,flags)
-        try {oracle?.onTouchEvent(e);v.onTouchEvent(e)} finally {e.recycle()}
+        try {v.onTouchEvent(e)} finally {e.recycle()}
     }
     @Test fun penTakingOverAFingerPortDragOwnsItsUpAndDrainsRemainingFingerEvents()=ui {context->
         for(success in listOf(false,true)) {
@@ -795,17 +795,13 @@ abstract class MapInputContract {
         }
         assertEquals(camera,v.viewport());assertEquals(0,requests);assertEquals(0,edits)
         val oldPoint=at(v,"source");val finger=MotionEvent.TOOL_TYPE_FINGER
-        var expected=1f
-        val oracle=android.view.ScaleGestureDetector(context,object:android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector:android.view.ScaleGestureDetector):Boolean {expected*=detector.scaleFactor;return true}
-        })
-        multi(v,MotionEvent.ACTION_DOWN,listOf(finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0)),oracle)
-        multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0),com.xnotes.core.geometry.Pt(700.0,250.0)),oracle)
+        multi(v,MotionEvent.ACTION_DOWN,listOf(finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0)))
+        multi(v,MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(100.0,250.0),com.xnotes.core.geometry.Pt(700.0,250.0)))
         assertNull(v.connectionFrom)
-        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(50.0,250.0),com.xnotes.core.geometry.Pt(750.0,250.0)),oracle)
-        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(-50.0,250.0),com.xnotes.core.geometry.Pt(850.0,250.0)),oracle)
+        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(50.0,250.0),com.xnotes.core.geometry.Pt(750.0,250.0)))
+        multi(v,MotionEvent.ACTION_MOVE,listOf(finger,finger),listOf(com.xnotes.core.geometry.Pt(-50.0,250.0),com.xnotes.core.geometry.Pt(850.0,250.0)))
         val ratio=v.viewport().zoom/camera.zoom
-        assertTrue("A genuine pinch must still zoom",ratio>1.1f);assertEquals(expected,ratio,.001f)
+        assertEquals("Pinch zoom follows the full change in finger span",900f/600f,ratio,.001f)
         val newPoint=at(v,"source")
         assertEquals(400.0+(oldPoint.x-400.0)*ratio,newPoint.x,.1)
         assertEquals(250.0+(oldPoint.y-250.0)*ratio,newPoint.y,.1)

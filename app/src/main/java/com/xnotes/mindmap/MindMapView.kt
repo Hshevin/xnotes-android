@@ -7,6 +7,9 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.ui.theme.MinTouchTarget
@@ -53,7 +56,7 @@ class MindMapView(context: Context) : View(context) {
     /** Explicit exploration mode. Editing is still the default for every existing map surface. */
     var readOnlyNavigation=false
         set(value) {if(field!=value) {
-            val unfinished=pressedStream || navigation.active || inkInput.active || nodeSelector.active || before!=null || connectionFrom!=null
+            val unfinished=touchInProgress || navigation.active || inkInput.active || nodeSelector.active || before!=null || connectionFrom!=null
             onGraphContact();cancelDetectors();discardCapturedGesture();cancelConnection();inkInput.cancel();navigation.cancel()
             if(unfinished) navigationDrain=true
             if(value) {navigationQuickScale=selectionQuickScale ?: scaleDetector.isQuickScaleEnabled;scaleDetector.isQuickScaleEnabled=false}
@@ -74,7 +77,8 @@ class MindMapView(context: Context) : View(context) {
     fun setSelectedNodes(ids:Set<String>) {
         val visible=document.visible(expandedAncestors).mapTo(hashSetOf()) {it.id}
         val next=ids.filterTo(linkedSetOf()) {it in visible}
-        if(next!=nodeSelections) discardCapturedGesture()
+        // A two-finger camera gesture owns no selection or content geometry.
+        if(next!=nodeSelections && pinch==null) discardCapturedGesture()
         nodeSelections=next;relationSelection=null;invalidate()
     }
     fun updateSelection(node:String?,relation:String?) {
@@ -107,7 +111,11 @@ class MindMapView(context: Context) : View(context) {
     private var inkOwner:String?=null
     private var suppressRemainingTouch=false
     private var inputReady=false
-    private var pressedStream=false
+    internal var touchInProgress by mutableStateOf(false)
+        private set
+    private data class Pinch(val x:Float,val y:Float,val span:Float)
+    private var pinch:Pinch?=null
+    private var doubleTap=false
     private var connectionDrain=false
     private var relationDrain=false
     private var nodeSelectionDrain=false
@@ -156,8 +164,8 @@ class MindMapView(context: Context) : View(context) {
         override fun onDown(e: MotionEvent) = true
         override fun onSingleTapUp(e: MotionEvent): Boolean { performClick(); return true }
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            hit(e.x, e.y)?.let { onEdit(it.id) }
-            cancelled = true; preview = null
+            // A second DOWN can still become a pinch when the next finger lands.
+            doubleTap = true
             return true
         }
     }).apply {
@@ -171,7 +179,7 @@ class MindMapView(context: Context) : View(context) {
         {capture,ids->onSelectNodes(capture,ids).also {if(it) setSelectedNodes(ids)}},
         {capture,dx,dy->onMoveNodes(capture,dx,dy).also {if(it) setSelectedNodes(capture.ids)}},
         ::cancelDetectors,{scaleDetector.onTouchEvent(it)},{dx,dy->panText(dx,dy)},
-        {nodeSelectionDrain=pressedStream},{invalidate()},visible={it.visible(expandedAncestors)})
+        {nodeSelectionDrain=touchInProgress},{invalidate()},visible={it.visible(expandedAncestors)})
     private val navigation=MapNavigationGesture(
         {document},slop.toDouble(),{x,y->x>=0 && y>=0 && x<width && y<height},
         {x,y->hit(x,y)?.id},::hitRelations,
@@ -198,11 +206,15 @@ class MindMapView(context: Context) : View(context) {
     private fun hitRelations(x:Float,y:Float)=MapRelationGeometry.hits(painter.relationGeometry(document,expandedAncestors),point(x,y),
         MapRelationGeometry.hitRadius(resources.displayMetrics.density.toDouble(),scale.toDouble()))
     private fun discardCapturedGesture() {
+        if(pinch!=null) {
+            pinch=null
+            suppressRemainingTouch=true
+        }
         if(navigation.active && !navigation.dispatchingCamera) {
-            navigationDrain=pressedStream;navigation.cancel();cancelDetectors()
+            navigationDrain=touchInProgress;navigation.cancel();cancelDetectors()
         }
         if(!nodeSelector.dispatchingCamera) {
-            if(nodeSelector.active) {nodeSelectionDrain=pressedStream;cancelDetectors()}
+            if(nodeSelector.active) {nodeSelectionDrain=touchInProgress;cancelDetectors()}
             nodeSelector.cancel()
         }
         if(before==null && relationPress==null) return
@@ -212,7 +224,7 @@ class MindMapView(context: Context) : View(context) {
     private fun retireReadOnlyNavigation() {
         if(!readOnlyNavigation && !navigation.active) return
         onGraphContact()
-        if(navigation.active || pressedStream) navigationDrain=true
+        if(navigation.active || touchInProgress) navigationDrain=true
         navigation.cancel();cancelDetectors()
     }
     fun fit() {
@@ -285,7 +297,7 @@ class MindMapView(context: Context) : View(context) {
             updateSelection(null,null);onSelectRelation(null);return true
         }
         if(connectionFrom!=null && keyCode==android.view.KeyEvent.KEYCODE_ENTER) {
-            if(!pressedStream) selected?.takeIf {it!=connectionFrom && document.visible(expandedAncestors).any {n->n.id==it}}?.let {target->
+            if(!touchInProgress) selected?.takeIf {it!=connectionFrom && document.visible(expandedAncestors).any {n->n.id==it}}?.let {target->
                 val from=requireNotNull(connectionFrom);connectionEnterHeld=true;cancelConnection();onConnectionTarget(from,target)
             }
             return true
@@ -302,7 +314,7 @@ class MindMapView(context: Context) : View(context) {
                 return true
             }
             android.view.KeyEvent.KEYCODE_ENTER -> {
-                if(!pressedStream) selectedRelation?.let {onEditRelation(it);return true}
+                if(!touchInProgress) selectedRelation?.let {onEditRelation(it);return true}
                 selected?.let(onEdit); return true
             }
         }
@@ -328,7 +340,7 @@ class MindMapView(context: Context) : View(context) {
     fun panText(dx:Float,dy:Float) {
         if(inkInput.active || connectionPen || !dx.isFinite() || !dy.isFinite()) return
         discardCapturedGesture()
-        panX+=dx;panY+=dy;invalidate();onViewportChanged()
+        panGraph(dx,dy)
     }
     fun restoreViewport(saved:Viewport,oldWidth:Int,oldHeight:Int,oldDensity:Float) {
         if(width<=0 || height<=0 || oldDensity<=0 || inkInput.active || connectionPen) return
@@ -352,10 +364,27 @@ class MindMapView(context: Context) : View(context) {
     private fun scaleAt(factor: Float, x: Float, y: Float) {
         if(inkInput.active || connectionPen) return
         discardCapturedGesture()
-        val p = point(x, y)
-        zoom = (zoom * factor).coerceIn(.05f, 4f)
-        panX = x - p.x.toFloat() * scale; panY = y - p.y.toFloat() * scale
+        transformCamera(factor,x,y,x,y)
+    }
+    private fun transformCamera(factor:Float,oldX:Float,oldY:Float,x:Float,y:Float) {
+        if(factor==1f) {
+            panGraph(x-oldX,y-oldY)
+            return
+        }
+        val anchor=point(oldX,oldY)
+        zoom=(zoom*factor).coerceIn(.05f,4f)
+        panX=x-anchor.x.toFloat()*scale
+        panY=y-anchor.y.toFloat()*scale
         invalidate();onViewportChanged()
+    }
+    private fun panGraph(dx:Float,dy:Float) {
+        if(dx==0f && dy==0f) return
+        panX+=dx;panY+=dy;invalidate();onViewportChanged()
+    }
+    private fun pinchSample(e:MotionEvent,a:Int=0,b:Int=1):Pinch {
+        val dx=e.getX(b)-e.getX(a)
+        val dy=e.getY(b)-e.getY(a)
+        return Pinch(e.getX(a)+dx/2,e.getY(a)+dy/2,hypot(dx,dy))
     }
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { retireReadOnlyNavigation();discardCapturedGesture();cancelConnection();inkInput.cancel(); if (!initialized && automaticInitialFit) fit();onViewportChanged() }
     override fun setEnabled(enabled:Boolean) {if(inputReady && !enabled) {retireReadOnlyNavigation();cancelDetectors();discardCapturedGesture();cancelConnection()};super.setEnabled(enabled)}
@@ -414,7 +443,7 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     fun beginConnection(from:String):Boolean {
-        if(readOnlyNavigation || nodeSelectionMode || !isEnabled || inkInput.active || pressedStream || pointer>=0 || editingText!=null || document.visible(expandedAncestors).none {it.id==from}) return false
+        if(readOnlyNavigation || nodeSelectionMode || !isEnabled || inkInput.active || touchInProgress || pointer>=0 || editingText!=null || document.visible(expandedAncestors).none {it.id==from}) return false
         armConnection(from);return true
     }
     private fun armConnection(from:String) {
@@ -499,15 +528,22 @@ class MindMapView(context: Context) : View(context) {
         }
         return true
     }
-    private fun cancelGesture() { sourcePress=null;relationPress=null;cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
+    private fun cancelGesture() { doubleTap=false;sourcePress=null;relationPress=null;cancelled = true; preview = null; dropTarget = null; before = null; dragged = null; invalidate() }
     private fun inkBody(n:MapNode,p:Pt):Boolean = n.kind==NodeKind.INK &&
         p.x in n.x+8..n.x+n.width-8 && p.y in n.y+8..n.y+n.height-(if(n.sources.isEmpty()) 8 else 28)
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if(e.actionMasked==MotionEvent.ACTION_DOWN || e.actionMasked==MotionEvent.ACTION_POINTER_DOWN) onGraphContact()
         if(e.actionMasked==MotionEvent.ACTION_DOWN && isEnabled) navigationDrain=false
-        if(e.actionMasked==MotionEvent.ACTION_DOWN) {pressedStream=true;connectionDrain=false;nodeSelectionDrain=false}
+        if(e.actionMasked==MotionEvent.ACTION_DOWN) {
+            touchInProgress=true;connectionDrain=false;nodeSelectionDrain=false
+            pinch=null;doubleTap=false
+        }
         return try {handleTouch(e)} finally {
-            if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL) pressedStream=false
+            if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL) {
+                pinch=null
+                touchInProgress=false
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
     }
     private fun handleTouch(e:MotionEvent):Boolean {
@@ -545,6 +581,7 @@ class MindMapView(context: Context) : View(context) {
                     // Only detector-local cancellation; the original MotionEvent is never changed.
                     val cancel=MotionEvent.obtain(e)
                     try {cancel.action=MotionEvent.ACTION_CANCEL;gestures.onTouchEvent(cancel);scaleDetector.onTouchEvent(cancel)} finally {cancel.recycle()}
+                    pinch=null
                     cancelGesture();pointer=-1;suppressRemainingTouch=true
                     if(inkOwner!=n.id) inkInput.clearSelection()
                     inkOwner=n.id
@@ -555,7 +592,37 @@ class MindMapView(context: Context) : View(context) {
                 }
             }
         }
+        if(e.actionMasked==MotionEvent.ACTION_POINTER_DOWN && isPen(e,e.actionIndex) && pinch!=null) {
+            pinch=null
+            cancelDetectors()
+        }
         if(suppressRemainingTouch) return true
+        if(e.actionMasked==MotionEvent.ACTION_POINTER_DOWN && e.pointerCount==2 &&
+            (0..1).all {e.getToolType(it)==MotionEvent.TOOL_TYPE_FINGER}) {
+            cancelDetectors()
+            cancelGesture();pointer=-1
+            pinch=pinchSample(e)
+            parent?.requestDisallowInterceptTouchEvent(true)
+            return true
+        }
+        pinch?.let {previous->
+            when(e.actionMasked) {
+                MotionEvent.ACTION_MOVE -> if(e.pointerCount==2) {
+                    val next=pinchSample(e)
+                    pinch=next
+                    val factor=if(previous.span>=1f && next.span>=1f) next.span/previous.span else 1f
+                    transformCamera(factor,previous.x,previous.y,next.x,next.y)
+                }
+                // Rebase when returning to two fingers so a change of membership cannot move the camera.
+                MotionEvent.ACTION_POINTER_UP -> if(e.pointerCount==2) {
+                    pinch=null
+                } else if(e.pointerCount==3) {
+                    val remaining=(0 until e.pointerCount).filter {it!=e.actionIndex}
+                    pinch=pinchSample(e,remaining[0],remaining[1])
+                }
+            }
+            return true
+        }
         if(relationPress!=null && e.actionMasked==MotionEvent.ACTION_UP && (e.flags and 0x20)!=0) {
             cancelGesture();pointer=-1;cancelDetectors();return true
         }
@@ -568,21 +635,26 @@ class MindMapView(context: Context) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> begin(e, 0)
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (e.getToolType(e.actionIndex) in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER)) begin(e, e.actionIndex)
-                else cancelGesture()
+                if (isPen(e,e.actionIndex)) {
+                    doubleTap=false
+                    begin(e,e.actionIndex)
+                } else cancelGesture()
             }
             MotionEvent.ACTION_MOVE -> {
                 val i = e.findPointerIndex(pointer)
                 if (i < 0 || cancelled || (scaleDetector.isInProgress && !stylus)) return true
                 val x = e.getX(i); val y = e.getY(i)
-                if (hypot((x - downX).toDouble(), (y - downY).toDouble()) > slop) dragging = true
+                if (!dragging && hypot((x - downX).toDouble(), (y - downY).toDouble()) > slop) {
+                    dragging = true
+                    lastX=downX;lastY=downY
+                }
                 if (dragging) {
                     relationPress=null
                     val id = dragged
                     if (id != null) {
                         updateNodeDrag(id,x,y)
-                    } else { panX += x - lastX; panY += y - lastY }
-                    invalidate()
+                        invalidate()
+                    } else panGraph(x-lastX,y-lastY)
                 }
                 lastX = x; lastY = y
             }
@@ -600,7 +672,9 @@ class MindMapView(context: Context) : View(context) {
                 val valid=!cancelled && (e.flags and 0x20)==0 && before===document &&
                     x>=0 && x<width && y>=0 && y<height
                 val distance=hypot((x-downX).toDouble(),(y-downY).toDouble())
-                val source=sourcePress?.takeIf {valid && !dragging && distance<=slop}
+                val edit=dragged?.takeIf {doubleTap && valid && !dragging && distance<=slop}
+                val source=sourcePress?.takeIf {edit==null && valid && !dragging && distance<=slop}
+                if(valid && dragging && dragged==null) panGraph(x-lastX,y-lastY)
                 val moved=if(valid && dragging && dragged!=null) {
                     updateNodeDrag(requireNotNull(dragged),x,y)
                     preview?.let {next->dropTarget?.let {next.reparent(requireNotNull(dragged),it)} ?: next}
@@ -612,6 +686,7 @@ class MindMapView(context: Context) : View(context) {
                 // Release the captured gesture before a host callback opens a panel or replaces the model.
                 if(moved!=null) onChange(moved)
                 if(source!=null) onSources(source)
+                if(edit!=null) onEdit(edit)
             }
             MotionEvent.ACTION_CANCEL -> { cancelGesture(); pointer = -1; parent?.requestDisallowInterceptTouchEvent(false) }
         }
@@ -641,8 +716,8 @@ class MindMapView(context: Context) : View(context) {
         }
     }
     override fun onWindowFocusChanged(hasWindowFocus:Boolean) {
-        if(!hasWindowFocus) {retireReadOnlyNavigation();discardCapturedGesture();cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
+        if(!hasWindowFocus) {retireReadOnlyNavigation();discardCapturedGesture();cancelDetectors();cancelConnection();touchInProgress=false;inkInput.cancel();cancelGesture();pointer=-1;suppressRemainingTouch=true}
         super.onWindowFocusChanged(hasWindowFocus)
     }
-    override fun onDetachedFromWindow() { retireReadOnlyNavigation();discardCapturedGesture();cancelDetectors();cancelConnection();pressedStream=false;inkInput.cancel(); cancelGesture();pointer=-1; super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { retireReadOnlyNavigation();discardCapturedGesture();cancelDetectors();cancelConnection();touchInProgress=false;inkInput.cancel(); cancelGesture();pointer=-1; super.onDetachedFromWindow() }
 }
