@@ -45,6 +45,8 @@ object Space {
     val s32 = 32.dp
     val s40 = 40.dp
     val s48 = 48.dp
+    /** Clears the top toolbar when positioning a floating hint. */
+    val s72 = 72.dp
 }
 
 /** Smallest touch target for any chrome control, whatever the toolbar size. */

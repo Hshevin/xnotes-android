@@ -659,6 +659,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             "redo" -> redo()
             "toggle_pan" -> toggleTool(Tool.PAN)
             "toggle_eraser" -> toggleTool(Tool.ERASER)
+            "toggle_lasso" -> toggleTool(Tool.LASSO)
             "toggle_previous" -> previousTool?.let { armTool(it) }
         }
     }
@@ -1378,6 +1379,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onToolStyleChanged?.invoke()
     }
 
+    /** The host turned light or dark: its other swatches, the same slot armed, so the ink becomes that slot's colour. */
+    fun adoptSwatches(colors: List<Rgba>) {
+        toolbarColors = colors
+        colors.getOrNull(activeColorIndex)?.let { inkColor = it }
+    }
+
     fun setToolConfig(forTool: Tool, config: ToolConfig) {
         toolConfigs[forTool] = config
     }
@@ -1574,7 +1581,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var onColorRemembered: ((Rgba) -> Unit)? = null
 
     /** The toolbar's swatches and recents, handed over by the host so both surfaces share them. */
-    var toolbarColors by mutableStateOf(InkPalette.presets)
+    var toolbarColors by mutableStateOf(InkPalette.dark)
     var activeColorIndex by mutableStateOf(0)
     /** Observable preview policy; raw toolbar colours remain the saved drawing colours. */
     var toolbarLightBlackInk by mutableStateOf(false)
@@ -1953,6 +1960,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 vertexDots = shape?.vertexDots()?.map { it.at }.orEmpty(),
                 edgeDots = shape?.edgeDots(OverlayTessellator.EDGE_DOT_MIN_PX / zoom)?.map { it.at }.orEmpty(),
                 knobs = shape?.knobDots().orEmpty(),
+                grip = selection.turns,
             )
             val b = OverlayTessellator.selectionBounds(box, zoom)
             bounds = bounds?.union(b) ?: b

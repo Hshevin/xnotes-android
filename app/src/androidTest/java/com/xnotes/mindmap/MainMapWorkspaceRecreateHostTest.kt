@@ -6,7 +6,7 @@ import android.graphics.drawable.AnimationDrawable
 import android.widget.ImageView
 import android.view.View
 import android.view.ViewGroup
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
 import com.xnotes.pen.PenTestRunner
@@ -18,7 +18,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Actual MainActivity recreation. Source compilation is not a claim this Android test has run. */
+/** Actual EditorActivity recreation. Source compilation is not a claim this Android test has run. */
 class MainMapWorkspaceRecreateHostTest {
     private val runner get()=PenTestRunner.instance
     private fun <T> main(action:()->T):T {
@@ -32,8 +32,8 @@ class MainMapWorkspaceRecreateHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
-    private fun mainReady(activity:MainActivity):Boolean {
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun mainReady(activity:EditorActivity):Boolean {
         val tree=views(activity.window.decorView)
         return activity.mapWorkspace!=null && activity.documentEditor!=null &&
             tree.any {it.javaClass.name=="androidx.compose.ui.platform.AndroidComposeView" && it.width>0 && it.height>0} &&
@@ -43,7 +43,7 @@ class MainMapWorkspaceRecreateHostTest {
         val camera=view.viewport();val scale=view.contentScale()
         return Pt((view.width/2.0-camera.panX)/scale,(view.height/2.0-camera.panY)/scale)
     }
-    private fun digest(activity:MainActivity,uri:String):String?=runCatching {
+    private fun digest(activity:EditorActivity,uri:String):String?=runCatching {
         val sha=MessageDigest.getInstance("SHA-256")
         requireNotNull(activity.contentResolver.openInputStream(Uri.parse(uri))).use {input->
             val block=ByteArray(8192)
@@ -63,12 +63,12 @@ class MainMapWorkspaceRecreateHostTest {
             MapNode(id="concept",parent="root",text="Before")))
         val file=File.createTempFile("main-map-recreate-",".xmap",base.cacheDir).apply {writeBytes(MapCodec.encode(fixed))}
         val uri=Uri.fromFile(file)
-        var activity:MainActivity?=null
+        var activity:EditorActivity?=null
         var workspace:MapWorkspace?=null
         var owned:MapWorkspace.Entry?=null
         var monitor:android.app.Instrumentation.ActivityMonitor?=null
         try {
-            val first=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val first=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=first
             waitUntil("Main actual workspace and completed native restore") {main {mainReady(first)}}
             val maps=main {requireNotNull(first.mapWorkspace)};workspace=maps
@@ -99,11 +99,11 @@ class MainMapWorkspaceRecreateHostTest {
             waitUntil("source list before recreation") {
                 runner.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(first.getString(R.string.graph_sources_count,0)).orEmpty().isNotEmpty()
             }
-            val watched=runner.addMonitor(MainActivity::class.java.name,null,false);monitor=watched
+            val watched=runner.addMonitor(EditorActivity::class.java.name,null,false);monitor=watched
             main {first.recreate()}
-            val next=runner.waitForMonitorWithTimeout(watched,15000) as? MainActivity
+            val next=runner.waitForMonitorWithTimeout(watched,15000) as? EditorActivity
             runner.removeMonitor(watched);monitor=null
-            assertNotNull("MainActivity did not recreate",next)
+            assertNotNull("EditorActivity did not recreate",next)
             val recreated=requireNotNull(next);activity=recreated
             waitUntil("retained graph in recreated Main") {main {
                 recreated.mapWorkspace!=null && recreated.documentEditor!=null && graph(recreated)?.let {it.width>0 && it.height>0 && it.isEnabled}==true

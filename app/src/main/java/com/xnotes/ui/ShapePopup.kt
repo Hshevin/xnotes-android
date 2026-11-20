@@ -31,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.shapes.ConnectorPage
@@ -75,7 +74,7 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             if (!connecting && !config.placesCorners) {
                 ToggleRow(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) }
             }
-            SliderRow(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f) {
+            SliderRow(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f, step = ToolConversions.WIDTH_STEP.toFloat()) {
                 emit(config.copy(strokeWidth = it.toDouble()))
             }
             if (!connecting && chip.kind.isClosed) {
@@ -113,7 +112,7 @@ private fun ShapePager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (Shap
     val pages = ShapePresets.pages
     ChipPager(pages.size, config.shapePage, { pageLabel(pages[it]) }, ShapePresets.ROWS, onPage) { page ->
         for (row in pages[page].presets.chunked(ShapePresets.COLUMNS)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
                 for (p in row) KindChip(ShapeIcons.of(p), stringResource(presetLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
             }
         }
@@ -126,7 +125,7 @@ private fun ConnectorPager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (
     val pages = ConnectorPresets.pages
     ChipPager(pages.size, config.connectorPage, { connectorPageLabel(pages[it]) }, ConnectorPresets.ROWS, onPage) { page ->
         for (row in pages[page].presets.chunked(ConnectorPresets.COLUMNS)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
                 for (p in row) KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
             }
         }
@@ -155,8 +154,8 @@ private fun ChipPager(
         fontSize = TextSize.label,
         modifier = Modifier.padding(bottom = Space.s4),
     )
-    HorizontalPager(state = state, modifier = Modifier.fillMaxWidth().height((rows * CHIP + (rows - 1) * GAP).dp)) { page ->
-        Column(verticalArrangement = Arrangement.spacedBy(GAP.dp)) { content(page) }
+    HorizontalPager(state = state, modifier = Modifier.fillMaxWidth().height(CHIP.dp * rows + Space.s6 * (rows - 1))) { page ->
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s6)) { content(page) }
     }
     if (pageCount > 1) {
         Row(Modifier.fillMaxWidth().padding(vertical = Space.s6), horizontalArrangement = Arrangement.Center) {
@@ -239,7 +238,7 @@ private fun Swatch(color: Rgba, selected: Boolean, label: String?, mark: Boolean
 @Composable
 private fun HeadRow(caption: String, chosen: Head, atStart: Boolean, onPick: (Head) -> Unit) {
     Text(caption, color = LocalPalette.current.text.toComposeColor(), fontSize = TextSize.label, modifier = Modifier.padding(top = Space.s4))
-    Row(Modifier.padding(vertical = Space.s4), horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
+    Row(Modifier.padding(vertical = Space.s4), horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
         for (h in Head.entries) KindChip(ShapeIcons.head(h, atStart), stringResource(headLabel(h)), selected = h == chosen) { onPick(h) }
     }
 }
@@ -432,4 +431,3 @@ private fun headLabel(head: Head): Int = when (head) {
 
 /** A chip is 38 dp across; six of them and their gaps fill the popup's 256 dp. */
 private const val CHIP = 38
-private const val GAP = 5

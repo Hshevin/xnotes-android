@@ -38,11 +38,11 @@ class PagedSourceRegionCaptureTest {
         var selectionMenu:Rect?=null
         val controller=InteractionController(state,history,FakeTextMeasurer(),{},onSelectionMenu={selectionMenu=it})
         var time=100L
-        fun send(action:Int,content:Pt,buttons:Int=0) {
+        fun send(action:Int,content:Pt,buttons:Int=0, finger:Boolean=false) {
             val point=state.contentToViewport(content)
-            val properties=MotionEvent.PointerProperties().apply {id=7;toolType=MotionEvent.TOOL_TYPE_STYLUS}
+            val properties=MotionEvent.PointerProperties().apply {id=7;toolType=if(finger) MotionEvent.TOOL_TYPE_FINGER else MotionEvent.TOOL_TYPE_STYLUS}
             val coordinates=MotionEvent.PointerCoords().apply {x=point.x.toFloat();y=point.y.toFloat();pressure=.67f;setAxisValue(MotionEvent.AXIS_TILT,.3f)}
-            val event=MotionEvent.obtain(100,time++,action,1,arrayOf(properties),arrayOf(coordinates),0,buttons,1f,1f,0,0,InputDevice.SOURCE_STYLUS,0)
+            val event=MotionEvent.obtain(100,time++,action,1,arrayOf(properties),arrayOf(coordinates),0,buttons,1f,1f,0,0,if(finger) InputDevice.SOURCE_TOUCHSCREEN else InputDevice.SOURCE_STYLUS,0)
             val before=listOf(event.x,event.y,event.pressure,event.buttonState.toFloat(),event.getAxisValue(MotionEvent.AXIS_TILT))
             try {
                 assertTrue(controller.onTouch(event))
@@ -157,6 +157,45 @@ class PagedSourceRegionCaptureTest {
         assertNull(f.controller.sourceCaptureRegion());assertNull(f.controller.screenshotRect)
         assertFalse(f.history.canUndo);assertFalse(f.document.dirty)
     }
+    @Test fun movingResizingAndCancellingACaptureKeepTheActualPageAndFrameTogether() {
+        val f = Fixture()
+        val local = Rect(50.0, 70.0, 120.0, 100.0)
+        val content = f.state.fromPageSpaceRect(0, local)
+        f.screenshot(content)
+        val original = requireNotNull(f.controller.sourceCaptureRegion())
+        val center = Pt(content.x + content.w / 2, content.y + content.h / 2)
+        val offset = Pt(40.0, 25.0)
+        f.send(MotionEvent.ACTION_DOWN, center, finger = true)
+        f.send(MotionEvent.ACTION_MOVE, center + offset, finger = true)
+        assertFalse(original.current())
+        assertNull(f.controller.sourceCaptureRegion())
+        f.send(MotionEvent.ACTION_UP, center + offset, finger = true)
+        val moved = requireNotNull(f.controller.sourceCaptureRegion())
+        val expected = local.copy(x = local.x + offset.x, y = local.y + offset.y)
+        rect(expected, moved.region)
+        assertSame(f.first, moved.page)
+        val corner = Pt(content.right, content.bottom) + offset
+        f.send(MotionEvent.ACTION_DOWN, corner)
+        f.send(MotionEvent.ACTION_MOVE, corner + offset)
+        f.send(MotionEvent.ACTION_CANCEL, corner + offset)
+        val restored = requireNotNull(f.controller.sourceCaptureRegion())
+        rect(expected, restored.region)
+        assertFalse(moved.current())
+        f.send(MotionEvent.ACTION_DOWN, corner)
+        f.send(MotionEvent.ACTION_MOVE, corner + offset)
+        f.send(MotionEvent.ACTION_UP, corner + offset)
+        val resized = requireNotNull(f.controller.sourceCaptureRegion())
+        rect(expected.copy(w = expected.w + offset.x, h = expected.h + offset.y), resized.region)
+        val edge = Pt(f.state.pageRects[0].right + 10, corner.y + offset.y)
+        f.send(MotionEvent.ACTION_DOWN, corner + offset)
+        f.send(MotionEvent.ACTION_MOVE, edge)
+        f.send(MotionEvent.ACTION_UP, edge)
+        assertFalse(resized.current())
+        assertNull(f.controller.sourceCaptureRegion())
+        assertNotNull(f.controller.screenshotRect)
+        assertFalse(f.history.canUndo)
+    }
+
     @Test fun oldScreenshotDtosStayRetiredAfterClearCancellationOrASecondCompletedScreenshot() {
         val f=Fixture();val firstArea=f.state.fromPageSpaceRect(0,Rect(20.0,30.0,100.0,80.0))
         f.screenshot(firstArea);val first=f.controller.sourceCaptureRegion()!!;assertTrue(first.current())
@@ -190,8 +229,8 @@ class PagedSourceRegionCaptureTest {
         f.send(MotionEvent.ACTION_CANCEL,Pt(content.right,content.bottom),0x20);assertNull(f.controller.sourceCaptureRegion())
         f.screenshot(content);assertNotNull(f.controller.sourceCaptureRegion())
         f.send(MotionEvent.ACTION_DOWN,content.topLeft);assertNull(f.controller.sourceCaptureRegion())
-        f.send(MotionEvent.ACTION_CANCEL,content.topLeft);assertNull(f.controller.sourceCaptureRegion())
-        f.screenshot(content);f.controller.clearScreenshot();assertNull(f.controller.sourceCaptureRegion())
+        f.send(MotionEvent.ACTION_CANCEL,content.topLeft);assertNotNull(f.controller.sourceCaptureRegion())
+        f.controller.clearScreenshot();assertNull(f.controller.sourceCaptureRegion())
         f.screenshot(content);f.controller.resetGestureState();assertNull(f.controller.sourceCaptureRegion());assertNull(f.controller.screenshotRect)
         assertFalse(f.history.canUndo);assertFalse(f.document.dirty)
     }

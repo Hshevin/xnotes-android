@@ -75,7 +75,7 @@ object FontCatalog {
 
     fun init(context: Context) = synchronized(initializationLock) {initialize(context.applicationContext)}
 
-    /** A source preview can be the process's first renderer, without opening MainActivity. */
+    /** A source preview can be the process's first renderer, without opening EditorActivity. */
     fun ensureInitialized(context:Context) = synchronized(initializationLock) {
         if(assets==null) initialize(context.applicationContext)
     }

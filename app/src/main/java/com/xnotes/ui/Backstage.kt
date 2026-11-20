@@ -269,7 +269,7 @@ fun Backstage(
         templateFromImage = onTemplateFromImage,
     )
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
-    // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
+    // window already runs edge-to-edge with the system bars hidden (EditorActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
         BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs, toolPane)
     }
@@ -2290,7 +2290,7 @@ internal fun ExplorerSearchField(query: String, onQueryChange: (String) -> Unit,
             .floatingBacking({ maxOf(open, lift()) }, CircleShape, surface, border)
             .clip(CircleShape)
             .clickable(enabled = !expanded, role = Role.Button) { active = true }
-            .padding(horizontal = lerp(10.dp, 12.dp, open)),
+            .padding(horizontal = lerp(Space.s8, Space.s12, open)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

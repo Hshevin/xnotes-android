@@ -9,7 +9,7 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.ImageView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.history.AddItem
 import com.xnotes.core.model.Document
@@ -51,7 +51,7 @@ class MainMixedMapEditingHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
     private fun nodes(node:AccessibilityNodeInfo?):List<AccessibilityNodeInfo> = if(node==null) emptyList() else
         listOf(node)+(0 until node.childCount).flatMap {nodes(node.getChild(it))}
     private fun labelMatches(node:AccessibilityNodeInfo,label:String)=node.text?.toString()==label || node.contentDescription?.toString()==label
@@ -66,11 +66,11 @@ class MainMixedMapEditingHostTest {
         }
         assertTrue(requireNotNull(target).performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
-    private fun ready(activity:MainActivity)=activity.mapWorkspace!=null && activity.documentEditor!=null &&
+    private fun ready(activity:EditorActivity)=activity.mapWorkspace!=null && activity.documentEditor!=null &&
         views(activity.window.decorView).let {tree->tree.any {it.javaClass.name=="androidx.compose.ui.platform.AndroidComposeView" && it.width>0} &&
             tree.filterIsInstance<ImageView>().none {it.drawable is AnimationDrawable}}
     private fun join(job:Job?) {if(job!=null) runBlocking {withTimeout(15000) {job.join()}}}
-    private inner class Scene(var activity:MainActivity,val folder:File,val sourceFile:File,val a:File,val b:File,
+    private inner class Scene(var activity:EditorActivity,val folder:File,val sourceFile:File,val a:File,val b:File,
         val aId:String,val bId:String,val aSource:MapSource,val noteSource:MapSource) {
         val maps=main {requireNotNull(activity.mapWorkspace)}
         val note=main {requireNotNull(activity.documentEditor)}
@@ -129,9 +129,9 @@ class MainMixedMapEditingHostTest {
         val noteSource=MapSource(documentId=model.identity.documentId,fileName=sourceFile.name,scope=SourceScope.PAGE,pageId=model.pages[1].referenceIdentity.id)
         val a=File(folder,"A.xmap").apply {writeBytes(MapCodec.encode(MindMapDocument(id=aId,nodes=listOf(MapNode(id="ar",parent=null),MapNode(id="an",parent="ar",text="A source",sources=listOf(aSource),primarySource=aSource.id)))))}
         val b=File(folder,"B.xmap").apply {writeBytes(MapCodec.encode(MindMapDocument(id=bId,nodes=listOf(MapNode(id="br",parent=null),MapNode(id="bn",parent="br",text="B note source",sources=listOf(noteSource),primarySource=noteSource.id)))))}
-        var activity:MainActivity?=null;var scene:Scene?=null
+        var activity:EditorActivity?=null;var scene:Scene?=null
         try {
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host;await("Main ready") {main {ready(host)}}
             val native=main {requireNotNull(host.documentEditor)}
             main {assertTrue(native.openPanes.isEmpty());assertNull(requireNotNull(host.mapWorkspace).current)}
@@ -194,8 +194,8 @@ class MainMixedMapEditingHostTest {
         click(f.label(R.string.mixed_split_swap));click(f.label(R.string.split_change_direction));f.awaitMixed()
         val layout=main {f.maps.splitPresentation.layout!!};val model=main {child.session.document};val epoch=main {child.session.interactionEpoch}
         val token=main {child.session.beginExistingSource("bn")!!};val route=main {f.maps.sourceReturnToken}
-        val monitor=runner.addMonitor(MainActivity::class.java.name,null,false)
-        val next=try {main {f.activity.recreate()};runner.waitForMonitorWithTimeout(monitor,15000) as? MainActivity}
+        val monitor=runner.addMonitor(EditorActivity::class.java.name,null,false)
+        val next=try {main {f.activity.recreate()};runner.waitForMonitorWithTimeout(monitor,15000) as? EditorActivity}
             finally {runner.removeMonitor(monitor)}
         assertNotNull(next);f.activity=requireNotNull(next)
         await("recreated mixed actual Main") {main {ready(f.activity) && f.activity.mapWorkspace===f.maps && f.maps.current===child && f.mixedGeometry()!=null}}

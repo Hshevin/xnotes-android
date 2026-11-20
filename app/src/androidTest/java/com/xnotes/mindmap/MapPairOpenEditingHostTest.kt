@@ -8,7 +8,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
@@ -47,8 +47,8 @@ class MapPairOpenEditingHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
-    private inner class Scene(val activity:MainActivity,val folder:File,val noteFile:File,val mapFile:File,val invalidFile:File) {
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private inner class Scene(val activity:EditorActivity,val folder:File,val noteFile:File,val mapFile:File,val invalidFile:File) {
         val editor=main {requireNotNull(activity.documentEditor)}
         val maps=main {requireNotNull(activity.mapWorkspace)}
         var ownedId:String?=null
@@ -102,7 +102,7 @@ class MapPairOpenEditingHostTest {
         invalid.writeText("This is deliberately not a native note")
         var scene:Scene?=null
         try {
-            val activity=runner.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val activity=runner.startActivitySync(Intent(context,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             await("Main owners ready") {main {activity.documentEditor!=null && activity.mapWorkspace!=null && activity.window.decorView.width>0}}
             val f=Scene(activity,folder,note,map,invalid);scene=f
             main {assertTrue(f.editor.openPanes.isEmpty());assertNull(f.maps.current)}

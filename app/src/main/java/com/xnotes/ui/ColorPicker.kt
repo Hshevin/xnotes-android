@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,10 +51,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -134,6 +135,22 @@ internal fun ColorPickerPopup(
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
                 TabChip(stringResource(R.string.swatches), tab == 0) { tab = 0 }
                 TabChip(stringResource(R.string.spectrum), tab == 1) { tab = 1 }
+                if (LocalEyedropper.current) {
+                    Spacer(Modifier.weight(1f))
+                    val label = stringResource(R.string.eyedropper)
+                    Tooltip(label) {
+                        Icon(
+                            XnotesIcons.eyedropper,
+                            contentDescription = label,
+                            tint = palette.text.toComposeColor(),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { Eyedropper.arm { commit(it) } }
+                                .padding(Space.s4)
+                                .size(20.dp),
+                        )
+                    }
+                }
             }
             Spacer(Modifier.size(Space.s12))
             when (tab) {
@@ -479,7 +496,7 @@ internal fun NativeField(
             // Mirror the live colour only while the user isn't typing, so an edit isn't clobbered.
             if (!et.hasFocus() && et.text?.toString() != value) {
                 et.setText(value)
-                et.setSelection(value.length)
+                et.setSelection(et.text.length)
             }
         },
     )

@@ -31,7 +31,7 @@ internal object EnglishWords : ExplorerWords {
     override fun kinds(k: EntryKind) = when (k) {
         EntryKind.FOLDER -> "Folders"
         EntryKind.NOTE -> "Notes"
-        EntryKind.PDF -> "PDF notes"
+        EntryKind.PDF -> "PDFs"
         EntryKind.CANVAS -> "Canvases"
         EntryKind.MIND_MAP -> "Mind maps"
         EntryKind.SPLIT -> "Splits"

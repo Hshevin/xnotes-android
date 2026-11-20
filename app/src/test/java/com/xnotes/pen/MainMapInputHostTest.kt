@@ -6,7 +6,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.mindmap.FileNetworkWorkspace
 import com.xnotes.mindmap.NetworkQuery
@@ -25,12 +25,12 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Real MainActivity dispatch -> real Window/View; its native editor and map actor are actual instances. */
+/** Real EditorActivity dispatch -> real Window/View; its native editor and map actor are actual instances. */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class MainMapInputHostTest {
     private data class Seen(val action:Int,val buttons:Int,val pressure:Float,val tilt:Float,val pointerId:Int,val source:Int)
-    private class RecordingView(activity:MainActivity):View(activity) {
+    private class RecordingView(activity:EditorActivity):View(activity) {
         val touches=mutableListOf<Seen>();val keys=mutableListOf<Int>()
         init {isFocusable=true;isFocusableInTouchMode=true;isClickable=true}
         override fun onTouchEvent(event:MotionEvent):Boolean {
@@ -44,7 +44,7 @@ class MainMapInputHostTest {
         val coords=MotionEvent.PointerCoords().apply {x=200f;y=220f;pressure=.37f;setAxisValue(MotionEvent.AXIS_TILT,.41f)}
         return MotionEvent.obtain(1000L,time,action,1,arrayOf(pointer),arrayOf(coords),0,0x64,1f,1f,9,0,InputDevice.SOURCE_STYLUS,0)
     }
-    private fun send(activity:MainActivity,action:Int,time:Long) {
+    private fun send(activity:EditorActivity,action:Int,time:Long) {
         val raw=event(action,time)
         try {
             activity.dispatchTouchEvent(raw) // The recorded child stream below proves actual delivery.
@@ -56,14 +56,14 @@ class MainMapInputHostTest {
         try {StylusButtonLatch.clicks.onTouch(cancel)} finally {cancel.recycle()}
         StylusButtonLatch.releaseKey()
     }
-    private fun scenario(network:Boolean=false,block:(MainActivity,Editor,RecordingView)->Unit)=runParkingScenario {f->
+    private fun scenario(network:Boolean=false,block:(EditorActivity,Editor,RecordingView)->Unit)=runParkingScenario {f->
         val graph=File(f.root,"main-input.xmap")
         withContext(Dispatchers.IO) {
             f.seed();graph.writeBytes(MapCodec.encode(MindMapDocument(nodes=listOf(MapNode(id="root",parent=null,text="graph")))))
         }
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
         val workspace=MapWorkspace(f.context,scope);val networks=FileNetworkWorkspace(f.context,scope)
-        val binding=Any();var activity:MainActivity?=null
+        val binding=Any();var activity:EditorActivity?=null
         try {
             withContext(Dispatchers.Main) {
                 f.editor.openAsync(f.sourceUri,"source.xnote");f.addStroke(110.0,recordHistory=true);f.stopDebounce()
@@ -77,14 +77,14 @@ class MainMapInputHostTest {
             withTimeout(10000L) {while(!withContext(Dispatchers.Main) {if(network) networks.visible && networks.current!=null else workspace.visible && workspace.current?.session?.document!=null}) delay(1L)}
             withContext(Dispatchers.Main) {
                 // No onCreate: the real dispatch path is exercised without loading the complete app UI.
-                val actual=Robolectric.buildActivity(MainActivity::class.java).get().also {activity=it}
+                val actual=Robolectric.buildActivity(EditorActivity::class.java).get().also {activity=it}
                 actual.setTheme(android.R.style.Theme_Material_Light_NoActionBar)
-                val window=requireNotNull(actual.window) {"Bare MainActivity must have its real attached Window"}
+                val window=requireNotNull(actual.window) {"Bare EditorActivity must have its real attached Window"}
                 val child=RecordingView(actual)
                 window.setContentView(child,ViewGroup.LayoutParams(-1,-1))
                 window.decorView.measure(View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY))
                 window.decorView.layout(0,0,1000,1000);child.requestFocus()
-                MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(actual,f.editor)
+                EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(actual,f.editor)
                 actual.mapWorkspace=workspace;actual.networkWorkspace=networks
                 if(network) {assertFalse(actual.mapWorkspace!!.visible);assertTrue(actual.networkWorkspace!!.visible)}
                 resetClick();block(actual,f.editor,child)
@@ -93,7 +93,7 @@ class MainMapInputHostTest {
             val disposal=withContext(Dispatchers.Main) {
                 resetClick()
                 activity?.let {it.penKeyRecorder=null;it.mapWorkspace=null;it.networkWorkspace=null
-                    MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(it,null)
+                    EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(it,null)
                     it.window?.setContentView(View(it))}
                 networks.dispose();workspace.dispose()
             }
@@ -101,7 +101,7 @@ class MainMapInputHostTest {
         }}
     }
 
-    private fun checkNativeInputIsolation(activity:MainActivity,editor:Editor,view:RecordingView) {
+    private fun checkNativeInputIsolation(activity:EditorActivity,editor:Editor,view:RecordingView) {
         val recorder=AtomicInteger();activity.penKeyRecorder={recorder.incrementAndGet();true}
         val tool=editor.tool;val model=editor.state.document;val items=model.pages.first().items.toList();val history=editor.history
         assertTrue(activity.dispatchKeyEvent(KeyEvent(1000L,1001L,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_STYLUS_BUTTON_PRIMARY,0)))
@@ -116,7 +116,7 @@ class MainMapInputHostTest {
         assertSame(history,editor.history);assertTrue(history.canUndo)
     }
 
-    private fun checkVendorEventTransparency(activity:MainActivity,editor:Editor,view:RecordingView) {
+    private fun checkVendorEventTransparency(activity:EditorActivity,editor:Editor,view:RecordingView) {
         val model=editor.state.document;val tool=editor.tool;val items=model.pages.first().items.toList()
         // Open a genuine Window touch target first so Android itself can deliver the unknown raw
         // vendor actions to that same child, rather than dropping an unknown initial action.

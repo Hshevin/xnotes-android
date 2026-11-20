@@ -27,6 +27,7 @@ android {
         getByName("androidTest").java.srcDir("src/sharedTest/java")
     }
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     // Pinned toolchain for the vendored native builds (F-Droid reproducibility).
     ndkVersion = "27.0.12077973"
 
@@ -37,7 +38,7 @@ android {
         targetSdk = 36
         testInstrumentationRunner = "com.xnotes.pen.PenTestRunner"
         versionCode = if (aiPreview) 3 else if (splitPreview) 79 else 98
-        versionName = "0.9.8"
+        versionName = "0.9.10"
         ndk {
             // This preview targets the ARM64 MovinkPad and ARM64 test emulator.
             abiFilters += listOf("arm64-v8a")

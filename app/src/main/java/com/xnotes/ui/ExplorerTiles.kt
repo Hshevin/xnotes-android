@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
@@ -61,7 +63,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
@@ -167,6 +168,7 @@ internal class ExplorerBody(
     fun colorOf(e: BrowseEntry): Rgba? = e.color.takeIf { view.showColour }
 }
 
+/** Imported PDF notes keep their PDF badge through their verified notebook metadata. */
 internal fun entryKind(e: BrowseEntry, meta: DocMetaStore.Meta?): EntryKind = when {
     e.isDir -> EntryKind.FOLDER
     DocumentKind.ofName(e.name) == DocumentKind.MIND_MAP -> EntryKind.MIND_MAP
@@ -209,7 +211,11 @@ internal fun rememberThumb(editor: Editor, entry: BrowseEntry, whole: Boolean): 
         if (whole) editor.cachedPageThumb(entry.documentUri) else editor.cachedNoteTile(entry.documentUri),
         entry.documentUri, entry.modified, whole,
     ) {
-        value = if (whole) editor.pageThumbnail(entry.documentUri, entry.name) else editor.tileThumbnail(entry.documentUri, entry.name)
+        value = if (whole) {
+            editor.pageThumbnail(entry.documentUri, entry.name)
+        } else {
+            editor.tileThumbnail(entry.documentUri, entry.name)
+        }
     }
     thumb
 }
@@ -253,6 +259,37 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
         }
         val pages = b.pages(e)
         if (b.view.showPages && pages > 1) TileBadge(XnotesIcons.pages, "$pages", Modifier.align(Alignment.BottomEnd))
+        ExportRing(e, Modifier.align(Alignment.TopEnd))
+    }
+}
+
+/**
+ * A ring on the tile of a PDF whose pages are being drawn again, as far round as that has got.
+ * It reads the running exports itself, so their progress redraws the ring and nothing around it.
+ */
+@Composable
+internal fun ExportRing(e: BrowseEntry, modifier: Modifier = Modifier) {
+    if (e.isDir || DocumentKind.ofName(e.name) != DocumentKind.PDF) return
+    val running by com.xnotes.platform.PdfExports.progress.collectAsState()
+    if (running.isEmpty()) return
+    val key = remember(e.documentUri) { com.xnotes.platform.PdfExports.keyOf(e.documentUri) }
+    val fraction = running[key] ?: return
+    val palette = LocalPalette.current
+    Box(
+        modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(palette.bg.withAlpha(if (palette.isDark) 200 else 235).toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.size(13.dp),
+            color = palette.accent.toComposeColor(),
+            trackColor = palette.border.toComposeColor(),
+            strokeWidth = 2.dp,
+        )
     }
 }
 
@@ -269,7 +306,17 @@ private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: 
     }
 }
 
-/** An entry's overflow menu, with the file-only block for notes and canvases and the pin toggle for folders. */
+/**
+ * What converting [e] is called: a note becomes a PDF and a PDF a note, and nothing else converts.
+ * Nothing converts while PDF documents are off, since a converted PDF would be written in place.
+ */
+internal fun convertLabel(e: BrowseEntry): Int? = if (e.isDir || !DocumentKind.PDF_DOCUMENTS_ENABLED) null else when (DocumentKind.ofName(e.name)) {
+    DocumentKind.NOTE -> R.string.convert_to_pdf
+    DocumentKind.PDF -> R.string.convert_to_note
+    else -> null
+}
+
+/** An entry's overflow menu, with the file-only block for notes, PDFs and canvases and the pin toggle for folders. */
 @Composable
 internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, onDismiss: () -> Unit) {
     val m = b.host.menu
@@ -692,7 +739,7 @@ internal fun HomeShelves(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.s16)) {
                 items(pinnedNotes, key = { it.documentUri }) { PinnedCard(b, it, wholePins) }
             }
-            Spacer(Modifier.height(if (pins.isNotEmpty()) 16.dp else 20.dp))
+            Spacer(Modifier.height(if (pins.isNotEmpty()) Space.s16 else Space.s20))
         }
         if (pins.isNotEmpty()) {
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s12), verticalArrangement = Arrangement.spacedBy(Space.s12)) {

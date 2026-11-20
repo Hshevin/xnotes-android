@@ -106,6 +106,8 @@ data class Preferences(
     val showExtensions: Boolean = false,
     /** Whether an exported PDF gets a bookmark for each heading of the note's text. */
     val pdfHeadingBookmarks: Boolean = true,
+    /** The View menu's autoscroll speed in tenths of a paper millimetre per second; autoscroll itself always starts off. */
+    val autoScrollSpeed: Int = AUTOSCROLL_DEFAULT,
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
@@ -190,15 +192,27 @@ data class Preferences(
         .put("show_folder_counts", showFolderCounts)
         .put("show_extensions", showExtensions)
         .put("pdf_heading_bookmarks", pdfHeadingBookmarks)
+        .put("autoscroll_speed", autoScrollSpeed)
 
     companion object {
-        val DEFAULT_ACCENT = Rgba(0, 230, 118, 255)
+        /** The accent a two-tone setting saved without a seed of its own has always loaded as. */
+        val LEGACY_ACCENT = Rgba(0, 230, 118, 255)
         val DEFAULT_MATERIAL_SINGLE = Rgba(244, 67, 54, 255)
-        val DEFAULT_MATERIAL_DUAL = Rgba(154, 124, 66, 255)
-        val DEFAULT_MATERIAL_SURFACE = Rgba(61, 117, 230, 255)
+        /** Bubblegum, the default two-tone theme: the launcher icon's pink over its violet. */
+        val DEFAULT_MATERIAL_DUAL = Rgba(255, 107, 154, 255)
+        val DEFAULT_MATERIAL_SURFACE = Rgba(122, 92, 255, 255)
+
+        /** Morning, the default two-tone theme before Bubblegum. */
+        private val MORNING_ACCENT = Rgba(154, 124, 66, 255)
+        private val MORNING_SURFACE = Rgba(61, 117, 230, 255)
 
         /** [trashDays] for keeping deleted items until Trash is emptied by hand. */
         const val TRASH_FOREVER = -1
+
+        /** [autoScrollSpeed] bounds and default, in tenths of a mm per second. */
+        const val AUTOSCROLL_MIN = 1
+        const val AUTOSCROLL_MAX = 100
+        const val AUTOSCROLL_DEFAULT = 20
 
         /** Settable range of the min/max zoom limits, in percent (within the hard zoom bounds). */
         const val ZOOM_LIMIT_MIN_PCT = 20
@@ -212,7 +226,7 @@ data class Preferences(
                 .let { if (it == "dark" || it == "light") it else "system" }
             val template = o.optString("default_template", "color").let { if (it == "pdf") "pdf" else "color" }
             val zoomLockPan = o.optString("zoom_lock_pan", "single").let { if (it == "double" || it == "none") it else "single" }
-            val tapActions = setOf("none", "undo", "redo", "toggle_pan", "toggle_eraser", "toggle_previous")
+            val tapActions = setOf("none", "undo", "redo", "toggle_pan", "toggle_eraser", "toggle_lasso", "toggle_previous")
             fun tapAction(key: String) = o.optString(key, "none").let { if (it in tapActions) it else "none" }
             val legacySeed = Rgba.fromHex(o.optString("material_seed"))
             val legacyDual = o.optBoolean("material_dual_tone", false)
@@ -221,19 +235,26 @@ data class Preferences(
                 legacySeed != null -> MaterialColourMode.SINGLE
                 else -> MaterialColourMode.SYSTEM
             }
-            val legacyDualAccent = legacySeed ?: Rgba.fromHex(o.optString("accent_color")) ?: DEFAULT_ACCENT
+            val legacyDualAccent = legacySeed ?: Rgba.fromHex(o.optString("accent_color")) ?: LEGACY_ACCENT
+            var dualSeed = Rgba.fromHex(o.optString("material_dual_seed"))
+                ?: if (legacyDual) legacyDualAccent else DEFAULT_MATERIAL_DUAL
+            var surfaceSeed = Rgba.fromHex(o.optString("material_surface_seed"))
+                ?: if (legacyDual && !o.has("material_mode")) Rgba(33, 150, 243, 255) else DEFAULT_MATERIAL_SURFACE
+            // Settings that kept Morning while it was the default never wrote its accent; they move to Bubblegum.
+            if (!o.has("material_dual_seed") && dualSeed == MORNING_ACCENT && surfaceSeed == MORNING_SURFACE) {
+                dualSeed = DEFAULT_MATERIAL_DUAL
+                surfaceSeed = DEFAULT_MATERIAL_SURFACE
+            }
             return Preferences(
                 penShortcuts = com.xnotes.pen.PenBindingsJson.read(o.optJSONArray("pen_shortcuts")),
                 uiAppearance = appearance,
                 materialMode = materialMode,
                 materialSingleSeed = Rgba.fromHex(o.optString("material_single_seed"))
                     ?: legacySeed?.takeIf { !legacyDual } ?: DEFAULT_MATERIAL_SINGLE,
-                materialDualSeed = Rgba.fromHex(o.optString("material_dual_seed"))
-                    ?: if (legacyDual) legacyDualAccent else DEFAULT_MATERIAL_DUAL,
+                materialDualSeed = dualSeed,
                 materialStyle = MaterialStyle.fromId(o.optString("material_style")),
                 materialContrast = o.optDouble("material_contrast", 0.0).takeIf { it in -1.0..1.0 } ?: 0.0,
-                materialSurfaceSeed = Rgba.fromHex(o.optString("material_surface_seed"))
-                    ?: if (legacyDual && !o.has("material_mode")) Rgba(33, 150, 243, 255) else DEFAULT_MATERIAL_SURFACE,
+                materialSurfaceSeed = surfaceSeed,
                 cornerStyle = CornerStyle.fromId(o.optString("corner_style")),
                 toolbarLook = ToolbarLook(
                     position = ToolbarPosition.fromId(o.optString("toolbar_position")),
@@ -296,6 +317,7 @@ data class Preferences(
                 showFolderCounts = o.optBoolean("show_folder_counts", true),
                 showExtensions = o.optBoolean("show_extensions", false),
                 pdfHeadingBookmarks = o.optBoolean("pdf_heading_bookmarks", true),
+                autoScrollSpeed = o.optInt("autoscroll_speed", AUTOSCROLL_DEFAULT).coerceIn(AUTOSCROLL_MIN, AUTOSCROLL_MAX),
             )
         }
     }

@@ -6,7 +6,7 @@ import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
@@ -43,11 +43,11 @@ class MapVisibleEditingRegressionTest {
         while (!clickable.isClickable) clickable = requireNotNull(clickable.parent)
         assertTrue(clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK))
     }
-    private fun scenario(initialNodes:List<MapNode> = listOf(MapNode(id="root", parent=null, text="Visible topic")), test: (MainActivity, MapSession, MindMapView) -> Unit) {
+    private fun scenario(initialNodes:List<MapNode> = listOf(MapNode(id="root", parent=null, text="Visible topic")), test: (EditorActivity, MapSession, MindMapView) -> Unit) {
         val base = runner.targetContext
         val file = File.createTempFile("visible-map-", ".xmap", base.cacheDir)
         file.writeBytes(MapCodec.encode(MindMapDocument(nodes = initialNodes)))
-        val activity = runner.startActivitySync(Intent(base, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val activity = runner.startActivitySync(Intent(base, EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
         try {
             await("Main workspace") { main { activity.mapWorkspace != null && activity.documentEditor != null } }
             val maps = main { requireNotNull(activity.mapWorkspace) }

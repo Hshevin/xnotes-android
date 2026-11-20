@@ -7,7 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,16 +41,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.xnotes.R
+import com.xnotes.platform.AppIcons
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -80,9 +77,9 @@ fun AboutPane() {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
 
-    val appIcon = remember {
-        runCatching { ctx.packageManager.getApplicationIcon(ctx.packageName).toBitmap(144, 144).asImageBitmap() }.getOrNull()
-    }
+    var icon by remember { mutableStateOf(AppIcons.current(ctx)) }
+    var picking by remember { mutableStateOf(false) }
+    val openPicker = remember { { picking = true } }
     val version = remember {
         runCatching {
             val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -105,10 +102,8 @@ fun AboutPane() {
             Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(top = Space.s16, bottom = Space.s32),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (appIcon != null) {
-                Image(appIcon, "xnotes", modifier = Modifier.size(72.dp))
-                Spacer(Modifier.height(Space.s16))
-            }
+            AppIconImage(icon, 72.dp, "xnotes", Modifier.holdForIconPicker(openPicker))
+            Spacer(Modifier.height(Space.s16))
             Text("xnotes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = TextSize.display)
             Spacer(Modifier.height(Space.s4))
             Text(
@@ -162,6 +157,7 @@ fun AboutPane() {
             }
         }
     }
+    if (picking) IconPicker(icon, onPick = { AppIcons.apply(ctx, it); icon = it }, onDismiss = { picking = false })
 }
 
 /** A link button: line glyph above a label. Fills with the selection container while pressed. */
@@ -212,7 +208,7 @@ private fun RowScope.AboutButton(icon: ImageVector, label: String, onClick: () -
         Text(
             label,
             color = if (pressed) onAccent else palette.text.toComposeColor(),
-            fontSize = TextSize.label, lineHeight = 14.sp, textAlign = TextAlign.Center,
+            fontSize = TextSize.label, lineHeight = TextSize.bodyLarge, textAlign = TextAlign.Center,
         )
     }
 }

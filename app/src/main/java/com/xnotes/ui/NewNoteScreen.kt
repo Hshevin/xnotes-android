@@ -61,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -117,7 +118,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.xnotes.R
@@ -569,7 +569,7 @@ internal fun NewNoteScreen(
             Spacer(Modifier.size(Space.s6))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s6), verticalArrangement = Arrangement.spacedBy(Space.s4)) {
                 ModeChip(stringResource(R.string.default_choice), value == null, onDefault)
-                SwatchCircles(editor, role, value, onPick)
+                CompositionLocalProvider(LocalEyedropper provides false) { SwatchCircles(editor, role, value, onPick) }
             }
         }
 
@@ -594,7 +594,7 @@ internal fun NewNoteScreen(
                         val about = if (face == Face.PAGES) pageT?.description else coverT?.takeIf { hasCover }?.description
                         if (!about.isNullOrBlank()) {
                             Text(
-                                about, color = dim, fontSize = TextSize.body, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                                about, color = dim, fontSize = TextSize.body, lineHeight = TextSize.headline, maxLines = 4, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = Space.s4),
                             )
                         }
@@ -699,7 +699,7 @@ internal fun NewNoteScreen(
                                     else -> Modifier
                                 },
                             )
-                            .padding(1.dp),
+                            .padding(Space.s2),
                     ) { thumb(w - 2.dp, h - 2.dp) }
                     if (selected) {
                         Box(

@@ -8,7 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
@@ -75,7 +75,7 @@ class MainMixedEntryPointsHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
     private fun nodes(node:AccessibilityNodeInfo?):List<AccessibilityNodeInfo> = if(node==null) emptyList() else
         listOf(node)+(0 until node.childCount).flatMap {nodes(node.getChild(it))}
     private fun matches(node:AccessibilityNodeInfo,label:String)=node.text?.toString()==label || node.contentDescription?.toString()==label
@@ -89,11 +89,11 @@ class MainMixedEntryPointsHostTest {
     }
     private fun join(job:Job?) {if(job!=null) runBlocking {withTimeout(15000) {job.join()}}}
     @Suppress("UNCHECKED_CAST")
-    private fun pendingState(activity:MainActivity)=MainActivity::class.java.getDeclaredField("pendingImport\$delegate")
+    private fun pendingState(activity:EditorActivity)=EditorActivity::class.java.getDeclaredField("pendingImport\$delegate")
         .apply {isAccessible=true}.get(activity) as androidx.compose.runtime.MutableState<Uri?>
-    private fun pending(activity:MainActivity):Uri?=pendingState(activity).value
-    private fun clearPending(activity:MainActivity) {pendingState(activity).value=null}
-    private class Scene(val activity:MainActivity,val native:Editor,val maps:MapWorkspace,val entry:MapWorkspace.Entry,
+    private fun pending(activity:EditorActivity):Uri?=pendingState(activity).value
+    private fun clearPending(activity:EditorActivity) {pendingState(activity).value=null}
+    private class Scene(val activity:EditorActivity,val native:Editor,val maps:MapWorkspace,val entry:MapWorkspace.Entry,
         val noteFile:File,val importFile:File,val savedFile:File?,val savedRequest:MixedSplitRequest?) {
         val ownedArrangements=mutableListOf<File>()
     }
@@ -132,9 +132,9 @@ class MainMixedEntryPointsHostTest {
             }
             recent.writeText(json.toString());stored!!.writeText(json.toString())
         }
-        var scene:Scene?=null;var activity:MainActivity?=null
+        var scene:Scene?=null;var activity:EditorActivity?=null
         try {
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host
             await("actual Main ready") {main {host.documentEditor!=null && host.mapWorkspace!=null &&
                 views(host.window.decorView).let {tree->tree.any {it.javaClass.name=="androidx.compose.ui.platform.AndroidComposeView" && it.width>0} &&

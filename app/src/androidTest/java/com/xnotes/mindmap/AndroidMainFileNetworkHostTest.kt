@@ -9,7 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Document
@@ -43,7 +43,7 @@ class AndroidMainFileNetworkHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
     private fun tree(node:AccessibilityNodeInfo?):List<AccessibilityNodeInfo> = if(node==null) emptyList() else
         listOf(node)+(0 until node.childCount).flatMap {tree(node.getChild(it))}
     private fun nodes()=tree(runner.uiAutomation.rootInActiveWindow)
@@ -163,10 +163,10 @@ class AndroidMainFileNetworkHostTest {
         val addedConcept=MapNode(id=addedConceptId,parent="root",text="An added concept keeps the first one in place",sources=laterSources,primarySource=laterSources[0].id)
         map.writeBytes(MapCodec.encode(original))
         val sourceBytes=source.readBytes();val targetBytes=target.readBytes()
-        var activity:MainActivity?=null;var native:Editor?=null;var maps:MapWorkspace?=null;var networks:FileNetworkWorkspace?=null
+        var activity:EditorActivity?=null;var native:Editor?=null;var maps:MapWorkspace?=null;var networks:FileNetworkWorkspace?=null
         val ownedIds=setOf(s.identity.documentId,t.identity.documentId,u.identity.documentId)
         try {
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host
             waitUntil("Main restored its real empty workspace") {main {
                 host.documentEditor!=null && host.mapWorkspace!=null && host.networkWorkspace!=null && views(host.window.decorView).let {all->

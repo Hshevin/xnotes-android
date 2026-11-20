@@ -6,7 +6,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
@@ -47,8 +47,8 @@ class NativeSplitReplacementEditingHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
-    private inner class Scene(val activity:MainActivity,val folder:File,val files:List<File>,val ids:List<String>,val mapFile:File) {
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private inner class Scene(val activity:EditorActivity,val folder:File,val files:List<File>,val ids:List<String>,val mapFile:File) {
         val editor=main {requireNotNull(activity.documentEditor)}
         val maps=main {requireNotNull(activity.mapWorkspace)}
         lateinit var origin:MapWorkspace.Entry
@@ -99,7 +99,7 @@ class NativeSplitReplacementEditingHostTest {
         val map=File(folder,"map.xmap").apply {writeBytes(MapCodec.encode(MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="Old mixed map"))))) }
         var scene:Scene?=null
         try {
-            val host=runner.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(context,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             await("Main owners ready") {main {host.documentEditor!=null && host.mapWorkspace!=null && host.window.decorView.width>0}}
             val f=Scene(host,folder,files,ids,map);scene=f
             runBlocking {withTimeout(15000) {withContext(Dispatchers.Main) {assertTrue(f.editor.openSingleFromHome(f.uri(files[0]).toString(),files[0].name))}}}

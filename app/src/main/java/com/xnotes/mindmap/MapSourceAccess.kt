@@ -71,7 +71,7 @@ internal object MapSourceAccess {
                 checkActive();storage.registry.registerMapObserved(doc.id,name,uri.toString(),uniqueSource=true)
                 offer
             }
-            DocumentKind.SPLIT -> error("Unsupported source kind")
+            DocumentKind.SPLIT, DocumentKind.PDF -> error("Unsupported source kind")
         }
     }
     /** Canvas region creation supplies the required type and UUID; a display suffix is never type evidence. */

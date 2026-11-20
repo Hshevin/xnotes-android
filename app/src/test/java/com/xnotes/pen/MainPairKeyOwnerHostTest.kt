@@ -6,7 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.provider.DocumentsContract
 import android.widget.FrameLayout
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.MixedInputBinding
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.core.tools.Tool
@@ -30,33 +30,33 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class MainPairKeyOwnerHostTest {
-    private class KeyView(activity:MainActivity):View(activity) {
+    private class KeyView(activity:EditorActivity):View(activity) {
         val keys=mutableListOf<KeyEvent>()
         init {isFocusable=true;isFocusableInTouchMode=true}
         override fun dispatchKeyEvent(event:KeyEvent):Boolean {keys+=event;return true}
     }
     private fun key(action:Int,device:Int=9,repeat:Int=0,code:Int=600)=
         KeyEvent(1000L,1001L+action,action,code,repeat,0,device,81,0,InputDevice.SOURCE_STYLUS)
-    private fun mapFocus(activity:MainActivity) {
+    private fun mapFocus(activity:EditorActivity) {
         activity.mixedInput=MixedInputBinding(MixedInputRouter(),native={null},focus={true},blocked={false})
     }
-    private fun scenario(block:suspend (MainActivity,EditorPageCopyFixture,KeyView)->Unit)=runParkingScenario {f->
+    private fun scenario(block:suspend (EditorActivity,EditorPageCopyFixture,KeyView)->Unit)=runParkingScenario {f->
         withContext(Dispatchers.IO) {f.seed()}
-        var activity:MainActivity?=null
+        var activity:EditorActivity?=null
         try {withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"source.xnote");f.stopDebounce()
-            val host=Robolectric.buildActivity(MainActivity::class.java).get();activity=host
+            val host=Robolectric.buildActivity(EditorActivity::class.java).get();activity=host
             host.setTheme(android.R.style.Theme_Material_Light_NoActionBar)
             val child=KeyView(host)
             host.window.setContentView(child,ViewGroup.LayoutParams(-1,-1))
             host.window.decorView.measure(View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY))
             host.window.decorView.layout(0,0,1000,1000);child.requestFocus()
-            MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,f.editor)
+            EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,f.editor)
             StylusButtonLatch.releaseKey();block(host,f,child)
         }} finally {withContext(NonCancellable+Dispatchers.Main) {
             activity?.let {host->host.mixedInput=null;host.penKeyRecorder=null
-                MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,null)
+                EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,null)
                 host.window.setContentView(View(host))}
             f.editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
         }}

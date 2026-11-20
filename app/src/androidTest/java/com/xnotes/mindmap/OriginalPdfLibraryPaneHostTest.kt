@@ -2,7 +2,7 @@ package com.xnotes.mindmap
 
 import android.content.Intent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
@@ -38,8 +38,8 @@ class OriginalPdfLibraryPaneHostTest {
         assertTrue(at.isEnabled);assertTrue(at.performAction(AccessibilityNodeInfo.ACTION_CLICK))
     }
     @Test fun libraryKeepsHomeNavigationAndLeavingForAiOrBackReleasesItsPresentation() {
-        val activity=runner.startActivitySync(Intent(runner.targetContext,MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val activity=runner.startActivitySync(Intent(runner.targetContext,EditorActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
         try {
             await("Home navigation ready") {shown(activity.getString(R.string.original_pdf_library_title))}
             val editor=main {activity.documentEditor}
@@ -59,8 +59,8 @@ class OriginalPdfLibraryPaneHostTest {
         } finally {main {activity.originalLibrary?.close();activity.finish()}}
     }
     @Test fun sidebarSwitchesNetworkRecoveryOriginalsAndAiWithoutLosingHome() {
-        val activity=runner.startActivitySync(Intent(runner.targetContext,MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val activity=runner.startActivitySync(Intent(runner.targetContext,EditorActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
         try {
             await("Home tools ready") {shown(activity.getString(R.string.network_library_title))}
             val editor=main {activity.documentEditor}

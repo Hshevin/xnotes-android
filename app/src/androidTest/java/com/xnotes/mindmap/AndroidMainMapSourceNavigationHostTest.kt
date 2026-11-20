@@ -15,7 +15,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.view.inspector.WindowInspector
 import android.widget.ImageView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.infinite.InfiniteDocument
@@ -61,7 +61,7 @@ class AndroidMainMapSourceNavigationHostTest {
     }
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
         (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
     private fun all(node:AccessibilityNodeInfo?):List<AccessibilityNodeInfo> = if(node==null) emptyList() else
         listOf(node)+(0 until node.childCount).flatMap {all(node.getChild(it))}
     private fun nodes()=all(runner.uiAutomation.rootInActiveWindow)
@@ -79,7 +79,7 @@ class AndroidMainMapSourceNavigationHostTest {
         repeat(15) {field(value)?.let {return it};assertTrue("Source row is not reachable: $value",scroll(true));runner.waitForIdleSync();Thread.sleep(40)}
         return requireNotNull(field(value)) {"Source note did not appear: $value"}
     }
-    private fun openRow(activity:MainActivity,note:String) {
+    private fun openRow(activity:EditorActivity,note:String) {
         val anchor=showField(note);val bounds=AndroidRect().also(anchor::getBoundsInScreen)
         val choices=nodes().filter {it.isClickable && it.isVisibleToUser && it.isEnabled && it.text?.toString()==activity.getString(R.string.open)}
         val selected=choices.minByOrNull {node->kotlin.math.abs(AndroidRect().also(node::getBoundsInScreen).centerY()-bounds.centerY())}
@@ -91,7 +91,7 @@ class AndroidMainMapSourceNavigationHostTest {
         return Pt((view.width/2.0-camera.panX)/scale,(view.height/2.0-camera.panY)/scale)
     }
     private fun join(job:Job?) {if(job!=null) runBlocking {withTimeout(15000) {job.join()}}}
-    private class Scene(val activity:MainActivity,val source:File,val map:File,val native:Editor,val maps:MapWorkspace,
+    private class Scene(val activity:EditorActivity,val source:File,val map:File,val native:Editor,val maps:MapWorkspace,
         val sourceModel:Document,val first:MapSource,val second:MapSource,val other:Editor?) {
         lateinit var entry:MapWorkspace.Entry
         fun entryOrNull()=if(::entry.isInitialized) entry else null
@@ -106,9 +106,9 @@ class AndroidMainMapSourceNavigationHostTest {
         assertTrue("Run on an empty instrumentation profile; no existing recovery files are changed",existing.none {it.exists()} && !splitOpen)
         val source=File.createTempFile("main-map-source-",".xnote",base.cacheDir)
         val map=File.createTempFile("main-source-graph-",".xmap",base.cacheDir)
-        var activity:MainActivity?=null;var scene:Scene?=null
+        var activity:EditorActivity?=null;var scene:Scene?=null
         try {
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host
             waitUntil("Main finishes restoring its real profile") {main {
                 host.mapWorkspace!=null && host.documentEditor!=null && views(host.window.decorView).let {tree->
@@ -231,7 +231,7 @@ class AndroidMainMapSourceNavigationHostTest {
         waitUntil("explicit return preserved the selection captured after cancelled navigation") {main {f.maps.visible && f.entry.session.selected=="f"} && field("Second remark")!=null}
         assertSame(f.entry,main {f.maps.current});assertArrayEquals(f.sourceBytes,f.source.readBytes())
     }
-    private class CanvasScene(val activity:MainActivity,val source:File,val map:File,val native:Editor,val maps:MapWorkspace,
+    private class CanvasScene(val activity:EditorActivity,val source:File,val map:File,val native:Editor,val maps:MapWorkspace,
         val documentId:String,val sourceId:String) {
         lateinit var entry:MapWorkspace.Entry
         val sourceBytes=source.readBytes()
@@ -245,7 +245,7 @@ class AndroidMainMapSourceNavigationHostTest {
         assertTrue("Run Canvas source navigation on an empty instrumentation profile",recovery.none {it.exists()} && !splitOpen)
         val source=File.createTempFile("main-canvas-source-",".xcanvas",base.cacheDir)
         val map=File.createTempFile("main-canvas-graph-",".xmap",base.cacheDir)
-        var activity:MainActivity?=null;var scene:CanvasScene?=null
+        var activity:EditorActivity?=null;var scene:CanvasScene?=null
         try {
             val seeded=InfiniteDocument(lastView=Waypoint("Canvas source",200.0,100.0,1.2))
             seeded.add(Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN),listOf(Sample(100.0,100.0,.5),Sample(160.0,140.0,.7))))
@@ -258,7 +258,7 @@ class AndroidMainMapSourceNavigationHostTest {
                 note="Whole Canvas remark",sourceVersion=raw)
             map.writeBytes(MapCodec.encode(MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="Canvas sources"),
                 MapNode(id="n",parent="r",kind=NodeKind.REFERENCE,text="Canvas display alias",sources=listOf(target))))))
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host
             waitUntil("Main restored before Canvas source navigation") {main {
                 host.mapWorkspace!=null && host.documentEditor!=null && views(host.window.decorView).let {tree->

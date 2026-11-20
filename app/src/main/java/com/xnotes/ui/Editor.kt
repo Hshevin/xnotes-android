@@ -862,8 +862,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     var activeColorIndex by mutableStateOf(0)
         private set
-    var toolbarColors by mutableStateOf(InkPalette.presets)
+    /** The swatches of the appearance in use; the other appearance's wait in [otherSwatches]. */
+    var toolbarColors by mutableStateOf(InkPalette.dark)
         private set
+    private var otherSwatches = InkPalette.light
+    private var swatchesDark = true
     var toolbarColorCount by mutableStateOf(5)
         private set
     var toolbarLayout by mutableStateOf(ToolbarLayout.DEFAULT)
@@ -1679,6 +1682,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  This is what the canvas, caches and thumbnails all consume. */
     var viewSettings by mutableStateOf(settings.viewDefaults)
         private set
+
+    /** The View menu's autoscroll. Never a View setting: it starts off in every note, and only its speed is remembered. */
+    var autoScrollOn by mutableStateOf(false)
+        private set
+
+    /** Autoscroll speed in tenths of a paper millimetre per second. */
+    var autoScrollSpeed by mutableStateOf(settings.prefs.autoScrollSpeed)
+        private set
+
+    private val autoScroll by lazy {
+        com.xnotes.canvas.AutoScroll(
+            state,
+            held = { canvasTouched || controller.isFlinging },
+            onMoved = { refreshView(); onRender() },
+            onEnded = { setAutoScroll(false) },
+        )
+    }
     var rulerVisible by mutableStateOf(false)
         private set
     var wandEnabled by mutableStateOf(false)
@@ -2038,6 +2058,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // matching how a note opened from outside the root behaves.
         canvasAutosaveUri = if (unverifiedCanvasSessionOrigin?.model!==doc && uri != null && documentStorageRoot(uri) != null) uri else null
         canvasAutosaveUri?.let { rememberStamp(it) }
+        setAutoScroll(false)
         canvasOpen = true
         noteOpen = true
         sessionModelAdopted()
@@ -2963,12 +2984,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         view.crossPaneTouchGate.shouldBlock = { sibling?.stylusInContact == true }
         view.onTwoFingerTap = { dispatchTapGesture(preferences.twoFingerTap) }
         view.onThreeFingerTap = { dispatchTapGesture(preferences.threeFingerTap) }
-        view.onInputLost = { hostInputLost();proPenInput.surfaceDetached() }
+        view.onInputLost = {
+            setAutoScroll(false)
+            hostInputLost()
+            proPenInput.surfaceDetached()
+        }
         view.hover = { focusForPenInput(it); proPenInput.motion(it); controller.onHover(it) }
         view.genericMotion = { focusForPenInput(it); proPenInput.motion(it); controller.onGenericMotion(it) }
         view.drawOverlay = { renderer, _ -> controller.drawOverlay(renderer);referenceLocator.draw(renderer) }
         bindFrontInk()
         view.debugOverlay.frontHud = { controller.frontInk?.hud }
+        view.debugOverlay.autoScrollHud = { if (autoScrollOn) autoScroll.secondsToEnd() else null }
         view.afterLayout = { refreshView() }
         view.onScrollbarScrolled = { refreshView() }
         // The canvas starts at built-in defaults; push any non-default global View settings
@@ -4172,7 +4198,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun applySettings() {
-        toolbarColors = settings.toolbarColors
+        swatchesDark = resolvedAppearance(settings.prefs) != "light"
+        toolbarColors = settings.toolbarColors(swatchesDark)
+        otherSwatches = settings.toolbarColors(!swatchesDark)
         toolbarColorCount = settings.toolbarColorCount
         toolbarLayout = settings.toolbarLayout
         canvasToolbarLayout = settings.canvasToolbarLayout
@@ -4215,6 +4243,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun applyPagePrefsToState(p: Preferences) {
         palette = buildPalette(p)
+        com.xnotes.platform.AppNightMode.follow(appContext, p.uiAppearance)
+        useSwatchesFor(dark = resolvedAppearance(p) != "light")
         cornerStyle = p.cornerStyle
         toolbarLook = p.toolbarLook
         state.palette = palette
@@ -4388,7 +4418,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             settings = settings.copy(
                 tools = tools,
                 shapeConfig = controller.shapeConfig,
-                toolbarColors = toolbarColors,
+                toolbarColorsDark = if (swatchesDark) toolbarColors else otherSwatches,
+                toolbarColorsLight = if (swatchesDark) otherSwatches else toolbarColors,
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
                 lastTool = tool,
@@ -4411,10 +4442,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(pane==Pane.PRIMARY) {
             val source=active
             val canvas=source.infiniteOrNull?.takeIf {source.canvasOpen}
+            val colors = canvas?.toolbarColors ?: source.toolbarColors
             settings=settings.copy(
                 tools=ToolDefaults.persistedTools.associateWith {canvas?.toolConfig(it) ?: source.controller.configFor(it)},
                 shapeConfig=canvas?.shapeConfig ?: source.controller.shapeConfig,
-                toolbarColors=canvas?.toolbarColors ?: source.toolbarColors,
+                toolbarColorsDark = if (source.swatchesDark) colors else source.otherSwatches,
+                toolbarColorsLight = if (source.swatchesDark) source.otherSwatches else colors,
                 toolbarColorCount=canvas?.toolbarColorCount ?: source.toolbarColorCount,
                 activeColor=canvas?.activeColorIndex ?: source.activeColorIndex,
                 lastTool=canvas?.toolbarTool ?: source.toolbarTool,
@@ -7582,7 +7615,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun createBlankCanvasFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.CANVAS)
         val intent=notebookStorage.beginCreation(DocumentKind.CANVAS)
-        val snapshot=com.xnotes.core.infinite.InfiniteDocument(created=System.currentTimeMillis()).snapshotForWrite(fixedItems=true)
+        val document = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
+        settings.newCanvasBackground?.let { document.background = it }
+        val snapshot = document.snapshotForWrite(fixedItems = true)
         snapshot.identity=snapshot.identity.copy(documentId=intent.documentId)
         return createCanvasFile(treeUri,parentDocId,name,snapshot,intent)
     }
@@ -8620,6 +8655,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         applyResolvedViewSettings()
     }
 
+    /** Start or stop autoscroll; it only runs in vertical scrolling, and keeps the screen awake while it does. */
+    fun setAutoScroll(on: Boolean) {
+        val run = on && viewSettings.verticalScroll
+        if (run == autoScrollOn) return
+        autoScrollOn = run
+        view.keepScreenOn = run
+        if (run) {
+            autoScroll.mmPerSec = autoScrollSpeed / 10.0
+            autoScroll.start()
+        } else {
+            autoScroll.stop()
+        }
+    }
+
+    fun pickAutoScrollSpeed(tenths: Int) {
+        val v = tenths.coerceIn(Preferences.AUTOSCROLL_MIN, Preferences.AUTOSCROLL_MAX)
+        if (v == autoScrollSpeed) return
+        autoScrollSpeed = v
+        autoScroll.mmPerSec = v / 10.0
+        settings = settings.copy(prefs = settings.prefs.copy(autoScrollSpeed = v))
+        saveSettingsSoon()
+    }
+
     /** Re-resolve the effective settings and react to whatever actually changed. */
     private fun applyResolvedViewSettings() {
         val prev = viewSettings
@@ -8631,6 +8689,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Push a settings change into the canvas/caches; each View-menu feature reacts here. */
     private fun onViewSettingsChanged(prev: com.xnotes.canvas.ViewSettings, new: com.xnotes.canvas.ViewSettings) {
+        val beforeOrigin = state.origin()
         state.freeMovement = new.freeMovement
         if (prev.mode != new.mode || prev.rotation != new.rotation || prev.verticalScroll != new.verticalScroll) {
             // Re-group / re-orient / re-flow the pages, keep the reader on the same page, and
@@ -8653,12 +8712,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.goToPage(cur)
                 refreshView()
             }
-        } else if (prev.freeMovement != new.freeMovement && !new.verticalScroll && state.didInitialFit) {
+        } else if (prev.freeMovement != new.freeMovement && state.didInitialFit) {
             if (new.freeMovement) {
                 state.fitWidthActive = false // free pinches never hold a fit
                 state.fitHeightActive = false
             }
-            state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
+            if (!new.verticalScroll) {
+                state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
+            } else {
+                if (new.freeMovement) {
+                    state.scrollX = -beforeOrigin.x - state.flipOffsetX
+                    state.scrollY = -beforeOrigin.y - state.overscrollY
+                }
+                state.clampScroll()
+            }
             refreshView()
         }
         if (prev.rotation != new.rotation) {
@@ -8676,6 +8743,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (evictPdfPageThumbnails()) pdfThumbTick++
             currentUri?.let { invalidateThumb(it) } // the recents tile re-renders with the new filter
         }
+        if (!new.verticalScroll && autoScrollOn) setAutoScroll(false)
         view.scrollbarEnabled = new.scrollbar
         view.requestRender()
     }
@@ -8711,6 +8779,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * note's View-menu settings ride along (folder notes remember them; anything else resets).
      */
     private fun installInitialView(path: String?) {
+        setAutoScroll(false)
         val saved = viewKey(path)?.let { viewStates.get(it) }
         installViewOverrides(saved?.overrides ?: com.xnotes.canvas.ViewOverrides())
         state.pendingInitialView =
@@ -9715,6 +9784,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         action == "redo" -> redo()
         action == "toggle_pan" -> toggleTool(Tool.PAN)
         action == "toggle_eraser" -> toggleTool(Tool.ERASER)
+        action == "toggle_lasso" -> toggleTool(Tool.LASSO)
         action == "toggle_previous" -> toggleToPreviousTool()
         else -> Unit
     }
@@ -9728,6 +9798,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Switch to the single previous tool; no-op on a fresh launch with no previous tool. */
     private fun toggleToPreviousTool() {
         controller.previousTool?.let { selectTool(it) }
+    }
+
+    /** Show the light or the dark appearance's swatches; the armed slot stays, so the ink becomes its partner. */
+    private fun useSwatchesFor(dark: Boolean) {
+        if (dark == swatchesDark) return
+        otherSwatches = toolbarColors.also { toolbarColors = otherSwatches }
+        swatchesDark = dark
+        controller.inkColor = toolbarInk()
+        infiniteOrNull?.adoptSwatches(toolbarColors)
     }
 
     /** The colour selected on the toolbar, which typed and pasted ==text== highlights in. */
@@ -10982,6 +11061,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun handleFlowKey(e: android.view.KeyEvent): Boolean {
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        // A physical keyboard AltGr carries no flag of its own: it arrives as Alt (and often as
+        // Ctrl too), and the layout has already composed what the chord stands for - AltGr+Q on a
+        // QWERTZ board comes back as "@" before any rule below reads the modifiers as commands.
+        // Ctrl on its own still means a shortcut, so an unbound Ctrl chord stays global.
+        if (e.isAltPressed && e.unicodeChar != 0) {
+            val composed = deadKeys.accept(e.unicodeChar) ?: return true // a dead key waiting for its letter
+            flowText.applyReplace(flowText.selection, composed)
+            return true
+        }
+
         when {
             // Escape backs out of the slash menu first; a second one ends the session.
             e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE ->
@@ -11031,7 +11120,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             e.keyCode == android.view.KeyEvent.KEYCODE_MOVE_END -> flowLineEdge(start = false, extend = shift)
             else -> {
                 val ch = e.unicodeChar
-                if (ch == 0 || e.isAltPressed) return false
+                if (ch == 0) return false
                 val typed = deadKeys.accept(ch) ?: return true // a dead key waiting for its letter
                 flowText.applyReplace(flowText.selection, typed)
             }
@@ -13044,6 +13133,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val shape = sourceCanvas?.shapeConfig ?: source.shapeConfig
         val configs = ToolDefaults.persistedTools.associateWith { sourceCanvas?.toolConfig(it) ?: source.controller.configFor(it) }
         toolbarColors = colors.toList()
+        otherSwatches = source.otherSwatches
+        swatchesDark = source.swatchesDark
         toolbarColorCount = sourceCanvas?.toolbarColorCount ?: source.toolbarColorCount
         activeColorIndex = colorIndex
         configs.forEach { (tool, config) -> controller.setToolConfig(tool, config) }
@@ -13311,6 +13402,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         resetPenButtons()
         if (!noteOpen) return
+        setAutoScroll(false)
         // Closing the note places a recording still going, before the note is saved.
         AudioRecording.stopFor(this)
         infiniteOrNull?.let { AudioRecording.stopFor(it) }

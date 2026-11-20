@@ -10,7 +10,7 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.ImageView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.history.AddItem
@@ -61,8 +61,8 @@ class MapGraphSourceEditingHostTest {
         }
         assertTrue(requireNotNull(button).performAction(AccessibilityNodeInfo.ACTION_CLICK));runner.waitForIdleSync()
     }
-    private fun graph(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
-    private fun ready(activity:MainActivity)=activity.mapWorkspace!=null && activity.documentEditor!=null &&
+    private fun graph(activity:EditorActivity)=views(activity.window.decorView).filterIsInstance<MindMapView>().singleOrNull()
+    private fun ready(activity:EditorActivity)=activity.mapWorkspace!=null && activity.documentEditor!=null &&
         views(activity.window.decorView).let {tree->tree.any {it.javaClass.name=="androidx.compose.ui.platform.AndroidComposeView" && it.width>0} &&
             tree.filterIsInstance<ImageView>().none {it.drawable is AnimationDrawable}}
     private fun join(job:Job?) {if(job!=null) runBlocking {withTimeout(15000) {job.join()}}}
@@ -81,7 +81,7 @@ class MapGraphSourceEditingHostTest {
         })}
         fun restore() {field.set(store,original)}
     }
-    private inner class Scene(var activity:MainActivity,val folder:File,val a:File,val b:File,
+    private inner class Scene(var activity:EditorActivity,val folder:File,val a:File,val b:File,
         val source:MapSource,val aDoc:MindMapDocument,val bDoc:MindMapDocument) {
         val maps=main {requireNotNull(activity.mapWorkspace)}
         val native=main {requireNotNull(activity.documentEditor)}
@@ -139,9 +139,9 @@ class MapGraphSourceEditingHostTest {
         val source=MapSource(documentId=bDoc.id,fileName="B.xmap",note="Actual B file source")
         val aDoc=MindMapDocument(nodes=listOf(MapNode(id="ar",parent=null,text="A root"),MapNode(id="n",parent="ar",text="A source",sources=listOf(source),primarySource=source.id)))
         val a=File(folder,"A.xmap").apply {writeBytes(MapCodec.encode(aDoc))};val b=File(folder,"B.xmap").apply {writeBytes(MapCodec.encode(bDoc))}
-        var activity:MainActivity?=null;var scene:Scene?=null
+        var activity:EditorActivity?=null;var scene:Scene?=null
         try {
-            val host=runner.startActivitySync(Intent(base,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            val host=runner.startActivitySync(Intent(base,EditorActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
             activity=host;await("Main completes restore") {main {ready(host)}}
             val f=Scene(host,folder,a,b,source,aDoc,bDoc);scene=f
             main {assertNull(f.maps.current);assertTrue(f.native.openPanes.isEmpty());f.native.newNote()}
@@ -204,8 +204,8 @@ class MapGraphSourceEditingHostTest {
         assertTrue(main {child.lease.alive && !child.session.closing})
         f.openB();f.edit("bn","Dirty B survives recreate")
         val aModel=main {f.origin.session.document};val bModel=main {child.session.document}
-        val monitor=runner.addMonitor(MainActivity::class.java.name,null,false)
-        val next=try {main {f.activity.recreate()};runner.waitForMonitorWithTimeout(monitor,15000) as? MainActivity}
+        val monitor=runner.addMonitor(EditorActivity::class.java.name,null,false)
+        val next=try {main {f.activity.recreate()};runner.waitForMonitorWithTimeout(monitor,15000) as? EditorActivity}
             finally {runner.removeMonitor(monitor)}
         assertNotNull(next);f.activity=requireNotNull(next)
         await("recreated Main retains B route") {main {ready(f.activity) && f.activity.mapWorkspace===f.maps && f.maps.current===child && graph(f.activity)?.height?.let {it>0}==true}}

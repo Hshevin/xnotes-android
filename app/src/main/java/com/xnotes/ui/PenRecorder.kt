@@ -19,7 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.pen.*
 import com.xnotes.ui.theme.*
@@ -83,8 +83,8 @@ internal fun PenRecorder(onRecorded: (List<PenTrigger>) -> Unit, onFailed: (PenR
     }
 }
 
-private fun Context.mainActivity(): MainActivity? = when (this) {
-    is MainActivity -> this
+private fun Context.mainActivity(): EditorActivity? = when (this) {
+    is EditorActivity -> this
     is ContextWrapper -> baseContext.takeUnless { it === this }?.mainActivity()
     else -> null
 }

@@ -250,7 +250,7 @@ class MapSourcePreviewBackendTest {
             assertEquals(doc,MapCodec.decode(f.provider.file(uri).readBytes()))
         } finally {release.countDown();writer.await();f.provider.afterTruncate=null;f.provider.queried=null}
     }}
-    @Test fun coldBackendWithoutMainActivityPaintsBuiltInLinesInsteadOfSuccessfulBlankPaper()=SavedCatalogs().use {catalogs->
+    @Test fun coldBackendWithoutEditorActivityPaintsBuiltInLinesInsteadOfSuccessfulBlankPaper()=SavedCatalogs().use {catalogs->
         catalogs.cold()
         Fixture(initializeCatalogs=false).use {f->
             val doc=Document(mutableListOf(Page(200.0,200.0)),dpi=72).apply {

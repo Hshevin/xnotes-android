@@ -106,10 +106,24 @@ class NativeCreationTest {
         } finally {foreign.registry.close()}
     }
     @Test fun unsupportedKindsNeverAcquireACreationContext()=scenario {f->
-        for(kind in listOf(DocumentKind.MIND_MAP,DocumentKind.SPLIT))
+        for(kind in listOf(DocumentKind.MIND_MAP,DocumentKind.SPLIT,DocumentKind.PDF))
             assertThrows(ReferenceContractViolation::class.java) {f.storage.beginCreation(kind)}
         assertEquals(0,f.reads);assertEquals(0,f.writes)
     }
+    @Test fun anEmptyPdfDestinationCannotReceiveANoteBundle() = scenario { f ->
+        val pdf = File(f.root, "source.PDF").apply { createNewFile() }
+        val uri = android.net.Uri.fromFile(pdf).toString()
+        val storage = NotebookStorage(f.context)
+        try {
+            assertThrows(ReferenceContractViolation::class.java) {
+                storage.prepareNewTarget(storage.beginCreation(DocumentKind.NOTE), uri)
+            }
+            assertTrue(pdf.exists())
+            assertEquals(0L, pdf.length())
+            assertFalse(storage.hasRecovery(uri))
+        } finally { storage.registry.close() }
+    }
+
     @Test fun nonemptyKnownOrUnreadableTargetsAreNeverTreatedAsNewFiles()=scenario {f->
         f.current.writeText("foreign existing file")
         val bad=f.storage.beginCreation(DocumentKind.NOTE)

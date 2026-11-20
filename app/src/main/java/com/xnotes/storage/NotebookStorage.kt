@@ -419,13 +419,34 @@ class NotebookStorage internal constructor(private val context:Context,
         releaseCompletedPin(uri)
         return requireNotNull(receipt)
     }
+    /** Native bundle publication and recovery must never replace an original PDF. */
+    private fun checkBundleName(name: String?) {
+        if (name?.endsWith(".pdf", ignoreCase = true) == true)
+            throw ReferenceContractViolation(StorageMsg.NATIVE_CREATION_TARGET_INVALID)
+    }
+
+    private fun checkBundleDestination(uri: Uri) {
+        checkBundleName(uri.lastPathSegment)
+        if (uri.scheme != "content" || uri.authority == context.packageName + ".documents") return
+        val resolver = context.contentResolver
+        if (resolver.getType(uri).equals("application/pdf", ignoreCase = true))
+            throw ReferenceContractViolation(StorageMsg.NATIVE_CREATION_TARGET_INVALID)
+        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) checkBundleName(it.getString(0))
+        }
+    }
+
     private fun target(uri:String):MigrationPublication.Target {
         targetOverride?.let {return it(uri)}
         val parsed=Uri.parse(uri)
-        if(parsed.authority==context.packageName+".documents") return OwnedRecoveryTarget(context,DocumentsContract.getDocumentId(parsed))
+        if(parsed.authority==context.packageName+".documents") {
+            checkBundleName(DocumentsContract.getDocumentId(parsed))
+            return OwnedRecoveryTarget(context,DocumentsContract.getDocumentId(parsed))
+        }
         return object:MigrationPublication.Target {
             override fun read()=requireNotNull(context.contentResolver.openInputStream(parsed)) {StorageText.t(StorageMsg.NOTE_UNREADABLE)}
             override fun write(source:File) {
+                checkBundleDestination(parsed)
                 val descriptor=requireNotNull(context.contentResolver.openFileDescriptor(parsed,"rwt")) {StorageText.t(StorageMsg.NOTE_NOT_WRITABLE)}
                 android.os.ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use {out->
                     source.inputStream().use {it.copyTo(out)};out.flush();out.fd.sync()
@@ -669,6 +690,7 @@ class NotebookStorage internal constructor(private val context:Context,
     /** IO-only. The caller must bind this request to its original model before accepting a picker result. */
     internal fun prepareNewTarget(intent:NativeCreationIntent,uri:String,checkActive:()->Unit={}):NativeCreationPermit = synchronized(lock) {
         intent.consume(creationIssuer);checkActive()
+        if (targetOverride == null) checkBundleDestination(Uri.parse(uri))
         if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         registry.verifyCreation(intent.documentId,intent.kind.extension,uri)
         requireEmptyTarget(target(uri),checkActive)
@@ -883,6 +905,7 @@ class NotebookStorage internal constructor(private val context:Context,
         val root = AppStorageDocumentsProvider.rootDir(context).canonicalFile
         val file = File(root, id.removePrefix("root/")).canonicalFile
         require(file.path.startsWith(root.path + File.separator)) { StorageText.t(StorageMsg.INVALID_NOTE_PATH) }
+        checkBundleName(file.name)
         return file
     }
     companion object {

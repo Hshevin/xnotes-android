@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Drawing a PDF's pages again once its note is closed goes on after xnotes leaves the screen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The apps that act on selected text ("Translate", "Search"), listed in a PDF text
@@ -25,27 +27,22 @@
         </intent>
     </queries>
 
+    <!-- Left to right in every locale: the chrome places menus and overlays by screen coordinates. -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="${appLabel}"
         android:largeHeap="true"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
+        android:supportsRtl="false"
         android:theme="@style/Theme.Xnotes">
         <activity
-            android:name=".MainActivity"
+            android:name=".EditorActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.Xnotes.Splash"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|density|uiMode"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
             <!-- "Open with" a PDF from a file manager: import it into a new note. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -80,6 +77,137 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|density|uiMode"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- The launcher entry: an alias, so the icon can switch; the old name keeps shortcuts working. -->
+        <activity-alias
+            android:name=".MainActivity"
+            android:exported="true"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- The other icons, off until one is picked. -->
+        <activity-alias
+            android:name=".IconCreamRose"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_cream_rose"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconInkTile"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_ink_tile"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconGraphite"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_graphite"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconSumi"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_sumi"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconPow"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_pow"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconMarbling"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_marbling"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconClassic"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_classic"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Icons no longer offered: kept so a launcher entry using one stays, drawn as the icon AppIcons maps it to. -->
+        <activity-alias
+            android:name=".IconLime"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconAqua"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconCreamTile"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_ink_tile"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <service
+            android:name=".platform.PdfExportService"
+            android:enabled="false"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name=".platform.RecordingService"

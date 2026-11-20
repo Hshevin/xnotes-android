@@ -60,6 +60,17 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     @Volatile
     private var target: Surface? = null
 
+    /**
+     * The display rotation [layer] was opened under, which is the one its buffer is turned to.
+     *
+     * The compositor tells a layer which way the display faces when the layer is made, and the
+     * driver turns the buffer to match when the surface is made. A single buffered surface never
+     * swaps, so neither is looked at again, and a pad left as it was through a rotation has to be
+     * turned by the display on every refresh. Some panels do that by copying the layer first, and
+     * a copy of a front buffer is a frame behind it at best: see [turned]. Main thread only.
+     */
+    private var turn = -1
+
     /** Set when something has arrived that has not been drawn, so offers collapse into one draw. */
     private val dirty = AtomicBoolean(false)
 
@@ -183,8 +194,10 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         val t = HandlerThread("xnotes-wet-pad").also { it.start() }
         thread = t
         handler = Handler(t.looper)
-        val surface = openLayer(holder) ?: holder.surface
+        val frame = holder.surfaceFrame
+        val surface = openLayer(parentLayer(), frame.width(), frame.height()) ?: holder.surface
         target = surface
+        turn = display?.rotation ?: -1
         post { createEgl(surface) }
         // Nothing to show until a pen is down, and a hidden layer is one the compositor does not
         // have to blend every refresh.
@@ -193,7 +206,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         val generation = surfaceGeneration
-        post { resize(width, height, generation) }
+        val parent = parentLayer()
+        post { resize(width, height, generation, parent) }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -225,23 +239,41 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      * the driver is still queueing a pad frame crashes inside BLASTBufferQueue. Nothing knows about
      * this layer's queue, so nothing syncs it. Before Android 12 there is no such sync.
      */
-    private fun openLayer(
-        holder: SurfaceHolder,
-        width: Int = holder.surfaceFrame.width(),
-        height: Int = holder.surfaceFrame.height(),
-    ): Surface? {
-        if (android.os.Build.VERSION.SDK_INT < 31) return null
-        val parent = surfaceControl?.takeIf { it.isValid } ?: return null
+    private fun openLayer(parent: SurfaceControl?, w: Int, h: Int): Surface? {
+        if (android.os.Build.VERSION.SDK_INT < 31 || parent == null) return null
         val child = SurfaceControl.Builder()
             .setName("xnotes-wet-pad")
             .setParent(parent)
-            .setBufferSize(width.coerceAtLeast(1), height.coerceAtLeast(1))
+            .setBufferSize(w.coerceAtLeast(1), h.coerceAtLeast(1))
             .setFormat(android.graphics.PixelFormat.TRANSLUCENT)
             .build()
         // Above the SurfaceView's own layer, which never gets a buffer now.
         SurfaceControl.Transaction().use { it.setLayer(child, 1).apply() }
         layer = child
         return Surface(child)
+    }
+
+    /** The SurfaceView's layer, which [layer] hangs under. The view's, so read on the main thread. */
+    private fun parentLayer(): SurfaceControl? =
+        if (android.os.Build.VERSION.SDK_INT >= 31) surfaceControl?.takeIf { it.isValid } else null
+
+    /**
+     * Whether the display has turned since [layer] was opened, in which case it is opened again.
+     *
+     * Asked when a pen comes down, not when the rotation is announced: the window hears of a
+     * rotation before the compositor has made it, and a layer opened in between is told the old
+     * one. Nobody can write on the turned screen before it is there.
+     */
+    private fun turned(): Boolean {
+        val now = display?.rotation ?: return false
+        if (now == turn) return false
+        turn = now
+        val parent = parentLayer()
+        val w = width
+        val h = height
+        val generation = surfaceGeneration
+        post { if (generation == surfaceGeneration) rebuild(w, h, parent, generation) }
+        return true
     }
 
     /** Let the layer go, once nothing on the pad's thread can be drawing into it. */
@@ -278,6 +310,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         // stands would land wherever the compositor stretched the layer, so this stroke takes the
         // ordinary path and the next one gets the pad back.
         if (width != surfaceW || height != surfaceH) return false
+        // Nor is it turned again after a rotation, and this stroke waits for that the same way.
+        if (turned()) return false
         if (!ink.begin(scrollX, scrollY, zoom, width, height, clip, lightBlackInk)) return false
         // Read here, on the main thread, because the delay the handover needs is one of these and
         // the pad's own thread has no display.
@@ -606,27 +640,47 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      * moment the canvas takes it back. Nothing here is cheap and nothing here is frequent either,
      * since a resize is a layout the whole window has already paid for.
      */
-    private fun resize(w: Int, h: Int, generation: Long) {
+    private fun resize(w: Int, h: Int, generation: Long, parent: SurfaceControl?) {
         if (w == surfaceW && h == surfaceH) return
+        rebuild(w, h, parent, generation)
+    }
+
+    /**
+     * Build the surface again, on a new layer under [parent] whenever the pad has a layer of its
+     * own. A rotation needs one because resizing a layer in place puts it back to the rotation it
+     * was opened under; a split resize needs one because a new EGLSurface alone still connects to
+     * the old native window's shared-buffer queue, which can report SINGLE and the right size
+     * while the compositor keeps reading the previous buffer.
+     */
+    private fun rebuild(w: Int, h: Int, parent: SurfaceControl?, generation: Long) {
         // A pad that never came up will not come up for being asked twice.
         if (!ready) return
         var surface = target ?: return
+        // Down before the host hears, so a stroke it brings straight back is refused.
+        ready = false
         // Every pixel goes with the surface, so nothing on it may be joined or handed over.
         ink.forget()
         mainHandler.post { if (generation == surfaceGeneration) onSurfaceLost?.invoke() }
         destroyEgl()
-        if (layer != null) {
-            // A new EGLSurface alone still connects to the old native window's shared-buffer
-            // queue. After split resizing it can report SINGLE and the correct dimensions while
-            // the compositor keeps reading the previous buffer. Give the new EGL context a new
-            // queue as well, so its transition swap publishes the buffer it will actually write.
+        val fresh = parent != null && parent.isValid && layer != null
+        if (fresh) {
             closeLayer()
-            surface = openLayer(holder, w, h) ?: holder.surface
+            surface = openLayer(parent, w, h) ?: holder.surface
             target = surface
+        } else {
+            sizeLayer(w, h)
         }
         createEgl(surface)
         setLayerVisible(false)
-        Log.i(TAG, "wet pad surface rebuilt for ${w}x$h, got ${surfaceW}x$surfaceH")
+        val what = if (fresh) "reopened" else "rebuilt"
+        Log.i(TAG, "wet pad surface $what for ${w}x$h, got ${surfaceW}x$surfaceH")
+    }
+
+    /** SurfaceView sizes its own queue, so the pad's layer is the pad's to size. */
+    private fun sizeLayer(w: Int, h: Int) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        val child = layer?.takeIf { it.isValid } ?: return
+        SurfaceControl.Transaction().use { it.setBufferSize(child, w, h).apply() }
     }
 
     /**

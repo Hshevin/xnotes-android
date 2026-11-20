@@ -25,6 +25,9 @@ class DebugOverlay {
     /** What the front buffer is doing, when there is one; installed by the host. */
     var frontHud: () -> String? = { null }
 
+    /** Seconds autoscroll needs to reach the end of the note, or null while it is off; installed by the host. */
+    var autoScrollHud: () -> Double? = { null }
+
     fun toggle() {
         enabled = !enabled
     }
@@ -80,6 +83,11 @@ class DebugOverlay {
 
     private fun memStat(key: String): Long = memInfo.getMemoryStat(key)?.toLongOrNull() ?: 0L
 
+    private fun fmtDuration(seconds: Double): String {
+        val s = seconds.toLong()
+        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+    }
+
     private fun fmtBytes(bytes: Long): String =
         if (bytes < 1024 * 1024) "%.0f KB".format(bytes / 1024.0) else "%.2f MB".format(bytes / MB)
 
@@ -94,6 +102,7 @@ class DebugOverlay {
         val (rw, rh) = state.targetRasterSize()
         val res = if (rw > 0) "$rw x $rh" else "-"
         val lines = buildList {
+            autoScrollHud()?.let { add("end in     ${fmtDuration(it)}") }
             add("%.0f fps   %.1f ms".format(fps, frameMs))
             add("cache res  $res")
             add("visible    ${snap.visiblePages} pg")
@@ -131,42 +140,46 @@ class DebugOverlay {
                 add(" saf copy  ${state.lastSaveCopyMs} ms")
             }
         }
-
-        // Measure each row as it will actually be laid out, not as one line: [Renderer.drawText]
-        // wraps to the rect's width, so a row too long for the panel used to be drawn over the one
-        // below it. Advancing by the wrapped height pushes the rest down instead.
-        val textW = PANEL_W - PAD_X * 2
-        val rowH = lines.map { AndroidText.blockHeight(it, textW.toInt(), FONT) }
-        val hintH = AndroidText.lineHeight(HINT_FONT)
-        val panelH = PAD_Y * 2 + rowH.sum() + HINT_GAP + hintH
-        val x = state.viewportW - PANEL_W - MARGIN
-        val y = MARGIN
-
-        r.fillRect(Rect(x, y, PANEL_W, panelH), PANEL_BG)
-
-        var ty = y + PAD_Y
-        for (i in lines.indices) {
-            r.drawText(lines[i], Rect(x + PAD_X, ty, textW, rowH[i]), FONT, TEXT)
-            ty += rowH[i]
-        }
-        r.drawText(HINT, Rect(x + PAD_X, ty + HINT_GAP, textW, hintH), HINT_FONT, TEXT_DIM)
+        drawPanel(r, lines, state.viewportW.toDouble())
     }
 
     companion object {
+        /** Draw [lines] as the HUD panel at the top right of a view [viewportW] px wide; the canvas's HUD shares it. */
+        fun drawPanel(r: AndroidRenderer, lines: List<String>, viewportW: Double) {
+            // Measure each row as it will actually be laid out, not as one line: [Renderer.drawText]
+            // wraps to the rect's width, so a row too long for the panel used to be drawn over the one
+            // below it. Advancing by the wrapped height pushes the rest down instead.
+            val textW = PANEL_W - PAD_X * 2
+            val rowH = lines.map { AndroidText.blockHeight(it, textW.toInt(), FONT) }
+            val hintH = AndroidText.lineHeight(HINT_FONT)
+            val panelH = PAD_Y * 2 + rowH.sum() + HINT_GAP + hintH
+            val x = viewportW - PANEL_W - MARGIN
+            val y = MARGIN
+
+            r.fillRect(Rect(x, y, PANEL_W, panelH), PANEL_BG)
+
+            var ty = y + PAD_Y
+            for (i in lines.indices) {
+                r.drawText(lines[i], Rect(x + PAD_X, ty, textW, rowH[i]), FONT, TEXT)
+                ty += rowH[i]
+            }
+            r.drawText(HINT, Rect(x + PAD_X, ty + HINT_GAP, textW, hintH), HINT_FONT, TEXT_DIM)
+        }
+
         private const val MB = 1024.0 * 1024.0
         private const val IDLE_GAP_NS = 200_000_000L // deltas longer than 200ms count as idle
         private const val MEM_SAMPLE_NS = 1_000_000_000L // re-read PSS from smaps at most once a second
         private const val SMOOTH = 0.15 // EMA weight on the newest frame
 
-        private const val PANEL_W = 460.0
+        private const val PANEL_W = 310.0
         private const val MARGIN = 16.0
-        private const val PAD_X = 20.0
-        private const val PAD_Y = 18.0
-        private const val HINT_GAP = 10.0
+        private const val PAD_X = 14.0
+        private const val PAD_Y = 12.0
+        private const val HINT_GAP = 7.0
 
         private const val HINT = "four finger tap to dismiss"
-        private val FONT = FontSpec(15.0, bold = true)
-        private val HINT_FONT = FontSpec(11.0)
+        private val FONT = FontSpec(10.0, bold = true)
+        private val HINT_FONT = FontSpec(8.0)
         private val PANEL_BG = Rgba(0, 0, 0, 170)
         private val TEXT = Rgba(238, 238, 238)
         private val TEXT_DIM = Rgba(175, 175, 175)

@@ -7,7 +7,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.MixedInputBinding
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.core.tools.Tool
@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
 @Config(manifest=Config.NONE,sdk=[35])
 class MainMixedInputHostTest {
     private data class Seen(val action:Int,val buttons:Int,val pressure:Float,val tilt:Float,val ids:List<Int>)
-    private class RecordingView(activity:MainActivity):View(activity) {
+    private class RecordingView(activity:EditorActivity):View(activity) {
         val touches=mutableListOf<Seen>()
         val keys=mutableListOf<Int>()
         init {isClickable=true;isFocusable=true;isFocusableInTouchMode=true}
@@ -45,7 +45,7 @@ class MainMixedInputHostTest {
                 (origin[0]+width).toFloat(),(origin[1]+height).toFloat())
         }
     }
-    private class Scene(val activity:MainActivity,val editor:Editor,val maps:MapWorkspace,
+    private class Scene(val activity:EditorActivity,val editor:Editor,val maps:MapWorkspace,
         val map:RecordingView,val native:RecordingView,val input:MixedInputBinding) {
         val mapTarget=MixedInputRouter.Target(Pane.SECONDARY,MixedInputRouter.Kind.MAP)
         val nativeTarget=MixedInputRouter.Target(Pane.PRIMARY,MixedInputRouter.Kind.NATIVE)
@@ -96,7 +96,7 @@ class MainMixedInputHostTest {
             withTimeout(10000L) {while(!withContext(Dispatchers.Main) {maps.visible && maps.current?.session?.document!=null}) delay(1L)}
             withContext(Dispatchers.Main) {
                 assertTrue(maps.showSplit(requireNotNull(maps.current),MapSplitLayout(Pane.SECONDARY,Pane.SECONDARY,.3f,true,true)))
-                val activity=Robolectric.buildActivity(MainActivity::class.java).get()
+                val activity=Robolectric.buildActivity(EditorActivity::class.java).get()
                 activity.setTheme(android.R.style.Theme_Material_Light_NoActionBar)
                 val container=FrameLayout(activity).apply {isMotionEventSplittingEnabled=false}
                 val map=RecordingView(activity);val native=RecordingView(activity)
@@ -106,7 +106,7 @@ class MainMixedInputHostTest {
                 activity.window.decorView.measure(View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(1000,View.MeasureSpec.EXACTLY))
                 activity.window.decorView.layout(0,0,1000,1000)
-                MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(activity,f.editor)
+                EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(activity,f.editor)
                 activity.mapWorkspace=maps
                 val router=MixedInputRouter()
                 val input=MixedInputBinding(router,native={f.editor.takeIf {maps.splitPresentation.layout?.focusedPane==Pane.PRIMARY}},
@@ -122,7 +122,7 @@ class MainMixedInputHostTest {
         } finally {withContext(NonCancellable) {
             val disposal=withContext(Dispatchers.Main) {
                 scene?.let {s->resetClick(s);s.activity.mixedInput=null;s.activity.mapWorkspace=null;s.activity.penKeyRecorder=null
-                    MainActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(s.activity,null)
+                    EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(s.activity,null)
                     s.activity.window.setContentView(View(s.activity));s.editor.resetPenButtons()}
                 StylusButtonLatch.releaseKey();maps.dispose()
             }

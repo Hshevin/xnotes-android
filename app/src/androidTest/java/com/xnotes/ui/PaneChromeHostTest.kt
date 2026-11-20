@@ -185,7 +185,7 @@ internal fun injectWindowStylus(start: Pt, end: Pt, rawButtons: Int = 0) {
     runner.waitForIdleSync()
 }
 
-/** Shared fixture uses a real window, without starting MainActivity or reading its workspace. */
+/** Shared fixture uses a real window, without starting EditorActivity or reading its workspace. */
 internal class ComposeHostFixture private constructor(val activity: RenderHostTestActivity) {
     private val runner = PenTestRunner.instance
     private val composition = onMain { ComposeView(activity).also { activity.host.addView(it, FrameLayout.LayoutParams(-1, -1)) } }

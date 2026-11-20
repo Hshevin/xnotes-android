@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.MaterialColourMode
@@ -56,7 +55,7 @@ private data class ColourPreset(@param:StringRes val name: Int, val accent: Rgba
 private fun rgb(value: Int) = Rgba.fromArgb(value or (0xff shl 24))
 
 private val singleColourSize = 32.dp
-private val singleColourSpacing = 4.dp
+private val singleColourSpacing = Space.s4
 
 private val singleTonePresets = listOf(
     ColourPreset(R.string.hue_red, Preferences.DEFAULT_MATERIAL_SINGLE),
@@ -69,9 +68,13 @@ private val singleTonePresets = listOf(
     ColourPreset(R.string.material_amber, rgb(0xffc107)),
 )
 
-// Base2Tone D3 accents and B3 surface seeds; attribution and revision in assets/licenses/base2tone.txt.
+// Row one wears the launcher icons' colours; then Base2Tone D3 accents and B3 surfaces (assets/licenses/base2tone.txt).
 private val dualTonePresets = listOf(
-    ColourPreset(R.string.material_morning, Preferences.DEFAULT_MATERIAL_DUAL, Preferences.DEFAULT_MATERIAL_SURFACE),
+    ColourPreset(R.string.material_bubblegum, Preferences.DEFAULT_MATERIAL_DUAL, Preferences.DEFAULT_MATERIAL_SURFACE),
+    ColourPreset(R.string.material_rose, rgb(0xff6b8e), rgb(0xf5f0e4)),
+    ColourPreset(R.string.material_lime, rgb(0xc8f55a), rgb(0x7a5cff)),
+    ColourPreset(R.string.material_aqua, rgb(0x7df4ea), rgb(0x2fa6b3)),
+    ColourPreset(R.string.material_morning, rgb(0x9a7c42), rgb(0x3d75e6)),
     ColourPreset(R.string.material_evening, rgb(0xffa142), rgb(0x9a86fd)),
     ColourPreset(R.string.material_sea, rgb(0x0db57d), rgb(0x57718e)),
     ColourPreset(R.string.material_forest, rgb(0xb1c44f), rgb(0x687d68)),
@@ -204,7 +207,7 @@ private fun CustomColourField(
             Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.4f).clip(shape)
                 .background(palette.surface.toComposeColor()).border(1.dp, palette.border.toComposeColor(), shape)
                 .clickable(enabled = enabled, role = Role.Button) { open = true }
-                .heightIn(min = 56.dp).padding(horizontal = 10.dp, vertical = if (compact) 6.dp else 8.dp),
+                .heightIn(min = 56.dp).padding(horizontal = Space.s12, vertical = if (compact) Space.s6 else Space.s8),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8),
         ) {
             Box(Modifier.size(if (compact) 20.dp else 24.dp).clip(MaterialTheme.shapes.extraSmall).background(colour.toComposeColor()))
