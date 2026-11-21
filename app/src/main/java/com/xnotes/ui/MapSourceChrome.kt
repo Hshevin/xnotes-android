@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +29,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.xnotes.R
 import com.xnotes.core.model.Page
@@ -55,7 +67,55 @@ import java.util.UUID
  * link copied from a page menu.
  */
 @Composable
-internal fun MapSourcesPanel(editor: InfiniteEditor, onDismiss: () -> Unit) {
+internal fun MapSourcesPanel(editor: InfiniteEditor, node: IntRect, bar: IntRect, onDismiss: () -> Unit) {
+    val gap = with(LocalDensity.current) { Space.s12.roundToPx() }
+    // Placed beside the node, never over it or its action bar, so what the sources belong to stays in sight.
+    // The anchor is a zero-size box at the canvas origin, the space [node] and [bar] are measured in.
+    val place = remember(node, bar, gap) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+                val origin = IntOffset(anchorBounds.left, anchorBounds.top)
+                val at = sourcesPanelPlacement(
+                    node.translate(origin), bar.translate(origin), popupContentSize, windowSize, gap,
+                )
+                return at
+            }
+        }
+    }
+    Box(Modifier.size(Dp.Hairline)) {
+        Popup(popupPositionProvider = place, onDismissRequest = onDismiss, properties = PopupProperties(focusable = false)) {
+            MapSourcesBody(editor, onDismiss)
+        }
+    }
+}
+
+/**
+ * Where the sources panel of [panel] size goes: right of [node], else left of it, else below the
+ * node and its [bar], else above them; each kept inside [window] and clear of both. When nothing
+ * fits clear (a tiny window), it takes the right side clamped into the window.
+ */
+internal fun sourcesPanelPlacement(node: IntRect, bar: IntRect, panel: IntSize, window: IntSize, gap: Int): IntOffset {
+    val both = IntRect(
+        minOf(node.left, bar.left), minOf(node.top, bar.top), maxOf(node.right, bar.right), maxOf(node.bottom, bar.bottom),
+    )
+    fun clampY(y: Int) = y.coerceIn(0, maxOf(0, window.height - panel.height))
+    fun clampX(x: Int) = x.coerceIn(0, maxOf(0, window.width - panel.width))
+    fun fits(o: IntOffset): Boolean {
+        val r = IntRect(o.x, o.y, o.x + panel.width, o.y + panel.height)
+        return r.left >= 0 && r.top >= 0 && r.right <= window.width && r.bottom <= window.height &&
+            !r.overlaps(node) && !r.overlaps(bar)
+    }
+    val candidates = listOf(
+        IntOffset(node.right + gap, clampY(node.top)),
+        IntOffset(node.left - gap - panel.width, clampY(node.top)),
+        IntOffset(clampX(node.left), both.bottom + gap),
+        IntOffset(clampX(node.left), both.top - gap - panel.height),
+    )
+    return candidates.firstOrNull(::fits) ?: IntOffset(clampX(node.right + gap), clampY(node.top))
+}
+
+@Composable
+private fun MapSourcesBody(editor: InfiniteEditor, onDismiss: () -> Unit) {
     val map = editor.map
     editor.mapVersion
     val node = map.selected ?: return onDismiss()
@@ -67,7 +127,12 @@ internal fun MapSourcesPanel(editor: InfiniteEditor, onDismiss: () -> Unit) {
     LaunchedEffect(sources) {
         statuses = runCatching { withContext(Dispatchers.IO) { resolver.resolveAll(sources) } }.getOrDefault(emptyMap())
     }
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss, properties = PopupProperties(focusable = false)) {
+    Box(
+        Modifier
+            .clip(MaterialTheme.shapes.medium)
+            .background(palette.menuBg.toComposeColor())
+            .border(Dp.Hairline, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+    ) {
         Column(Modifier.width(SOURCES_WIDTH).padding(horizontal = Space.s16, vertical = Space.s8)) {
             PopupTitle(stringResource(R.string.map2_sources))
             if (sources.isEmpty()) {
