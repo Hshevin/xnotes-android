@@ -41,7 +41,25 @@ class NodeMetrics(private val titles: TitleMeasure) : NodeMeasure {
     }
 
     /** The node's parts with its top-left corner at [at]. */
-    fun frame(node: MapNode, isRoot: Boolean, at: Pt): NodeFrame = TODO("phase 1: gpt-6.2-astra")
+    fun frame(node: MapNode, isRoot: Boolean, at: Pt): NodeFrame {
+        val x = at.x + PAD_X
+        var y = PAD_Y
+        val title = if (node.title.isNotEmpty() || node.ink.isEmpty) {
+            val size = titles.measure(node.title, node.style.textSize, node.style.bold, MAX_TITLE_W)
+            Rect(x, at.y + y, size.w, size.h).also { y += size.h }
+        } else null
+        val ink = if (!node.ink.isEmpty) {
+            if (title != null) y += GAP
+            Rect(x, at.y + y, node.ink.width, node.ink.height).also { y += it.h }
+        } else null
+        val minWidth = if (isRoot) ROOT_MIN_W else MIN_W
+        val width = maxOf(minWidth, maxOf(title?.w ?: 0.0, node.ink.width) + 2 * PAD_X)
+        val sources = if (node.sources.isNotEmpty()) {
+            y += GAP
+            Rect(x, at.y + y, width - 2 * PAD_X, CHIP_H).also { y += CHIP_H }
+        } else null
+        return NodeFrame(Rect(at.x, at.y, width, y + PAD_Y), title, ink, sources)
+    }
 
     companion object {
         const val PAD_X = 16.0

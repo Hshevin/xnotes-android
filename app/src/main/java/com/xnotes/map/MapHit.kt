@@ -29,7 +29,19 @@ object MapHit {
     const val EDGE_BAND = 0.25
 
     /** The topmost visible node whose box contains [p], or null. */
-    fun nodeAt(state: MapState, layout: MapLayoutResult, p: Pt): NodeId? = TODO("phase 1: gpt-6.2-astra")
+    fun nodeAt(state: MapState, layout: MapLayoutResult, p: Pt): NodeId? =
+        topmost(state, layout, p, skip = null)
+
+    private fun topmost(state: MapState, layout: MapLayoutResult, p: Pt, skip: NodeId?): NodeId? {
+        var hit: NodeId? = null
+        state.walkTrees(state.roots) { id ->
+            val rect = layout.rectOf(id)
+            if (id == skip || rect == null) return@walkTrees false
+            if (rect.contains(p)) hit = id
+            true
+        }
+        return hit
+    }
 
     /**
      * What dropping [dragged] does when the finger is at [pointer] and the node has been dragged by
@@ -47,6 +59,29 @@ object MapHit {
      *    [DropAction.None].
      * 4. Without a target: [DropAction.Nudge] by [delta], or [DropAction.None] when [delta] is zero.
      */
-    fun drop(state: MapState, layout: MapLayoutResult, dragged: NodeId, pointer: Pt, delta: Vec): DropAction =
-        TODO("phase 1: gpt-6.2-astra")
+    fun drop(state: MapState, layout: MapLayoutResult, dragged: NodeId, pointer: Pt, delta: Vec): DropAction {
+        if (dragged !in state.nodes) return DropAction.None
+        val target = topmost(state, layout, pointer, skip = dragged)
+            ?: return if (delta.isZero) DropAction.None else DropAction.Nudge(delta)
+        val targetParent = state.parent[target]
+        var parent = target
+        var slot = state.childrenOf(target).size
+        if (targetParent != null) {
+            val box = layout.placements.getValue(target).rect
+            val horizontal = layout.placements.getValue(targetParent).side == GrowSide.DOWN
+            val pos = if (horizontal) pointer.x - box.left else pointer.y - box.top
+            val extent = if (horizontal) box.w else box.h
+            val before = pos <= extent * EDGE_BAND
+            if (before || pos >= extent * (1.0 - EDGE_BAND)) {
+                parent = targetParent
+                slot = state.childrenOf(parent).indexOf(target) + if (before) 0 else 1
+            }
+        }
+        if (state.parent[dragged] == parent) {
+            val old = state.childrenOf(parent).indexOf(dragged)
+            if (old < slot) slot--
+            if (old == slot) return DropAction.None
+        }
+        return DropAction.Reparent(parent, slot)
+    }
 }
