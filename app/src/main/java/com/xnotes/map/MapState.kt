@@ -85,13 +85,13 @@ data class NodeStyle(
     val fill: Rgba? = Rgba(255, 255, 255),
     val text: Rgba = Rgba(0, 0, 0),
     val borderWidth: Double = 2.0,
-    /** Title text size in canvas units. */
-    val textSize: Double = 18.0,
+    /** Title text size in canvas units; the default matches a canvas text box's 13 pt. */
+    val textSize: Double = 27.0,
     val bold: Boolean = false,
 ) {
     companion object {
         /** The style a new root gets. */
-        val ROOT = NodeStyle(borderWidth = 3.0, textSize = 22.0, bold = true)
+        val ROOT = NodeStyle(borderWidth = 3.0, textSize = 34.0, bold = true)
 
         /** The style a new child or sibling gets. */
         val TOPIC = NodeStyle()

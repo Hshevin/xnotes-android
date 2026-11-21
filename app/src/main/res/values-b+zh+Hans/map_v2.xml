@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mind map v2 on the canvas (docs/movinkpad/mind-map-v2-design-2026-11-21.md). -->
+<resources>
+    <string name="tool_map">导图</string>
+    <string name="map2_edit_text">编辑文字</string>
+    <string name="map2_add_child">添加子主题</string>
+    <string name="map2_add_sibling">添加同级主题</string>
+    <string name="map2_collapse">折叠</string>
+    <string name="map2_expand">展开</string>
+    <string name="map2_layout">布局</string>
+    <string name="map2_layout_right">向右</string>
+    <string name="map2_layout_balanced">左右平衡</string>
+    <string name="map2_layout_org">组织结构图</string>
+    <string name="map2_layout_indent">缩进树</string>
+    <string name="map2_reset_node">恢复自动位置</string>
+    <string name="map2_reset_tree">整棵树恢复自动位置</string>
+    <string name="map2_detach">拆为独立主题</string>
+    <string name="map2_style">样式</string>
+    <string name="map2_shape">形状</string>
+    <string name="map2_shape_rounded">圆角矩形</string>
+    <string name="map2_shape_ellipse">椭圆</string>
+    <string name="map2_shape_underline">下划线</string>
+    <string name="map2_border">边框</string>
+    <string name="map2_fill">填充</string>
+    <string name="map2_text_color">文字</string>
+    <string name="map2_no_fill">无填充</string>
+    <string name="map2_bold">加粗</string>
+    <string name="map2_text_size">字号</string>
+    <string name="map2_size_small">小</string>
+    <string name="map2_size_medium">中</string>
+    <string name="map2_size_large">大</string>
+    <string name="map2_arrows">箭头</string>
+    <string name="map2_arrow_none">无箭头</string>
+    <string name="map2_arrow_forward">终点箭头</string>
+    <string name="map2_arrow_backward">起点箭头</string>
+    <string name="map2_arrow_both">两端箭头</string>
+    <string name="map2_relation_reverse">反向</string>
+    <string name="map2_relation_label">说明文字</string>
+    <string name="map2_relation_label_hint">描述这条关系</string>
+    <string name="map2_color">颜色</string>
+    <string name="map2_title_hint">主题</string>
+</resources>

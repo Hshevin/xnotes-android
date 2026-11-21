@@ -62,6 +62,8 @@ import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.Tool
+import com.xnotes.map.rootsOnLayer
+import com.xnotes.map.withoutSubtrees
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.vector.VectorMesher
@@ -166,7 +168,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onWetStroke = { publishWetStroke(it) },
         onCommitStroke = { commitStroke(it) },
         onScribbleErase = { stroke, taken -> commitScribbleErase(stroke, taken) },
-        onEraseBegin = { EraseSession(document) },
+        onEraseBegin = {
+            map.commitTitle()
+            EraseSession(document, com.xnotes.map.MapInkErase(document.map, mapMetrics, { map.shown }) { id ->
+                mapHost.layerEditable(document.map.state.layers[document.map.state.rootOf(id)])
+            })
+        },
         onEraseEnd = { commitErase(it) },
         onEraseLifted = { maybeSwitchBackAfterErase() },
         onEraserCursor = { at, radius -> view.setEraserCursor(at, radius) },
@@ -540,6 +547,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             scene.reset(imageDecodeBinding)
             sceneLayers.clear()
             for (item in document.items) pushItem(item, vectorJobs)
+            map.reproject()
             publishLayerOrder()
         }
     }
@@ -578,7 +586,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Publish z order across every layer, and which layers are hidden, as one update. */
     private fun publishLayerOrder() {
-        val ordered = document.layers.stacked(document.items)
+        val ordered = document.layers.stacked(document.items + map.parts)
         val active = document.layers.entries.indexOfFirst { it.id == document.layers.activeId }
         val belowOrActive = document.layers.entries.take(active + 1).map { it.id }.toSet()
         val end = ordered.indexOfLast { it.layerId in belowOrActive }
@@ -691,6 +699,133 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Only text needs a measurer to clone, and the canvas has none; this satisfies the signature. */
     private val textMeasurer = com.xnotes.platform.AndroidTextMeasurer()
 
+    // --- mind maps (docs/movinkpad/mind-map-v2-design-2026-11-21.md) ---
+
+    private val mapTitles = com.xnotes.map.ui.MapTitles(textMeasurer)
+    private val mapMetrics = com.xnotes.map.NodeMetrics(mapTitles)
+    private val mapProjection = com.xnotes.map.ui.MapProjection(mapTitles, textMeasurer, mapMetrics)
+    private val mapSink = object : com.xnotes.map.ui.MapSceneSink {
+        override fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect) = scene.upsert(item, parts, bounds)
+        override fun remove(item: CanvasItem) = scene.remove(item)
+    }
+
+    /** Bumped whenever the map's selection, menu or title field may have changed, for Compose to read. */
+    var mapVersion by mutableStateOf(0)
+        private set
+
+    /** The parts last stacked into the scene's order, so only a structural change republishes it. */
+    private var stackedMapParts: List<CanvasItem> = emptyList()
+
+    private val mapHost = object : com.xnotes.map.ui.MapController.Host {
+        override fun layerVisible(layer: String?) = document.layers.entries.any { it.id == drawingLayer(layer) && it.visible }
+        override fun layerEditable(layer: String?) = drawingLayer(layer) == document.layers.activeId && document.layers.writable
+        override fun activeLayer(): String? = document.layers.activeId.takeIf { it != com.xnotes.core.model.DrawingLayers.DEFAULT }
+        override fun night(): Boolean = view.lightBlackInk
+        override fun drawingLayer(layer: String?): String? {
+            val entries = document.layers.entries
+            val id = layer ?: com.xnotes.core.model.DrawingLayers.DEFAULT
+            return if (entries.any { it.id == id }) id else entries.first().id
+        }
+        override fun mapChanged() = onMapChanged()
+    }
+
+    private val mapContentListener = com.xnotes.map.MapModel.Listener { onContentChanged?.invoke() }
+
+    var map: com.xnotes.map.ui.MapController = newMap(document)
+        private set
+
+    private fun newMap(doc: InfiniteDocument): com.xnotes.map.ui.MapController {
+        doc.map.addListener(mapContentListener)
+        return com.xnotes.map.ui.MapController(
+            com.xnotes.map.MapEditor(doc.map, history, mapMetrics), mapProjection, mapSink, mapHost,
+        )
+    }
+
+    private fun onMapChanged() {
+        val parts = map.parts
+        if (parts !== stackedMapParts) {
+            stackedMapParts = parts
+            publishLayerOrder()
+        }
+        mapVersion++
+        refreshMapField()
+        refresh()
+        publishOverlay()
+    }
+
+    /** The title field over the node being typed into, in viewport pixels; null when none is open. */
+    var mapField by mutableStateOf<MapFieldState?>(null)
+        private set
+
+    /**
+     * The title field: its top-left in viewport pixels, its box and type in canvas units (the field
+     * sets them at canvas scale and zooms at draw time, as the canvas does), the colour it shows.
+     */
+    class MapFieldState(
+        val x: Double, val y: Double, val width: Double, val height: Double, val zoom: Double,
+        val text: String, val textPx: Double, val bold: Boolean, val color: Rgba, val node: com.xnotes.map.NodeId, val isNew: Boolean,
+    )
+
+    private fun refreshMapField() {
+        val f = map.titleField
+        mapField = f?.let {
+            val at = viewport.contentToViewport(it.rect.topLeft)
+            MapFieldState(
+                at.x, at.y, it.rect.w, it.rect.h, viewport.zoom, it.text, it.style.textSize, it.style.bold,
+                com.xnotes.core.pal.NightInk.displayColor(it.style.text, view.lightBlackInk), it.node, it.isDraft,
+            )
+        }
+    }
+
+    /** The map's menu and style panel need the canvas's swatches. */
+    val mapSwatches: SwatchHost get() = this
+
+    /** The selected node or relation line in viewport pixels, where the map's menu anchors; null for none. */
+    val mapMenuRect: Rect?
+        get() {
+            mapVersion // read so Compose follows it
+            if (interaction.mode == CanvasPointerMode.MAP || map.isEditingTitle) return null
+            val r = map.selectedRect ?: map.selectedRelationRect ?: return null
+            return viewport.contentToViewport(r)
+        }
+
+    /** The map's touch, as the canvas hands it over. */
+    private val mapInput = object : CanvasMapInput {
+        private fun touchPx() = com.xnotes.ui.theme.MinTouchTarget.value * devicePxPerDp
+
+        override fun press(at: Pt, finger: Boolean, eraser: Boolean, tool: Tool, connector: Boolean, fingerDraws: Boolean): Boolean {
+            if (editingLabel != null) return false
+            return map.press(at, viewport.zoom, touchPx(), finger, eraser, tool, connector, fingerDraws)
+        }
+        override fun move(at: Pt) = map.move(at, viewport.zoom)
+        override fun release(at: Pt) = map.release(at)
+        override fun cancel() = map.cancel()
+        override fun otherPress(at: Pt, tool: Tool) {
+            if (tool.isStroke && map.inkTarget(at) != null) return
+            map.commitTitle()
+            map.clearSelection()
+        }
+        override fun tapBlank(at: Pt, tool: Tool): Boolean = map.tapBlank(at, tool == Tool.MAP)
+    }
+
+    init {
+        interaction.mapInput = mapInput
+    }
+
+    /** Write a finished stroke into the node it started in, if it started in one; false otherwise. */
+    private fun writeIntoNode(stroke: Stroke): Boolean {
+        if (!stroke.tool.isStroke || stroke.sampleCount == 0) return false
+        val node = map.inkTarget(Pt(stroke.xAt(0), stroke.yAt(0))) ?: return false
+        return map.writeInk(node, stroke)
+    }
+
+    /** Everything drawn: the items and the mind maps. */
+    private fun drawnBounds(): Rect? {
+        val items = document.contentBounds()
+        val maps = map.shown.placements.values.fold(null as Rect?) { acc, p -> acc?.union(p.rect) ?: p.rect }
+        return if (items == null) maps else if (maps == null) items else items.union(maps)
+    }
+
     /** Where the floating menu sits, or null while a gesture is running or nothing is selected. */
     override var selectionMenuRect: Rect? by mutableStateOf(null)
         private set
@@ -748,6 +883,15 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Put copies of the selection on the item clipboard both panes share; a [cut]'s are spent by the paste that lands them. */
     private fun copyToClipboard(cut: Boolean) {
         ItemClipboard.clip = ItemClipboard.Clip(selection.items.deepCopyAll(textMeasurer), document.dpi, document, cut)
+        com.xnotes.map.ui.MapPasteboard.fragment = null
+    }
+
+    /** Put the selected node's subtree on the clipboard, as a tree of its own; a [cut] deletes it too. */
+    fun copyMapSelection(cut: Boolean) {
+        val fragment = map.copySelected() ?: return
+        com.xnotes.map.ui.MapPasteboard.fragment = fragment
+        ItemClipboard.clip = null
+        if (cut) map.deleteSelected()
     }
 
     override fun cutSelection() {
@@ -805,6 +949,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     fun pasteClipboard(atContent: Pt? = null) {
         finishSelectionPreviews()
         if (!document.layers.writable) { onMessage?.invoke(appContext.getString(R.string.layers_not_writable), null); return }
+        com.xnotes.map.ui.MapPasteboard.fragment?.let { fragment ->
+            val size = fragment.bounds
+            val at = atContent ?: viewport.centerContent.let { c -> Pt(c.x - (size?.w ?: 0.0) / 2, c.y - (size?.h ?: 0.0) / 2) }
+            if (map.paste(fragment, at)) interaction.clearSelection()
+            return
+        }
         val clip = ItemClipboard.clip ?: return
         val home = clip.isFrom(document)
         val clones = ItemClipboard.copiesFor(clip, document.dpi, home, textMeasurer)
@@ -830,7 +980,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         publishOverlay()
     }
 
-    override val hasClipboardItems: Boolean get() = ItemClipboard.clip != null
+    override val hasClipboardItems: Boolean get() = ItemClipboard.clip != null || com.xnotes.map.ui.MapPasteboard.fragment != null
 
     // --- long-press paste menu ---
 
@@ -1965,6 +2115,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             val b = OverlayTessellator.selectionBounds(box, zoom)
             bounds = bounds?.union(b) ?: b
         }
+        map.chrome(zoom, com.xnotes.ui.theme.MinTouchTarget.value * devicePxPerDp)?.let { c ->
+            parts += OverlayTessellator.mapChrome(
+                c.outline, c.handles.map { it.center }, c.dropTarget, c.relationLine, c.relation,
+                zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp,
+            )
+            val pad = (OverlayTessellator.MAP_OUTLINE_GAP_PX + OverlayTessellator.MAP_HANDLE_PX) / zoom
+            val boxes = listOfNotNull(c.outline, c.dropTarget) +
+                c.handles.map { Rect(it.center.x - it.radius, it.center.y - it.radius, 2 * it.radius, 2 * it.radius) } +
+                listOfNotNull(c.relationLine, c.relation).map { (p, q) -> Rect.fromPoints(p, q) }
+            for (r in boxes) bounds = bounds?.union(r.outset(pad)) ?: r.outset(pad)
+        }
         if (parts.isEmpty()) {
             scene.setWet(null, InkPalette.DEFAULT, InkPass.OPAQUE, Rect(0.0, 0.0, 0.0, 0.0))
         } else {
@@ -2315,8 +2476,20 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         forgetWetStroke()
         val front = frontInk
         frontInk = false
+        val intoNode = !(wandEnabled && stroke.tool.isStroke) && writeIntoNode(stroke)
         if (!front) {
+            if (intoNode) return
             if (wandEnabled && stroke.tool.isStroke) holdEphemeral(stroke) else commitItem(stroke)
+            return
+        }
+        if (intoNode) {
+            // The node now draws the ink; let the pad go once a frame with it is up.
+            pad.freeze()
+            handoverTail = tail
+            view.setUnbufferedStylus(false)
+            settleHeld()
+            val gen = ++handoffGen
+            view.publishThen { if (gen == handoffGen) pad.release() }
             return
         }
         pad.freeze()
@@ -2554,6 +2727,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        // The map's field takes its own keys; a selected node or relation line takes these first.
+        if (map.isEditingTitle) return false
+        if (map.hasSelection && mapKey(e, ctrl)) return true
         when {
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z && shift -> redo()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z -> undo()
@@ -2577,6 +2753,24 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> panStep(1, 0)
             e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP -> panStep(0, -1)
             e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> panStep(0, 1)
+            else -> return false
+        }
+        return true
+    }
+
+    /** Keys for the selected node: Tab a subtopic, Enter a sibling, F2 or Space types, Delete deletes. */
+    private fun mapKey(e: android.view.KeyEvent, ctrl: Boolean): Boolean {
+        val node = map.selected
+        when {
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_C -> copyMapSelection(cut = false)
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_X -> copyMapSelection(cut = true)
+            ctrl -> return false
+            node != null && e.keyCode == android.view.KeyEvent.KEYCODE_TAB -> map.commitAndAdd(com.xnotes.map.ui.MapController.HandleKind.CHILD)
+            node != null && (e.keyCode == android.view.KeyEvent.KEYCODE_ENTER || e.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) ->
+                map.commitAndAdd(com.xnotes.map.ui.MapController.HandleKind.SIBLING)
+            node != null && (e.keyCode == android.view.KeyEvent.KEYCODE_F2 || e.keyCode == android.view.KeyEvent.KEYCODE_SPACE) -> map.editTitle(node)
+            e.keyCode == android.view.KeyEvent.KEYCODE_DEL || e.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL -> map.deleteSelected()
+            e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> map.clearSelection()
             else -> return false
         }
         return true
@@ -2671,7 +2865,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         editingField = null
         textBar = null
         document.listener = null
+        document.map.removeListener(mapContentListener)
+        map.dispose()
         document = next
+        map = newMap(next)
+        stackedMapParts = map.parts
         imageDecodeBinding = Any()
         next.listener = modelListener
         selection = CanvasSelection(next)
@@ -2704,7 +2902,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         val saved = document.lastView
         when {
             saved != null -> viewport.apply(saved)
-            else -> document.contentBounds()?.let { viewport.fit(it) } ?: viewport.centerOn(0.0, 0.0)
+            else -> drawnBounds()?.let { viewport.fit(it) } ?: viewport.centerOn(0.0, 0.0)
         }
         onViewChanged()
         view.publish()
@@ -2714,7 +2912,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     fun zoomToFit() {
         cancelReferenceLocation()
         if (zoomLocked) return
-        val bounds = document.contentBounds()
+        val bounds = drawnBounds()
         if (bounds == null) {
             viewport.zoom = 1.0
             viewport.centerOn(0.0, 0.0)
@@ -2786,7 +2984,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (!minimapVisible) return false
         val panel = Minimap.panel(viewport.widthPx, viewport.heightPx, viewport.insetRight, viewport.insetBottom)
         if (!panel.contains(Pt(vx, vy))) return false
-        val extent = Minimap.mappedExtent(document.contentBounds(), viewport.visibleContentRect())
+        val extent = Minimap.mappedExtent(drawnBounds(), viewport.visibleContentRect())
         val target = Minimap.toContent(Pt(vx, vy), extent, panel)
         viewport.centerOn(target.x, target.y)
         onViewChanged()
@@ -2820,14 +3018,30 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         settleHeld()
         val handoff = handoffGen
         view.publishThen { if (handoff == handoffGen) pad.release() }
-        if (recordHistory) history.push(com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change))
-        else change()
+        map.settleForHistory()
+        val mapBefore = document.map.state
+        if (recordHistory) {
+            val layers = com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change)
+            val mapAfter = document.map.state
+            history.push(if (mapAfter == mapBefore) layers else com.xnotes.core.history.CompositeCommand(
+                listOf(layers, com.xnotes.map.MapStateCommand(document.map, mapBefore, mapAfter)),
+            ))
+        } else change()
         interaction.clearSelection()
         syncScene()
         markDirty()
         refresh()
         view.publish()
         return true
+    }
+
+    /** Inside [editLayers]: delete layer [id] with everything on it, its mind map trees included. */
+    fun deleteLayerContent(id: String) {
+        document.removeAll(document.items.filter { it.layerId == id })
+        val state = document.map.state
+        val roots = state.rootsOnLayer(id, isDefault = id == com.xnotes.core.model.DrawingLayers.DEFAULT)
+        if (roots.isNotEmpty()) document.map.replace(state.withoutSubtrees(roots))
+        document.layers.delete(id)
     }
 
     fun moveSelectionToLayer(id: String) = editLayers {
@@ -2842,6 +3056,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     // reason, so both surfaces behave alike.
     fun undo() {
         commitText() // a label being typed is the first thing undo takes back
+        map.settleForHistory()
         finishSelectionPreviews()
         history.undo()
         interaction.clearSelection()
@@ -2852,6 +3067,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     fun redo() {
         commitText()
+        map.settleForHistory()
         finishSelectionPreviews()
         history.redo()
         interaction.clearSelection()
@@ -2872,7 +3088,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // The menu is anchored in viewport pixels, so a pan or a zoom moves it.
         refreshSelectionMenu()
         // The minimap maps everything drawn, so its extent moves with the content, not the view.
-        view.contentBounds = document.contentBounds()
+        view.contentBounds = drawnBounds()
+        if (map.isEditingTitle) refreshMapField()
+        if (map.hasSelection) mapVersion++
         onPresentationViewChanged?.invoke()
     }
 
@@ -2886,7 +3104,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         canUndo = history.canUndo
         canRedo = history.canRedo
         waypoints = document.waypoints.toList()
-        view.contentBounds = document.contentBounds()
+        view.contentBounds = drawnBounds()
     }
 
     companion object {

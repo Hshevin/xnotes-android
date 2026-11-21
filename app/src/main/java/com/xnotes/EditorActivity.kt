@@ -2426,6 +2426,8 @@ private fun EditorScreen(
                 BackHandler(enabled = focused.editingField == null && !focused.flowEditingActive) {
                     closeEditorPane(focused)
                 }
+                // A mind map title being typed on a canvas is finished first.
+                BackHandler(enabled = focused.canvasOpen && focused.infinite.mapField != null) { focused.infinite.map.commitTitle() }
             }
 
             val actions = PaneActions(
@@ -3367,6 +3369,7 @@ private fun EditorPane(
                         canvas.editingField?.let { field ->
                             com.xnotes.ui.TextEditorOverlay(canvas, field)
                         }
+                        com.xnotes.ui.MapTitleField(canvas)
                         if (sidebarShown) {
                             // Taking every pointer keeps a touch on the panel's empty space
                             // from reaching the canvas underneath.
@@ -3385,6 +3388,7 @@ private fun EditorPane(
                             onShareImage = actions.onShareImage,
                             onReferenceSelection = {canvas.sourceSelectionRegion()?.let(editor::requestCanvasRegionReference)==true},
                         )
+                        com.xnotes.ui.MapMenu(canvas)
                         com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage,
                             onReferenceRegion = {canvas.sourceCaptureRegion()?.let(editor::requestCanvasRegionReference)==true})
                         com.xnotes.ui.CropOverlay(canvas)

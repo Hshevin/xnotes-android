@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mind map v2 on the canvas (docs/movinkpad/mind-map-v2-design-2026-11-21.md). -->
+<resources>
+    <string name="tool_map">Mind map</string>
+    <string name="map2_edit_text">Edit text</string>
+    <string name="map2_add_child">Add subtopic</string>
+    <string name="map2_add_sibling">Add sibling topic</string>
+    <string name="map2_collapse">Collapse</string>
+    <string name="map2_expand">Expand</string>
+    <string name="map2_layout">Layout</string>
+    <string name="map2_layout_right">To the right</string>
+    <string name="map2_layout_balanced">Both sides</string>
+    <string name="map2_layout_org">Org chart</string>
+    <string name="map2_layout_indent">Indented list</string>
+    <string name="map2_reset_node">Reset position</string>
+    <string name="map2_reset_tree">Reset whole tree</string>
+    <string name="map2_detach">Make independent topic</string>
+    <string name="map2_style">Style</string>
+    <string name="map2_shape">Shape</string>
+    <string name="map2_shape_rounded">Rounded box</string>
+    <string name="map2_shape_ellipse">Ellipse</string>
+    <string name="map2_shape_underline">Underline</string>
+    <string name="map2_border">Border</string>
+    <string name="map2_fill">Fill</string>
+    <string name="map2_text_color">Text</string>
+    <string name="map2_no_fill">No fill</string>
+    <string name="map2_bold">Bold</string>
+    <string name="map2_text_size">Text size</string>
+    <string name="map2_size_small">Small</string>
+    <string name="map2_size_medium">Medium</string>
+    <string name="map2_size_large">Large</string>
+    <string name="map2_arrows">Arrows</string>
+    <string name="map2_arrow_none">No arrows</string>
+    <string name="map2_arrow_forward">Arrow at end</string>
+    <string name="map2_arrow_backward">Arrow at start</string>
+    <string name="map2_arrow_both">Arrows at both ends</string>
+    <string name="map2_relation_reverse">Reverse</string>
+    <string name="map2_relation_label">Label</string>
+    <string name="map2_relation_label_hint">Describe the relation</string>
+    <string name="map2_color">Color</string>
+    <string name="map2_title_hint">Topic</string>
+</resources>

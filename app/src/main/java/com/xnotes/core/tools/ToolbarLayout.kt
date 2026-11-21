@@ -54,7 +54,10 @@ enum class ToolbarItem(val id: String) {
     MINIMAP("minimap"),
 
     /** Notes only: opens and closes room on a page. Last, so a stored bar missing older items too still gets it right after the lasso. */
-    INSERT_SPACE("insert_space");
+    INSERT_SPACE("insert_space"),
+
+    /** Canvas only: the mind map tool. */
+    MAP("map");
 
     companion object {
         fun fromId(id: String?): ToolbarItem? = entries.firstOrNull { it.id == id }
@@ -161,6 +164,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.TAPE to ToolbarItem.WAND,
             ToolbarItem.INSERT_SPACE to ToolbarItem.LASSO,
             ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
+            ToolbarItem.MAP to ToolbarItem.SHAPE,
         )
 
         /**
@@ -174,7 +178,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
             ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.WAND,
-            ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT,
+            ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT,
             ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
             ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
@@ -183,7 +187,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         /** Everything the paged bar can hold: the whole enum bar the canvas-only additions. Insert space is the note bar's alone;
          *  paged layers live in the side panel's tab, so a stored paged bar drops its old button on load. */
         val NOTE_ITEMS: Set<ToolbarItem> =
-            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.LAYERS)
+            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.LAYERS, ToolbarItem.MAP)
 
         /** Mirrors the hardcoded bar exactly (see Toolbar.kt) so existing users see no change. */
         val DEFAULT: ToolbarLayout = of(
@@ -211,7 +215,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
             listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO),
-            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT),
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
@@ -264,6 +268,7 @@ private enum class ToolbarScope(val supported: Set<ToolbarDocument>, val perDocu
     COMMON(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF, ToolbarDocument.CANVAS), false),
     PAGED_TOOL(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), false),
     PDF_TOOL(setOf(ToolbarDocument.PDF), false),
+    CANVAS_TOOL(setOf(ToolbarDocument.CANVAS), false),
     ALL_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF, ToolbarDocument.CANVAS), true),
     PAGED_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), true),
     CANVAS_VIEW(setOf(ToolbarDocument.CANVAS), true),
@@ -277,6 +282,8 @@ private val ToolbarItem.scope: ToolbarScope get() = when (this) {
     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FULLSCREEN, ToolbarItem.COLORS -> ToolbarScope.COMMON
     ToolbarItem.INSERT_SPACE -> ToolbarScope.PAGED_TOOL
     ToolbarItem.MARKUP -> ToolbarScope.PDF_TOOL
+    // Mind maps live on canvases only.
+    ToolbarItem.MAP -> ToolbarScope.CANVAS_TOOL
     ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES -> ToolbarScope.ALL_VIEW
     ToolbarItem.SIDEBAR, ToolbarItem.PAGE_NAV, ToolbarItem.MARGINS, ToolbarItem.VIEW -> ToolbarScope.PAGED_VIEW
     // Paged documents reach layers through the side panel; only the canvas needs a button.

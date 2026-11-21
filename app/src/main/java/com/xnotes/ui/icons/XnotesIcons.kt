@@ -167,6 +167,11 @@ object XnotesIcons {
         "M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4",
         roundRect(12.0, 13.0, 10.0, 7.0, 2.0),
     )
+    // Mind map: a central topic with a branch out to each side.
+    val mindMap = icon(
+        roundRect(8.0, 9.5, 8.0, 5.0, 1.5),
+        "M16 12c2 0 2-5 4-5", "M16 12c2 0 2 5 4 5", "M8 12H4",
+    )
     val prev = icon("M15 18l-6-6 6-6")
     val next = icon("M9 18l6-6-6-6")
     val file = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z", "M14 2v6h6")

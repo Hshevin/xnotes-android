@@ -371,6 +371,62 @@ object OverlayTessellator {
         }
     }
 
+    /** Mind map node outline thickness and its gap outside the node, in device pixels. */
+    const val MAP_OUTLINE_PX = 2.5
+    const val MAP_OUTLINE_GAP_PX = 5.0
+
+    /** A mind map "+" handle's drawn diameter, in device pixels; its touch target is larger. */
+    const val MAP_HANDLE_PX = 22.0
+
+    /**
+     * Mind map chrome: the ring round the selected node ([outline], drawn outside it so the node
+     * keeps its own colours), its "+" handles, the node a drop or a relation line would land on
+     * (dashed), a relation line being drawn (dashed), and the selected relation line (a band along
+     * it). Everything in content coordinates.
+     */
+    fun mapChrome(
+        outline: Rect?,
+        handles: List<Pt>,
+        dropTarget: Rect?,
+        relationLine: Pair<Pt, Pt>?,
+        relation: Pair<Pt, Pt>?,
+        zoom: Double,
+        accent: Rgba,
+        tolerance: Double,
+        devicePxPerDp: Double = 1.0,
+    ): List<MeshPart> {
+        if (zoom <= 0.0) return emptyList()
+        val parts = ArrayList<MeshPart>(6)
+        val lines = Haloed(HALO_PX / zoom)
+        fun ring(r: Rect): List<Pt> = listOf(Pt(r.left, r.top), Pt(r.right, r.top), Pt(r.right, r.bottom), Pt(r.left, r.bottom))
+        outline?.let { lines.ribbon(ring(it.outset(MAP_OUTLINE_GAP_PX / zoom)), MAP_OUTLINE_PX / zoom / 2.0, closed = true, tolerance = tolerance) }
+        dropTarget?.let {
+            dashInto(lines, ring(it.outset(MAP_OUTLINE_GAP_PX / zoom)), MAP_OUTLINE_PX / zoom / 2.0, closed = true, zoom = zoom, devicePxPerDp = devicePxPerDp, tolerance = tolerance)
+        }
+        relationLine?.let { (a, b) ->
+            dashInto(lines, listOf(a, b), MAP_OUTLINE_PX / zoom / 2.0, closed = false, zoom = zoom, devicePxPerDp = devicePxPerDp, tolerance = tolerance)
+        }
+        relation?.let { (a, b) ->
+            lines.ribbon(listOf(a, b), MAP_OUTLINE_PX / zoom, closed = false, tolerance = tolerance)
+        }
+        lines.addTo(parts, accent)
+        if (handles.isNotEmpty()) {
+            val dots = Haloed(HALO_PX / zoom)
+            val r = MAP_HANDLE_PX / zoom / 2.0
+            for (c in handles) dots.circle(c.x, c.y, r, tolerance)
+            dots.addTo(parts, accent)
+            val plus = MeshBuilder()
+            val arm = r * 0.55
+            val half = r * 0.12
+            for (c in handles) {
+                plus.rect(c.x - arm, c.y - half, 2 * arm, 2 * half)
+                plus.rect(c.x - half, c.y - arm, 2 * half, 2 * arm)
+            }
+            parts.add(MeshPart(plus.build(), coreFor(accent), InkPass.OPAQUE))
+        }
+        return parts
+    }
+
     /** Content-space bounds of an oriented box grown by its handles and grip, for the cover quad. */
     /** Edge dots read as a hint beside the solid vertex dots. */
     private const val EDGE_DOT_ALPHA = 140
