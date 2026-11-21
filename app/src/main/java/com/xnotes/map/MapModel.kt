@@ -43,6 +43,16 @@ class MapModel(initial: MapState = MapState.EMPTY, collapsed: Set<NodeId> = empt
     /** [collapsed] limited to nodes that exist and have children: what a save writes. */
     fun prunedCollapsed(): Set<NodeId> = collapsed.filterTo(HashSet()) { state.childrenOf(it).isNotEmpty() }
 
+    /** Publish the new draft with its entire path visible in the same listener notification. */
+    internal fun showDraft(next: MapState, id: NodeId) {
+        if (collapsed.isNotEmpty()) {
+            val path = generateSequence(next.parent[id]) { next.parent[it] }
+            val expand = path.filter { it in collapsed }.toList()
+            if (expand.isNotEmpty()) collapsed = collapsed - expand
+        }
+        replace(next)
+    }
+
     /** Swap the whole state. Only [MapEditor] and its commands call this. */
     internal fun replace(next: MapState) {
         if (next == state) return
