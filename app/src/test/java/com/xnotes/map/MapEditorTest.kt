@@ -202,6 +202,17 @@ class MapEditorTest {
         assertEquals(listOf(24.0, 44.0), f.state.nodes.getValue(r).ink.strokes.single().samples.map { it.x })
     }
 
+    @Test fun shiftedInkKeepsItsRoomOnTheFarSide() {
+        val r = rootForInk()
+        e.addInk(r, pen(30.0 to 60.0, 400.0 to 70.0))
+        val wide = f.state.nodes.getValue(r).ink
+        e.addInk(r, pen(0.0 to 60.0, 10.0 to 65.0))
+        val ink = f.state.nodes.getValue(r).ink
+        val shift = -(pen(0.0 to 60.0, 10.0 to 65.0).bounds().left - 16.0)
+        assertEquals(wide.width + shift, ink.width, 1e-9)
+        assertTrue(ink.strokes.all { it.bounds().right <= ink.width })
+    }
+
     @Test fun inkWritesUndoAsOneStepEach() {
         val r = rootForInk()
         e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))

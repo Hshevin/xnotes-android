@@ -185,8 +185,9 @@ class MapEditor(
      * - Let b be the copy's local bounds. If b.left < 0 or b.top < 0, every stroke in the area (the
      *   existing ones and the new one) is shifted by (max(0, −b.left), max(0, −b.top)) so nothing is
      *   left of or above the area's origin.
-     * - The area then grows (never shrinks) to width = max(width, b.right + [INK_MARGIN], [INK_MIN_W])
-     *   and height = max(height, b.bottom + [INK_MARGIN], [INK_MIN_H]), using the shifted b.
+     * - The area then grows (never shrinks) to width = max(width + sx, b.right + [INK_MARGIN], [INK_MIN_W])
+     *   and height = max(height + sy, b.bottom + [INK_MARGIN], [INK_MIN_H]), using the shifted b and the
+     *   shift (sx, sy), so ink that was shifted keeps the same room on its far side.
      *
      * Returns false when [id] does not exist.
      */
@@ -206,8 +207,8 @@ class MapEditor(
             ink.strokes.map { it.inkCopy().apply { translate(dx, dy) } }
         }
         node.copy(ink = NodeInk(
-            maxOf(ink.width, bounds.right + dx + INK_MARGIN, INK_MIN_W),
-            maxOf(ink.height, bounds.bottom + dy + INK_MARGIN, INK_MIN_H),
+            maxOf(ink.width + dx, bounds.right + dx + INK_MARGIN, INK_MIN_W),
+            maxOf(ink.height + dy, bounds.bottom + dy + INK_MARGIN, INK_MIN_H),
             strokes + local,
         ))
     }
