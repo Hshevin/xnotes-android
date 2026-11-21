@@ -25,7 +25,7 @@ internal class NativeSourceVersion private constructor(
                     val before=BundleMigration.hash(file,cancelled)
                     val info=BundleReferenceInfo.inspect(file,true,cancelled)
                     if(BundleMigration.hash(file,cancelled)!=before) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-                    if(info.format!=kind.extension) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+                    if(info.kind!=kind) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
                     val id=info.header.identity?.documentId ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISSING)
                     checkActive()
                     return Inspected(NativeSourceVersion(locationKey,id,kind,before),info)
@@ -114,7 +114,7 @@ internal class NativeSourceSnapshot private constructor(
     internal fun verifyWorkingContract(info:BundleReferenceInfo):com.xnotes.format.BundleIdentity {
         synchronized(gate) {checkOpen()};checkActive()
         val original=inspected.info
-        if(info.format!=version.kind.extension || info.header.identity?.documentId!=version.documentId ||
+        if(info.kind!=version.kind || info.header.identity?.documentId!=version.documentId ||
             (info.header.anchors!=null)!=(original.header.anchors!=null))
             throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
         if(info.originalPdfHash!=original.originalPdfHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)

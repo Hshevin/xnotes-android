@@ -65,21 +65,26 @@ internal class BundleCopyPlan private constructor(
                             FileOutputStream(replacement).use {out->AnchorManifest.write(open,out,plan,cancelled);out.fd.sync()}
                         }
                     } else open().use {input->
-                        validateLegacyFormat(input,cancelled)
+                        val format = validateLegacyFormat(input,cancelled)
+                        if (CanvasCodec.isCanvasFormat(format)) {
+                            MapJson.checkEntry(format, MapJson.ENTRY in before)
+                            if (format == CanvasCodec.FORMAT_WITH_MAP) MapJson.validateForCopy(z, cancelled)
+                        }
                     }
                 }
                 return BundleCopyPlan(identity,header,before,manifest,header.anchorBytesFor(identity),ids)
             } catch(error:Throwable) {manifest?.delete();throw error}
         }
         /** A legacy format prefix may be large; it has no anchor token/byte limits. Borrows input. */
-        fun validateLegacyFormat(input:java.io.InputStream,cancelled:()->Boolean={false}) {
+        fun validateLegacyFormat(input:java.io.InputStream,cancelled:()->Boolean={false}): String {
             val p=JsonPull(java.io.InputStreamReader(BundleEntries.cancellable(input,cancelled),Charsets.UTF_8));p.beginObject()
             var format:String?=null
             while(p.hasNext()) {
                 check(!cancelled())
                 if(p.nextName()=="format") {format=p.nextString();break} else p.skipValue()
             }
-            require(format=="xnote" || format=="xcanvas") {"Not a supported note bundle"}
+            require(format=="xnote" || CanvasCodec.isCanvasFormat(format)) {"Not a supported note bundle"}
+            return requireNotNull(format)
         }
         private fun digest(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}
     }

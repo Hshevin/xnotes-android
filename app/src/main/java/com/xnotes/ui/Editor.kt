@@ -4842,7 +4842,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(bodyFile)
                     val actual=com.xnotes.format.BundleMigration.hash(bodyFile)
                     val expected=result.publication.bodySha256 ?: oldSha
-                    if(info.format!=kind.extension || info.header.identity?.documentId!=id || expected==null || expected!=actual)
+                    if(info.kind!=kind || info.header.identity?.documentId!=id || expected==null || expected!=actual)
                         WorkingCheckpointRead(com.xnotes.platform.LegacyMutationResult.Changed)
                     else WorkingCheckpointRead(result,actual,(access.observeAbsent() as? com.xnotes.platform.LegacyAbsentResult.Granted)?.observation)
                 }
@@ -9487,7 +9487,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
                 observed(header)
                 val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(snapshot.file) {checkActive();false}
-                require(info.format==kind.extension && info.header.identity==header.identity && info.header.anchors==header.anchors) {"Stored document kind or identity changed"}
+                require(info.kind==kind && info.header.identity==header.identity && info.header.anchors==header.anchors) {"Stored document kind or identity changed"}
                 observed(info.header)
                 val identity=header.identity ?: com.xnotes.format.BundleIdentity()
                 val ids=identity.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()

@@ -1,5 +1,7 @@
 package com.xnotes.pen
 
+import com.xnotes.format.MapBundleFixture
+
 import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.ProviderInfo
@@ -214,6 +216,16 @@ class EditorPageCopyHostTest {
             while(!job.isCompleted && System.nanoTime()<deadline) {shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(10));Thread.yield()}
             assertTrue("Real Editor copy did not settle",job.isCompleted);failure?.let {throw it}
         } finally {f.release.countDown();scope.cancel();root.deleteRecursively()}
+    }
+
+    @Test fun copyingAStoredMapCanvasKeepsItsEntryBytesAndRegistersACanvas() = scenario { f ->
+        f.sourceDisplayName = "tree.xcanvas"
+        MapBundleFixture.write(f.source)
+        assertTrue(withContext(Dispatchers.Main) { f.editor.copyStoredFileTo(f.sourceUri, f.targetUri, "tree copy.xcanvas") })
+        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.source))
+        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.target))
+        val info = BundleReferenceInfo.inspectStrict(f.target)
+        assertEquals("xcanvas", f.storage.registry.kindForId(info.header.identity!!.documentId))
     }
 
     @Test fun anAnchoredNoteCanSaveAsANewEmptyTargetWithIndependentDocumentAndPageIds()=scenario {f->
