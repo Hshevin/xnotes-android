@@ -186,7 +186,6 @@ fun SelectionMenu(
     onSaveAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
     onShareAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
     onShareImage: ((java.io.File) -> Unit)? = null,
-    onReferenceSelection: (() -> Boolean)? = null,
 ) {
     val rect = host.selectionMenuRect ?: return
     val palette = LocalPalette.current
@@ -248,13 +247,6 @@ fun SelectionMenu(
                     onDismissRequest = { overflowOpen = false },
                     properties = PopupProperties(focusable = false),
                 ) {
-                    onReferenceSelection?.let { capture ->
-                        DropdownMenuItem(text={Text(stringResource(R.string.graph_reference_this_region),fontSize=TextSize.body)},
-                            leadingIcon={Icon(XnotesIcons.link,null)},onClick={
-                                overflowOpen=false
-                                if(capture()) host.dismissSelectionMenu()
-                            })
-                    }
                     // A lone recording's own actions come first.
                     if (audio != null) {
                         DropdownMenuItem(
@@ -568,7 +560,7 @@ private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () 
  * "Copy as image" button that renders the region and puts it on the system clipboard.
  */
 @Composable
-fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit, onReferenceRegion: (() -> Boolean)? = null) {
+fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
     // The tool this pane had before the AI card's capture mode armed it; given back when the mode ends.
     var toolBeforeAi by remember { mutableStateOf<com.xnotes.core.tools.Tool?>(null) }
     val askAi = rememberAskAi(editor.state.document.title, editor.currentUri, editor.state.document.pdfFile, editor.state.document.identity.documentId,
@@ -584,8 +576,8 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit, onReferenceR
     val palette = LocalPalette.current
     val density = LocalDensity.current
 
-    val barHeightPx = with(density) { if(onReferenceRegion==null) 44.dp.toPx() else MinTouchTarget.toPx() }
-    val barWidthPx = with(density) { 340.dp.toPx() + if(onReferenceRegion==null) 0f else MinTouchTarget.toPx() }
+    val barHeightPx = with(density) { 44.dp.toPx() }
+    val barWidthPx = with(density) { 340.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceIn(0f, (editor.state.viewportW - barWidthPx).coerceAtLeast(0f))
@@ -621,7 +613,6 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit, onReferenceR
         }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
-        onReferenceRegion?.let { capture -> ReferenceRegionAction(capture,editor::dismissScreenshot) }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         Row(
             Modifier.clickable { editor.screenshotImageForShare(keepTool = askAi.addsToOpenChat)?.let(askAi.take) }.padding(horizontal = Space.s16, vertical = Space.s12),
@@ -634,7 +625,7 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit, onReferenceR
 }
 
 @Composable
-fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit, onReferenceRegion: (() -> Boolean)? = null) {
+fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit) {
     var toolBeforeAi by remember { mutableStateOf<com.xnotes.core.tools.Tool?>(null) }
     val askAi = rememberAskAi(editor.document.title, editor.document.path, documentId = editor.document.identity.documentId,
         onCapture = {
@@ -649,8 +640,8 @@ fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit, onRe
     val palette = LocalPalette.current
     val density = LocalDensity.current
 
-    val barHeightPx = with(density) { if(onReferenceRegion==null) 44.dp.toPx() else MinTouchTarget.toPx() }
-    val barWidthPx = with(density) { 340.dp.toPx() + if(onReferenceRegion==null) 0f else MinTouchTarget.toPx() }
+    val barHeightPx = with(density) { 44.dp.toPx() }
+    val barWidthPx = with(density) { 340.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceIn(0f, (editor.viewport.widthPx - barWidthPx).coerceAtLeast(0f))
@@ -686,7 +677,6 @@ fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit, onRe
         }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
-        onReferenceRegion?.let { capture -> ReferenceRegionAction(capture,editor.interaction::clearCapture) }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         Row(
             Modifier.clickable { editor.screenshotImageForShare()?.let(askAi.take) }.padding(horizontal = Space.s16, vertical = Space.s12),
@@ -698,15 +688,6 @@ fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit, onRe
     }
 }
 
-@Composable
-private fun ReferenceRegionAction(capture:()->Boolean,dismiss:()->Unit) {
-    val label=stringResource(R.string.graph_reference_this_region)
-    Tooltip(label) {
-        IconButton(onClick={if(capture()) dismiss()},modifier=Modifier.size(MinTouchTarget)) {
-            Icon(XnotesIcons.link,label,tint=LocalPalette.current.text.toComposeColor(),modifier=Modifier.size(Space.s24))
-        }
-    }
-}
 
 @Composable
 private fun ActionIcon(icon: ImageVector, desc: String, enabled: Boolean = true, shortcut: String? = null, onClick: () -> Unit) {

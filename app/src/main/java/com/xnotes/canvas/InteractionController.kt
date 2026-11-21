@@ -392,12 +392,6 @@ class InteractionController(
 
     // SELECTION
     private val selection = mutableListOf<Selected>()
-    private var selectionDocument:Document?=null
-    private var selectionRegionEpoch=0L
-    private var sourceTouchActive=false
-    private var sourceObservedDocument:Document?=null
-    private var sourceObservedPages:List<Page> = emptyList()
-    private var sourceRegionEpoch=0L
     private val lassoPoints = mutableListOf<Pt>()
     private var bandRect: Rect? = null
     private var moveOrigin = Pt.ZERO
@@ -410,7 +404,6 @@ class InteractionController(
         private set
     private var screenshotOrigin = Pt.ZERO
     private var screenshotDocument:Document?=null
-    private var screenshotSource:PageSourceRegion?=null
     /** The frozen capture as it was when an adjust started, so a cancel can put it back. */
     private var shotStart: Rect? = null
     /** The handle being dragged on the frozen capture, and where the pen grabbed it. */
@@ -630,81 +623,6 @@ class InteractionController(
     /** The selected items, in the order they were picked. */
     fun selectedItems(): List<CanvasItem> = selection.map { it.item }
 
-    /** Main-thread observation only: page removal and model replacement retire captured UI ranges. */
-    internal fun sourceRegionsChanged() {
-        val doc=state.document;val pages=doc.pages
-        if(sourceObservedDocument===doc && sourceObservedPages.size==pages.size &&
-            pages.indices.all {pages[it]===sourceObservedPages[it]}) return
-        val current=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Page,Boolean>()).apply {addAll(pages)}
-        if(sourceObservedDocument!==doc || sourceObservedPages.any {it !in current}) {
-            sourceRegionEpoch++
-            screenshotSource=null
-        }
-        sourceObservedDocument=doc;sourceObservedPages=pages.toList()
-    }
-    private fun sourceRegion(doc:Document,page:Page,rect:Rect,selectionEpoch:Long?=null,screenshot:Boolean=false):PageSourceRegion {
-        val epoch=sourceRegionEpoch
-        lateinit var signed:PageSourceRegion
-        signed=PageSourceRegion(doc,page,rect.copy()) {
-            sourceRegionsChanged()
-            state.document===doc && sourceRegionEpoch==epoch &&
-                (selectionEpoch==null || selectionRegionEpoch==selectionEpoch) && (!screenshot || (shotStart == null && screenshotSource === signed))
-        }
-        return signed
-    }
-
-    /** Read settled page-local geometry only; selecting an old ordinal never signs a new page. */
-    internal fun sourceSelectionRegion():PageSourceRegion? {
-        sourceRegionsChanged()
-        val doc=state.document
-        if(!sourceRegionReady() || selectionDocument!==doc || selection.isEmpty()) return null
-        val picked=selection.map {it.item}
-        val wanted=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<CanvasItem,Boolean>())
-        if(picked.any {!wanted.add(it)}) return null
-        val owners=java.util.IdentityHashMap<CanvasItem,Page>()
-        val ambiguous=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<CanvasItem,Boolean>())
-        for(page in doc.pages) for(item in page.items) if(item in wanted) {
-            if(owners.put(item,page)!=null) ambiguous.add(item)
-        }
-        if(ambiguous.isNotEmpty() || owners.size!=wanted.size) return null
-        val page=owners[picked.first()] ?: return null
-        if(picked.any {owners[it]!==page} || doc.pages.count {it===page}!=1) return null
-        // Item geometry already lives in page space, including an individual shape's turned
-        // frame. Rebuild from the actual objects instead of the old content-space selObb/index.
-        val one=picked.singleOrNull()
-        val frame=(one as? ShapeItem)?.frameObb() ?: (one as? TapeItem)?.takeIf {it.mode==TapeMode.RECTANGLE}?.shape?.frame()
-        val region=frame?.let {Rect.bounding(it.corners())} ?: picked.map {it.bounds()}.reduce {a,b->a.union(b)}
-        if(!validSourceRegion(region)) return null
-        return sourceRegion(doc,page,region,selectionEpoch=selectionRegionEpoch)
-    }
-
-    /** The normal screenshot UP froze this actual page; later layout/page changes cannot rebind it. */
-    internal fun sourceCaptureRegion():PageSourceRegion? {
-        sourceRegionsChanged()
-        if(!sourceRegionReady()) return null
-        val frozen=screenshotSource ?: return null
-        return frozen.takeIf {it.current()}
-    }
-    private fun sourceRegionReady()=mode==PointerMode.IDLE && !sourceTouchActive && !hasPendingContentTransaction
-    private fun validSourceRegion(rect:Rect)=rect.w>0 && rect.h>0 &&
-        listOf(rect.x,rect.y,rect.w,rect.h,rect.right,rect.bottom).all {it.isFinite()}
-
-    private fun freezeScreenshotSource(rect:Rect):PageSourceRegion? {
-        sourceRegionsChanged()
-        val doc=state.document
-        if(screenshotDocument!==doc || !validSourceRegion(rect) || state.pageRects.size!=doc.pages.size) return null
-        val drawable=state.drawablePageRange()
-        val contained=state.pageRects.withIndex().filter {(index,paper)->index in drawable &&
-            paper.contains(rect.topLeft) && paper.contains(Pt(rect.right,rect.bottom))}
-        val match=contained.singleOrNull() ?: return null
-        // Neither a gap nor a second visible page becomes part of an implicitly clipped source.
-        if(state.pageRects.withIndex().any {(index,paper)->index in drawable && index!=match.index &&
-            paper.left<rect.right && paper.right>rect.left && paper.top<rect.bottom && paper.bottom>rect.top}) return null
-        val page=doc.pages.getOrNull(match.index) ?: return null
-        if(doc.pages.count {it===page}!=1) return null
-        val local=state.toPageSpaceRect(match.index,rect)
-        return local.takeIf(::validSourceRegion)?.let {sourceRegion(doc,page,it,screenshot=true)}
-    }
 
     fun configFor(t: Tool): ToolConfig = toolConfigs[t] ?: ToolDefaults.configFor(t)
 
@@ -776,10 +694,6 @@ class InteractionController(
         try { dispatchTouch(e) } finally { onContentTransactionChanged?.invoke() }
 
     private fun dispatchTouch(e: MotionEvent): Boolean {
-        when(e.actionMasked) {
-            MotionEvent.ACTION_DOWN->sourceTouchActive=true
-            MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->sourceTouchActive=false
-        }
         if (touchTakenBack && e.actionMasked != MotionEvent.ACTION_DOWN) return true
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -823,7 +737,6 @@ class InteractionController(
     /** Android took this touch back, as its palm rejection does with a resting hand: drop the
      *  gesture, and put back a view it scrolled or zoomed, since the hand never meant to. */
     private fun takeBackTouch() {
-        sourceTouchActive=false
         tapCandidate = false
         val movedView = movingView()
         abortGesture()
@@ -2279,11 +2192,9 @@ class InteractionController(
 
     /** The pen lifted off an adjust: the capture stays where it was left, with its menu on it. */
     private fun endScreenshotAdjust() {
-        val changed = screenshotRect != shotStart
         mode = PointerMode.IDLE
         shotGrab = null
         shotStart = null
-        screenshotSource = if (changed) screenshotRect?.let(::freezeScreenshotSource) else restoredScreenshotSource()
         refreshScreenshotMenu()
         requestRender()
     }
@@ -2294,16 +2205,10 @@ class InteractionController(
         screenshotRect = start
         shotGrab = null
         shotStart = null
-        screenshotSource = restoredScreenshotSource()
         onScreenshotMenu(screenshotRectViewport(start))
         requestRender()
     }
 
-    // Reissue the original page identity after cancellation, even if pages were reordered.
-    // The old menu action stays retired and a deleted page cannot acquire a replacement.
-    private fun restoredScreenshotSource(): PageSourceRegion? = screenshotSource?.takeIf { it.current() }?.let {
-        sourceRegion(it.document, it.page, it.region, screenshot = true)
-    }
 
     private fun beginScreenshot(content: Pt) {
         clearScreenshot() // drop any previous frozen capture + its menu
@@ -2323,13 +2228,13 @@ class InteractionController(
         val rect = screenshotRect
         // A tap or a sliver isn't a capture: drop it. Otherwise freeze the rect and show its menu.
         if (rect == null || rect.w < SHOT_MIN || rect.h < SHOT_MIN || screenshotDocument!==state.document) clearScreenshot()
-        else {screenshotSource=freezeScreenshotSource(rect);refreshScreenshotMenu()}
+        else {refreshScreenshotMenu()}
         requestRender()
     }
 
     /** Drop the capture rectangle and hide its menu (after a copy, a tool change, or a re-drag). */
     fun clearScreenshot() {
-        screenshotSource=null;screenshotDocument=null
+        screenshotDocument=null
         shotStart=null;shotGrab=null
         if (screenshotRect == null) return
         screenshotRect = null
@@ -3818,7 +3723,6 @@ class InteractionController(
     // --- selection management ---
 
     private fun setSelection(picked: List<Selected>) {
-        selectionRegionEpoch++
         finishSelectionPreviews()
         // A member picked brings its whole group along, from its own page: a group never spans pages.
         val onPages = picked.map { it.pageIndex }.distinct().asSequence()
@@ -3830,7 +3734,6 @@ class InteractionController(
         val touched = selection + items
         selection.clear()
         selection.addAll(items)
-        selectionDocument=state.document
         // A fresh selection starts upright around the items, unless it is a lone shape in its frame.
         selObb = selectionBox()
         repairRegions(dirtyRegions(touched))
@@ -3847,7 +3750,6 @@ class InteractionController(
     fun clearSelection() = try { clearSelectedContent() } finally { onContentTransactionChanged?.invoke() }
 
     private fun clearSelectedContent() {
-        selectionRegionEpoch++
         if (selectionGestureActive()) abortGesture()
         finishSelectionPreviews()
         // Restore the tool a long-press grab temporarily switched away from.
@@ -3858,7 +3760,6 @@ class InteractionController(
         }
         onSelectionMenu(null)
         selObb = null
-        selectionDocument=null
         if (selection.isEmpty()) return
         val regions = dirtyRegions(selection) // where the now-unlifted items sit (before clearing)
         selection.clear()
@@ -3923,7 +3824,6 @@ class InteractionController(
         cmd.redo()
         // The items stay lifted, so no cache is out of date: the old page never held them, and the
         // new one bakes them in when the selection clears (dirtyRegions now names the new page).
-        selectionRegionEpoch++
         selection.clear()
         selection.addAll(rehomed)
         return cmd
@@ -4686,11 +4586,9 @@ class InteractionController(
      * new document at (or believing it is at) its bottom, spuriously arming add-page on first scroll.
      */
     fun resetGestureState() {
-        selectionRegionEpoch++
         // The host may already have adopted the next document. Never end/restore the old gesture
         // through that document; its owner must settle it before replacement.
         mode = PointerMode.IDLE
-        sourceTouchActive=false
         touchTakenBack = true // only a fresh DOWN belongs to the new document
         stopFling()
         stopPageFlipAnimation()
@@ -4752,7 +4650,6 @@ class InteractionController(
         lassoPoints.clear()
         moveOffset = Pt.ZERO
         selection.clear()
-        selectionDocument=null
         selObb = null
         refillBaseline = null
         restyleBaseline = null
@@ -4766,7 +4663,7 @@ class InteractionController(
         textDragRect = null
         textDragPageIndex = -1
         screenshotRect = null
-        screenshotSource=null;screenshotDocument=null
+        screenshotDocument=null
         shotStart=null;shotGrab=null
         roomButton = null
         hoverActionTool = null
@@ -4974,7 +4871,7 @@ class InteractionController(
         textDragRect = null
         // Cancel an in-progress capture drag; a frozen capture (mode IDLE) survives.
         if (mode == PointerMode.SHOT) {
-            screenshotRect = null;screenshotSource=null;screenshotDocument=null;onScreenshotMenu(null)
+            screenshotRect = null;screenshotDocument=null;onScreenshotMenu(null)
         }
         // A cancelled adjust puts the frozen capture back where it was.
         if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) abandonScreenshotAdjust()

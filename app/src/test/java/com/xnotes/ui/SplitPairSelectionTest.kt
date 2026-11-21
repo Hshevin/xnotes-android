@@ -7,9 +7,9 @@ class SplitPairSelectionTest {
     private val map=BrowseEntry("graph.xmap","content://library/graph",false)
     private val note=BrowseEntry("note.xnote","content://library/note",false)
 
-    @Test fun oneMapAndOneNoteAreSelectableInBothOrders() {
-        assertEquals(listOf(map.documentUri,note.documentUri),splitPairSelection(listOf(map,note)))
-        assertEquals(listOf(note.documentUri,map.documentUri),splitPairSelection(listOf(note,map)))
+    @Test fun oneMapAndOneNoteAreRefusedInBothOrders() {
+        assertNull(splitPairSelection(listOf(map,note)))
+        assertNull(splitPairSelection(listOf(note,map)))
     }
 
     @Test fun twoNotesKeepTheirExistingSelectionOrder() {
@@ -33,10 +33,9 @@ class SplitPairSelectionTest {
     @Test fun aPaneHomeCanAllowWholeWorkspaceNativePairsWithoutExposingMapPairs() {
         val other=note.copy(name="second.xnote",documentUri="content://library/second")
         assertEquals(listOf(note.documentUri,other.documentUri),
-            splitPairSelection(listOf(note,other),allowNativePairs=true,allowMapPairs=false))
-        assertNull(splitPairSelection(listOf(note,map),allowNativePairs=true,allowMapPairs=false))
-        assertNull(splitPairSelection(listOf(note,other),allowNativePairs=false,allowMapPairs=true))
-        assertEquals(listOf(map.documentUri,note.documentUri),
-            splitPairSelection(listOf(map,note),allowNativePairs=false,allowMapPairs=true))
+            splitPairSelection(listOf(note,other),allowNativePairs=true))
+        assertNull(splitPairSelection(listOf(note,map),allowNativePairs=true))
+        assertNull(splitPairSelection(listOf(note,other),allowNativePairs=false))
+        assertNull(splitPairSelection(listOf(map,note),allowNativePairs=false))
     }
 }

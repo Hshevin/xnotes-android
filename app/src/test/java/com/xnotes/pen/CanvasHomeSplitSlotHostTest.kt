@@ -67,7 +67,7 @@ class CanvasHomeSplitSlotHostTest {
         }
         withContext(Dispatchers.Main) {
             assertTrue(f.editor.prepareReference(target,selectedUri=f.sourceUri,pagedDestination=f.editor) is NativeReferencePreparation.Failed)
-            assertNull(f.editor.prepareDetachMixedPane(f.editor));assertTrue(f.editor.canvasOpen)
+            assertNull(f.editor.prepareDetachPane(f.editor));assertTrue(f.editor.canvasOpen)
         }
         val request=prepare(f)
         withContext(Dispatchers.Main) {
@@ -87,7 +87,7 @@ class CanvasHomeSplitSlotHostTest {
             f.beforeTargetWrite={throw IOException("Canvas Home save failed")}
             withContext(Dispatchers.Main) {
                 val model=f.editor.infinite.document;val history=f.editor.infinite.history;val undo=history.nextUndo
-                if(detach) assertNull(f.editor.prepareDetachMixedPane(f.editor,allowCanvasHome=true))
+                if(detach) assertNull(f.editor.prepareDetachPane(f.editor,allowCanvasHome=true))
                 else assertTrue(f.editor.openReference(requireNotNull(request)) is NativeReferenceResult.Failed)
                 assertTrue(f.editor.noteOpen && f.editor.canvasOpen);assertSame(model,f.editor.infinite.document)
                 assertSame(history,f.editor.infinite.history);assertSame(undo,history.nextUndo);assertTrue(model.dirty)
@@ -124,7 +124,7 @@ class CanvasHomeSplitSlotHostTest {
             coroutineScope {
                 val model=withContext(Dispatchers.Main) {f.editor.infinite.document}
                 val operation=async(Dispatchers.Main) {
-                    if(detach) f.editor.prepareDetachMixedPane(f.editor,allowCanvasHome=true)
+                    if(detach) f.editor.prepareDetachPane(f.editor,allowCanvasHome=true)
                     else f.editor.openReference(requireNotNull(request))
                 }
                 entered.await();operation.cancel();f.release.countDown();operation.join()
@@ -144,11 +144,11 @@ class CanvasHomeSplitSlotHostTest {
         open(f)
         withContext(Dispatchers.Main) {
             val model=f.editor.infinite.document;val history=f.editor.infinite.history
-            val first=requireNotNull(f.editor.prepareDetachMixedPane(f.editor,allowCanvasHome=true))
+            val first=requireNotNull(f.editor.prepareDetachPane(f.editor,allowCanvasHome=true))
             assertTrue(f.editor.canvasOpen && f.editor.noteOpen);assertTrue(first.current());assertFalse(model.dirty)
             add(f.editor,450.0);assertFalse(first.current());assertNull(first.commit())
             assertTrue(f.editor.canvasOpen);assertSame(model,f.editor.infinite.document);assertSame(history,f.editor.infinite.history)
-            val next=requireNotNull(f.editor.prepareDetachMixedPane(f.editor,allowCanvasHome=true))
+            val next=requireNotNull(f.editor.prepareDetachPane(f.editor,allowCanvasHome=true))
             assertNotNull(next.commit());assertFalse(f.editor.noteOpen);assertFalse(f.editor.canvasOpen)
             assertSame(model,f.editor.infinite.document);assertSame(history,f.editor.infinite.history);assertTrue(history.canUndo)
         }

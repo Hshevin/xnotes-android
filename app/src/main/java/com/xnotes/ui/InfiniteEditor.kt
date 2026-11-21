@@ -875,16 +875,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         selectionMenuRect = null
     }
 
-    /** Freeze the settled selection's world AABB, without accepting any unfinished edit. */
-    fun sourceSelectionRegion():Rect? {
-        if(interaction.mode!=CanvasPointerMode.IDLE || stylusInContact || hasPendingContentTransaction) return null
-        return selection.box?.corners()?.let {Rect.bounding(it)}?.takeIf(::validCanvasSourceRegion)?.copy()
-    }
-    /** The screenshot's own frozen world rectangle; menu chrome is in a different coordinate space. */
-    fun sourceCaptureRegion():Rect? {
-        if(interaction.mode!=CanvasPointerMode.IDLE || stylusInContact || hasPendingContentTransaction) return null
-        return interaction.captureRect?.takeIf(::validCanvasSourceRegion)?.copy()
-    }
 
     /** Delete whatever is selected, as one undoable edit. */
     override fun deleteSelection() {

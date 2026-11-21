@@ -130,7 +130,7 @@ class NativeReferenceSplitSlotHostTest {
             peer.state.zoom=1.7;peer.state.scrollX=17.0;peer.state.scrollY=93.0
             val model=f.editor.state.document;val history=f.editor.history
             f.addStroke(120.0,recordHistory=true)
-            val prepared=requireNotNull(f.editor.prepareDetachMixedPane(f.editor))
+            val prepared=requireNotNull(f.editor.prepareDetachPane(f.editor))
             assertTrue(prepared.current());assertTrue(f.editor.noteOpen && peer.noteOpen)
             assertSame(f.editor,peer.documentOwner);assertTrue(model.dirty)
             assertEquals(Pane.PRIMARY,prepared.result.remainingPane);assertEquals(Pane.SECONDARY,prepared.result.retiredPane)
@@ -147,29 +147,12 @@ class NativeReferenceSplitSlotHostTest {
         val destination=openParkingPanes(f)
         withContext(Dispatchers.Main) {
             val original=f.editor.state.document;val other=destination.state.document
-            val prepared=requireNotNull(f.editor.prepareDetachMixedPane(destination))
+            val prepared=requireNotNull(f.editor.prepareDetachPane(destination))
             f.addStroke(150.0,recordHistory=true)
             assertFalse(prepared.current());assertNull(prepared.commit())
             assertTrue(f.editor.noteOpen && destination.noteOpen)
             assertSame(original,f.editor.state.document);assertSame(other,destination.state.document)
             assertEquals(0,f.writes.get())
-        }
-    }
-
-    @Test fun mixedFocusDoesNotCommitAnUnconfirmedTextDraftOrCopyTools()=runParkingScenario {f->
-        val other=openParkingPanes(f)
-        withContext(Dispatchers.Main) {
-            f.editor.focusPane(Pane.PRIMARY);f.editor.selectTool(Tool.TEXT_BOX);other.selectTool(Tool.ERASER)
-            parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(220.0,220.0))
-            parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(220.0,220.0))
-            f.editor.updateEditingText("Keep my unfinished native text")
-            val draft=f.editor.controller.activeTextItem();assertNotNull(draft)
-            val revision=f.editor.state.document.bodyRevision;val undo=f.editor.history.nextUndo
-            assertTrue(f.editor.focusMixedNativePane(Pane.SECONDARY))
-            assertSame(draft,f.editor.controller.activeTextItem());assertNotNull(f.editor.editingField)
-            assertEquals(revision,f.editor.state.document.bodyRevision);assertSame(undo,f.editor.history.nextUndo)
-            assertEquals(Tool.TEXT_BOX,f.editor.tool);assertEquals(Tool.ERASER,other.tool)
-            f.editor.commitText()
         }
     }
 

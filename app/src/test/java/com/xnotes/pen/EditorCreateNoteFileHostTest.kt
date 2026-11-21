@@ -12,7 +12,6 @@ import com.xnotes.core.model.Document
 import com.xnotes.core.model.PageStyle
 import com.xnotes.format.BundleReferenceInfo
 import com.xnotes.format.CanvasCodec
-import com.xnotes.mindmap.MapCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
 import com.xnotes.platform.LegacySessionQueue
@@ -86,12 +85,11 @@ class EditorCreateNoteFileHostTest {
             f.stopDebounce();f.addStroke(77.0,recordHistory=true);f.editor.state.document
         }
     }
-    private enum class Entry { NOTE,CANVAS,MAP,MARKDOWN }
+    private enum class Entry { NOTE,CANVAS,MARKDOWN }
     private suspend fun createEntry(f:EditorPageCopyFixture,entry:Entry)=withContext(Dispatchers.IO) {
         when(entry) {
             Entry.NOTE->f.editor.createBlankNoteFile(tree(f),"root","blank note")
             Entry.CANVAS->f.editor.createBlankCanvasFile(tree(f),"root","blank canvas")
-            Entry.MAP->f.editor.createBlankMindMapFile(tree(f),"root","blank map")
             Entry.MARKDOWN->f.editor.createMarkdownNoteFile(tree(f),"root","markdown note","# New entry\ncreated markdown")
         }
     }
@@ -181,14 +179,6 @@ class EditorCreateNoteFileHostTest {
             assertEquals("$entry must execute the real createDocument",1,f.creates.get())
             assertNotNull("$entry could not publish to a genuinely empty target",made)
             assertEquals("target",DocumentsContract.getDocumentId(Uri.parse(made!!)))
-            if(entry==Entry.MAP) {
-                val raw=f.target.readBytes()
-                assertTrue("Maps must use their independent JSON format",String(raw,Charsets.UTF_8).trimStart().startsWith("{"))
-                val map=MapCodec.decode(raw)
-                assertNotEquals(identity.documentId,map.id);assertTrue(map.root.text.isNotBlank())
-                assertEquals("The map creator must use its JSON output adapter",1,f.writeOpens.get())
-                assertEquals("A map must not enter the native ZIP backend",0,f.writes.get())
-            } else {
                 val actual=withContext(Dispatchers.IO) {BundleReferenceInfo.inspectStrict(f.target)}
                 assertNotEquals(identity.documentId,actual.header.identity!!.documentId)
                 assertEquals(actual.header.identity!!.documentId,f.storage.registry.idAt(made))
@@ -207,7 +197,6 @@ class EditorCreateNoteFileHostTest {
                         assertEquals(note.pages.size,actual.orderedPageIds.size);assertEquals(note.pages.size,actual.pageIds.size)
                     }
                 }
-            }
             assertEquals(0,f.deletes.get());assertArrayEquals(source,f.source.readBytes())
             withContext(Dispatchers.Main) {
                 assertSame(live,f.editor.state.document);assertEquals(identity,live.identity);assertEquals(f.sourceUri,live.path)

@@ -69,7 +69,7 @@ internal class SplitRecentWriter private constructor(private val filesDir:File,p
     /** Registration never performs IO or invokes a caller callback under its short memory lock. */
     fun reserve(explicit:Boolean=false):Ticket=synchronized(registration) {Ticket(this,++epoch,explicit)}
 
-    fun submit(ticket:Ticket,request:SplitOpenRequest):Deferred<SplitRecentWrite> {
+    fun submit(ticket:Ticket,request:SplitOpenRequest.Native):Deferred<SplitRecentWrite> {
         if(ticket.issuer!==this || !ticket.submitted.compareAndSet(false,true))
             return CompletableDeferred<SplitRecentWrite>(SplitRecentWrite.Superseded)
         val result=CompletableDeferred<SplitRecentWrite>()
@@ -101,14 +101,11 @@ internal class SplitRecentWriter private constructor(private val filesDir:File,p
         if(epoch!=ticket.epoch || claimed!=null) false else {claimed=ticket;true}
     }
 
-    private fun write(ticket:Ticket,request:SplitOpenRequest):SplitRecentWrite {
+    private fun write(ticket:Ticket,request:SplitOpenRequest.Native):SplitRecentWrite {
         var stage:Path?=null
         try {
             if(!current(ticket)) return SplitRecentWrite.Superseded
-            val bytes=when(request) {
-                is SplitOpenRequest.Mixed->SplitOpenCodec.encodeMixed(request.request)
-                is SplitOpenRequest.Native->SplitOpenCodec.encodeNative(request.request)
-            }
+            val bytes=SplitOpenCodec.encodeNative(request.request)
             val canonical=requireNotNull(SplitOpenCodec.parse(bytes))
             if(!current(ticket)) return SplitRecentWrite.Superseded
             val target=SplitArrangementPaths.recent(filesDir).toPath()

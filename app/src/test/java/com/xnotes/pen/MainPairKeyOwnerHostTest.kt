@@ -7,7 +7,6 @@ import android.view.ViewGroup
 import android.provider.DocumentsContract
 import android.widget.FrameLayout
 import com.xnotes.EditorActivity
-import com.xnotes.MixedInputBinding
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.core.tools.Tool
 import com.xnotes.ui.Editor
@@ -26,7 +25,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Actual Main key dispatch and actual prepared native commits, including a Map-focused release. */
+/** Actual Main key dispatch and actual prepared native commits. */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class MainPairKeyOwnerHostTest {
@@ -37,9 +36,6 @@ class MainPairKeyOwnerHostTest {
     }
     private fun key(action:Int,device:Int=9,repeat:Int=0,code:Int=600)=
         KeyEvent(1000L,1001L+action,action,code,repeat,0,device,81,0,InputDevice.SOURCE_STYLUS)
-    private fun mapFocus(activity:EditorActivity) {
-        activity.mixedInput=MixedInputBinding(MixedInputRouter(),native={null},focus={true},blocked={false})
-    }
     private fun scenario(block:suspend (EditorActivity,EditorPageCopyFixture,KeyView)->Unit)=runParkingScenario {f->
         withContext(Dispatchers.IO) {f.seed()}
         var activity:EditorActivity?=null
@@ -55,7 +51,7 @@ class MainPairKeyOwnerHostTest {
             EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,f.editor)
             StylusButtonLatch.releaseKey();block(host,f,child)
         }} finally {withContext(NonCancellable+Dispatchers.Main) {
-            activity?.let {host->host.mixedInput=null;host.penKeyRecorder=null
+            activity?.let {host->host.penKeyRecorder=null
                 EditorActivity::class.java.getDeclaredField("editor").apply {isAccessible=true}.set(host,null)
                 host.window.setContentView(View(host))}
             f.editor.openPanes.forEach {it.resetPenButtons()};StylusButtonLatch.releaseKey()
@@ -87,51 +83,6 @@ class MainPairKeyOwnerHostTest {
             assertEquals(Tool.ERASER,f.editor.tool)
             assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP,device=98)))
             assertEquals(Tool.PAN,f.editor.tool);assertTrue(child.keys.isEmpty())
-        } finally {f.editor.setPenShortcuts(old)}
-    }
-
-    @Test fun actualSharedPeerCommitHandsItsAcceptedReleaseToTheRetainedOwner()=scenario {activity,f,child->
-        val peer=f.editor.secondaryPane();assertTrue(peer.openSharedView(f.editor))
-        val old=bind(f.editor)
-        try {
-            f.editor.selectTool(Tool.PEN);f.editor.focusPane(Pane.SECONDARY)
-            assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)));assertEquals(Tool.ERASER,peer.tool)
-            val model=f.editor.state.document;val history=f.editor.history
-            val cap=f.editor.preparePagedPairOpen(f.sourceUri,"source.xnote",Pane.SECONDARY,
-                guardOwners={owners,current->assertTrue(current());assertTrue(owners.isEmpty());emptySet()})
-            assertNotNull(cap)
-            try {
-                assertSame(f.editor,cap!!.target);assertTrue(cap.keyHandoffs.any {it.first===peer && it.second===f.editor})
-                val handoff=activity.prepareNativeKeyHandoffs(cap.keyHandoffs)
-                assertTrue(cap.commit());handoff();f.editor.focusMixedNativePane(cap.nativePane)
-                assertFalse(peer.noteOpen);assertSame(model,f.editor.state.document);assertSame(history,f.editor.history)
-                assertEquals(Tool.ERASER,f.editor.tool);assertEquals(Tool.PEN,f.editor.toolbarTool)
-                mapFocus(activity)
-                assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
-                assertEquals(Tool.PEN,f.editor.tool);assertTrue(child.keys.isEmpty())
-            } finally {cap?.close()}
-        } finally {f.editor.setPenShortcuts(old)}
-    }
-
-    @Test fun retainedOtherDocumentKeepsItsFormalToolAndReceivesTheRetiredOwnersRelease()=scenario {activity,f,child->
-        val target=openParkingPanes(f);val old=bind(f.editor)
-        try {
-            f.editor.focusPane(Pane.PRIMARY);f.editor.selectTool(Tool.PEN);target.selectTool(Tool.PAN)
-            assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
-            val token=target.penInputOwnerToken
-            val cap=f.editor.preparePagedPairOpen(f.targetUri,"target.xnote",Pane.PRIMARY,
-                guardOwners={owners,current->assertTrue(current());assertEquals(listOf(f.editor),owners);emptySet()})
-            assertNotNull(cap)
-            try {
-                assertSame(target,cap!!.target);assertTrue(cap.keyHandoffs.any {it.first===f.editor && it.second===target})
-                val handoff=activity.prepareNativeKeyHandoffs(cap.keyHandoffs)
-                assertTrue(cap.commit());handoff();f.editor.focusMixedNativePane(cap.nativePane)
-                assertSame(token,target.penInputOwnerToken);assertFalse(f.editor.noteOpen)
-                assertEquals(Tool.PAN,target.toolbarTool);assertEquals(Tool.ERASER,target.tool)
-                mapFocus(activity)
-                assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
-                assertEquals(Tool.PAN,target.tool);assertEquals(Tool.PAN,target.toolbarTool);assertTrue(child.keys.isEmpty())
-            } finally {cap?.close()}
         } finally {f.editor.setPenShortcuts(old)}
     }
 

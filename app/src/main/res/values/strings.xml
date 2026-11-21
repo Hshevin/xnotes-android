@@ -1190,4 +1190,7 @@
     <string name="split_position_top">Top</string>
     <string name="split_position_bottom">Bottom</string>
     <string name="split_delete_confirm">Delete this split file? The documents it contains will be kept.</string>
+    <string name="legacy_map_unsupported">Old mind maps and map splits are no longer supported.</string>
+    <string name="map_title">Mind map</string>
+    <string name="map_no_documents">No mind maps</string>
 </resources>

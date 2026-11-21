@@ -29,6 +29,7 @@ internal class HomeToolOwners(initial:Map<BackstageView,String> = emptyMap()) {
         fun key(target:Editor?)=target?.pane?.name ?: MAIN
         val Saver=listSaver<HomeToolOwners,String>(save={it.owners.flatMap {(tool,home)->listOf(tool.name,home)}},
             restore={saved->HomeToolOwners(saved.chunked(2).mapNotNull {pair->
+                if (pair.size != 2) return@mapNotNull null
                 BackstageView.entries.firstOrNull {it.name==pair[0] && it.tool}?.let {it to pair[1]}
             }.toMap())})
     }
@@ -36,8 +37,7 @@ internal class HomeToolOwners(initial:Map<BackstageView,String> = emptyMap()) {
 
 /**
  * Releases a tool when the Home pane showing it leaves composition — the pane's Home closed or covered — except
- * across an Activity rebuild. [release] checks whether its presentation still needs releasing: one handed to a
- * reader or a map has already left the pane and stays for the return.
+ * across an Activity rebuild.
  */
 @Composable
 internal fun HomeToolLease(release:()->Unit) {

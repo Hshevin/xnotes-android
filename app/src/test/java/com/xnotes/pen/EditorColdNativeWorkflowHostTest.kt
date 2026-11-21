@@ -10,7 +10,6 @@ import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.CanvasCodec
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.mindmap.MapWorkspace
 import com.xnotes.platform.*
 import com.xnotes.ui.*
 import java.io.File
@@ -42,9 +41,7 @@ class EditorColdNativeWorkflowHostTest {
         return document
     }
     private suspend fun bound(f:EditorPageCopyFixture,block:suspend (ColdPresentationCoordinator)->Unit) {
-        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
-        val maps=withContext(Dispatchers.Main) {MapWorkspace(f.context,scope).also {it.bindHost(Any())}}
-        val coordinator=withContext(Dispatchers.Main) {ColdPresentationCoordinator(f.editor,maps,ColdPresentationBootstrap())}
+        val coordinator=withContext(Dispatchers.Main) {ColdPresentationCoordinator(f.editor,ColdPresentationBootstrap())}
         try {
             withContext(Dispatchers.Main) {
                 assertTrue(coordinator.bootstrap())
@@ -54,7 +51,7 @@ class EditorColdNativeWorkflowHostTest {
             block(coordinator)
         } finally {withContext(NonCancellable+Dispatchers.Main) {
             f.editor.onPresentationIntent=null;f.editor.preparePresentationDeparture=null
-            coordinator.close();maps.dispose().join();scope.cancel()
+            coordinator.close()
         }}
     }
 

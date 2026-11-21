@@ -5,9 +5,6 @@ import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.mindmap.MapPresentationCamera
-import com.xnotes.mindmap.MapSplitLayout
-import com.xnotes.mindmap.MindMapView
 import com.xnotes.platform.ViewOverridesJson
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -47,12 +44,7 @@ internal object LastPresentationCodec {
         val version=integer(root,"version");require(version in 1..3)
         when(string(root,"state")) {
             "home"->{require(version==1);keys(root,setOf("format","version","state"));LastPresentation.Home}
-            "mixed"->LastPresentation.Mixed(readMixed(root,version))
-            "map"->{
-                require(version==2);keys(root,setOf("format","version","state","map","camera","homeLayout"))
-                LastPresentation.MapOnly(readMap(obj(root,"map")),optional(root,"camera") {readCamera(obj(root,it))},
-                    optional(root,"homeLayout") {readMapLayout(obj(root,it),true)}).also(LastPresentationContract::validateMapOnly)
-            }
+            "mixed","map","network"->LastPresentation.Home
             "native"->{require(version>=2);readNative(root,version).also(LastPresentationContract::validateNative)}
             else->null
         }
@@ -61,31 +53,17 @@ internal object LastPresentationCodec {
     fun encode(value:LastPresentation):ByteArray {
         // v1/v2 keep their strict contracts; only a description carrying a stored lock needs v3.
         val views=when(value) {
-            is LastPresentation.Mixed->listOfNotNull(value.value.nativeView)
             is LastPresentation.Native->value.slots.mapNotNull {(it as? ColdNativeSlot.Note)?.view ?: (it as? ColdNativeSlot.Shared)?.view}
             else->emptyList()
         }
         val version=when {
             views.any {it.zoomLocked!=null}->3
-            value===LastPresentation.Home || value is LastPresentation.Mixed && value.value.nativeView==null->1
+            value===LastPresentation.Home->1
             else->2
         }
         val root=JSONObject().put("format","xnotes-last-presentation").put("version",version)
         when(value) {
             LastPresentation.Home->root.put("state","home")
-            is LastPresentation.Mixed->{
-                val data=value.value;LastPresentationContract.validateMixed(data)
-                root.put("state","mixed").put("map",writeMap(data.map)).put("native",writeHint(data.nativeHint))
-                    .put("layout",writeMapLayout(data.layout))
-                data.mapCamera?.let {root.put("camera",writeCamera(it))}
-                data.nativePosition?.let {root.put("nativePosition",writePosition(it))}
-                data.nativeView?.let {root.put("nativeView",writeNativeView(it))}
-            }
-            is LastPresentation.MapOnly->{
-                LastPresentationContract.validateMapOnly(value);root.put("state","map").put("map",writeMap(value.map))
-                value.camera?.let {root.put("camera",writeCamera(it))}
-                value.homeLayout?.let {root.put("homeLayout",writeMapLayout(it).put("nativeHome",true))}
-            }
             is LastPresentation.Native->{
                 LastPresentationContract.validateNative(value)
                 val slots=org.json.JSONArray()
@@ -109,12 +87,6 @@ internal object LastPresentationCodec {
         return root.toString().toByteArray(Charsets.UTF_8).also {require(it.size<=MAX_BYTES)}
     }
 
-    private fun readMap(value:MarkerObject):SplitSourceRef {
-        keys(value,setOf("kind","documentId","uri","title"));require(string(value,"kind")=="map")
-        return SplitSourceRef(string(value,"documentId"),string(value,"uri"),optional(value,"title") {string(value,it)}).also(LastPresentationContract::validateMap)
-    }
-    private fun writeMap(value:SplitSourceRef)=JSONObject().put("kind","map").put("documentId",value.documentId).put("uri",value.uri)
-        .also {json->value.title?.let {json.put("title",it)}}
     private fun readHint(value:MarkerObject,kind:DocumentKind):NativeRestoreHint {
         keys(value,setOf("kind","documentId","path"));require(string(value,"kind")==kind.name.lowercase())
         val path=required(value,"path").let {if(it==null) null else it as? String ?: error("Expected nullable path")}
@@ -122,23 +94,6 @@ internal object LastPresentationCodec {
     }
     private fun writeHint(value:NativeRestoreHint)=JSONObject().put("kind",value.kind.name.lowercase())
         .put("documentId",value.documentId).put("path",value.path ?: JSONObject.NULL)
-    private fun readCamera(value:MarkerObject):MapPresentationCamera {
-        keys(value,setOf("zoom","panX","panY","width","height","density"))
-        return MapPresentationCamera(MindMapView.Viewport(float(bounded(value,"zoom","0.05","4")),
-            float(number(value,"panX")),float(number(value,"panY"))),integer(value,"width"),integer(value,"height"),
-            float(number(value,"density"))).also(LastPresentationContract::validateCamera)
-    }
-    private fun writeCamera(value:MapPresentationCamera)=JSONObject().put("zoom",value.viewport.zoom.toDouble())
-        .put("panX",value.viewport.panX.toDouble()).put("panY",value.viewport.panY.toDouble()).put("width",value.width)
-        .put("height",value.height).put("density",value.density.toDouble())
-    private fun readMapLayout(value:MarkerObject,home:Boolean=false):MapSplitLayout {
-        keys(value,setOf("mapPane","focusedPane","ratio","sideBySide","reversed")+if(home) setOf("nativeHome") else emptySet())
-        if(home) require(boolean(value,"nativeHome"))
-        return MapSplitLayout(Pane.valueOf(string(value,"mapPane")),Pane.valueOf(string(value,"focusedPane")),
-            bounded(value,"ratio","0.18","0.82").toFloat(),optional(value,"sideBySide") {boolean(value,it)},boolean(value,"reversed"),home)
-    }
-    private fun writeMapLayout(value:MapSplitLayout)=JSONObject().put("mapPane",value.mapPane.name).put("focusedPane",value.focusedPane.name)
-        .put("ratio",value.ratio.toDouble()).put("reversed",value.reversed).also {json->value.sideBySide?.let {json.put("sideBySide",it)}}
     private fun readPosition(value:MarkerObject,extra:Set<String> = emptySet()):Editor.ReadingPosition {
         keys(value,setOf("zoom","x","y","view")+extra)
         return Editor.ReadingPosition(bounded(value,"zoom","0.05","20"),number(value,"x"),number(value,"y"),readView(obj(value,"view")))
@@ -150,15 +105,6 @@ internal object LastPresentationCodec {
         optional(value,"zoomLocked") {boolean(value,it)})
     private fun writeNativeView(value:ColdNativeView)=writePosition(value.position).put("fitWidth",value.fitWidth)
         .also {json->value.zoomLocked?.let {json.put("zoomLocked",it)}}
-    private fun readMixed(root:MarkerObject,version:Int):ColdMixedPresentation {
-        keys(root,setOf("format","version","state","map","native","layout","camera")+
-            if(version==1) setOf("nativePosition") else setOf("nativeView"))
-        val result=ColdMixedPresentation(readMap(obj(root,"map")),readHint(obj(root,"native"),DocumentKind.NOTE),readMapLayout(obj(root,"layout")),
-            optional(root,"camera") {readCamera(obj(root,it))},
-            if(version==1) optional(root,"nativePosition") {readPosition(obj(root,it))} else null,
-            if(version>=2) readNativeView(obj(root,"nativeView"),version) else null)
-        return result.also(LastPresentationContract::validateMixed)
-    }
     private fun readNative(root:MarkerObject,version:Int):LastPresentation.Native {
         keys(root,setOf("format","version","state","slots","layout"))
         val array=required(root,"slots") as? List<*> ?: error("Expected native slots")

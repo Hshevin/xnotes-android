@@ -166,13 +166,13 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, ORIGINALS, NETWORK, RECOVERY;
+enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, RECOVERY;
     /** A sidebar tool whose pane belongs to a host-owned presentation: the host decides when it shows and releases it. */
-    val tool: Boolean get() = this == ORIGINALS || this == NETWORK || this == RECOVERY
+    val tool: Boolean get() = this == RECOVERY
 }
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
-private enum class CreateMode { NONE, FILE, CANVAS, MIND_MAP, FOLDER }
+private enum class CreateMode { NONE, FILE, CANVAS, FOLDER }
 
 /** Entries copied or cut in the explorer; each remembers the folder it was listed in. */
 private data class ClipItem(val entries: List<BrowseEntry>, val isCut: Boolean)
@@ -217,8 +217,6 @@ fun Backstage(
     /** Captured entries keep selection order and routing hints fixed across asynchronous opens. */
     onOpenSplitEntries: (BrowseEntry, BrowseEntry) -> Unit = { first,second -> onOpenSplit(first.documentUri,second.documentUri) },
     allowSplits: Boolean = true,
-    /** A map pair replaces the whole workspace, including when selected from a slot Home. */
-    allowMapPairs: Boolean = allowSplits,
     /** Two notes selected here also replace the whole workspace, rather than nesting a split. */
     allowNativePairs: Boolean = allowSplits,
     initialDocument: String? = null,
@@ -239,10 +237,6 @@ fun Backstage(
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
     /** Preview historical recovery material from this physical pane without replacing its workspace. */
     onPreviewRecovery: () -> Unit = {},
-    /** Explore authorized files without requiring an open native document. */
-    onOpenNetwork: (() -> Unit)? = null,
-    /** Retained PDF originals have independent identities and a read-only reader. */
-    onOpenOriginalPdfs: (() -> Unit)? = null,
     /** The host's pane for a tool view ([BackstageView.tool]), shown beside the sidebar; null falls back to Home. */
     toolPane: (@Composable (sidebarOpen: Boolean, onShowSidebar: () -> Unit) -> Unit)? = null,
 ) {
@@ -261,7 +255,6 @@ fun Backstage(
         openSplit = onOpenSplitEntries,
         chooseSplitPair = onChooseSplitPair, openSplitFile = onOpenSplitFile, restoreSplit = onRestoreSplit,
         canRestoreSplit = canRestoreSplit,
-        allowMapPairs = allowMapPairs,
         allowNativePairs = allowNativePairs,
         openBeside = onOpenBeside,
         exportPdfs = onExportPdfs,
@@ -271,7 +264,7 @@ fun Backstage(
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (EditorActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
-        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs, toolPane)
+        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, toolPane)
     }
 }
 
@@ -310,8 +303,6 @@ private fun BackstageContent(
     onBackup: (Boolean) -> Unit,
     initialDocument: String?,
     onPreviewRecovery: () -> Unit,
-    onOpenNetwork: (() -> Unit)?,
-    onOpenOriginalPdfs: (() -> Unit)?,
     toolPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
 ) {
     val palette = LocalPalette.current
@@ -408,7 +399,7 @@ private fun BackstageContent(
     LaunchedEffect(editor.browseRoot) { editor.browseRoot?.let { r -> withContext(Dispatchers.IO) { editor.purgeExpiredTrash(r, prefs.trashDays) } } }
     // Kept while its inputs hold, so folding the sidebar never recomposes the rail or the sidebar.
     val showRecent = prefs.sidebarRecent && editor.browseRoot != null
-    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery, onOpenNetwork, onOpenOriginalPdfs) {
+    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery) {
         SidebarNav(
             allowSplits = calls.allowSplits,
             view = view,
@@ -430,8 +421,6 @@ private fun BackstageContent(
             // Another tool's pane is left first, so its host releases it before this presentation starts;
             // picking the tool already shown only closes the drawer.
             onPreviewRecovery = { openTool(BackstageView.RECOVERY, onPreviewRecovery) },
-            onOpenNetwork = onOpenNetwork?.let {open->{openTool(BackstageView.NETWORK, open)}},
-            onOpenOriginalPdfs = onOpenOriginalPdfs?.let {open->{openTool(BackstageView.ORIGINALS, open)}},
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -551,8 +540,6 @@ private class SidebarNav(
     val onOpenPin: (PinnedFolder) -> Unit,
     val onUnpin: (PinnedFolder) -> Unit,
     val onPreviewRecovery: () -> Unit,
-    val onOpenNetwork: (() -> Unit)?,
-    val onOpenOriginalPdfs: (() -> Unit)?,
 )
 
 /** The full sidebar: a pane on wide screens, a slide-over drawer on phones. */
@@ -580,8 +567,6 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 Command(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-                nav.onOpenNetwork?.let {open->Command(XnotesIcons.map, stringResource(R.string.network_library_title), selected = nav.view == BackstageView.NETWORK, onClick=open)}
-                nav.onOpenOriginalPdfs?.let {open->Command(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), selected = nav.view == BackstageView.ORIGINALS, onClick=open)}
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
                 Command(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
@@ -637,8 +622,6 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
             Column(if (scrollAll) Modifier else Modifier.weight(1f).verticalScroll(scroll), horizontalAlignment = Alignment.CenterHorizontally) {
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
-                nav.onOpenNetwork?.let {open->RailItem(XnotesIcons.map, stringResource(R.string.network_library_title), selected = nav.view == BackstageView.NETWORK, onClick=open)}
-                nav.onOpenOriginalPdfs?.let {open->RailItem(XnotesIcons.file, stringResource(R.string.original_pdf_library_title), selected = nav.view == BackstageView.ORIGINALS, onClick=open)}
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
                 RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
@@ -760,7 +743,7 @@ private fun BackstageMain(
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
-                BackstageView.ORIGINALS, BackstageView.NETWORK, BackstageView.RECOVERY -> if (toolPane != null) toolPane(sidebarOpen, onShowSidebar)
+                BackstageView.RECOVERY -> if (toolPane != null) toolPane(sidebarOpen, onShowSidebar)
                     else HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
             }
         }
@@ -985,7 +968,6 @@ private fun NewItemMenuItems(
     )
     item(XnotesIcons.edit, stringResource(R.string.new_note_menu)) { onCreateMode(CreateMode.FILE) }
     item(XnotesIcons.canvas, stringResource(R.string.new_canvas_menu)) { onCreateMode(CreateMode.CANVAS) }
-    item(XnotesIcons.file, stringResource(R.string.map_new)) { onCreateMode(CreateMode.MIND_MAP) }
     item(XnotesIcons.importDoc, stringResource(R.string.import_pdf)) { onImportPdf() }
     item(XnotesIcons.newFolder, stringResource(R.string.new_folder_menu)) { onCreateMode(CreateMode.FOLDER) }
 }
@@ -1001,7 +983,6 @@ private class ExplorerCalls(
     val saveCopyFile: (String) -> Unit,
     val exportFilePdf: (String) -> Unit,
     val openSplit: (BrowseEntry, BrowseEntry) -> Unit,
-    val allowMapPairs: Boolean,
     val allowNativePairs: Boolean,
     val chooseSplitPair: () -> Unit,
     val openSplitFile: (String) -> Unit,
@@ -1452,7 +1433,7 @@ private fun ExplorerSection(
                 when {
                     selection.isNotEmpty() -> toggleSelect(e)
                     e.isDir -> openFolder(e)
-                    prefsNow.value.tapPreviews -> previewing = e
+                    prefsNow.value.tapPreviews && e.storedDocument -> previewing = e
                     else -> callsNow.value.openFile(e.documentUri)
                 }
             },
@@ -1800,7 +1781,6 @@ private fun ExplorerSection(
                     EmptyPane(empty.text, empty.art, if (!empty.offersCreate) null else { {
                         PrimaryButton(XnotesIcons.edit, stringResource(R.string.new_note_menu)) { onCreateMode(CreateMode.FILE) }
                         PrimaryButton(XnotesIcons.canvas, stringResource(R.string.new_canvas_menu)) { onCreateMode(CreateMode.CANVAS) }
-                        PrimaryButton(XnotesIcons.file, stringResource(R.string.map_new)) { onCreateMode(CreateMode.MIND_MAP) }
                         PrimaryButton(XnotesIcons.importDoc, stringResource(R.string.import_pdf), onClick = calls.importPdf)
                     } })
                 }
@@ -1961,8 +1941,7 @@ private fun ExplorerSection(
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
                     if (selection.size == 1) ExplorerIcon(XnotesIcons.edit, stringResource(R.string.rename), fg) { renaming = selection.first(); selection.clear() }
-                    val pair = splitPairSelection(selection,allowNativePairs=calls.allowSplits || calls.allowNativePairs,
-                        allowMapPairs=calls.allowSplits || calls.allowMapPairs)
+                    val pair = splitPairSelection(selection,allowNativePairs=calls.allowSplits || calls.allowNativePairs)
                     val pairFiles=pair?.map {uri->files.first {it.documentUri==uri}}
                     if (pairFiles != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) {
                         val first=pairFiles[0];val second=pairFiles[1]
@@ -2015,7 +1994,7 @@ private fun ExplorerSection(
                                     selection.clear()
                                     if (uris.size == 1) calls.shareFile(uris[0]) else calls.shareFiles(uris)
                                 })
-                                if (one != null && !one.isDir) {
+                                if (one?.storedDocument == true) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
                                 }
@@ -2033,7 +2012,7 @@ private fun ExplorerSection(
                 }
             }
         }
-        CreateButton(
+        if (selection.all { it.isDir || it.storedDocument }) CreateButton(
             exporting = selection.isNotEmpty(),
             onCreateMode = onCreateMode,
             onImportPdf = calls.importPdf,
@@ -2093,11 +2072,11 @@ private fun ExplorerSection(
     }
     // Name entry for a new canvas, new folder, or a pending PDF import. Hidden while an import is
     // actually being written, so only the "Importing…" dialog shows.
-    if ((createMode == CreateMode.CANVAS || createMode == CreateMode.MIND_MAP || createMode == CreateMode.FOLDER || pendingImport != null) && !editor.importing) {
+    if ((createMode == CreateMode.CANVAS || createMode == CreateMode.FOLDER || pendingImport != null) && !editor.importing) {
         val isFolder = pendingImport == null && createMode == CreateMode.FOLDER
         val default = when {
             pendingImport != null -> pendingImport.defaultName // import names default to the source file
-            createMode == CreateMode.FILE || createMode == CreateMode.CANVAS || createMode == CreateMode.MIND_MAP ->
+            createMode == CreateMode.FILE || createMode == CreateMode.CANVAS ->
                 nextUntitled(editor, editor.cachedChildren(root, currentDocId))
             else -> "" // new folder
         }
@@ -2105,7 +2084,6 @@ private fun ExplorerSection(
             title = when {
                 pendingImport != null -> stringResource(R.string.import_title)
                 isFolder -> stringResource(R.string.new_folder)
-                createMode == CreateMode.MIND_MAP -> stringResource(R.string.map_new)
                 createMode == CreateMode.CANVAS -> stringResource(R.string.new_canvas)
                 else -> stringResource(R.string.new_note)
             },
@@ -2131,11 +2109,6 @@ private fun ExplorerSection(
                     isFolder -> scope.launch {
                         val ok = withContext(Dispatchers.IO) { editor.createFolder(root, currentDocId, n) }
                         if (ok) { onCreateMode(CreateMode.NONE); listAgain() } else fieldError = context.getString(R.string.err_create_folder)
-                    }
-                    createMode == CreateMode.MIND_MAP -> scope.launch {
-                        val uri = withContext(Dispatchers.IO) { editor.createBlankMindMapFile(root, currentDocId, n) }
-                        if (uri != null) { onCreateMode(CreateMode.NONE); listAgain(); calls.openFile(uri) }
-                        else fieldError = context.getString(R.string.map_create_error)
                     }
                     createMode == CreateMode.CANVAS -> scope.launch {
                         val uri = withContext(Dispatchers.IO) { editor.createBlankCanvasFile(root, currentDocId, n) }
@@ -2407,8 +2380,8 @@ internal fun EntryMenu(
             if (onShare != null) {
                 HorizontalDivider(color = palette.border.toComposeColor())
                 DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, onClick = { onDismiss(); onShare() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { onDismiss(); onSaveCopy?.invoke() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { onDismiss(); onExportPdf?.invoke() })
+                if (onSaveCopy != null) DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { onDismiss(); onSaveCopy() })
+                if (onExportPdf != null) DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { onDismiss(); onExportPdf() })
             }
         }
     }

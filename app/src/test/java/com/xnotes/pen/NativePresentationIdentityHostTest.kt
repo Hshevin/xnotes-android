@@ -57,7 +57,7 @@ class NativePresentationIdentityHostTest {
             val peer=f.editor.secondaryPane();assertTrue(peer.openSharedView(f.editor))
             val model=f.editor.state.document;val ticket=f.editor.captureNativePresentationIdentity()
             assertTrue(f.editor.matchesNativePresentationIdentity(ticket))
-            assertNotNull(f.editor.detachMixedPane(peer))
+            assertNotNull(f.editor.detachPane(peer))
             assertFalse(f.editor.matchesNativePresentationIdentity(ticket))
             // Slot retirement is synchronous; the accepted recovery clear must finish before a new adoption.
             (Editor::class.java.getDeclaredField("sessionWriteJob").apply {isAccessible=true}.get(peer) as? Job)?.join()
