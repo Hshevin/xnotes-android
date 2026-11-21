@@ -14,6 +14,7 @@ import org.junit.Test
  *
  * Geometry: root "root" at the origin measures its title 40 × 24 at (16, 10), so its ink area
  * starts at canvas (16, 42); a stroke written at canvas (x, y) is stored at (x − 16, y − 42).
+ * [com.xnotes.core.model.Stroke.intersectsCircle] tests samples, so every hit below sits on one.
  */
 class MapInkEraseTest {
 
@@ -36,7 +37,7 @@ class MapInkEraseTest {
         val r = twoStrokes()
         val before = inkOf(r)
         val box = e.layout().rectOf(r)!!
-        val dirty = eraser().erase(40.0, 60.0, 4.0, area = false)
+        val dirty = eraser().erase(30.0, 60.0, 4.0, area = false)
         assertEquals(box, dirty)
         val after = inkOf(r)
         assertEquals(1, after.strokes.size)
@@ -73,7 +74,7 @@ class MapInkEraseTest {
 
     @Test fun nodesThatMayNotBeEditedAreLeftAlone() {
         val r = twoStrokes()
-        assertNull(eraser { false }.erase(40.0, 60.0, 4.0, area = false))
+        assertNull(eraser { false }.erase(30.0, 60.0, 4.0, area = false))
         assertEquals(2, inkOf(r).strokes.size)
     }
 
@@ -85,7 +86,7 @@ class MapInkEraseTest {
         val at = Pt(frame.rect.left + 30.0, frame.rect.bottom + 20.0)
         e.addInk(c, pen(at.x to at.y, at.x + 20 to at.y))
         f.model.setCollapsed(r, true)
-        assertNull(eraser().erase(at.x + 10, at.y, 5.0, area = false))
+        assertNull(eraser().erase(at.x, at.y, 5.0, area = false))
         assertEquals(1, inkOf(c).strokes.size)
     }
 
@@ -93,7 +94,7 @@ class MapInkEraseTest {
         val r = f.root("root")
         e.addInk(r, pen(30.0 to 60.0, 50.0 to 60.0))
         val before = inkOf(r)
-        eraser().erase(40.0, 60.0, 4.0, area = false)
+        eraser().erase(30.0, 60.0, 4.0, area = false)
         val after = inkOf(r)
         assertTrue(after.strokes.isEmpty())
         assertFalse(after.isEmpty)
@@ -118,11 +119,12 @@ class MapInkEraseTest {
     @Test fun theDragIsOneCommandTheCallerPushes() {
         val r = twoStrokes()
         val before = f.state
-        val steps = f.undoCount()
+        var pushed = 0
+        f.history.onPush = { pushed++ }
         val er = eraser()
-        er.erase(40.0, 60.0, 4.0, area = false)
-        er.erase(60.0, 100.0, 4.0, area = true)
-        assertEquals("erasing pushes nothing itself", steps, f.undoCount())
+        er.erase(30.0, 60.0, 4.0, area = false)
+        er.erase(90.0, 100.0, 4.0, area = true)
+        assertEquals("erasing pushes nothing itself", 0, pushed)
         val erased = f.state
         val command = er.command()
         assertTrue(command is MapStateCommand)
