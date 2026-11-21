@@ -1432,6 +1432,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     companion object {
         const val FORMAT = "xcanvas"
+
+        /** The manifest format of a canvas that holds mind maps; see [MapJson]. Released readers refuse it. */
+        const val FORMAT_WITH_MAP = "xcanvas-map"
+
+        /** Whether a manifest's `format` names a canvas bundle, with or without maps. */
+        fun isCanvasFormat(format: String?): Boolean = format == FORMAT || format == FORMAT_WITH_MAP
         const val VERSION = 1
 
         /** File extension of the bundle, without the dot. */
