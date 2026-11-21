@@ -286,3 +286,7 @@
 
 - 用户要求合并上游 XNotes 新提交（可用 GPT 子代理处理具体改动）；上游 PDF 写回功能按用户选择「合并代码但不启用」。合并提交 `4a0f3b19` 已本地快进至 `master`，未推送。见 [合并记录](upstream-merge-2026-11-20.md)。
 - 用户要求为合并结果打包测试 APK，并提供原调试签名密钥。源码 `4a0f3b19`，code 11；不覆盖正式版，不安装、不推送、不发布 Release。见 [记录](master-test11-2026-11-20.md)。
+
+## 2026-11-21 test12 打包与设备安装
+
+- 用户连接 MovinkPad 要求调试当前应用，随后回复「测试」选择打包当前 `master` 并上机测试。源码 `33386908`，code 12；仅覆盖安装 `com.xnotes.movinkpad.branchtest.master`，不动正式版，不推送、不发布 Release。见 [记录](master-test12-2026-11-21.md)。
