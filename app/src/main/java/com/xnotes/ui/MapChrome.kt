@@ -159,6 +159,8 @@ fun MapMenu(editor: InfiniteEditor) {
     val xDp = with(density) { xPx.coerceAtLeast(Space.s8.toPx()).toDp() }
     val yDp = with(density) { yPx.toDp() }
     var open by remember { mutableStateOf<MapMenuOpen?>(null) }
+    // The panels are non-focusable popups, so Back reaches the activity: close the panel, not the document.
+    androidx.activity.compose.BackHandler(enabled = open != null) { open = null }
 
     CompositionLocalProvider(LocalTipSide provides if (barAbove) TipSide.ABOVE else TipSide.BELOW) {
         Row(

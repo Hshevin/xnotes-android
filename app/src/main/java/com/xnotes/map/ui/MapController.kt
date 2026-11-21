@@ -24,6 +24,7 @@ import com.xnotes.map.RelationArrow
 import com.xnotes.map.RelationId
 import com.xnotes.map.Vec
 import com.xnotes.map.nudged
+import kotlin.math.min
 
 /**
  * The canvas's mind maps as the person works on them: what is selected, the title being typed, a
@@ -205,7 +206,8 @@ class MapController(
     fun press(p: Pt, zoom: Double, touchPx: Double, finger: Boolean, eraser: Boolean, tool: Tool, connector: Boolean, fingerDraws: Boolean): Boolean {
         abandonGesture()
         if (eraser) return false
-        handleAt(p, zoom, touchPx)?.let { h ->
+        // A node under the press beats a handle whose target spills over it.
+        handleAt(p, zoom, touchPx)?.takeIf { shown.placements.values.none { it.rect.contains(p) } }?.let { h ->
             press = Press.OnHandle(checkNotNull(selected), h.kind, p)
             return true
         }
@@ -578,18 +580,31 @@ class MapController(
         if (!host.layerEditable(layerOf(id))) return emptyList()
         val r = placement.rect
         val radius = touchPx / 2 / zoom
-        val gap = radius + HANDLE_GAP_PX / zoom
+        val clear = radius + HANDLE_GAP_PX / zoom
+        // Off a side with a neighbour, a handle sits halfway across the gap, on the line, rather than
+        // over the neighbour; off an empty side it clears the node (and its count badge).
+        fun reach(gap: Double?, extra: Double = 0.0) =
+            if (gap != null && gap > 0.0) min(clear + extra, gap / 2) else clear + extra
+        val kids = shownState.childrenOf(id).mapNotNull(shown::rectOf)
+        val badge = if ((shown.hiddenCount[id] ?: 0) > 0) MapProjection.BADGE + BADGE_CLEAR else 0.0
         val child = when (placement.side) {
-            GrowSide.RIGHT -> Pt(r.right + gap, r.centerY)
-            GrowSide.LEFT -> Pt(r.left - gap, r.centerY)
-            GrowSide.DOWN -> Pt(r.centerX, r.bottom + gap)
-            GrowSide.INDENT -> Pt(r.right + gap, r.centerY)
+            GrowSide.RIGHT -> Pt(r.right + reach(kids.minOfOrNull { it.left - r.right }, badge), r.centerY)
+            GrowSide.LEFT -> Pt(r.left - reach(kids.minOfOrNull { r.left - it.right }, badge), r.centerY)
+            GrowSide.DOWN -> Pt(r.centerX, r.bottom + reach(kids.minOfOrNull { it.top - r.bottom }, badge))
+            GrowSide.INDENT -> Pt(r.right + clear, r.centerY)
         }
         val out = arrayListOf(Handle(HandleKind.CHILD, child, radius))
         val parent = shownState.parent[id]
         if (parent != null) {
             val across = shown.placements[parent]?.side
-            out += Handle(HandleKind.SIBLING, if (across == GrowSide.DOWN) Pt(r.right + gap, r.centerY) else Pt(r.centerX, r.bottom + gap), radius)
+            val siblings = shownState.childrenOf(parent)
+            val next = siblings.getOrNull(siblings.indexOf(id) + 1)?.let(shown::rectOf)
+            out += Handle(
+                HandleKind.SIBLING,
+                if (across == GrowSide.DOWN) Pt(r.right + reach(next?.let { it.left - r.right }), r.centerY)
+                else Pt(r.centerX, r.bottom + reach(next?.let { it.top - r.bottom })),
+                radius,
+            )
         }
         return out
     }
@@ -598,6 +613,8 @@ class MapController(
         /** How far a press must travel on screen before it drags a node. */
         const val DRAG_SLOP_PX = 12.0
         const val HANDLE_GAP_PX = 6.0
+        /** Canvas units between a count badge and the child handle beyond it. */
+        const val BADGE_CLEAR = 4.0
         const val RELATION_REACH_PX = 16.0
 
     }

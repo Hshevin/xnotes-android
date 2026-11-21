@@ -6997,7 +6997,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         var transferred=false
         try {
             surface.fill(doc.background.paperColor ?: (style?.paper ?: state.palette.paper))
-            val items=doc.layers.ordered(doc.items.toList())
+            val items=com.xnotes.map.ui.MapPaint.ordered(doc,textMeasurer)
             val bounds=items.map {checkActive();it.paintBounds()}.reduceOrNull {a,rect->a.union(rect)}
             if(bounds!=null && bounds.w>0.0 && bounds.h>0.0) {
                 val r=surface.renderer();val margin=minOf(w,h)*0.06

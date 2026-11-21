@@ -173,6 +173,46 @@ class MapControllerTest {
         assertTrue(org.single { it.kind == MapController.HandleKind.SIBLING }.center.x > x.rect(a).right)
     }
 
+    @Test fun zoomedOutHandlesSitOnTheLineNotOverTheNeighbours() {
+        // Below the root, so both children grow to the same side whatever the root's balance.
+        val p = x.f.child(root(), "p")
+        val a = x.f.child(p, "a")
+        val b = x.f.child(p, "b")
+        // At zoom 0.25 a 48 px target is 96 canvas units across, wider than the layout's gaps.
+        c.select(p)
+        val child = c.chrome(0.25, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }
+        assertTrue(child.center.x > x.rect(p).right)
+        assertTrue("the child handle stops short of the children", child.center.x < x.rect(a).left)
+        c.select(a)
+        val sibling = c.chrome(0.25, 48.0)!!.handles.single { it.kind == MapController.HandleKind.SIBLING }
+        assertTrue(sibling.center.y > x.rect(a).bottom)
+        assertTrue("the sibling handle stops short of the next sibling", sibling.center.y < x.rect(b).top)
+    }
+
+    @Test fun aNodeUnderThePressBeatsAHandleSpillingOverIt() {
+        val r = root()
+        val a = x.f.child(r, "a")
+        c.select(r)
+        val handle = c.chrome(0.25, 48.0)!!.handles.single()
+        val onChild = Pt(x.rect(a).left + 2.0, x.rect(a).centerY)
+        assertTrue("the target reaches the child", handle.center.distanceTo(onChild) <= handle.radius)
+        c.press(onChild, 0.25, 48.0, finger = true, eraser = false, tool = Tool.PAN, connector = false, fingerDraws = false)
+        c.release(onChild)
+        assertEquals("the tap selected the child, not a new subtopic", a, c.selected)
+        assertNull(e.draft)
+    }
+
+    @Test fun aCollapsedNodesChildHandleClearsItsCountBadge() {
+        val r = root()
+        x.f.child(r, "a")
+        x.f.model.setCollapsed(r, true)
+        c.refresh()
+        c.select(r)
+        val handle = c.chrome(1.0, 48.0)!!.handles.single()
+        val box = x.rect(r)
+        assertTrue(handle.center.x - handle.radius >= box.right + MapProjection.BADGE)
+    }
+
     @Test fun handlesKeepTheirScreenSizeAtAnyZoom() {
         val r = root()
         c.select(r)

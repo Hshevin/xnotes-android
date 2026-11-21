@@ -6,7 +6,6 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.infinite.InkPass
 import com.xnotes.core.infinite.ItemMesher
 import com.xnotes.core.infinite.MeshPart
-import com.xnotes.core.infinite.MeshedItem
 import com.xnotes.core.infinite.ShapeTessellator
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorEnd
@@ -20,6 +19,7 @@ import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.TextStyle
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextMeasurer
+import com.xnotes.core.vector.VectorContour
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.Head
@@ -54,7 +54,10 @@ sealed class MapPart : CanvasItem {
         set(_) {}
     internal var box: Rect = Rect(0.0, 0.0, 0.0, 0.0)
 
-    override fun paint(r: Renderer) {}
+    /** What the part is drawn from, kept so the CPU renderer (thumbnails, previews) draws what the scene meshes. */
+    internal var pieces: List<MapPiece> = emptyList()
+
+    override fun paint(r: Renderer) { for (p in pieces) p.paint(r) }
     override fun bounds(): Rect = box
     override fun translate(dx: Double, dy: Double) {}
     override fun contains(p: Pt): Boolean = box.contains(p)
@@ -69,8 +72,45 @@ class MapNodePart(val id: NodeId) : MapPart() { override val kind: String get() 
 class MapEdgePart(val child: NodeId) : MapPart() { override val kind: String get() = "map_edge" }
 class MapRelationPart(val id: RelationId) : MapPart() { override val kind: String get() = "map_relation" }
 
+/**
+ * One drawable of a map part, which the GL scene meshes and the CPU renderer paints, so both
+ * draw the same thing.
+ */
+sealed interface MapPiece {
+    fun mesh(): List<MeshPart>
+    fun paint(r: Renderer)
+
+    /** A canvas item that already knows how to draw itself: a box, a line, a stroke. */
+    class Item(val item: CanvasItem) : MapPiece {
+        override fun mesh(): List<MeshPart> = ItemMesher.mesh(item)?.parts.orEmpty()
+        override fun paint(r: Renderer) = item.paint(r)
+    }
+
+    /** Glyph outlines in their own frame, placed at ([dx], [dy]). */
+    class Glyphs(val contours: List<VectorContour>, val color: Rgba, val dx: Double, val dy: Double) : MapPiece {
+        override fun mesh(): List<MeshPart> =
+            listOfNotNull(ShapeTessellator.textPart(contours, color) { Pt(dx + it.x, dy + it.y) })
+        override fun paint(r: Renderer) {
+            if (contours.isEmpty()) return
+            r.save(); r.translate(dx, dy); r.fillPath(contours, color); r.restore()
+        }
+    }
+
+    /** A plain filled rectangle. */
+    class Fill(val rect: Rect, val color: Rgba) : MapPiece {
+        override fun mesh(): List<MeshPart> {
+            val b = com.xnotes.core.infinite.MeshBuilder(4, 6)
+            b.rect(rect.left, rect.top, rect.w, rect.h)
+            return listOf(MeshPart(b.build(), color, if (color.a == 255) InkPass.OPAQUE else InkPass.TRANSLUCENT))
+        }
+        override fun paint(r: Renderer) = r.fillRect(rect, color)
+    }
+}
+
 /** Where the projection's meshes go: the GL scene, or a test's list. */
 interface MapSceneSink {
+    /** False for a caller that only paints the parts, so nodes are not meshed for nothing. */
+    val wantsMeshes: Boolean get() = true
     fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect)
     fun remove(item: CanvasItem)
 }
@@ -133,10 +173,11 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             val part = old?.first ?: MapNodePart(id)
             part.layerId = layer(id)
             if (old?.second == look) continue
-            val meshed = meshNode(look)
-            part.box = meshed.bounds
+            val (pieces, bounds) = nodePieces(look)
+            part.box = bounds
+            part.pieces = pieces
             nodes[id] = part to look
-            sink.upsert(part, meshed.parts, meshed.bounds)
+            sink.upsert(part, if (sink.wantsMeshes) pieces.flatMap { it.mesh() } else emptyList(), bounds)
             changed = true
         }
         for (id in nodes.keys.filter { it !in seenNodes }) {
@@ -155,8 +196,10 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             val part = old?.first ?: MapEdgePart(edge.child)
             part.layerId = layer(edge.child)
             if (old?.second == look) continue
-            val meshed = meshEdge(look)
+            val line = edgeItem(look)
+            val meshed = ItemMesher.mesh(line)
             part.box = meshed?.bounds ?: Rect(edge.from.x, edge.from.y, 0.0, 0.0)
+            part.pieces = listOf(MapPiece.Item(line))
             edges[edge.child] = part to look
             if (meshed == null) sink.remove(part) else sink.upsert(part, meshed.parts, meshed.bounds)
             changed = true
@@ -177,8 +220,10 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             val part = old?.first ?: MapRelationPart(relation.id)
             part.layerId = layer(relation.from)
             if (old?.second == look) continue
-            val meshed = meshRelation(look)
+            val line = relationItem(look)
+            val meshed = line?.let(ItemMesher::mesh)
             part.box = meshed?.bounds ?: from.union(to)
+            part.pieces = listOfNotNull(line?.let { MapPiece.Item(it) })
             relations[relation.id] = part to look
             if (meshed == null) sink.remove(part) else sink.upsert(part, meshed.parts, meshed.bounds)
             changed = true
@@ -218,12 +263,12 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
 
     // ---- meshing ----
 
-    private fun meshNode(look: NodeLook): MeshedItem {
+    private fun nodePieces(look: NodeLook): Pair<List<MapPiece>, Rect> {
         val node = look.node
         val style = node.style
         val frame = metrics.frame(node, look.root, look.rect.topLeft)
         val r = look.rect
-        val parts = ArrayList<MeshPart>()
+        val parts = ArrayList<MapPiece>()
         var bounds = r.outset(style.borderWidth)
         val fill = style.fill?.let { if (look.night && it.r == 255 && it.g == 255 && it.b == 255) NIGHT_PAPER.withAlpha(it.a) else it }
         val box = when (style.shape) {
@@ -238,17 +283,18 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             NodeShape.UNDERLINE -> null
         }
         if (box != null) {
-            ItemMesher.mesh(box)?.let { parts += it.parts }
+            parts += MapPiece.Item(box)
         } else {
             // No box: the paper behind the content keeps lines under it from showing through, then the rule.
-            fill?.let { parts += rectPart(r, it) }
-            ItemMesher.mesh(ShapeItem(ShapeKind.LINE, Pt(r.left, r.bottom), Pt(r.right, r.bottom), style.border, style.borderWidth))?.let { parts += it.parts }
+            fill?.let { parts += MapPiece.Fill(r, it) }
+            parts += MapPiece.Item(ShapeItem(ShapeKind.LINE, Pt(r.left, r.bottom), Pt(r.right, r.bottom), style.border, style.borderWidth))
         }
-        if (look.titleShown) frame.title?.let { t -> titlePart(node, t)?.let { parts += it } }
+        if (look.titleShown) frame.title?.let { t -> parts += titlePiece(node, t) }
         frame.ink?.let { area ->
             for (stroke in node.ink.strokes) {
                 val placed = stroke.copyForWrite().also { it.translate(area.left, area.top) }
-                ItemMesher.mesh(placed)?.let { m -> parts += m.parts; bounds = bounds.union(m.bounds) }
+                parts += MapPiece.Item(placed)
+                bounds = bounds.union(placed.paintBounds())
             }
         }
         frame.sources?.let { row -> parts += chipParts(node, row) }
@@ -257,17 +303,15 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             parts += badgeParts(badge, look.hidden.toString(), style.border, fill ?: if (look.night) NIGHT_PAPER else Rgba(255, 255, 255))
             bounds = bounds.union(badge.outset(EDGE_WIDTH))
         }
-        return MeshedItem(parts, bounds)
+        return parts to bounds
     }
 
-    private fun titlePart(node: MapNode, title: Rect): MeshPart? {
-        val glyphs = titles.outline(node.title, node.style.textSize, node.style.bold, NodeMetrics.MAX_TITLE_W)
-        return ShapeTessellator.textPart(glyphs, node.style.text) { Pt(title.left + it.x, title.top + it.y) }
-    }
+    private fun titlePiece(node: MapNode, title: Rect): MapPiece =
+        MapPiece.Glyphs(titles.outline(node.title, node.style.textSize, node.style.bold, NodeMetrics.MAX_TITLE_W), node.style.text, title.left, title.top)
 
     /** Source chips across [row], as many as fit, then "+N" for the rest. */
-    private fun chipParts(node: MapNode, row: Rect): List<MeshPart> {
-        val out = ArrayList<MeshPart>()
+    private fun chipParts(node: MapNode, row: Rect): List<MapPiece> {
+        val out = ArrayList<MapPiece>()
         var x = row.left
         val sources = node.sources
         for ((i, source) in sources.withIndex()) {
@@ -285,17 +329,13 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         return out
     }
 
-    private fun chip(r: Rect, text: String): List<MeshPart> {
-        val out = ArrayList<MeshPart>()
-        ItemMesher.mesh(ShapeItem(ShapeKind.ROUNDED_RECT, r.topLeft, Pt(r.right, r.bottom), CHIP_BORDER, 1.0, CHIP_FILL).also {
+    private fun chip(r: Rect, text: String): List<MapPiece> {
+        val pill = ShapeItem(ShapeKind.ROUNDED_RECT, r.topLeft, Pt(r.right, r.bottom), CHIP_BORDER, 1.0, CHIP_FILL).also {
             it.adj = doubleArrayOf(0.5)
-        })?.let { out += it.parts }
+        }
         val h = titles.lineHeight(CHIP_TEXT)
         val glyphs = titles.outlineLine(titles.fit(text, CHIP_TEXT, r.w - 2 * CHIP_PAD), CHIP_TEXT)
-        ShapeTessellator.textPart(glyphs, CHIP_INK) {
-            Pt(r.left + CHIP_PAD + it.x, r.top + (r.h - h) / 2 + it.y)
-        }?.let { out += it }
-        return out
+        return listOf(MapPiece.Item(pill), MapPiece.Glyphs(glyphs, CHIP_INK, r.left + CHIP_PAD, r.top + (r.h - h) / 2))
     }
 
     private fun badgeRect(r: Rect, side: GrowSide): Rect {
@@ -309,22 +349,18 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         return Rect(c.x - d / 2, c.y - d / 2, d, d)
     }
 
-    private fun badgeParts(r: Rect, text: String, ink: Rgba, paper: Rgba): List<MeshPart> {
-        val out = ArrayList<MeshPart>()
+    private fun badgeParts(r: Rect, text: String, ink: Rgba, paper: Rgba): List<MapPiece> {
         val w = max(r.w, titles.width(text, BADGE_TEXT) + 8)
         val pill = Rect(r.centerX - w / 2, r.top, w, r.h)
-        ItemMesher.mesh(ShapeItem(ShapeKind.ROUNDED_RECT, pill.topLeft, Pt(pill.right, pill.bottom), ink, EDGE_WIDTH, paper).also {
+        val shape = ShapeItem(ShapeKind.ROUNDED_RECT, pill.topLeft, Pt(pill.right, pill.bottom), ink, EDGE_WIDTH, paper).also {
             it.adj = doubleArrayOf(0.5)
-        })?.let { out += it.parts }
+        }
         val tw = titles.width(text, BADGE_TEXT)
         val th = titles.lineHeight(BADGE_TEXT)
-        ShapeTessellator.textPart(titles.outlineLine(text, BADGE_TEXT), ink) {
-            Pt(pill.centerX - tw / 2 + it.x, pill.centerY - th / 2 + it.y)
-        }?.let { out += it }
-        return out
+        return listOf(MapPiece.Item(shape), MapPiece.Glyphs(titles.outlineLine(text, BADGE_TEXT), ink, pill.centerX - tw / 2, pill.centerY - th / 2))
     }
 
-    private fun meshEdge(look: EdgeLook): MeshedItem? {
+    private fun edgeItem(look: EdgeLook): ConnectorItem {
         val e = look.edge
         val elbow = when (e.side) {
             GrowSide.RIGHT, GrowSide.LEFT -> Elbow(Axis.H, doubleArrayOf((e.from.x + e.to.x) / 2))
@@ -333,10 +369,10 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         }
         val c = ConnectorItem(look.kind, ConnectorEnd(e.from), ConnectorEnd(e.to), look.color, look.width)
         c.elbow = elbow
-        return ItemMesher.mesh(c)
+        return c
     }
 
-    private fun meshRelation(look: RelationLook): MeshedItem? {
+    private fun relationItem(look: RelationLook): ConnectorItem? {
         val (a, b) = relationEnds(look.from, look.to) ?: return null
         val r = look.relation
         val c = ConnectorItem(
@@ -348,13 +384,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         if (r.label.isNotBlank()) {
             c.label = ShapeLabel(r.label, TextStyle(r.color, RELATION_LABEL_PT, MapTitles.FACE), labels)
         }
-        return ItemMesher.mesh(c)
-    }
-
-    private fun rectPart(r: Rect, color: Rgba): MeshPart {
-        val b = com.xnotes.core.infinite.MeshBuilder(4, 6)
-        b.rect(r.left, r.top, r.w, r.h)
-        return MeshPart(b.build(), color, if (color.a == 255) InkPass.OPAQUE else InkPass.TRANSLUCENT)
+        return c
     }
 
     companion object {

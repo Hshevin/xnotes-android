@@ -1102,13 +1102,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     fun copyScreenshotAsImage() {
-        val bmp = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
+        val bmp = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items + map.parts).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
         val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes capture")
         onMessage?.invoke(appContext.getString(if (ok) R.string.image_copied else R.string.err_copy_image), null)
         if (ok) interaction.clearCapture()
     }
     fun screenshotImageForShare(): java.io.File? {
-        val file = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
+        val file = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items + map.parts).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
             ?.let { com.xnotes.platform.ShareFiles.png(appContext, it, document.title) }
         if (file != null) interaction.clearCapture()
         else onMessage?.invoke(appContext.getString(R.string.err_share_image), null)
