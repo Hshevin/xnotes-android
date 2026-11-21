@@ -29,19 +29,26 @@ sealed interface ReturnCheck {
  * dropped once used or when the user opens anything else themselves.
  */
 class SourceTrip {
+    @Volatile
     var pending: MapReturn? = null
         private set
 
     /** Following a source from a map. */
-    fun leave(from: MapReturn): Unit = TODO("phase 3 backend")
+    @Synchronized
+    fun leave(from: MapReturn): Unit { pending = from }
 
     /** The user opened something else themselves: the way back is no longer offered. */
-    fun forget(): Unit = TODO("phase 3 backend")
+    @Synchronized
+    fun forget(): Unit { pending = null }
 
     /**
      * Returning: checks the file still at [MapReturn.canvasLocation] is the same canvas
      * ([canvasIdAt] reads its document id; null for nothing there; a throw counts as gone).
      * Consumes the bookmark either way; null when there is none.
      */
-    fun back(canvasIdAt: (String) -> String?): ReturnCheck? = TODO("phase 3 backend")
+    fun back(canvasIdAt: (String) -> String?): ReturnCheck? {
+        val to = synchronized(this) { pending.also { pending = null } } ?: return null
+        val id = runCatching { canvasIdAt(to.canvasLocation) }.getOrNull()
+        return if (id == to.canvasDocumentId) ReturnCheck.Go(to) else ReturnCheck.CanvasGone
+    }
 }

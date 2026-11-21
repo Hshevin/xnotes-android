@@ -1,5 +1,6 @@
 package com.xnotes.map.source
 
+import com.xnotes.map.SourceKind
 import com.xnotes.map.SourceRef
 
 /** What a file holds, as far as linking cares; read without changing the file. */
@@ -51,11 +52,56 @@ sealed interface SourceStatus {
  */
 class SourceResolver(private val catalogs: SourceCatalogs) {
 
-    fun resolve(ref: SourceRef): SourceStatus = TODO("phase 3 backend")
+    fun resolve(ref: SourceRef): SourceStatus = resolveAll(listOf(ref)).getValue(ref.id)
 
     /**
      * [resolve] for each of [refs], keyed by [SourceRef.id], reading each location at most once
      * however many refs share its document.
      */
-    fun resolveAll(refs: List<SourceRef>): Map<String, SourceStatus> = TODO("phase 3 backend")
+    fun resolveAll(refs: List<SourceRef>): Map<String, SourceStatus> {
+        val reads = mutableMapOf<String, Result<SourceCatalog?>>()
+        val documents = mutableMapOf<String, (SourceRef) -> SourceStatus>()
+        return refs.associate { ref ->
+            val resolve = documents.getOrPut(ref.documentId) {
+                findDocument(ref.documentId) { location ->
+                    reads.getOrPut(location) { runCatching { catalogs.read(location) } }
+                }
+            }
+            ref.id to resolve(ref)
+        }
+    }
+
+    private fun findDocument(
+        id: String,
+        read: (String) -> Result<SourceCatalog?>,
+    ): (SourceRef) -> SourceStatus {
+        val locations = runCatching { catalogs.locations(id) }.getOrElse { return { SourceStatus.Unavailable } }
+        var missing: SourceStatus = SourceStatus.Missing
+        for (location in locations) {
+            val result = read(location)
+            if (result.isFailure) missing = SourceStatus.Unavailable
+            val catalog = result.getOrNull() ?: continue
+            if (catalog.documentId == id) return catalog.resolverAt(location)
+        }
+        return { missing }
+    }
+
+    private fun SourceCatalog.resolverAt(location: String): (SourceRef) -> SourceStatus {
+        val pageNumbers = pageIds?.let { ids ->
+            ids.withIndex().associate { (index, id) -> id to index + 1 }
+                .takeIf { it.isNotEmpty() && it.size == ids.size && it.keys.none(String::isBlank) }
+        }
+        return { ref ->
+            when (ref.kind) {
+                SourceKind.CANVAS -> if (kind == SourceCatalog.Kind.CANVAS) SourceStatus.Ready(location, name, null)
+                    else SourceStatus.WrongKind
+                SourceKind.NOTE_PAGE, SourceKind.PDF_PAGE -> when {
+                    kind != SourceCatalog.Kind.NOTE -> SourceStatus.WrongKind
+                    pageNumbers == null -> SourceStatus.Unavailable
+                    else -> pageNumbers[ref.pageId]?.let { SourceStatus.Ready(location, name, it) }
+                        ?: SourceStatus.PageDeleted(location, name)
+                }
+            }
+        }
+    }
 }
