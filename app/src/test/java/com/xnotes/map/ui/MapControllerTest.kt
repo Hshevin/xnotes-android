@@ -220,8 +220,8 @@ class MapControllerTest {
         val steps = x.f.undoCount()
         x.gesture(start, Pt(start.x + 40.0, start.y + 100.0), Pt(start.x + 50.0, start.y + 120.0))
         assertEquals(Vec(50.0, 120.0), x.state.offsets[a])
+        assertEquals(a, c.selected) // before undoCount(), whose undo of a's creation clears it
         assertEquals(steps + 1, x.f.undoCount())
-        assertEquals(a, c.selected)
     }
 
     @Test fun aDragPreviewsWithoutTouchingTheModel() {

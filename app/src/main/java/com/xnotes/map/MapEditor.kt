@@ -262,23 +262,7 @@ class MapEditor(
      */
     fun delete(ids: Collection<NodeId>): Boolean {
         val state = editableState()
-        val removed = state.subtreeIds(ids)
-        if (removed.isEmpty()) return false
-        val children = state.children.toMutableMap()
-        children.keys.removeAll(removed)
-        val survivingParents = removed.mapNotNullTo(HashSet()) { state.parent[it] } - removed
-        for (parent in survivingParents) children[parent] = state.childrenOf(parent).filterNot { it in removed }
-        return record(state, state.copy(
-            nodes = state.nodes - removed,
-            roots = state.roots.filterNot { it in removed },
-            parent = state.parent - removed,
-            children = children,
-            rootOrigin = state.rootOrigin - removed,
-            layout = state.layout - removed,
-            offsets = state.offsets - removed,
-            layers = state.layers - removed,
-            relations = state.relations.filterValues { it.from !in removed && it.to !in removed },
-        ))
+        return record(state, state.withoutSubtrees(ids))
     }
 
     /**
@@ -315,15 +299,7 @@ class MapEditor(
     /** Move a child by [delta] (its offset grows; a resulting zero offset is removed) or a root's origin by [delta]. False for a zero delta. */
     fun nudge(id: NodeId, delta: Vec): Boolean {
         val state = editableState()
-        if (delta.isZero || id !in state.nodes) return false
-        val origin = state.rootOrigin[id]
-        val after = if (origin != null) {
-            state.copy(rootOrigin = state.rootOrigin + (id to Pt(origin.x + delta.dx, origin.y + delta.dy)))
-        } else {
-            val offset = (state.offsets[id] ?: Vec.ZERO) + delta
-            state.copy(offsets = if (offset.isZero) state.offsets - id else state.offsets + (id to offset))
-        }
-        return record(state, after)
+        return record(state, state.nudged(id, delta))
     }
 
     /** Apply a [DropAction] from [MapHit.drop] to [id]. */
