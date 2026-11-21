@@ -157,12 +157,25 @@ class NotebookStorage internal constructor(private val context:Context,
             }
         }
     }
-    internal fun hasPageActivationRecovery(uri:String,checkActive:()->Unit={}):Boolean = synchronized(lock) {
-        checkActive();val pending=journal(uri,checkActive)
-        if(!pending.pending) false else try {
-            pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES,checkActive);true
-        } catch(_:MigrationPublication.RecoveryRequired) {false}
+    internal class PageActivationRecovery(val uri: String, val recordDigest: String)
+
+    /** Bind the recovery button to the retained candidate shown for this location. */
+    internal fun pageActivationRecovery(uri: String, checkActive: () -> Unit = {}): PageActivationRecovery? = synchronized(lock) {
+        checkActive()
+        val pending = journal(uri, checkActive)
+        if (!pending.pending) null else try {
+            PageActivationRecovery(uri, pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES, checkActive))
+        } catch (_: MigrationPublication.RecoveryRequired) { null }
     }
+
+    internal fun hasPageActivationRecovery(uri: String, checkActive: () -> Unit = {}) =
+        pageActivationRecovery(uri, checkActive) != null
+
+    internal fun completePageActivation(recovery: PageActivationRecovery, name: String, checkActive: () -> Unit): NativeSourceSnapshot.ReferenceCatalog =
+        synchronized(lock) {
+            checkActive()
+            publishPageActivation(recovery.uri, name, journal(recovery.uri, checkActive), recovery.recordDigest, null, null, checkActive)
+        }
 
     /** Only an explicit user-selected recovery may finish a retained page upgrade. Never called by ensure/save. */
     internal fun completePageActivation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
@@ -230,7 +243,10 @@ class NotebookStorage internal constructor(private val context:Context,
             }
         }
         releaseCompletedPin(uri)
-        return actualPageCatalog(uri,requireNotNull(verified).version,checkActive)
+        // A failed final read cannot turn a verified publication into an untouched-file failure.
+        return try { actualPageCatalog(uri, requireNotNull(verified).version, checkActive) }
+        catch (e: java.util.concurrent.CancellationException) { throw e }
+        catch (e: Exception) { throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED, e) }
     }
 
     /** IO-only, source bytes and their version are from the same owned container. */

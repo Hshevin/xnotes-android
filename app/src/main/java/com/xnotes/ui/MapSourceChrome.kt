@@ -141,6 +141,10 @@ internal fun CopyPageLinkFlow(editor: Editor, index: Int, onDone: () -> Unit) {
     var asking by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
 
+    val offeredDocument = remember(editor, index) { editor.state.document }
+    val offeredPage = remember(offeredDocument, index) { offeredDocument.pages.getOrNull(index) }
+    val offeredIdentity = remember(offeredDocument, index) { offeredDocument.identity }
+    val offeredPath = remember(offeredDocument, index) { offeredDocument.path }
     fun page(): Page? = editor.state.document.pages.getOrNull(index)
     fun offer(): PageLinkOffer? = page()?.let { SourceLinks.forPage(editor.state.document, it) { UUID.randomUUID().toString() } }
     fun say(id: Int) { editor.message = context.getString(id) }
@@ -169,7 +173,11 @@ internal fun CopyPageLinkFlow(editor: Editor, index: Int, onDone: () -> Unit) {
                 TextButton(enabled = !working, onClick = {
                     working = true
                     scope.launch {
-                        val result = try { editor.enablePageIds() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { PageIdEnableResult.FAILED }
+                        val result = try {
+                            if (editor.state.document === offeredDocument && offeredDocument.identity == offeredIdentity &&
+                                offeredDocument.path == offeredPath && page() === offeredPage)
+                                editor.enablePageIds() else PageIdEnableResult.CHANGED
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { PageIdEnableResult.FAILED }
                         working = false
                         asking = false
                         when (result) {

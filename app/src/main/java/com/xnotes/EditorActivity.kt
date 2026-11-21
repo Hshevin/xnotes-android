@@ -775,6 +775,11 @@ private fun EditorScreen(
                     if (pane.storageMissingPdf != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.openInkWithoutPdf(); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_open_ink_only)) }
+                    val activation = pane.storagePageActivation
+                    if (activation != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
+                        working = true
+                        scope.launch { try { pane.finishPageActivationRecovery(activation) } finally { working = false } }
+                    }) { androidx.compose.material3.Text(stringResource(R.string.map2_continue_page_ids)) }
                     if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.recoverStorageProblem(restore = true); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_restore_backup)) }
@@ -1202,7 +1207,7 @@ private fun EditorScreen(
         scope.launch {
             val result=mapSourceOpener.follow(ref,from)
             if(result is com.xnotes.map.source.FollowResult.Failed)
-                editor.message=context.getString(com.xnotes.ui.sourceProblem(result.status) ?: R.string.map2_open_failed)
+                editor.message=context.getString(result.status?.let { com.xnotes.ui.sourceProblem(it) } ?: R.string.map2_open_failed)
         }
     }
     SideEffect {editor.followMapSource=::followMapSource}
@@ -1350,7 +1355,10 @@ private fun EditorScreen(
         if(maps.splitPresentation.layout!=null && kindOf(uriStr)==com.xnotes.core.util.DocumentKind.CANVAS) {
             editor.message=context.getString(R.string.split_canvas_unsupported);return null
         }
-        if (requested.noteOpen && requested.visibleDocumentUri?.let { requested.isSameDocument(it, uriStr) } == true) return requested
+        if (requested.noteOpen && requested.visibleDocumentUri?.let { requested.isSameDocument(it, uriStr) } == true) {
+            mapSourceOpener.userOpenedElsewhere()
+            return requested
+        }
         // Keep a shared document's save owner alive. Replace its borrowed view instead, then
         // exchange visual slots so the requested pane still opens the new file in place.
         val target = if (requested.isSharedView && requested.documentOwner === requested)
@@ -1392,6 +1400,7 @@ private fun EditorScreen(
             editor.focusPane(target.pane)
         }
         return target.takeIf { it.noteOpen && it.visibleDocumentUri?.let { uri -> it.isSameDocument(uri, uriStr) } == true }
+            ?.also { mapSourceOpener.userOpenedElsewhere() }
     }
 
     fun closePaneHome(pane: Editor) {
@@ -1461,6 +1470,7 @@ private fun EditorScreen(
                         it.copy(nativeHome=true,focusedPane=it.nativePane)
                     }) return@launch
                 } else if(gate?.commit(::ready)==false) return@launch
+                mapSourceOpener.userOpenedElsewhere()
                 paneHomeViews=paneHomeViews+(pane.pane to view)
                 paneHomes=paneHomes+(pane.pane to pane.visibleDocumentUri);homeFocus=pane.pane
                 onShown()
@@ -1549,6 +1559,7 @@ private fun EditorScreen(
                 else guardPairOwners(owners,operation) {ready() && valid() && current()}
             }?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
         },stillCurrent=::current,operation=operation,onPresented={_->
+            mapSourceOpener.userOpenedElsewhere()
             // The coordinator has adopted both native views and retired only its Map route.
             applyKeys?.invoke();applyKeys=null
             editor.mixedPresentationActive=false
@@ -1579,6 +1590,7 @@ private fun EditorScreen(
                 guardPairOwners(owners,operation) {ready() && valid() && current()}
             })?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
         },stillCurrent=::current,operation=operation,onPresented={entry,cap->
+            mapSourceOpener.userOpenedElsewhere()
             applyKeys?.invoke();applyKeys=null
             editor.mixedPresentationActive=true
             editor.focusMixedNativePane(cap.nativePane)
@@ -1633,6 +1645,7 @@ private fun EditorScreen(
         fun launchOpen(mapProof:()->Boolean) {scope.launch {
             editor.openSingleFromHome(uriStr, displayNameOf(resolver, Uri.parse(uriStr)), explicitlyDiscarded,
                 stillCurrent={hostCurrent() && mapProof()},onAdopted={
+                    mapSourceOpener.userOpenedElsewhere()
                     if(retainedMap!=null) {maps.close(retainedMap);sourceNavigator.retire();savedMapUri=null;savedMapTitle=""}
                     else maps.splitPresentation.clear()
                     editor.mixedPresentationActive=false
@@ -1679,6 +1692,7 @@ private fun EditorScreen(
                         })?.also {cap->applyKeys=mapActivity?.prepareNativeKeyHandoffs(cap.keyHandoffs)}
                 },stillCurrent=::current,operation=operation,
                 onPresented={entry,cap->
+                    mapSourceOpener.userOpenedElsewhere()
                     // The pair coordinator has just proved and adopted both sides in this stack.
                     applyKeys?.invoke();applyKeys=null
                     editor.mixedPresentationActive=true
@@ -1814,6 +1828,7 @@ private fun EditorScreen(
                     intentAlreadyAccepted=true,
                     onPresented={
                         editor.mixedPresentationActive=true
+                        mapSourceOpener.userOpenedElsewhere()
                         val surviving=if(split.nativePane==com.xnotes.ui.Pane.PRIMARY) editor else editor.secondary
                         maps.splitPresentation.rememberNativeHint(surviving?.nativeRestoreHint())
                         paneHomes=paneHomes-requestedPane.pane-mapPane
@@ -1840,7 +1855,10 @@ private fun EditorScreen(
                     if(persisted==null) null else editor.awaitMapSourceParking()?.let {proof->({current() && persisted() && proof.current()})}
                 }
             },stillCurrent=::current,flushNativeOnPresent=flushNativeOnPresent,
-                onPresented={editor.mixedPresentationActive=false;sourceNavigator.retire();paneHomes=emptyMap();homeFocus=null;mainMenu=false})
+                onPresented={
+                    mapSourceOpener.userOpenedElsewhere()
+                    editor.mixedPresentationActive=false;sourceNavigator.retire();paneHomes=emptyMap();homeFocus=null;mainMenu=false
+                })
         }
         if(prior!=null) sourceNavigator.prepareEntryLeave(prior,stillCurrent=host,onReady=::launchSingle)
         else launchSingle {true}
@@ -2486,6 +2504,7 @@ private fun EditorScreen(
                                 if(entry!=null) {if(!maps.hide(entry,beforeAdopt={gate?.commit(::ready)!=false})) return@launch}
                                 else {if(gate?.commit(::ready)==false) return@launch;maps.splitPresentation.park()}
                                 editor.persistPresentationSettings()
+                                mapSourceOpener.userOpenedElsewhere()
                                 parkedDocuments=documentsNow;mainMenu=true;backstageView=com.xnotes.ui.BackstageView.HOME
                             } finally {gate?.close()}
                         }
@@ -2501,6 +2520,7 @@ private fun EditorScreen(
                             if(provider!=null && gate==null) return@launch
                             try {
                                 if(!ready() || gate?.commit(::ready)==false) return@launch
+                                mapSourceOpener.userOpenedElsewhere()
                                 editor.persistPresentationSettings();parkedDocuments=documentsNow;mainMenu=true
                                 backstageView=com.xnotes.ui.BackstageView.HOME
                             } finally {gate?.close()}

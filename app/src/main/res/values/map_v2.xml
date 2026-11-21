@@ -55,7 +55,8 @@
     <string name="map2_enable">Enable</string>
     <string name="map2_enable_failed">Could not enable page links; the note is unchanged</string>
     <string name="map2_enable_changed">The note changed meanwhile; try again</string>
-    <string name="map2_enable_retained">Enabling was interrupted; reopen the note to finish</string>
+    <string name="map2_enable_retained">Open the note again and choose “Continue enabling page links” to finish the interrupted upgrade.</string>
+    <string name="map2_continue_page_ids">Continue enabling page links</string>
     <string name="map2_source_page">%1$s · page %2$d</string>
     <string name="map2_source_checking">Checking…</string>
     <string name="map2_source_deleted">Page deleted</string>

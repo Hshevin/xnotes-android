@@ -60,7 +60,7 @@ class OriginalPdfCreationCancellationTest {
     }
     private data class Source(val request:PageReferenceRequest,val sha:String,val engines:Engines)
     private suspend fun source(f:EditorPageCopyFixture):Source=withContext(Dispatchers.Main) {
-        f.editor.newNote()
+        f.openLegacyNote()
         val document=f.editor.state.document;val page=document.pages.first();page.pdfPage=0
         val pdf=File(f.root,"original-for-cancellation.pdf").apply {writeText("immutable controlled original PDF bytes")}
         document.pdfFile=pdf

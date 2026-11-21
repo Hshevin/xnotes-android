@@ -7,13 +7,13 @@ enum class PageIdEnableResult {
     /** The file now has page ids and the open model was reloaded from it, at the same page. */
     ENABLED,
 
-    /** The note changed, was closed, or another save ran meanwhile; nothing was done. */
+    /** The note, its source or its owner changed. The old page index cannot be used. Accepted writes remain durable. */
     CHANGED,
 
     /** It could not be done; the file and the open note are as they were. */
     FAILED,
 
-    /** The upgrade was interrupted after writing; recovery data is kept and reopening finishes it. */
+    /** The upgrade has a retained candidate. Reopening offers explicit continuation of that candidate. */
     RETAINED,
 }
 

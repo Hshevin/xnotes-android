@@ -55,7 +55,8 @@
     <string name="map2_enable">启用</string>
     <string name="map2_enable_failed">无法启用页面链接，笔记未改动</string>
     <string name="map2_enable_changed">笔记已有变动，请重试</string>
-    <string name="map2_enable_retained">启用被中断，请重新打开笔记以完成</string>
+    <string name="map2_enable_retained">重新打开笔记，选择「继续启用页面链接」以完成中断的升级。</string>
+    <string name="map2_continue_page_ids">继续启用页面链接</string>
     <string name="map2_source_page">%1$s · 第 %2$d 页</string>
     <string name="map2_source_checking">正在检查…</string>
     <string name="map2_source_deleted">该页已删除</string>

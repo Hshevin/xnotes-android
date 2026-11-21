@@ -40,7 +40,7 @@ class OriginalPdfSourceModeHostTest {
     }},f.storage)
     @Test fun originalWholePageKeepsActualOriginalIdentityWithoutSavingDirtyNoteOrEnablingItsPageIds()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote();val page=doc.pages.first()
             page.pdfPage=0;page.pdfTurn=1;page.rooms=listOf(Room(20.0,150.0))
             val pdf=File(f.root,"actual-original.pdf").apply {writeText("controlled engine original bytes")}
             val bytes=pdf.readBytes();doc.pdfFile=pdf;f.editor.originalPdfAccess=fakeAccess(f)
@@ -69,7 +69,7 @@ class OriginalPdfSourceModeHostTest {
     }
     @Test fun anUnrepresentableInsertedSpaceRegionDoesNotRetainAnythingAndStillAllowsTheNoteBranch()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote(asUnsaved=true);val page=doc.pages.first()
             page.pdfPage=0;page.rooms=listOf(Room(100.0,30.0));doc.pdfFile=File(f.root,"raw.pdf").apply {writeText("raw")}
             var opened=0;f.editor.originalPdfAccess=fakeAccess(f) {opened++}
             assertTrue(f.editor.requestPageRegionReference(PageSourceRegion(doc,page,Rect(80.0,80.0,90.0,90.0))))
@@ -83,7 +83,7 @@ class OriginalPdfSourceModeHostTest {
     }
     @Test fun aDeletedOriginalRequiresTheExplicitRestoreActionAndKeepsItsExistingPermanentIds()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote();val page=doc.pages.first()
             page.pdfPage=0;doc.pdfFile=File(f.root,"original.pdf").apply {writeText("original bytes")}
             f.editor.originalPdfAccess=fakeAccess(f)
             assertTrue(f.editor.requestPageReference(page));val first=f.editor.pageReferenceRequest!!
@@ -102,7 +102,7 @@ class OriginalPdfSourceModeHostTest {
 
     @Test fun wholePdfPageAndRegionUseTheSameChooserWithoutEnablingOrSavingTheNote()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote(asUnsaved=true);val page=doc.pages.first()
             page.pdfPage=0;page.rooms=listOf(Room(60.0,40.0));doc.pdfFile=File(f.root,"raw.pdf").apply {writeText("raw")}
             f.addStroke(140.0,recordHistory=true);f.stopDebounce()
             val identity=doc.identity;val revision=doc.bodyRevision;val nextUndo=f.editor.history.nextUndo
@@ -124,7 +124,7 @@ class OriginalPdfSourceModeHostTest {
     }
     @Test fun blankInsertedPageKeepsTheExistingNoteFlowAndCannotInventAnOriginalPdfPage()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote(asUnsaved=true);val page=doc.pages.first()
             doc.pdfFile=File(f.root,"raw.pdf").apply {writeText("raw")}
             assertNull(page.pdfPage);assertTrue(f.editor.requestPageReference(page))
             val request=f.editor.pageReferenceRequest!!
@@ -135,7 +135,7 @@ class OriginalPdfSourceModeHostTest {
     }
     @Test fun deletingAndUndoingTheSelectedActualPageDoesNotReviveTheOldModeChooser()=runParkingScenario {f->
         withContext(Dispatchers.Main) {
-            f.editor.newNote();val doc=f.editor.state.document;val page=doc.pages.first()
+            val doc=f.openLegacyNote();val page=doc.pages.first()
             page.pdfPage=0;doc.pdfFile=File(f.root,"raw.pdf").apply {writeText("raw")}
             f.editor.addPageAtEnd()
             assertTrue(f.editor.requestPageReference(page));val request=f.editor.pageReferenceRequest!!

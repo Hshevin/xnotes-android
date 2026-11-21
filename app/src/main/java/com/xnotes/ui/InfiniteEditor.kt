@@ -2968,6 +2968,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.publish()
     }
 
+    /** A map bookmark records the top-left in content coordinates, including before first layout. */
+    internal fun restoreMapView(x: Double, y: Double, zoom: Double) {
+        cancelReferenceLocation()
+        appliedInitialView = true
+        viewport.zoom = zoom
+        viewport.scrollX = x
+        viewport.scrollY = y
+        onViewChanged()
+        view.publish()
+    }
+
     fun jumpTo(waypoint: Waypoint) {
         cancelReferenceLocation()
         viewport.apply(waypoint)
