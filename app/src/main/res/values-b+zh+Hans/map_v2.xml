@@ -69,4 +69,5 @@
     <string name="map2_back_to_map">返回导图</string>
     <string name="map2_map_gone">导图所在画布已不在原处</string>
     <string name="map2_open_failed">无法打开来源</string>
+    <string name="map2_canvas_unsaved">请先保存画布再复制链接</string>
 </resources>

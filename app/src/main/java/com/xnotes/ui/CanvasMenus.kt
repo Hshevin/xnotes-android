@@ -740,6 +740,12 @@ interface LongPressMenuHost {
 
     /** Release [item], so it can be selected again. */
     fun unlockItem(item: com.xnotes.core.model.CanvasItem)
+
+    /** Whether the menu offers "Copy canvas link" (a canvas, for map v2 sources). */
+    val offersCanvasLink: Boolean get() = false
+
+    /** Put a link to this whole canvas on the clipboard, or say why not. */
+    fun copyCanvasLink() {}
 }
 
 /**
@@ -776,6 +782,11 @@ fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geo
             DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = {
                 onInsertImageAt(target.content); host.dismissContextMenu()
             })
+            if (host.offersCanvasLink) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.map2_copy_canvas_link)) }, onClick = {
+                    host.copyCanvasLink(); host.dismissContextMenu()
+                })
+            }
         }
     }
 }

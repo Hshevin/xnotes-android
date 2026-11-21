@@ -69,4 +69,5 @@
     <string name="map2_back_to_map">Back to map</string>
     <string name="map2_map_gone">The map\'s canvas is no longer where it was</string>
     <string name="map2_open_failed">Could not open the source</string>
+    <string name="map2_canvas_unsaved">Save the canvas first to link it</string>
 </resources>

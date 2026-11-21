@@ -787,6 +787,19 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Follows a node's source (set by the activity, which owns navigation). */
     var onFollowMapSource: ((com.xnotes.map.NodeId, com.xnotes.map.SourceRef) -> Unit)? = null
 
+    override val offersCanvasLink: Boolean get() = true
+
+    override fun copyCanvasLink() {
+        val text = when (val offer = com.xnotes.map.source.SourceLinks.forCanvas(document) { java.util.UUID.randomUUID().toString() }) {
+            is com.xnotes.map.source.PageLinkOffer.Ready -> appContext.getString(
+                if (com.xnotes.platform.SystemClipboard.putText(appContext, offer.ref.label, com.xnotes.map.source.PageLink.encode(offer.ref)))
+                    R.string.map2_link_copied else R.string.map2_open_failed,
+            )
+            else -> appContext.getString(R.string.map2_canvas_unsaved)
+        }
+        mapMessage(text)
+    }
+
     /** Show [text] as the canvas's transient message. */
     fun mapMessage(text: String) { onMessage?.invoke(text, null) }
 
