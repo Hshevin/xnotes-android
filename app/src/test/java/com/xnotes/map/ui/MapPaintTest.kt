@@ -31,7 +31,8 @@ class MapPaintTest {
         for (part in parts) {
             val out = FakeRenderer()
             part.paint(out)
-            assertTrue("${part.kind} draws something", out.ops.isNotEmpty())
+            val drawing = out.ops.filterNot { it in setOf("save", "restore", "translate", "scale", "clipRect", "saveLayerAlpha") }
+            assertTrue("${part.kind} draws something, not just state changes: ${out.ops}", drawing.isNotEmpty())
             assertTrue(part.paintBounds().w > 0.0)
         }
     }

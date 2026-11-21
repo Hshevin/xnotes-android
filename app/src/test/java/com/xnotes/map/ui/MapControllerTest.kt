@@ -178,7 +178,7 @@ class MapControllerTest {
         val p = x.f.child(root(), "p")
         val a = x.f.child(p, "a")
         val b = x.f.child(p, "b")
-        // At zoom 0.25 a 48 px target is 96 canvas units across, wider than the layout's gaps.
+        // At zoom 0.25 a 48 px target has a 96 canvas-unit radius, far wider than the layout's gaps.
         c.select(p)
         val child = c.chrome(0.25, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }
         assertTrue(child.center.x > x.rect(p).right)
