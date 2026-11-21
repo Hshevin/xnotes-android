@@ -1,5 +1,11 @@
 package com.xnotes.ui
 
+import com.xnotes.format.MapBundleFixture
+import com.xnotes.core.infinite.InfiniteDocument
+import com.xnotes.format.CanvasCodec
+import com.xnotes.format.BundleMigration
+import com.xnotes.map.MapModel
+
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Rect
@@ -27,6 +33,24 @@ class RecordingRecoveryStoreTest {
         file.outputStream().use {DocumentCodec(FakeImageCodec(),FakeTextMeasurer()).write(doc,it)}
         return RecordingBodyEvidence.inspect(file)
     }
+    @Test fun aMapCanvasBindsRecordingEvidenceToTheExactBodyAndAudio() = scenario { root, _ ->
+        val audio = File(root, "track.aac").apply { writeText("audio bytes") }
+        val doc = InfiniteDocument().apply {
+            map = MapModel(MapBundleFixture.state)
+            add(AudioItem(AudioData(audio, "aac", 1000, ByteArray(0)), Rect(0.0, 0.0, 100.0, 50.0), "track", 7, FakeTextMeasurer()))
+        }
+        val codec = CanvasCodec(FakeImageCodec(), FakeTextMeasurer())
+        val file = File(root, "recorded.xcanvas")
+        file.outputStream().use { codec.write(doc, it) }
+        val raw = MapBundleFixture.entry(file)
+        val evidence = RecordingBodyEvidence.inspect(file)
+        assertEquals(DocumentKind.CANVAS, evidence.kind)
+        assertEquals(BundleMigration.hash(file), evidence.bodySha256)
+        assertEquals(mapOf(7 to BundleMigration.hash(audio)), evidence.recordings)
+        assertArrayEquals(raw, MapBundleFixture.entry(file))
+        assertEquals(MapBundleFixture.state, file.inputStream().use { codec.read(it) }.map.state)
+    }
+
     @Test fun orphanAfterFailedInitialMetadataRemainsUnboundAndNeverAutoDeleted()=scenario {_,store->
         val raw=File(store.directory,"rec-orphan.aac").apply {writeText("original audio bytes");setLastModified(1L)}
         val bytes=raw.readBytes()

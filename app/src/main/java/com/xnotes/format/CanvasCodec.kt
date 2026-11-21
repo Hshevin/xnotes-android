@@ -46,6 +46,7 @@ import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.util.Svg
 import com.xnotes.core.vector.PathFlattener
+import com.xnotes.map.MapModel
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -94,11 +95,21 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             // Each image streams straight from its temp file into the bundle, never as a byte[].
             for ((name, file) in assets + audio) zos.putStored(name, file, isCancelled)
             doc.identity.write(zos)
+            val map = doc.map
+            val format = if (map.state.isEmpty) FORMAT else FORMAT_WITH_MAP
+            if (format == FORMAT_WITH_MAP) {
+                MapJson.checkLayers(map.state, doc.layers)
+                zos.putNextEntry(ZipEntry(MapJson.ENTRY).apply { method = ZipEntry.DEFLATED })
+                val writer = zos.bufferedWriter(Charsets.UTF_8)
+                MapJson.write(JsonWrite(writer), map) { json, stroke -> writeStroke(json, stroke, null) }
+                writer.flush()
+                zos.closeEntry()
+            }
             // The manifest streams straight into the deflater, so a dense canvas's JSON is never
             // materialized as a DOM, a String, or a byte[].
             zos.putNextEntry(ZipEntry("manifest.json").apply { method = ZipEntry.DEFLATED })
             val w = java.io.BufferedWriter(java.io.OutputStreamWriter(zos, Charsets.UTF_8), 32 * 1024)
-            writeManifest(JsonWrite(w), doc, assets, audio)
+            writeManifest(JsonWrite(w), doc, assets, audio, format)
             w.flush()
             zos.closeEntry()
         }
@@ -133,9 +144,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         return out
     }
 
-    private fun writeManifest(j: JsonWrite, doc: InfiniteDocument, assets: List<Pair<String, File>>, audio: List<Pair<String, File>>) {
+    private fun writeManifest(j: JsonWrite, doc: InfiniteDocument, assets: List<Pair<String, File>>, audio: List<Pair<String, File>>, format: String) {
         j.beginObject()
-        j.name("format").value(FORMAT)
+        j.name("format").value(format)
         j.name("version").value(VERSION)
         j.name("writer").value(WRITER)
         doc.created?.let { j.name("created").value(java.time.Instant.ofEpochMilli(it).toString()) }
@@ -222,7 +233,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         j.endObject()
     }
 
-    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String? = s.layerId) {
+    private fun writeStroke(j: JsonWrite, s: Stroke, layerId: String?) {
         // Per-sample time and kept width are only meaningful to the speed pen, so they're written as
         // optional 4th and 5th elements only then; every other stroke serializes without them.
         val withTime = s.config.speedStrength > 0.0
@@ -516,7 +527,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
     internal class CompleteRead private constructor(val document:InfiniteDocument,items:List<CanvasItem>) {
         private val items=items.toList()
-        internal fun matches(actual:InfiniteDocument)=actual===document && actual.items.size==items.size &&
+        private val map = document.map
+        private val mapState = map.state
+        private val collapsed = map.collapsed
+        internal fun matches(actual:InfiniteDocument)=actual===document && actual.map === map &&
+            map.state === mapState && map.collapsed == collapsed && actual.items.size==items.size &&
             items.indices.all {actual.items[it]===items[it]}
         companion object {
             internal fun capture(document:InfiniteDocument,items:List<CanvasItem>)=CompleteRead(document,items)
@@ -527,6 +542,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val created=ArrayList<File>()
         try {
             var manifest: ParsedManifest? = null
+            var map: MapModel? = null
             var identity: BundleIdentity? = null
             val imageFiles = HashMap<String, File>()
             val audioFiles = HashMap<String, File>()
@@ -540,15 +556,17 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                         } else if (name == BundleIdentity.ENTRY) {
                             require(identity == null) { "Duplicate document identity" }
                             identity = BundleIdentity.read(zis)
+                        } else if (name == MapJson.ENTRY) {
+                            if (map != null) throw XCanvasFormatException("Duplicate map entry")
+                            map = readMapEntry(zis)
                         } else if (name == "manifest.json") {
                             // Parsed straight off the zip stream, so a dense canvas's manifest is never
                             // materialized as bytes, a String, or a DOM.
-                            if (manifest == null) {
-                                manifest = try {
-                                    parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)),requireCompleteItems)
-                                } catch (_: JsonPullException) {
-                                    throw XCanvasFormatException(NOT_XCANVAS)
-                                }
+                            if (manifest != null) throw XCanvasFormatException("Duplicate canvas manifest")
+                            manifest = try {
+                                parseManifest(JsonPull(InputStreamReader(zis, Charsets.UTF_8)),requireCompleteItems)
+                            } catch (_: JsonPullException) {
+                                throw XCanvasFormatException(NOT_XCANVAS)
                             }
                         } else if (name.startsWith("assets/image-")) {
                             if (imageDir != null) {
@@ -572,7 +590,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             }
 
             val m = manifest ?: throw XCanvasFormatException(NOT_XCANVAS)
-            if (!m.formatOk) throw XCanvasFormatException(NOT_XCANVAS)
+            MapJson.checkEntry(m.format ?: throw XCanvasFormatException(NOT_XCANVAS), map != null)
 
             val doc = InfiniteDocument(dpi = m.dpi)
             identity?.let { doc.identity = it }
@@ -606,6 +624,10 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             m.glue.resolve()
             doc.layers.restore(m.layers.entries, m.layers.activeId)
             require(items.all { item -> doc.layers.entries.any { it.id == item.layerId } })
+            map?.let {
+                MapJson.checkLayers(it.state, doc.layers)
+                doc.map = it
+            }
             doc.addAll(items)
             return DecodedDocument(doc,items,m.completeItems && dropped==0)
         } catch(error:Throwable) {
@@ -644,7 +666,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         p.beginObject()
         while (p.hasNext()) {
             when (p.nextName()) {
-                "format" -> isCanvas = stringOr(p, "") == FORMAT
+                "format" -> isCanvas = isCanvasFormat(stringOrNull(p))
                 "created" -> created = stringOrNull(p)?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
                 // The writer puts every field the peek wants ahead of the items, so the rest can go unread.
                 "items" -> break
@@ -655,7 +677,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
 
     private class ParsedManifest {
-        var formatOk = false
+        var format: String? = null
         var completeItems = true
         var writer = 0
         var created: Long? = null
@@ -709,8 +731,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             val key=p.nextName()
             when (key) {
                 "format" -> {
-                    if (stringOr(p, "") != FORMAT) throw XCanvasFormatException(NOT_XCANVAS)
-                    m.formatOk = true
+                    if (m.format != null) throw XCanvasFormatException("Duplicate canvas format")
+                    m.format = stringOrNull(p)
+                    if (!isCanvasFormat(m.format)) throw XCanvasFormatException(NOT_XCANVAS)
                 }
                 "writer" -> m.writer = intOr(p, 0)
                 "created" -> m.created = stringOrNull(p)?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
@@ -889,16 +912,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val s = ItemScratch()
         p.beginObject()
         while (p.hasNext()) {
-            when (p.nextName()) {
-                "kind" -> s.kind = stringOr(p, "")
+            when (val key = p.nextName()) {
                 "id" -> s.id = intOrNull(p)
                 "connector" -> s.connector = parseConnector(p)
-                "tool" -> s.tool = stringOr(p, "")
-                "config" -> s.config = parseConfig(p)
-                "samples" -> s.samples = parseSamples(p)
-                "speed_scale" -> s.speedScale = doubleOr(p, 1.0)
-                "smooth_scale" -> s.smoothScale = doubleOr(p, 1.0)
-                "straight" -> s.straight = boolOr(p, false)
                 "asset" -> s.asset = stringOr(p, "")
                 "rect" -> s.rect = rectOrNull(p)
                 "src_w" -> s.srcW = intOr(p, 0)
@@ -926,22 +942,17 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "dashed" -> s.dashed = boolOr(p, false)
                 "dash_length" -> s.dashLength = doubleOr(p, 10.0)
                 "dash_gap" -> s.dashGap = doubleOr(p, 8.0)
-                "locked" -> s.locked = boolOr(p, false)
-                "group" -> s.group = intOrNull(p)
                 "layer" -> s.layerId = stringOr(p, com.xnotes.core.model.DrawingLayers.DEFAULT)
                 "rid" -> s.rid = intOr(p, 0)
                 "name" -> s.name = stringOr(p, "")
                 "duration_ms" -> s.durationMs = intOr(p, 0)
                 "peaks" -> s.peaks = stringOrNull(p)?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() }
-                "rec" -> s.rec = intOrNull(p)
-                "rec_ms" -> s.recMs = intOr(p, 0)
                 "mode" -> s.mode = stringOrNull(p)
                 "pattern" -> s.pattern = stringOrNull(p)
                 "width" -> s.tapeWidth = doubleOrNull(p)
                 "rgba" -> s.rgba = rgbaOrNull(p)
-                "cuts" -> s.cuts = parseCuts(p)
                 "part" -> s.part = rectOrNull(p)?.let { partWithin(it) }
-                else -> p.skipValue()
+                else -> readStrokeField(p, key, s)
             }
         }
         p.endObject()
@@ -970,9 +981,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if(read is ParsedItem.Actual) {
             val item=read.item
             item.layerId=s.layerId;glue.named(item,s.id)
-            if(s.locked) item.locked=true
-            if(s.group!=null) item.group=s.group
-            if(sync!=null) item.sync=sync
+            applyItemMetadata(item, s, sync)
         }
         return read
     }
@@ -987,36 +996,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             s.rgba ?: InkPalette.LEGACY,
             TapePattern.fromId(s.pattern),
         )
-    }
-
-    private fun buildStroke(s: ItemScratch): Stroke {
-        val tool = Tool.fromId(s.tool) ?: Tool.PEN
-        val c = s.config
-        val def = ToolConfig()
-        val config = ToolConfig(
-            baseWidth = c?.baseWidth ?: def.baseWidth,
-            pressureEnabled = c?.pressureEnabled ?: def.pressureEnabled,
-            pressureMinFactor = c?.pressureMinFactor ?: def.pressureMinFactor,
-            directionStrength = c?.directionStrength ?: def.directionStrength,
-            rgba = c?.rgba ?: InkPalette.LEGACY,
-            speedStrength = c?.speedStrength ?: def.speedStrength,
-            speedSmoothing = c?.speedSmoothing ?: def.speedSmoothing,
-            speedTop = c?.speedTop ?: def.speedTop,
-            taperEnabled = c?.taperEnabled ?: def.taperEnabled,
-            taperMinFactor = c?.taperMinFactor ?: ToolDefaults.LEGACY_TAPER_TIP,
-            neon = c?.neon ?: def.neon,
-            neonStrength = c?.neonStrength ?: def.neonStrength,
-            dashLength = c?.dashLength ?: def.dashLength,
-            dashGap = c?.dashGap ?: def.dashGap,
-            highlighterAlpha = c?.highlighterAlpha ?: def.highlighterAlpha,
-            highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
-        )
-        val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
-        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
-        // Speed ink saved before its widths were kept works them out once, as it is drawn now.
-        stroke.freezeSpeedWidths()
-        stroke.cuts = s.cuts
-        return stroke
     }
 
     private fun buildShape(s: ItemScratch): ShapeItem {
@@ -1187,67 +1166,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         )
     }
 
-    private fun parseConfig(p: JsonPull): ConfigScratch? {
-        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
-            p.skipValue()
-            return null
-        }
-        val c = ConfigScratch()
-        p.beginObject()
-        while (p.hasNext()) {
-            when (p.nextName()) {
-                "base_width" -> c.baseWidth = doubleOrNull(p)
-                "pressure_enabled" -> c.pressureEnabled = boolOrNull(p)
-                "pressure_min_factor" -> c.pressureMinFactor = doubleOrNull(p)
-                "direction_strength" -> c.directionStrength = doubleOrNull(p)
-                "rgba" -> c.rgba = rgbaOrNull(p)
-                "speed_strength" -> c.speedStrength = doubleOrNull(p)
-                "speed_smoothing" -> c.speedSmoothing = doubleOrNull(p)
-                "speed_top" -> c.speedTop = doubleOrNull(p)
-                "taper_enabled" -> c.taperEnabled = boolOrNull(p)
-                "taper_min_factor" -> c.taperMinFactor = doubleOrNull(p)
-                "neon" -> c.neon = boolOrNull(p)
-                "neon_strength" -> c.neonStrength = doubleOrNull(p)
-                "dash_length" -> c.dashLength = doubleOrNull(p)
-                "dash_gap" -> c.dashGap = doubleOrNull(p)
-                "highlighter_alpha" -> c.highlighterAlpha = doubleOrNull(p)
-                "highlighter_inverse" -> c.highlighterInverse = boolOrNull(p)
-                else -> p.skipValue()
-            }
-        }
-        p.endObject()
-        return c
-    }
-
-    private fun parseSamples(p: JsonPull): RawSamples? {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
-            p.skipValue()
-            return null
-        }
-        val out = RawSamples()
-        val tuple = DoubleArray(5)
-        p.beginArray()
-        while (p.hasNext()) {
-            if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
-                p.skipValue()
-                continue
-            }
-            // NaN back from [JsonPull.nextSample] means the slot held nothing readable, which is
-            // not the same as a zero: pressure then defaults to full, and the 4th and 5th elements
-            // (relative ms and kept width, only speed-pen strokes carry them) to none.
-            p.nextSample(tuple)
-            out.add(
-                if (tuple[0].isNaN()) 0.0 else tuple[0],
-                if (tuple[1].isNaN()) 0.0 else tuple[1],
-                if (tuple[2].isNaN()) 1.0 else tuple[2],
-                if (tuple[3].isNaN()) 0.0 else tuple[3],
-                if (tuple[4].isNaN()) 0.0 else tuple[4],
-            )
-        }
-        p.endArray()
-        return out
-    }
-
     private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>): ImageItem? {
         val file = imageFiles[spec.asset] ?: return null
         var w = spec.srcW
@@ -1281,65 +1199,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     // --- streaming value helpers (mirroring org.json's forgiving opt* coercions) ---
 
-    private fun doubleOr(p: JsonPull, def: Double): Double = doubleOrNull(p) ?: def
-
-    private fun doubleOrNull(p: JsonPull): Double? = when (p.peek()) {
-        JsonPull.Token.NUMBER -> p.nextDouble()
-        JsonPull.Token.STRING -> p.nextString().toDoubleOrNull()
-        else -> {
-            p.skipValue()
-            null
-        }
-    }
-
-    private fun intOr(p: JsonPull, def: Int): Int = intOrNull(p) ?: def
-
-    private fun intOrNull(p: JsonPull): Int? = when (p.peek()) {
-        JsonPull.Token.NUMBER -> p.nextInt()
-        JsonPull.Token.STRING -> p.nextString().let { it.toIntOrNull() ?: it.toDoubleOrNull()?.toInt() }
-        else -> {
-            p.skipValue()
-            null
-        }
-    }
-
-    private fun boolOr(p: JsonPull, def: Boolean): Boolean = boolOrNull(p) ?: def
-
-    private fun boolOrNull(p: JsonPull): Boolean? = when (p.peek()) {
-        JsonPull.Token.BOOLEAN -> p.nextBoolean()
-        JsonPull.Token.STRING -> when (p.nextString().lowercase()) {
-            "true" -> true
-            "false" -> false
-            else -> null
-        }
-        else -> {
-            p.skipValue()
-            null
-        }
-    }
-
-    private fun stringOr(p: JsonPull, def: String): String = stringOrNull(p) ?: def
-
-    private fun stringOrNull(p: JsonPull): String? = when (p.peek()) {
-        JsonPull.Token.STRING -> p.nextString()
-        else -> {
-            p.skipValue()
-            null
-        }
-    }
-
-    private fun rgbaOrNull(p: JsonPull): Rgba? {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
-            p.skipValue()
-            return null
-        }
-        val channels = ArrayList<Int>(4)
-        p.beginArray()
-        while (p.hasNext()) channels.add(intOr(p, 0))
-        p.endArray()
-        return Rgba.fromList(channels)
-    }
-
     private fun ptOrNull(p: JsonPull): Pt? {
         if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
             p.skipValue()
@@ -1359,24 +1218,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         }
         p.endArray()
         return if (count >= 2) Pt(x, y) else null
-    }
-
-    /** The edges an item was cut along, the broken ones left out. */
-    private fun parseCuts(p: JsonPull): List<CutEdge> {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
-            p.skipValue()
-            return emptyList()
-        }
-        val out = ArrayList<CutEdge>()
-        p.beginArray()
-        while (p.hasNext()) {
-            val v = doublesOrNull(p) ?: continue
-            if (v.size < 4) continue
-            val len = kotlin.math.hypot(v[2], v[3])
-            if (len > 1e-9) out += CutEdge(v[0], v[1], v[2] / len, v[3] / len)
-        }
-        p.endArray()
-        return out
     }
 
     /** A picture's part as written, kept to the picture; null when there is nothing of it left, or all of it. */
@@ -1404,18 +1245,6 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         }
         p.endArray()
         return if (count >= 4) Rect(v[0], v[1], v[2], v[3]) else null
-    }
-
-    private fun doublesOrNull(p: JsonPull): DoubleArray? {
-        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
-            p.skipValue()
-            return null
-        }
-        val out = ArrayList<Double>()
-        p.beginArray()
-        while (p.hasNext()) doubleOrNull(p)?.takeIf { it.isFinite() }?.let { out.add(it) }
-        p.endArray()
-        return out.toDoubleArray()
     }
 
     private fun pointsOrNull(p: JsonPull): List<Pt>? {
@@ -1457,6 +1286,244 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
         /** A recording is a STORED asset, its format's extension after the number. */
         private const val AUDIO_ASSET = "assets/audio-"
+
+        /** Node ink and layer validation also run before a raw bundle can be migrated in place. */
+        internal fun readMapEntry(input: InputStream): MapModel {
+            val reader = InputStreamReader(input, Charsets.UTF_8.newDecoder())
+            return try {
+                MapJson.read(JsonPull(reader, strict = true, tokenLimit = Int.MAX_VALUE), ::readMapStroke)
+            } catch (_: java.io.EOFException) {
+                throw XCanvasFormatException("Truncated map entry")
+            } catch (_: java.util.zip.ZipException) {
+                throw XCanvasFormatException("Damaged map entry")
+            }
+        }
+
+        private fun applyItemMetadata(item: CanvasItem, s: ItemScratch, sync: SyncMark? = s.rec?.let { SyncMark(it, s.recMs) }) {
+            if (s.locked) item.locked = true
+            s.group?.let { item.group = it }
+            if (sync != null) item.sync = sync
+        }
+
+        private fun readMapStroke(p: JsonPull): Stroke {
+            val s = ItemScratch()
+            MapJson.run { p.fields { key -> readStrokeField(p, key, s) } }
+            if (s.kind != Stroke.KIND || Tool.fromId(s.tool) == null || s.config == null || s.samples == null)
+                throw XCanvasFormatException("Incomplete or unknown node stroke")
+            return buildStroke(s).also { applyItemMetadata(it, s) }
+        }
+
+        private fun readStrokeField(p: JsonPull, key: String, s: ItemScratch) {
+            when (key) {
+                "kind" -> s.kind = stringOr(p, "")
+                "tool" -> s.tool = stringOr(p, "")
+                "config" -> s.config = parseConfig(p)
+                "samples" -> s.samples = parseSamples(p)
+                "speed_scale" -> s.speedScale = doubleOr(p, 1.0)
+                "smooth_scale" -> s.smoothScale = doubleOr(p, 1.0)
+                "straight" -> s.straight = boolOr(p, false)
+                "locked" -> s.locked = boolOr(p, false)
+                "group" -> s.group = intOrNull(p)
+                "rec" -> s.rec = intOrNull(p)
+                "rec_ms" -> s.recMs = intOr(p, 0)
+                "cuts" -> s.cuts = parseCuts(p)
+                else -> p.skipValue()
+            }
+        }
+
+        private fun buildStroke(s: ItemScratch): Stroke {
+            val tool = Tool.fromId(s.tool) ?: Tool.PEN
+            val c = s.config
+            val def = ToolConfig()
+            val config = ToolConfig(
+                baseWidth = c?.baseWidth ?: def.baseWidth,
+                pressureEnabled = c?.pressureEnabled ?: def.pressureEnabled,
+                pressureMinFactor = c?.pressureMinFactor ?: def.pressureMinFactor,
+                directionStrength = c?.directionStrength ?: def.directionStrength,
+                rgba = c?.rgba ?: InkPalette.LEGACY,
+                speedStrength = c?.speedStrength ?: def.speedStrength,
+                speedSmoothing = c?.speedSmoothing ?: def.speedSmoothing,
+                speedTop = c?.speedTop ?: def.speedTop,
+                taperEnabled = c?.taperEnabled ?: def.taperEnabled,
+                // Only legacy tapered ink needs the historical visible tip when its factor is absent.
+                taperMinFactor = c?.taperMinFactor ?: if (c?.taperEnabled == true) ToolDefaults.LEGACY_TAPER_TIP else def.taperMinFactor,
+                neon = c?.neon ?: def.neon,
+                neonStrength = c?.neonStrength ?: def.neonStrength,
+                dashLength = c?.dashLength ?: def.dashLength,
+                dashGap = c?.dashGap ?: def.dashGap,
+                highlighterAlpha = c?.highlighterAlpha ?: def.highlighterAlpha,
+                highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
+            )
+            val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
+            s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
+            // Speed ink saved before its widths were kept works them out once, as it is drawn now.
+            stroke.freezeSpeedWidths()
+            stroke.cuts = s.cuts
+            return stroke
+        }
+
+        private fun parseConfig(p: JsonPull): ConfigScratch? {
+            if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
+                p.skipValue()
+                return null
+            }
+            val c = ConfigScratch()
+            val keys = if (p.strict) HashSet<String>() else null
+            p.beginObject()
+            while (p.hasNext()) {
+                val key = p.nextName()
+                if (keys?.add(key) == false) throw XCanvasFormatException("Duplicate stroke config field")
+                when (key) {
+                    "base_width" -> c.baseWidth = doubleOrNull(p)
+                    "pressure_enabled" -> c.pressureEnabled = boolOrNull(p)
+                    "pressure_min_factor" -> c.pressureMinFactor = doubleOrNull(p)
+                    "direction_strength" -> c.directionStrength = doubleOrNull(p)
+                    "rgba" -> c.rgba = rgbaOrNull(p)
+                    "speed_strength" -> c.speedStrength = doubleOrNull(p)
+                    "speed_smoothing" -> c.speedSmoothing = doubleOrNull(p)
+                    "speed_top" -> c.speedTop = doubleOrNull(p)
+                    "taper_enabled" -> c.taperEnabled = boolOrNull(p)
+                    "taper_min_factor" -> c.taperMinFactor = doubleOrNull(p)
+                    "neon" -> c.neon = boolOrNull(p)
+                    "neon_strength" -> c.neonStrength = doubleOrNull(p)
+                    "dash_length" -> c.dashLength = doubleOrNull(p)
+                    "dash_gap" -> c.dashGap = doubleOrNull(p)
+                    "highlighter_alpha" -> c.highlighterAlpha = doubleOrNull(p)
+                    "highlighter_inverse" -> c.highlighterInverse = boolOrNull(p)
+                    else -> p.skipValue()
+                }
+            }
+            p.endObject()
+            if (p.strict && (c.baseWidth == null || c.pressureEnabled == null || c.pressureMinFactor == null ||
+                    c.directionStrength == null || c.rgba == null)) throw XCanvasFormatException("Incomplete node stroke config")
+            return c
+        }
+
+        private fun parseSamples(p: JsonPull): RawSamples? {
+            if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+                p.skipValue()
+                return null
+            }
+            val out = RawSamples()
+            val tuple = DoubleArray(5)
+            p.beginArray()
+            while (p.hasNext()) {
+                if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+                    if (p.strict) throw XCanvasFormatException("Malformed node ink sample")
+                    p.skipValue()
+                    continue
+                }
+                // NaN back from [JsonPull.nextSample] means the slot held nothing readable, which is
+                // not the same as a zero: pressure then defaults to full, and the 4th and 5th elements
+                // (relative ms and kept width, only speed-pen strokes carry them) to none.
+                val count = p.nextSample(tuple)
+                if (p.strict && (count < 3 || (0 until count).any { !tuple[it].isFinite() }))
+                    throw XCanvasFormatException("Invalid node ink sample")
+                out.add(
+                    if (tuple[0].isNaN()) 0.0 else tuple[0],
+                    if (tuple[1].isNaN()) 0.0 else tuple[1],
+                    if (tuple[2].isNaN()) 1.0 else tuple[2],
+                    if (tuple[3].isNaN()) 0.0 else tuple[3],
+                    if (tuple[4].isNaN()) 0.0 else tuple[4],
+                )
+            }
+            p.endArray()
+            return out
+        }
+
+        private fun doubleOr(p: JsonPull, def: Double): Double = doubleOrNull(p) ?: def
+
+        private fun doubleOrNull(p: JsonPull): Double? = if (p.strict) MapJson.number(p) else when (p.peek()) {
+            JsonPull.Token.NUMBER -> p.nextDouble()
+            JsonPull.Token.STRING -> p.nextString().toDoubleOrNull()
+            else -> {
+                p.skipValue()
+                null
+            }
+        }
+
+        private fun intOr(p: JsonPull, def: Int): Int = intOrNull(p) ?: def
+
+        private fun intOrNull(p: JsonPull): Int? = if (p.strict) p.nextInt() else when (p.peek()) {
+            JsonPull.Token.NUMBER -> p.nextInt()
+            JsonPull.Token.STRING -> p.nextString().let { it.toIntOrNull() ?: it.toDoubleOrNull()?.toInt() }
+            else -> {
+                p.skipValue()
+                null
+            }
+        }
+
+        private fun boolOr(p: JsonPull, def: Boolean): Boolean = boolOrNull(p) ?: def
+
+        private fun boolOrNull(p: JsonPull): Boolean? = if (p.strict) p.nextBoolean() else when (p.peek()) {
+            JsonPull.Token.BOOLEAN -> p.nextBoolean()
+            JsonPull.Token.STRING -> when (p.nextString().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+            else -> {
+                p.skipValue()
+                null
+            }
+        }
+
+        private fun stringOr(p: JsonPull, def: String): String = stringOrNull(p) ?: def
+
+        private fun stringOrNull(p: JsonPull): String? = if (p.strict) p.nextString() else when (p.peek()) {
+            JsonPull.Token.STRING -> p.nextString()
+            else -> {
+                p.skipValue()
+                null
+            }
+        }
+
+        private fun rgbaOrNull(p: JsonPull): Rgba? {
+            if (p.strict) return MapJson.color(p)
+            if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+                p.skipValue()
+                return null
+            }
+            val channels = ArrayList<Int>(4)
+            p.beginArray()
+            while (p.hasNext()) channels.add(intOr(p, 0))
+            p.endArray()
+            return Rgba.fromList(channels)
+        }
+
+        /** The edges an item was cut along, the broken ones left out. */
+        private fun parseCuts(p: JsonPull): List<CutEdge> {
+            if (p.strict && p.peek() != JsonPull.Token.BEGIN_ARRAY) throw XCanvasFormatException("Invalid stroke cuts")
+            if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+                p.skipValue()
+                return emptyList()
+            }
+            val out = ArrayList<CutEdge>()
+            p.beginArray()
+            while (p.hasNext()) {
+                val v = doublesOrNull(p)
+                if (p.strict && v?.size != 4) throw XCanvasFormatException("Invalid stroke cut")
+                if (v == null) continue
+                if (v.size < 4) continue
+                val len = kotlin.math.hypot(v[2], v[3])
+                if (p.strict && (!len.isFinite() || len <= 1e-9)) throw XCanvasFormatException("Invalid stroke cut normal")
+                if (len > 1e-9) out += CutEdge(v[0], v[1], v[2] / len, v[3] / len)
+            }
+            p.endArray()
+            return out
+        }
+
+        private fun doublesOrNull(p: JsonPull): DoubleArray? {
+            if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+                p.skipValue()
+                return null
+            }
+            val out = ArrayList<Double>()
+            p.beginArray()
+            while (p.hasNext()) doubleOrNull(p)?.takeIf { it.isFinite() }?.let { out.add(it) }
+            p.endArray()
+            return out.toDoubleArray()
+        }
 
         private fun audioExt(ext: String): String = ext.lowercase().takeIf { Regex("[a-z0-9]{1,5}").matches(it) } ?: "m4a"
     }

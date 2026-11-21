@@ -1,5 +1,7 @@
 package com.xnotes.storage
 
+import com.xnotes.format.MapBundleFixture
+
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Rect
@@ -25,6 +27,17 @@ class PreparedProtectedCanvasTest {
         val root=Files.createTempDirectory("protected-canvas-assets-").toFile()
         try {block(root,CanvasCodec(FakeImageCodec(),FakeTextMeasurer()))} finally {root.deleteRecursively()}
     }
+    @Test fun protectedCanvasAdoptsTheDecodedMapAndKeepsTheOriginalBytes() = scenario { root, codec ->
+        val file = File(root, "protected.xcanvas")
+        MapBundleFixture.write(file)
+        PreparedProtectedCanvas.read(BundleSnapshot.take(file, root), codec, File(root, "assets")).use { prepared ->
+            assertEquals(MapBundleFixture.state, prepared.document.map.state)
+            assertFalse(prepared.document.dirty)
+            prepared.adopt(prepared.document).close()
+        }
+        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(file))
+    }
+
     @Test fun abortClosesOnlyItsSnapshotAndAssetsWhileAdoptionKeepsTheActualImageAlive()=scenario {root,codec->
         val image=File(root,"image.png").apply {writeBytes(byteArrayOf(1,2,3))}
         val document=InfiniteDocument().apply {add(ImageItem(ImageData(image,20,20),Rect(0.0,0.0,20.0,20.0)))}

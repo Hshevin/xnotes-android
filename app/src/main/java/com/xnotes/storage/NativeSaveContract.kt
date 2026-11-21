@@ -1,5 +1,6 @@
 package com.xnotes.storage
 
+import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleReferenceInfo
 
 /** Ordinary existing-file saves cannot stand in for creation, copying or raw metadata upgrades. */
@@ -7,11 +8,11 @@ internal object NativeSaveContract {
     fun verify(original:BundleReferenceInfo,candidate:BundleReferenceInfo,current:BundleReferenceInfo,
                purpose:MigrationPublication.Purpose,atLocation:ReferenceExpectation?,byIdentity:ReferenceExpectation?) {
         val expected=when(purpose) {
-            MigrationPublication.Purpose.SAVE_NOTE -> "xnote"
-            MigrationPublication.Purpose.SAVE_CANVAS -> "xcanvas"
+            MigrationPublication.Purpose.SAVE_NOTE -> DocumentKind.NOTE
+            MigrationPublication.Purpose.SAVE_CANVAS -> DocumentKind.CANVAS
             MigrationPublication.Purpose.CREATE_NOTE,MigrationPublication.Purpose.CREATE_CANVAS,MigrationPublication.Purpose.ACTIVATE_PAGES -> reject()
         }
-        if(listOf(original,candidate,current).any {it.format!=expected}) reject()
+        if(listOf(original,candidate,current).any {it.kind!=expected}) reject()
         ReferenceContract.verifyWrite(atLocation,byIdentity,current.header,candidate.header)
         val id=original.header.identity?.documentId
             ?: throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISSING)

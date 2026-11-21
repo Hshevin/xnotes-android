@@ -4,6 +4,7 @@ import android.content.ContextWrapper
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.AnchorMetadata
 import com.xnotes.format.BundleIdentity
+import com.xnotes.format.MapBundleFixture
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -53,6 +54,21 @@ class NativeStorageSaveTest {
             z.write("""{"format":"$format","version":1,"has_pdf":$hasPdf,$content,"user_data":"$body"}""".toByteArray());z.closeEntry()
         }
     }
+    @Test fun restoringAStagedLastMapDeletionRecoversTheRawOriginal() = scenario { f ->
+        MapBundleFixture.write(f.current, BundleIdentity(id))
+        val original = f.current.readBytes()
+        val next = bundle(File(f.root, "plain"), format = "xcanvas")
+        val version = f.storage.openSourceActual(f.uri).use { it.version }
+        f.storage.prepareExpected(f.uri, next, version)
+        // The provider finished writing the candidate before recovery resumed.
+        next.copyTo(f.current, overwrite = true)
+        f.storage.restore(f.alias)
+        assertArrayEquals(original, f.current.readBytes())
+        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.current))
+        assertEquals("xcanvas", f.storage.registry.kindForId(id))
+        assertFalse(f.storage.hasRecovery(f.uri))
+    }
+
     @Test fun successfulAnchoredSavePublishesRegistersPositiveContractAndClearsRecovery() = scenario {f->
         bundle(f.current,pages=true);val next=bundle(File(f.root,"next.xnote"),pages=true,body="new")
         f.storage.publishNote(f.uri,next,DocumentKind.NOTE,"source.xnote")

@@ -84,7 +84,7 @@ internal class PreparedRecoveryPreview private constructor(
             try {
                 verifyBody()
                 val info=BundleReferenceInfo.inspectStrict(body) {checkActive();false}
-                if(kind !in setOf(DocumentKind.NOTE,DocumentKind.CANVAS) || info.format!=kind.extension || info.header.identity?.externalPdf==true)
+                if(kind !in setOf(DocumentKind.NOTE,DocumentKind.CANVAS) || info.kind!=kind || info.header.identity?.externalPdf==true)
                     throw WorkingSessionCache.Invalid()
                 if(expectedId!=null && info.header.identity?.documentId!=expectedId) throw WorkingSessionCache.Invalid()
                 check(assetRoot.isDirectory || assetRoot.mkdirs()) {"Cannot create recovery preview root"}

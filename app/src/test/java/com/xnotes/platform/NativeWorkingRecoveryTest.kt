@@ -1,5 +1,8 @@
 package com.xnotes.platform
 
+import com.xnotes.format.MapBundleFixture
+import com.xnotes.map.MapModel
+
 import android.content.ContextWrapper
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.FakeImageCodec
@@ -81,6 +84,50 @@ class NativeWorkingRecoveryTest {
         val root=Files.createTempDirectory("native-working-recovery-").toFile();val f=Fixture(root)
         try {block(f)} finally {f.storage.registry.close();root.deleteRecursively()}
     }
+    @Test fun stagedCanvasSaveAcceptsAHandoffWithAMapBearingWorkingBody() = scenario { f ->
+        val (document, source) = f.boundCanvas()
+        val session = f.store()
+        document.map = MapModel(MapBundleFixture.state)
+        document.dirty = true
+        val request = source.capture(document)
+        session.publish(session.capture(document, source))
+        val stage = request.prepareForHandoff(f.storage, f.noteCodec, f.canvasCodec, File(f.root, "saves"), "tree")
+        kotlinx.coroutines.runBlocking {
+            session.persistHandoff(stage) { permit -> permit.capture(document, source) }.use { publication ->
+                session.load()!!.use { read ->
+                    val body = read.body.inputStream().use { f.canvasCodec.read(it) }
+                    assertEquals(MapBundleFixture.state, body.map.state)
+                    assertEquals(stage.handoffId, read.metadata.handoff!!.id)
+                }
+                assertTrue(source.accept(request, stage.commit(publication)))
+            }
+        }
+        assertEquals(MapBundleFixture.state, f.sourceFile.inputStream().use { f.canvasCodec.read(it) }.map.state)
+    }
+
+    @Test fun mapAddedToAPlainSourceSurvivesCacheReuseRecoveryAndSavingBack() = scenario { f ->
+        val (document, source) = f.boundCanvas()
+        document.map = MapModel(MapBundleFixture.state)
+        document.dirty = true
+        val session = f.store()
+        session.publish(session.capture(document, source))
+        val raw = session.load()!!.use { MapBundleFixture.entry(it.body) }
+        document.lastView = Waypoint("view", 1.0, 2.0, 1.0)
+        val view = session.capture(document, source)
+        assertFalse(view.requiresBody)
+        session.publish(view)
+        session.load()!!.use { assertArrayEquals(raw, MapBundleFixture.entry(it.body)) }
+        (f.recover() as NativeWorkingSession.Recovery.Bound).use {
+            assertEquals(MapBundleFixture.state, it.prepared.canvas!!.map.state)
+            f.publish(it.prepared)
+        }
+        f.storage.openSourceActual(f.uri).use {
+            assertEquals(DocumentKind.CANVAS, it.version.kind)
+            assertEquals(MapBundleFixture.state, it.file.inputStream().use(f.canvasCodec::read).map.state)
+        }
+        assertEquals("xcanvas", f.storage.registry.kindForId(document.identity.documentId))
+    }
+
     @Test fun editedPageSetIsVerifiedAgainstTheCacheAndCanSaveBackAgainstTheActualSourceBase()=scenario {f->
         val (doc,source)=f.bound();val originalBase=BundleMigration.hash(f.sourceFile)
         val removed=doc.pages.removeAt(1).referenceIdentity.id;doc.pages.reverse();doc.pages.add(Page(100.0,100.0))
