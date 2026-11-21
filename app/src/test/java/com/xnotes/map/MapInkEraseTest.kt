@@ -51,9 +51,10 @@ class MapInkEraseTest {
         val long = inkOf(r).strokes[1]
         val expected = long.erasedBy(90.0 - 16.0, 100.0 - 42.0, 6.0)
         assertNotNull(expected)
+        val untouched = inkOf(r).strokes[0]
         eraser().erase(90.0, 100.0, 6.0, area = true)
         val after = inkOf(r).strokes
-        assertSame(inkOf(r).strokes[0], after[0])
+        assertSame(untouched, after[0])
         assertEquals(1 + expected!!.size, after.size)
         for ((i, piece) in expected.withIndex()) {
             assertEquals(piece.samples.map { it.x }, after[1 + i].samples.map { it.x })
