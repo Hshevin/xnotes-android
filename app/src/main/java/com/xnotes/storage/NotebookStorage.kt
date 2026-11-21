@@ -598,10 +598,8 @@ class NotebookStorage internal constructor(private val context:Context,
         checkActive()
         val identity = compactPdf(uri, existing ?: migrate(uri, copy = false))
         registry.register(identity.documentId, kind, name, uri)
-        for(old in registry.locations(identity.documentId)) if(registry.locationKey(old)!=registry.locationKey(uri)) {
-            val reachable=runCatching { context.contentResolver.openFileDescriptor(Uri.parse(old),"r")?.use { true } ?: false }.getOrDefault(false)
-            if(!reachable) registry.markUnavailable(old)
-        }
+        // A failed descriptor open cannot distinguish a second copy from a provider alias.
+        // Only explicit removal/relocation retires an unverified location.
         identity.pdfResource?.let { id -> if(registry.resource(id)!=null) pdfResources.pin("note:${identity.documentId}",pdfResources.references("note:${identity.documentId}")+id) }
         identity
     }
@@ -876,7 +874,7 @@ class NotebookStorage internal constructor(private val context:Context,
     /** Explicit user-triggered rediscovery, only inside granted workspace trees, with a bounded scan. */
     suspend fun rediscover(id: String, roots: List<String>): String? {
         require(id.isNotBlank()) { StorageText.t(StorageMsg.SPLIT_MISSING_DOCUMENT_ID) }
-        val matches=linkedMapOf<String,String>()
+        val matches=linkedSetOf<String>()
         val coroutine=kotlinx.coroutines.currentCoroutineContext()
         var inspected=0
         for(root in roots.distinct()) {
@@ -900,15 +898,17 @@ class NotebookStorage internal constructor(private val context:Context,
                                 catch(error:java.util.concurrent.CancellationException) {throw error}
                                 catch(_:Exception) {false}
                             if(matchesId) {
-                                registry.register(id,if(name.endsWith(".xcanvas",true)) "xcanvas" else "xnote",name,uri); matches["${tree.authority}|$child"]=uri
+                                registry.register(id,if(name.endsWith(".xcanvas",true)) "xcanvas" else "xnote",name,uri)
+                                matches.add(uri)
                             }
                         }
                     }
                 }
             }
         }
-        check(matches.size<=1) { StorageText.t(StorageMsg.DUPLICATE_DOCUMENTS_FOUND) }
-        return matches.values.singleOrNull()
+        val distinct = registry.distinctLocations(matches)
+        check(distinct.size<=1) { StorageText.t(StorageMsg.DUPLICATE_DOCUMENTS_FOUND) }
+        return distinct.singleOrNull()
     }
     fun ownedFile(uri: String): File? {
         val parsed = Uri.parse(uri)

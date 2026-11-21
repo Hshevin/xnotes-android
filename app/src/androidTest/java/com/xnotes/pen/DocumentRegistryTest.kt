@@ -39,6 +39,7 @@ class DocumentRegistryTest {
         val id=UUID.randomUUID().toString();val uri="content://example/document/page-ref"
         db.register(id,"xnote","original",uri)
         // Remove the tables introduced after v1; keep the actual historical native/resource rows.
+        db.writableDatabase.execSQL("DROP TABLE location_alias_expectations")
         db.writableDatabase.execSQL("DROP TABLE original_pdf_pages")
         db.writableDatabase.execSQL("DROP TABLE original_pdf_documents")
         db.writableDatabase.execSQL("DROP TABLE page_reference_contracts")
@@ -46,7 +47,7 @@ class DocumentRegistryTest {
         db.close()
         val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
         DocumentRegistry(context).use {upgraded->
-            assertEquals(3,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            assertEquals(4,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
             upgraded.register(id,"xnote","with references",uri,pageReferences=true)
             upgraded.register(id,"xnote","ordinary save",uri)
             assertTrue(upgraded.expectationForId(id).requiresPages)
@@ -80,12 +81,13 @@ class DocumentRegistryTest {
         db.register(id,"xnote","existing",uri,pageReferences=true)
         db.registerResource(DocumentRegistry.Resource("v2-resource","original",pdf.path,pdf.length(),"v2-digest"))
         db.references("note:$id",setOf("v2-resource"))
+        db.writableDatabase.execSQL("DROP TABLE location_alias_expectations")
         db.writableDatabase.execSQL("DROP TABLE original_pdf_pages")
         db.writableDatabase.execSQL("DROP TABLE original_pdf_documents")
         db.writableDatabase.version=2;db.close()
         val context=object:ContextWrapper(PenTestRunner.instance.targetContext) {override fun getNoBackupFilesDir()=root}
         DocumentRegistry(context).use {upgraded->
-            assertEquals(3,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
+            assertEquals(4,upgraded.writableDatabase.version);assertEquals(id,upgraded.idAt(uri))
             assertTrue(upgraded.expectationForId(id).requiresPages)
             assertEquals(setOf("v2-resource"),upgraded.referenceIds("note:$id"))
             assertNotNull(upgraded.resource("v2-resource"));assertEquals("original bytes",pdf.readText())
