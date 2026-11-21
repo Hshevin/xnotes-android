@@ -1345,8 +1345,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 speedSmoothing = c?.speedSmoothing ?: def.speedSmoothing,
                 speedTop = c?.speedTop ?: def.speedTop,
                 taperEnabled = c?.taperEnabled ?: def.taperEnabled,
-                // Only legacy tapered ink needs the historical visible tip when its factor is absent.
-                taperMinFactor = c?.taperMinFactor ?: if (c?.taperEnabled == true) ToolDefaults.LEGACY_TAPER_TIP else def.taperMinFactor,
+                taperMinFactor = c?.taperMinFactor ?: ToolDefaults.LEGACY_TAPER_TIP,
                 neon = c?.neon ?: def.neon,
                 neonStrength = c?.neonStrength ?: def.neonStrength,
                 dashLength = c?.dashLength ?: def.dashLength,

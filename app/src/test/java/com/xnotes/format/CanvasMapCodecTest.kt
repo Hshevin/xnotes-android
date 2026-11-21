@@ -129,7 +129,12 @@ class CanvasMapCodecTest {
             assertEquals(n.ink.width, m.ink.width, 0.0)
             assertEquals(n.ink.height, m.ink.height, 0.0)
             assertEquals(n.ink.strokes.size, m.ink.strokes.size)
-            n.ink.strokes.zip(m.ink.strokes).forEach { (x, y) -> assertEquals(x.samples.size, y.samples.size); assertEquals(x.config, y.config) }
+            n.ink.strokes.zip(m.ink.strokes).forEach { (x, y) ->
+                assertEquals(x.samples.size, y.samples.size)
+                // node ink reads back exactly like the same stroke as a plain canvas item
+                val asItem = roundTrip(InfiniteDocument().apply { add(Stroke(x.tool, x.config, x.samples)) }).items.single() as Stroke
+                assertEquals(asItem.config, y.config)
+            }
         }
     }
 
