@@ -91,6 +91,9 @@ interface CanvasItem {
 /** An opaque per-item geometry snapshot exchanged by the transform tools (resize + rotate). */
 sealed interface GeometrySnapshot
 
+/** The snapshot of an item no transform tool may change, such as a mind map node drawn from its map. */
+data object FixedGeometry : GeometrySnapshot
+
 /** An opaque geometry handle exchanged by resize (spec 02, 07). */
 sealed interface GeoHandle
 

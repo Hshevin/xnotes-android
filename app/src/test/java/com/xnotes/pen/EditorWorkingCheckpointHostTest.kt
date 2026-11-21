@@ -1,5 +1,9 @@
 package com.xnotes.pen
 
+import com.xnotes.format.MapBundleFixture
+import com.xnotes.format.CanvasCodec
+import com.xnotes.core.FakeImageCodec
+import com.xnotes.core.FakeTextMeasurer
 import android.view.MotionEvent
 import com.xnotes.canvas.InitialView
 import com.xnotes.core.geometry.Pt
@@ -32,6 +36,22 @@ class EditorWorkingCheckpointHostTest {
             assertTrue(f.editor.noteOpen);f.editor.view.layout(0,0,1000,800)
             f.editor.selectTool(Tool.PEN);f.stopDebounce()
         }
+    }
+
+    @Test fun canvasPresentationCheckpointIncludesTheMapInTheRecoverableBody() = runParkingScenario { f ->
+        f.sourceDisplayName = "tree.xcanvas"
+        MapBundleFixture.write(f.source)
+        withContext(Dispatchers.Main) {
+            assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
+            assertTrue(f.editor.canvasOpen)
+            assertEquals(MapBundleFixture.state, f.editor.infinite.document.map.state)
+            val checkpoint = requireNotNull(f.editor.prepareNativePresentationCheckpoint(emptySet()) { true })
+            assertTrue(checkpoint.current())
+        }
+        val codec = CanvasCodec(FakeImageCodec(), FakeTextMeasurer())
+        val body = File(slot(f.editor), "canvas.xcanvas")
+        assertEquals(MapBundleFixture.state, body.inputStream().use { codec.read(it) }.map.state)
+        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.source))
     }
 
     @Test fun anExplicitOverrideEqualToTheDefaultStillChangesThePersistedView()=runParkingScenario {f->

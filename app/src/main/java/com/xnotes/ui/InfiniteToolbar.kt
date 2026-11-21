@@ -39,6 +39,7 @@ private val CANVAS_TOOL_OF: Map<ToolbarItem, Tool> = mapOf(
     ToolbarItem.TEXT_BOX to Tool.TEXT_BOX,
     ToolbarItem.TEXT to Tool.TEXT,
     ToolbarItem.SCREENSHOT to Tool.SCREENSHOT,
+    ToolbarItem.MAP to Tool.MAP,
 )
 
 /**
@@ -83,6 +84,7 @@ fun InfiniteToolbar(
         Tool.TEXT to XnotesIcons.text,
         Tool.TEXT_BOX to XnotesIcons.textBox,
         Tool.SCREENSHOT to XnotesIcons.scissors,
+        Tool.MAP to XnotesIcons.mindMap,
     )
     var renaming by remember(editor) { mutableStateOf(false) }
     if (renaming) {

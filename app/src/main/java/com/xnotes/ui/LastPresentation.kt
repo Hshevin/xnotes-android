@@ -1,18 +1,6 @@
 package com.xnotes.ui
 
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.mindmap.MapPresentationCamera
-import com.xnotes.mindmap.MapSplitLayout
-
-/** A description of local recovery, never permission to read or save either original source. */
-internal data class ColdMixedPresentation(
-    val map:SplitSourceRef,
-    val nativeHint:NativeRestoreHint,
-    val layout:MapSplitLayout,
-    val mapCamera:MapPresentationCamera?=null,
-    val nativePosition:Editor.ReadingPosition?=null,
-    val nativeView:ColdNativeView?=null,
-)
 /** One pane's complete persisted note view; a null [zoomLocked] is an older record that never stored the lock. */
 internal data class ColdNativeView(val position:Editor.ReadingPosition,val fitWidth:Boolean,val zoomLocked:Boolean?=null)
 internal data class ColdCanvasView(val centerX:Double,val centerY:Double,val zoom:Double)
@@ -27,9 +15,6 @@ internal sealed interface ColdNativeSlot {
 }
 internal sealed interface LastPresentation {
     data object Home:LastPresentation
-    data class Mixed(val value:ColdMixedPresentation):LastPresentation
-    data class MapOnly(val map:SplitSourceRef,val camera:MapPresentationCamera?=null,
-                       val homeLayout:MapSplitLayout?=null):LastPresentation
     class Native(slots:List<ColdNativeSlot>,val layout:ColdNativeLayout):LastPresentation {
         val slots:List<ColdNativeSlot> = slots.toList()
         fun copy(slots:List<ColdNativeSlot> = this.slots,layout:ColdNativeLayout = this.layout)=Native(slots,layout)

@@ -18,7 +18,7 @@ enum class DocumentKind(val extension: String) {
     /** References two documents and their viewports, without embedding their contents. */
     SPLIT("xsplit"),
 
-    /** Native text and editable-ink tree document. */
+    /** Legacy standalone map, listed for file management but no longer opened. */
     MIND_MAP("xmap"),
 
     /**

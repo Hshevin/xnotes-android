@@ -1,5 +1,7 @@
 package com.xnotes.storage
 
+import com.xnotes.format.MapBundleFixture
+
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.util.DocumentKind
@@ -60,6 +62,22 @@ class RecoveryCopyTest {
     private fun entry(file:File,name:String)=ZipFile(file).use {zip->zip.getInputStream(zip.getEntry(name)).use {it.readBytes()}}
     private fun localized(result:RecoveryCopyResult.Failed) {
         assertTrue("Failure text must come from StorageText",StorageMsg.entries.any {StorageText.t(it)==result.message})
+    }
+
+    @Test fun recoveryPreviewDecodesTheMapAndPublishesTheHeldEntryVerbatim() = scenario { f ->
+        val source = File(f.root, "working.xcanvas")
+        MapBundleFixture.write(source, BundleIdentity(owner))
+        val snapshot = BundleSnapshot.take(source, f.root)
+        PreparedRecoveryPreview.readLegacy(snapshot, DocumentKind.CANVAS, f.storage.pdfResources,
+            f.noteCodec, f.canvasCodec, f.pdfs, f.assets, "Recovered canvas").use { preview ->
+            assertEquals(MapBundleFixture.state, preview.canvas!!.map.state)
+            val request = RecoveryCopyRequest.create(f.storage, preview, f.temp)
+            assertTrue(request.publish(f.native.uri, "Recovered canvas") is RecoveryCopyResult.Saved)
+            assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.native.current))
+            val id = BundleIdentity.read(f.native.current)!!.documentId
+            assertNotEquals(owner, id)
+            assertEquals("xcanvas", f.storage.registry.kindForId(id))
+        }
     }
 
     @Test fun heldRawNotePdfAndCanvasPublishVerifiedIndependentCopiesWithoutChangingThePreview() {

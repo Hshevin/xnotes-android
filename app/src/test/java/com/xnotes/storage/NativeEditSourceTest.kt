@@ -1,5 +1,8 @@
 package com.xnotes.storage
 
+import com.xnotes.format.MapBundleFixture
+import com.xnotes.map.MapModel
+
 import android.content.ContextWrapper
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
@@ -71,6 +74,25 @@ class NativeEditSourceTest {
     private fun ink()=com.xnotes.core.model.Stroke(Tool.PEN,ToolDefaults.configFor(Tool.PEN)).apply {
         addSample(Sample(10.0,20.0,.4,t=10.0));addSample(Sample(30.0,40.0,.8,t=20.0))
     }
+    @Test fun savingTheFirstAndDeletingTheLastMapKeepTheSameCanvasIdentity() = scenario { f ->
+        f.canvas()
+        val opened = f.prepare(DocumentKind.CANVAS)
+        val doc = opened.canvas!!
+        val source = opened.editSource()
+        for (model in listOf(MapModel(MapBundleFixture.state), MapModel())) {
+            doc.map = model
+            doc.dirty = true
+            val request = source.capture(doc)
+            val receipt = request.publish(f.storage, f.noteCodec, f.canvasCodec, f.scratch, "canvas")
+            assertTrue(source.accept(request, receipt))
+            val saved = f.current.inputStream().use { f.canvasCodec.read(it) }
+            assertEquals(doc.identity, saved.identity)
+            assertEquals(model.state, saved.map.state)
+            assertEquals("xcanvas", f.storage.registry.kindForId(doc.identity.documentId))
+            f.storage.openSourceActual(f.uri).use { assertEquals(DocumentKind.CANVAS, it.version.kind) }
+        }
+    }
+
     @Test fun realRequestStagesItsOwnBodyBeforeTheOwnerAcceptsAnyReceipt()=scenario {f->
         f.note();val p=f.prepare(DocumentKind.NOTE);val doc=requireNotNull(p.note);val source=p.editSource()
         doc.pages.single().items.add(ink());doc.dirty=true

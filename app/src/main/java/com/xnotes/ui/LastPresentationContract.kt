@@ -2,7 +2,6 @@ package com.xnotes.ui
 
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.mindmap.MapPresentationCamera
 import java.util.UUID
 
 /**
@@ -19,24 +18,14 @@ internal object LastPresentationContract {
     fun requireValid(value:LastPresentation) {
         when(value) {
             LastPresentation.Home->Unit
-            is LastPresentation.Mixed->validateMixed(value.value)
-            is LastPresentation.MapOnly->validateMapOnly(value)
             is LastPresentation.Native->validateNative(value)
         }
     }
 
     fun text(value:String) {require(value.length<=LastPresentationCodec.MAX_BYTES && Charsets.UTF_8.newEncoder().canEncode(value))}
-    fun validateMap(value:SplitSourceRef) {
-        require(UUID.fromString(value.documentId).toString()==value.documentId)
-        text(value.uri);require(value.uri.isNotBlank());value.title?.let(::text)
-    }
     fun validateHint(value:NativeRestoreHint,kind:DocumentKind) {
         require(value.kind==kind && UUID.fromString(value.documentId).toString()==value.documentId)
         value.path?.let {text(it);require(it.isNotBlank())}
-    }
-    fun validateCamera(value:MapPresentationCamera) {
-        require(value.viewport.zoom.isFinite() && value.viewport.zoom in .05f..4f && value.viewport.panX.isFinite() && value.viewport.panY.isFinite())
-        require(value.width>0 && value.height>0 && value.density.isFinite() && value.density>0)
     }
     private fun validateRatio(ratio:Float) {require(ratio.isFinite() && ratio in MIN_RATIO..MAX_RATIO)}
     private fun validateView(position:Editor.ReadingPosition) {
@@ -47,16 +36,6 @@ internal object LastPresentationContract {
         view.rotation?.let {require(it in listOf(0,90,180,270))}
         for(color in listOfNotNull(view.multiply,view.screen))
             require(color.r in 0..255 && color.g in 0..255 && color.b in 0..255 && color.a==255)
-    }
-    fun validateMixed(data:ColdMixedPresentation) {
-        validateMap(data.map);validateHint(data.nativeHint,DocumentKind.NOTE)
-        require(data.map.documentId!=data.nativeHint.documentId && !data.layout.nativeHome);validateRatio(data.layout.ratio)
-        require(data.nativeView==null || data.nativePosition==null)
-        data.mapCamera?.let(::validateCamera);data.nativePosition?.let(::validateView);data.nativeView?.position?.let(::validateView)
-    }
-    fun validateMapOnly(value:LastPresentation.MapOnly) {
-        validateMap(value.map);value.camera?.let(::validateCamera)
-        value.homeLayout?.let {require(it.nativeHome);validateRatio(it.ratio)}
     }
     fun validateNative(value:LastPresentation.Native) {
         require(value.slots.size in 1..2 && value.slots.map {it.pane}.distinct().size==value.slots.size)

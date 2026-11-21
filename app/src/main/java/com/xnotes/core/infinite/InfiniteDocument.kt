@@ -65,6 +65,19 @@ class InfiniteDocument(
             if(value) bodyRevision=Math.incrementExact(bodyRevision)
             field=value
         }
+    private val mapDirty = com.xnotes.map.MapModel.Listener { this.dirty = true }
+
+    /**
+     * The canvas's mind maps (docs/movinkpad/mind-map-v2-design-2026-11-21.md). Every change to it,
+     * content or collapse, marks the document dirty. Replaced wholesale only when a file is read.
+     */
+    var map: com.xnotes.map.MapModel = com.xnotes.map.MapModel().also { it.addListener(mapDirty) }
+        set(value) {
+            field.removeListener(mapDirty)
+            field = value
+            value.addListener(mapDirty)
+        }
+
     /** A writer snapshot keeps this token; a separate live model never inherits it implicitly. */
     internal var snapshotOwnerToken:Any=Any()
     /** Stable identity; the ZIP metadata entry persists it independently of editable content. */
@@ -145,6 +158,8 @@ class InfiniteDocument(
         val members=if(fixedItems) backing.fixedWriteCopies(allowText=false) else backing
         copy.savedLayerIds = members.indices.associateBy({index->members[index]},{index->layerIdForWrite(backing[index])})
         copy.backing.addAll(members)
+        // The map state is immutable, so the snapshot shares it; later edits swap the live model's state, never this one.
+        copy.map = com.xnotes.map.MapModel(map.state, map.prunedCollapsed())
         // Copy last: construction/identity setters are not edits of this frozen body.
         copy.bodyRevision=bodyRevision
         copy.snapshotOwnerToken=snapshotOwnerToken

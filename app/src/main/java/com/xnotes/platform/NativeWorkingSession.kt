@@ -97,7 +97,7 @@ internal class NativeWorkingSession(
     private fun validatePortableBody(file:File,kind:WorkingSessionCache.Kind,id:String,checkActive:()->Unit) {
         try {
             val info=BundleReferenceInfo.inspect(file,true) {checkActive();false}
-            require(info.format==extension(kind) && info.header.identity?.documentId==id)
+            require(info.kind?.extension==extension(kind) && info.header.identity?.documentId==id)
             // Until durable cache resource pins exist, every cache PDF must be portable.
             require(info.header.identity?.externalPdf!=true)
         } catch(error:Exception) {

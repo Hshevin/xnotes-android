@@ -1,5 +1,6 @@
 package com.xnotes.format
 
+import com.xnotes.core.util.DocumentKind
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.CodingErrorAction
@@ -8,8 +9,16 @@ import java.util.zip.ZipFile
 /** Caller owns an immutable file. Inspects references without decoding ink or PDF. */
 internal class BundleReferenceInfo private constructor(val header:BundleHeader,val orderedPageIds:List<String>,
                                                       val format:String?,val embeddedPdfHash:String?,val originalPdfHash:String?) {
+    val kind: DocumentKind? = kindOf(format)
     val pageIds:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(orderedPageIds))
     companion object {
+        /** The marker changes when the first map is added or the last map is removed. */
+        fun kindOf(format: String?): DocumentKind? = when {
+            CanvasCodec.isCanvasFormat(format) -> DocumentKind.CANVAS
+            format == "xnote" -> DocumentKind.NOTE
+            else -> null
+        }
+
         fun legacy(header:BundleHeader):BundleReferenceInfo {
             require(header.anchors==null)
             return BundleReferenceInfo(header,emptyList(),null,null,null)
@@ -64,13 +73,14 @@ internal class BundleReferenceInfo private constructor(val header:BundleHeader,v
                             }
                         }
                         p.endObject();require(p.peek()==JsonPull.Token.END_DOCUMENT)
-                        require(version && (format=="xnote" && "pages" in names || format=="xcanvas" && "items" in names)) {
+                        require(version && (format=="xnote" && "pages" in names || CanvasCodec.isCanvasFormat(format) && "items" in names)) {
                             "Unsupported native manifest structure"
                         }
                         requireNotNull(format) to hasPdf
                     }
                 }
                 val format=metadata.first;val hasPdf=metadata.second
+                if (CanvasCodec.isCanvasFormat(format)) MapJson.checkEntry(format, MapJson.ENTRY in payloads)
                 val pdf=payloads[BundlePdf.ENTRY]
                 require(!hasPdf || format=="xnote") {"Only a note can declare a PDF original"}
                 require(hasPdf || pdf==null && header.identity?.externalPdf!=true) {"Undeclared PDF original"}

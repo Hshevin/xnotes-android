@@ -66,7 +66,7 @@ internal class RecordingBodyEvidence private constructor(
                     p.endObject();require(p.peek()==JsonPull.Token.END_DOCUMENT)
                 }}
             }
-            val kind=when(format) {"xnote"->DocumentKind.NOTE;"xcanvas"->DocumentKind.CANVAS;else->error("Invalid recording body kind")}
+            val kind = BundleReferenceInfo.kindOf(format) ?: error("Invalid recording body kind")
             checkActive();require(BundleMigration.hash(file,cancelled)==before) {"Recording body changed during inspection"}
             return RecordingBodyEvidence(kind,identity.documentId,before,Collections.unmodifiableMap(audio))
         }

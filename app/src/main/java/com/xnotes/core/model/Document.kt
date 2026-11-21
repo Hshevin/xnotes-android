@@ -54,7 +54,7 @@ class Document(
     var newPageSize: PageSizeChoice? = null,
 ) {
     /** Owner-side body changes, separate from render versions and saved/unsaved presentation. */
-    internal var bodyRevision:Long=0L
+    @Volatile internal var bodyRevision:Long=0L
     var dirty:Boolean=dirty
         set(value) {
             if(value) bodyRevision=Math.incrementExact(bodyRevision)

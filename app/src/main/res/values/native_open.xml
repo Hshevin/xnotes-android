@@ -2,4 +2,6 @@
 <resources>
     <string name="native_open_changed">The document changed while opening. Your current workspace was kept. Please try again.</string>
     <string name="native_save_picker_busy">Finish or cancel the current save destination selection first.</string>
+    <string name="native_split_open_failed">Could not open this split view. Your current workspace is still available.</string>
+    <string name="split_arrangement_invalid">This split arrangement is missing, damaged, or unsupported. Your current workspace is still available.</string>
 </resources>

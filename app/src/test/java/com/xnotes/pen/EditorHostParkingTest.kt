@@ -35,7 +35,7 @@ internal fun initializeParkingEglHandles() {
     if(EGL14.EGL_NO_CONTEXT==null) EGL14.EGL_NO_CONTEXT=empty(EGLContext::class.java)
     if(EGL14.EGL_NO_SURFACE==null) EGL14.EGL_NO_SURFACE=empty(EGLSurface::class.java)
 }
-internal fun runParkingScenario(block:suspend (EditorPageCopyFixture)->Unit) {
+internal fun runParkingScenario(advanceClock:Boolean=false,block:suspend (EditorPageCopyFixture)->Unit) {
     initializeParkingEglHandles()
     val base=RuntimeEnvironment.getApplication();val root=File(base.cacheDir,"native-parking-${UUID.randomUUID()}").apply {mkdirs()}
     val f=EditorPageCopyFixture(base,root)
@@ -68,7 +68,9 @@ internal fun runParkingScenario(block:suspend (EditorPageCopyFixture)->Unit) {
         val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30L)
         while(!job.isCompleted && System.nanoTime()<deadline) {
             androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
-            shadowOf(Looper.getMainLooper()).idle();Thread.yield()
+            val looper=shadowOf(Looper.getMainLooper())
+            if(advanceClock) looper.idleFor(10,TimeUnit.MILLISECONDS) else looper.idle()
+            Thread.yield()
         }
         assertTrue("Actual native host parking did not settle",job.isCompleted);failure?.let {throw it}
     } finally {f.release.countDown();scope.cancel();if(job.isCompleted) root.deleteRecursively()}

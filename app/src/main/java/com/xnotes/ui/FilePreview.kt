@@ -105,7 +105,7 @@ internal fun FilePreview(b: ExplorerBody, e: BrowseEntry, where: String?, action
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s4)) {
                         ExplorerIcon(XnotesIcons.share, stringResource(R.string.share), palette.accent.toComposeColor(), onClick = actions.share)
-                        ExplorerIcon(XnotesIcons.pdfFile, stringResource(R.string.export_pdf), palette.accent.toComposeColor(), onClick = actions.exportPdf)
+                        if (e.storedDocument) ExplorerIcon(XnotesIcons.pdfFile, stringResource(R.string.export_pdf), palette.accent.toComposeColor(), onClick = actions.exportPdf)
                         var colors by remember { mutableStateOf(false) }
                         Box {
                             ExplorerIcon(XnotesIcons.palette, stringResource(R.string.colour_code), palette.accent.toComposeColor()) { colors = true }

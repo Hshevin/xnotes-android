@@ -32,13 +32,11 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         db.execSQL("CREATE TABLE original_pdf_documents(id TEXT PRIMARY KEY NOT NULL,resource_sha TEXT NOT NULL UNIQUE,title TEXT NOT NULL,page_count INTEGER NOT NULL,generation INTEGER NOT NULL,deleted INTEGER NOT NULL,row_schema INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE original_pdf_pages(document_id TEXT NOT NULL REFERENCES original_pdf_documents(id),ordinal INTEGER NOT NULL,page_id TEXT NOT NULL UNIQUE,PRIMARY KEY(document_id,ordinal))")
     }
-    internal fun <T> originalPdfTransaction(block:(SQLiteDatabase)->T):T=transaction(block)
     /** No location/document FK: losing a location or removing an index row must not erase evidence. */
     private fun createPageContracts(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
     }
     private class MutationFrame {
-        val nativeIdentities=mutableSetOf<String>()
         val structuralIdentities=mutableSetOf<String>()
         val notifications=mutableListOf<AutoCloseable>()
     }
@@ -62,16 +60,8 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
             }}
         }
     }
-    /** Only a newly introduced cross-domain identity retires network reads. Existing map reads
-     * register the same actor routinely and must not invalidate their own valid network handoff. */
-    private fun observeNativeIdentityInsertion(db:SQLiteDatabase,id:String) {
-        val first=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {!it.moveToFirst()}
-        if(!first) return
-        val reserved=db.rawQuery("SELECT 1 FROM original_pdf_documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
-        if(!reserved) return
-        val frame=checkNotNull(mutationFrame.get())
-        if(frame.nativeIdentities.add(id)) frame.notifications+=OriginalPdfNetworkEpoch.forDatabase(databaseName).begin()
-    }
+    internal fun reservedOriginalId(id:String):Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM original_pdf_documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
     /** Pure-memory continuation check; capture before reading the actual identity structure. */
     internal fun identityObservation(id:String):DocumentRegistryIdentityEpoch.Ticket {
         require(UUID.fromString(id).toString()==id)
@@ -98,7 +88,6 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         // Display-name refreshes and the same already-known URI do not retire valid readers.
         if(!known || !pages || position==null || position.id!=id || position.uri!=uri || position.available!=1)
             beginIdentityChanges(setOfNotNull(id,position?.id))
-        observeNativeIdentityInsertion(db,id)
         db.execSQL("DELETE FROM locations WHERE location_key=? AND uri<>?",arrayOf(key,uri))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
@@ -135,15 +124,6 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
         if(uniqueSource) verifyUniqueSource(db,id,uri)
         register(db,id,kind,name,uri,header.anchors!=null)
     }
-    /** JSON map observations cannot reclassify a known native identity or erase its page contract. */
-    internal fun registerMapObserved(id:String,name:String,uri:String,uniqueSource:Boolean=false) = transaction {db->
-        val at=expectationAt(uri);val byId=expectationForId(id)
-        val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
-        if(at!=null && at.documentId!=id || at?.requiresPages==true || byId.requiresPages || known!=null && known!="xmap")
-            throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        if(uniqueSource) verifyUniqueSource(db,id,uri)
-        register(db,id,"xmap",name,uri,false)
-    }
     /** Check and registration share one transaction; rejecting a copy must not leave a new row. */
     private fun verifyUniqueSource(db:SQLiteDatabase,id:String,uri:String) {
         val key=locationKey(uri)
@@ -164,46 +144,6 @@ class DocumentRegistry(context: Context) : SQLiteOpenHelper(context, File(contex
     internal fun uriAtLocation(uri:String):String? = readableDatabase.rawQuery("SELECT uri FROM locations WHERE location_key=?",arrayOf(locationKey(uri))).use {if(it.moveToFirst()) it.getString(0) else null}
     internal fun nameForId(id:String):String? = readableDatabase.rawQuery("SELECT name FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
     internal fun kindForId(id:String):String? = readableDatabase.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
-    internal data class ObservedLocation(val uri:String,val key:String,val available:Boolean)
-    internal data class ObservedFile(val kind:String?,val name:String?,val locations:List<ObservedLocation>)
-    internal data class FileObservations(val files:Map<String,ObservedFile>,val limited:Boolean)
-    /** Last-registered metadata only. A limit never turns a truncated set into one chosen location. */
-    internal fun fileObservations(ids:Set<String>,checkActive:()->Unit={}):FileObservations {
-        require(ids.size<=10000)
-        data class Read(val kind:String?,val name:String?,val locations:MutableList<ObservedLocation> = mutableListOf())
-        val found=linkedMapOf<String,Read>();var positions=0;var limited=false
-        loop@for(chunk in ids.toList().chunked(200)) {
-            checkActive()
-            val placeholders=chunk.joinToString(",") {"?"}
-            val args=(chunk+((10000-positions)+chunk.size+1).toString()).toTypedArray()
-            readableDatabase.rawQuery("SELECT d.id,d.kind,d.name,l.uri,l.location_key,l.available FROM documents d LEFT JOIN locations l ON l.document_id=d.id "+
-                "WHERE d.id IN ($placeholders) ORDER BY d.id,l.location_key LIMIT ?",args).use {cursor->
-                while(cursor.moveToNext()) {
-                    checkActive()
-                    val id=cursor.getString(0)
-                    val file=found.getOrPut(id) {Read(cursor.getString(1),cursor.getString(2))}
-                    if(!cursor.isNull(3)) {
-                        if(++positions>10000) {limited=true;break}
-                        file.locations+=ObservedLocation(cursor.getString(3),cursor.getString(4),cursor.getInt(5)!=0)
-                    }
-                }
-            }
-            if(limited) break@loop
-        }
-        checkActive()
-        return FileObservations(found.mapValues {(_,file)->ObservedFile(file.kind,file.name,file.locations.toList())},limited)
-    }
-    /** Bounded last-registered inventory only; no file is opened or granted a new identity. */
-    internal fun knownAvailableFiles(limit:Int=10001,checkActive:()->Unit={}):FileObservations {
-        require(limit in 1..10001)
-        val ids=linkedSetOf<String>()
-        readableDatabase.rawQuery("SELECT d.id FROM documents d WHERE d.kind IN ('xnote','xcanvas','xmap') "+
-            "AND EXISTS(SELECT 1 FROM locations l WHERE l.document_id=d.id AND l.available=1) ORDER BY d.id LIMIT ?",
-            arrayOf(limit.toString())).use {cursor->while(cursor.moveToNext()) {checkActive();ids+=cursor.getString(0)}}
-        val overflow=ids.size>10000
-        val observed=fileObservations(ids.take(10000).toSet(),checkActive)
-        return FileObservations(observed.files,observed.limited || overflow)
-    }
     fun idAt(uri: String): String? = readableDatabase.rawQuery("SELECT document_id FROM locations WHERE location_key=?", arrayOf(locationKey(uri))).use { if (it.moveToFirst()) it.getString(0) else null }
     /** Multiple live copies are a conflict, never a last-open-wins path. */
     fun locations(id: String): List<String> = readableDatabase.rawQuery("SELECT uri FROM locations WHERE document_id=? AND available=1 ORDER BY uri", arrayOf(id)).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }

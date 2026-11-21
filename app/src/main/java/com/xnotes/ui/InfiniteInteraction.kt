@@ -47,7 +47,25 @@ import com.xnotes.core.tools.ToolConfig
 import kotlin.math.exp
 
 /** What the current gesture is doing. */
-enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, TEXT_BOX, SCREENSHOT }
+enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, TEXT_BOX, SCREENSHOT, MAP }
+
+/**
+ * The canvas's mind maps, as touch reaches them. Asked first on every press; a press it takes is
+ * its until the pointer lifts, and everything else on the canvas leaves it alone. Content points.
+ */
+interface CanvasMapInput {
+    /** Whether the map takes this press (see [com.xnotes.map.ui.MapController.press]). */
+    fun press(at: Pt, finger: Boolean, eraser: Boolean, tool: Tool, connector: Boolean, fingerDraws: Boolean): Boolean
+    fun move(at: Pt)
+    fun release(at: Pt)
+    fun cancel()
+
+    /** A press the map did not take starts something else at [at] with [tool]: put the map's chrome away unless it writes into a node. */
+    fun otherPress(at: Pt, tool: Tool)
+
+    /** A tap on empty canvas that nothing else used; true when the map used it. */
+    fun tapBlank(at: Pt, tool: Tool): Boolean
+}
 
 /**
  * Gestures on the infinite canvas.
@@ -332,6 +350,9 @@ class InfiniteInteraction(
 
     var canEditLayer: () -> Boolean = { true }
 
+    /** The canvas's mind maps, or null on a surface without them. */
+    var mapInput: CanvasMapInput? = null
+
     var mode = CanvasPointerMode.IDLE
         private set
 
@@ -592,6 +613,20 @@ class InfiniteInteraction(
         drawingIsStylus = e.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS
         val vx = e.getX(0).toDouble()
         val vy = e.getY(0).toDouble()
+        mapInput?.let { map ->
+            val toolType0 = e.getToolType(0)
+            val erasing = toolType0 == MotionEvent.TOOL_TYPE_ERASER ||
+                (stylusButtons.heldFor(e) && penButtonTool == Tool.ERASER)
+            val content = viewport.viewportToContent(Pt(vx, vy))
+            if (map.press(content, toolType0 == MotionEvent.TOOL_TYPE_FINGER, erasing, tool, connecting, fingerDraws)) {
+                cancelLongPress()
+                clearSelection()
+                if (polygonDraft != null) finishPolygonDraft()
+                mode = CanvasPointerMode.MAP
+                setInteractive(true, false)
+                return
+            }
+        }
 
         // Which tool this pointer actually drives: the pen's eraser end and its held side button
         // both override the armed tool, and a finger pans unless finger-draw is on. This mirrors
@@ -643,6 +678,7 @@ class InfiniteInteraction(
         // A draft only lives through Free polygon presses; anything else that draws or edits ends it.
         val placing = effective == Tool.SHAPE && shapeConfig().placesCorners
         if (polygonDraft != null && !placing && effective != Tool.PAN) finishPolygonDraft()
+        if (effective != Tool.PAN) mapInput?.otherPress(at, effective)
         if (effective != Tool.PAN && effective != Tool.SCREENSHOT && !canEditLayer()) return
         when {
             effective.isStroke -> beginDraw(vx, vy, effective, e)
@@ -750,6 +786,10 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.ERASE && drawingIsStylus) return
         if (mode == CanvasPointerMode.TAPE && drawingIsStylus) return
         if (e.pointerCount >= 2) {
+            if (mode == CanvasPointerMode.MAP) {
+                if (drawingIsStylus) return
+                mapInput?.cancel()
+            }
             if (mode == CanvasPointerMode.TEXT_BOX || mode == CanvasPointerMode.SCREENSHOT) {
                 if (drawingIsStylus) return
                 clearCapture()
@@ -790,6 +830,10 @@ class InfiniteInteraction(
                 captureRect = Rect.fromPoints(captureStart, viewport.viewportToContent(Pt(e.x.toDouble(), e.y.toDouble())))
                 requestRender()
             }
+            CanvasPointerMode.MAP -> {
+                val idx = e.findPointerIndex(drawingPointerId).coerceAtLeast(0)
+                mapInput?.move(viewport.viewportToContent(Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())))
+            }
             CanvasPointerMode.IDLE -> Unit
         }
     }
@@ -815,9 +859,11 @@ class InfiniteInteraction(
         // A tape lies over whatever else the tap could reach, so it takes the tap first.
         val tapeTapped = panTap && peelTapeAt(viewport.viewportToContent(Pt(e.getX(0).toDouble(), e.getY(0).toDouble())))
         val audioTapped = !tapeTapped && panTap && onAudioTap(viewport.viewportToContent(Pt(e.getX(0).toDouble(), e.getY(0).toDouble())))
+        val mapTapped = !tapeTapped && !audioTapped && panTap &&
+            mapInput?.tapBlank(viewport.viewportToContent(Pt(e.getX(0).toDouble(), e.getY(0).toDouble())), tool) == true
         // A finger tap off the selection puts it away; a tap is the only way to say so with a
         // finger, since a drag there is a pan.
-        if (!audioTapped && !tapeTapped && mode == CanvasPointerMode.PAN && panMayDismiss &&
+        if (!audioTapped && !tapeTapped && !mapTapped && mode == CanvasPointerMode.PAN && panMayDismiss &&
             panWasTap(e.getX(0).toDouble(), e.getY(0).toDouble())
         ) {
             clearSelection()
@@ -834,6 +880,11 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.SHAPE) endShape()
         if (mode == CanvasPointerMode.TAPE) endTape()
         if (mode == CanvasPointerMode.CONNECT) endConnector()
+        if (mode == CanvasPointerMode.MAP) {
+            tapCandidate = false // the map read its own tap; it is no half of a canvas double tap
+            val idx = e.findPointerIndex(drawingPointerId).coerceAtLeast(0)
+            mapInput?.release(viewport.viewportToContent(Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())))
+        }
         when (mode) {
             CanvasPointerMode.BAND -> endBand()
             CanvasPointerMode.LASSO -> endLasso()
@@ -870,6 +921,7 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.SHAPE) abandonShape()
         if (mode == CanvasPointerMode.TAPE) abandonTape()
         if (mode == CanvasPointerMode.CONNECT) abandonConnector()
+        if (mode == CanvasPointerMode.MAP) mapInput?.cancel()
         // A cancelled drag never happened: the model was never touched, so putting the box back and
         // dropping the lift is the whole undo.
         if (mode == CanvasPointerMode.MOVE) {

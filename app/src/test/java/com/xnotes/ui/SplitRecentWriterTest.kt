@@ -45,12 +45,16 @@ class SplitRecentWriterTest {
         val root=Files.createTempDirectory("split-recent-").toFile()
         try {withTimeout(15000) {block(root)}} finally {root.deleteRecursively()}
     }
-    private fun request(y:Double)=SplitOpenRequest.Mixed(mixedSplitSample().let {it.copy(nativePosition=it.nativePosition.copy(y=y))})
-    private fun seed(root:File,request:SplitOpenRequest.Mixed)=File(root,"saved-split.json").apply {
-        writeBytes(SplitOpenCodec.encodeMixed(request.request))
+    private fun request(offset:Double):SplitOpenRequest.Native {
+        val view=Editor.ReadingPosition(1.0,0.0,offset,com.xnotes.canvas.ViewOverrides())
+        return SplitOpenRequest.Native(NativeSplitOpenRequest(NativeSplitSource("content://notes/a"),NativeSplitSource("content://notes/b"),
+            NativeSplitOpenLayout(firstPosition=view,secondPosition=view)))
+    }
+    private fun seed(root:File,request:SplitOpenRequest.Native)=File(root,"saved-split.json").apply {
+        writeBytes(SplitOpenCodec.encodeNative(request.request))
     }
     private suspend fun loaded(writer:SplitRecentWriter)=withTimeout(2500) {writer.state.first {it.loaded}}
-    private suspend fun write(writer:SplitRecentWriter,ticket:SplitRecentWriter.Ticket,request:SplitOpenRequest)=
+    private suspend fun write(writer:SplitRecentWriter,ticket:SplitRecentWriter.Ticket,request:SplitOpenRequest.Native)=
         withTimeout(2500) {writer.submit(ticket,request).await()}
     private fun read(root:File)=SplitArrangementStore(root).readRecent()
 
@@ -138,7 +142,7 @@ class SplitRecentWriterTest {
     @Test fun failedRecentReplaceKeepsTheNamedFileAndOldRecentIntact()=scenario {root->
         val previous=request(0.0);val recent=seed(root,previous);val bytes=recent.readBytes()
         val value=request(1.0)
-        val named=requireNotNull(SplitArrangementStore(root).saveNamed(value.request,"saved despite recent failure"))
+        val named=File(File(root,"splits").apply {mkdirs()},"saved.xsplit").apply {writeBytes(SplitOpenCodec.encodeNative(value.request))}
         val ops=Ops().apply {onReplace={_,_->throw IOException("controlled recent failure")}}
         val writer=SplitRecentWriter.forFilesDir(root,ops)
         assertEquals(SplitRecentWrite.Failed,write(writer,writer.reserve(explicit=true),value))
@@ -147,7 +151,7 @@ class SplitRecentWriterTest {
         assertTrue(root.listFiles()!!.none {it.name.endsWith(".pending")})
     }
 
-    @Test fun nativeAndMixedRequestsUseTheSameCheckedRecentTarget()=scenario {root->
+    @Test fun nativeRequestsUseTheCheckedRecentTarget()=scenario {root->
         val writer=SplitRecentWriter.forFilesDir(root)
         val first=NativeSplitSource("content://notes/one",expectedId=UUID.randomUUID().toString())
         val second=NativeSplitSource("content://notes/two",expectedId=UUID.randomUUID().toString())
@@ -156,8 +160,5 @@ class SplitRecentWriterTest {
         val restored=((read(root) as SplitArrangementRead.Ready).request as SplitOpenRequest.Native).request
         assertEquals(first,restored.first);assertEquals(second,restored.second)
         assertEquals(.3f,restored.layout.ratio,0f);assertEquals(Pane.SECONDARY,restored.layout.focused)
-        val mixed=request(4.0)
-        assertEquals(SplitRecentWrite.Written,write(writer,writer.reserve(),mixed))
-        assertEquals(SplitArrangementRead.Ready(mixed),read(root))
     }
 }

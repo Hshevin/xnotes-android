@@ -59,7 +59,7 @@ internal class PreparedProtectedCanvas private constructor(
             try {
                 verify()
                 val info=BundleReferenceInfo.inspectStrict(snapshot.file) {checkActive();false}
-                require(info.format=="xcanvas" && info.header.anchors==null && info.originalPdfHash==null &&
+                require(CanvasCodec.isCanvasFormat(info.format) && info.header.anchors==null && info.originalPdfHash==null &&
                     info.header.identity?.externalPdf!=true && info.header.identity?.pdfResource==null)
                 val rawId=info.header.identity?.documentId
                 if(expectedId!=null && expectedId!=rawId) throw ProtectedCanvasIdentityMismatch()

@@ -50,7 +50,7 @@ class NotebookStorage internal constructor(private val context:Context,
             return originalInspection to candidateInspection
         }
         internal fun verifyWorkingContract(info:com.xnotes.format.BundleReferenceInfo) {
-            if(info.format!=original.kind.extension || info.header.identity?.documentId!=original.documentId ||
+            if(info.kind!=original.kind || info.header.identity?.documentId!=original.documentId ||
                 (info.header.anchors!=null)!=anchored) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
             if(info.originalPdfHash!=originalPdfHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
         }
@@ -157,12 +157,25 @@ class NotebookStorage internal constructor(private val context:Context,
             }
         }
     }
-    internal fun hasPageActivationRecovery(uri:String,checkActive:()->Unit={}):Boolean = synchronized(lock) {
-        checkActive();val pending=journal(uri,checkActive)
-        if(!pending.pending) false else try {
-            pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES,checkActive);true
-        } catch(_:MigrationPublication.RecoveryRequired) {false}
+    internal class PageActivationRecovery(val uri: String, val recordDigest: String)
+
+    /** Bind the recovery button to the retained candidate shown for this location. */
+    internal fun pageActivationRecovery(uri: String, checkActive: () -> Unit = {}): PageActivationRecovery? = synchronized(lock) {
+        checkActive()
+        val pending = journal(uri, checkActive)
+        if (!pending.pending) null else try {
+            PageActivationRecovery(uri, pending.selectedRecordDigest(MigrationPublication.Purpose.ACTIVATE_PAGES, checkActive))
+        } catch (_: MigrationPublication.RecoveryRequired) { null }
     }
+
+    internal fun hasPageActivationRecovery(uri: String, checkActive: () -> Unit = {}) =
+        pageActivationRecovery(uri, checkActive) != null
+
+    internal fun completePageActivation(recovery: PageActivationRecovery, name: String, checkActive: () -> Unit): NativeSourceSnapshot.ReferenceCatalog =
+        synchronized(lock) {
+            checkActive()
+            publishPageActivation(recovery.uri, name, journal(recovery.uri, checkActive), recovery.recordDigest, null, null, checkActive)
+        }
 
     /** Only an explicit user-selected recovery may finish a retained page upgrade. Never called by ensure/save. */
     internal fun completePageActivation(uri:String,name:String,checkActive:()->Unit={}):NativeSourceSnapshot.ReferenceCatalog = synchronized(lock) {
@@ -230,7 +243,10 @@ class NotebookStorage internal constructor(private val context:Context,
             }
         }
         releaseCompletedPin(uri)
-        return actualPageCatalog(uri,requireNotNull(verified).version,checkActive)
+        // A failed final read cannot turn a verified publication into an untouched-file failure.
+        return try { actualPageCatalog(uri, requireNotNull(verified).version, checkActive) }
+        catch (e: java.util.concurrent.CancellationException) { throw e }
+        catch (e: Exception) { throw ReferenceContractViolation(StorageMsg.REFERENCE_SOURCE_CHANGED, e) }
     }
 
     /** IO-only, source bytes and their version are from the same owned container. */
@@ -261,11 +277,8 @@ class NotebookStorage internal constructor(private val context:Context,
                 header.identity?.let {registry.expectationForId(it.documentId)},header)
             val ids=header.identity?.takeIf {it.externalPdf}?.pdfResource?.let {setOf(it)} ?: emptySet()
             if(leasedIds!=ids) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
-            val actualKind=kind ?: when(inspect(snapshot.file,checkActive).format) {
-                "xnote"->com.xnotes.core.util.DocumentKind.NOTE
-                "xcanvas"->com.xnotes.core.util.DocumentKind.CANVAS
-                else->throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
-            }
+            val actualKind=kind ?: inspect(snapshot.file,checkActive).kind
+                ?: throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
             val inspected=NativeSourceVersion.inspect(snapshot.file,registry.locationKey(uri),actualKind,checkActive)
             verifyObserved(uri,inspected.info)
             val source=NativeSourceSnapshot.open(snapshot,inspected,pdfResources,requireNotNull(lease),ids,checkActive)
@@ -360,7 +373,7 @@ class NotebookStorage internal constructor(private val context:Context,
     }
     private fun verifyKind(info:com.xnotes.format.BundleReferenceInfo,expected:MigrationPublication.Purpose?) {
         if(expected!=null && !expected.ordinarySave) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
-        if(expected!=null && purpose(info.format.orEmpty())!=expected) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        if(expected!=null && purpose(info.kind?.extension.orEmpty())!=expected) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
     }
     private fun registerVerified(uri:String,info:com.xnotes.format.BundleReferenceInfo,name:String?=null,
                                  strict:Boolean=false,checkActive:()->Unit={}) {
@@ -371,8 +384,8 @@ class NotebookStorage internal constructor(private val context:Context,
         pdfResources.protect("note:${identity.documentId}",dependencies(info))
         val display=name ?: registry.nameForId(identity.documentId) ?: Uri.parse(uri).lastPathSegment.orEmpty()
         checkActive()
-        if(strict) registry.registerObserved(info.header,requireNotNull(info.format),display,uri)
-        else registry.register(identity.documentId,requireNotNull(info.format),display,uri,pageReferences=info.header.anchors!=null)
+        if(strict) registry.registerObserved(info.header,requireNotNull(info.kind).extension,display,uri)
+        else registry.register(identity.documentId,requireNotNull(info.kind).extension,display,uri,pageReferences=info.header.anchors!=null)
     }
     private fun releaseCompletedPin(uri:String) {
         // Only after successful validation + note pin/registration + journal clear, while owner holds lock.
@@ -474,7 +487,7 @@ class NotebookStorage internal constructor(private val context:Context,
                     !(original.header.identity==null && state.candidateHash==current.sourceHash && state.purpose==null))
                     throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
                 val readable=try {inspect(current.file)} catch(error:ReferenceContractViolation) {null}
-                if(readable!=null && (readable.format!=original.format ||
+                if(readable!=null && (readable.kind!=original.kind ||
                     readable.originalPdfHash!=null && readable.originalPdfHash!=original.originalPdfHash))
                     throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
             }
@@ -818,7 +831,7 @@ class NotebookStorage internal constructor(private val context:Context,
             },afterVerified={
                 checkActive();val info=requireNotNull(verified);val id=requireNotNull(info.header.identity).documentId
                 pdfResources.protect("note:$id",dependencies(info))
-                registry.registerCreated(id,requireNotNull(info.format),name,uri,info.header.anchors!=null)
+                registry.registerCreated(id,requireNotNull(info.kind).extension,name,uri,info.header.anchors!=null)
             },expectedRecordDigest=expectedRecordDigest,checkActive=checkActive)
             committed=true
         } catch(error:Throwable) {failure=error;throw error}

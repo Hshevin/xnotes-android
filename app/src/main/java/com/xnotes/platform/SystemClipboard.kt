@@ -60,6 +60,19 @@ object SystemClipboard {
         true
     }.getOrDefault(false)
 
+    /** Make [text] the primary clip; false when that failed. */
+    fun putText(context: Context, label: String, text: String): Boolean = runCatching {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+        true
+    }.getOrDefault(false)
+
+    /** The primary clip's first item as text, or null when it holds none. */
+    fun text(context: Context): String? = runCatching {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+    }.getOrNull()
+
     /** The clipboard's image as bytes, reading the uri or falling back to copied SVG source. */
     fun imageBytes(context: Context): ByteArray? {
         imageUri(context)?.let { uri ->

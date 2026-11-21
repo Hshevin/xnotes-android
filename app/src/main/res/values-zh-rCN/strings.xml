@@ -1180,4 +1180,7 @@
     <plurals name="import_pdfs_title">
         <item quantity="other">导入 %d 个 PDF</item>
     </plurals>
+    <string name="legacy_map_unsupported">不再支持旧思维导图和导图分屏。</string>
+    <string name="map_title">思维导图</string>
+    <string name="map_no_documents">暂无思维导图</string>
 </resources>

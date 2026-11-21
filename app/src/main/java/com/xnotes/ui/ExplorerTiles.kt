@@ -324,8 +324,8 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         expanded, onDismiss,
         onRename = { m.rename(e) }, onCopy = { m.copy(e) }, onCut = { m.cut(e) }, onDelete = { m.delete(e) },
         onShare = if (e.isDir) null else ({ m.share(e) }),
-        onSaveCopy = { m.saveCopy(e) },
-        onExportPdf = { m.exportPdf(e) },
+        onSaveCopy = if (e.storedDocument) ({ m.saveCopy(e) }) else null,
+        onExportPdf = if (e.storedDocument) ({ m.exportPdf(e) }) else null,
         onColor = { c -> m.color(e, c) },
         pinned = e.isDir && b.host.isPinned(e),
         onTogglePin = if (e.isDir) ({ m.togglePin(e) }) else null,
@@ -333,7 +333,7 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onToggleNotePin = if (e.isDir) null else ({ m.toggleNotePin(e) }),
         onNameColor = e.color?.let { c -> { m.nameColor(c) } },
         onMoveTo = { m.moveTo(e) },
-        onPreview = if (e.isDir) null else ({ m.preview(e) }),
+        onPreview = if (e.storedDocument) ({ m.preview(e) }) else null,
         deleteLabel = b.deleteLabel,
     )
 }

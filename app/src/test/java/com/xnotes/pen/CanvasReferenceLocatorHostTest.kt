@@ -117,25 +117,4 @@ class CanvasReferenceLocatorHostTest {
         canvas.showReferenceRegion(old,Rect(900.0,800.0,200.0,200.0));canvas.replaceDocument(InfiniteDocument());frames(canvas)
         assertTrue(outlines(canvas).isEmpty());assertFalse(old.dirty);assertFalse(canvas.document.dirty);assertFalse(canvas.history.canUndo)
     }
-    @Test fun selectionAndScreenshotSourcesFreezeWorldGeometryWithoutCompletingAnActivePreview()=scenario {canvas,holder->
-        attach(canvas,holder)
-        val item=ShapeItem(ShapeKind.RECTANGLE,Pt(-200.0,100.0),Pt(0.0,180.0),Rgba(0,0,0),rotation=Math.PI/4)
-        canvas.document.add(item);canvas.selectAll()
-        val expected=Rect.bounding(canvas.selection.box!!.corners())
-        val revision=canvas.document.bodyRevision
-        assertEquals(expected,canvas.sourceSelectionRegion())
-        canvas.viewport.zoom=2.3;canvas.viewport.scrollX=-1000.0;canvas.viewport.scrollY=500.0
-        assertEquals(expected,canvas.sourceSelectionRegion());assertNotEquals(canvas.selectionMenuRect,expected)
-        canvas.restyleSelection(Rgba(70,70,70),null,preview=true)
-        assertNull(canvas.sourceSelectionRegion());assertFalse(canvas.history.canUndo)
-        canvas.finishSelectionPreviews()
-        canvas.armTool(Tool.SCREENSHOT)
-        val start=canvas.viewport.centerContent;val finish=Pt(start.x+100.0,start.y+60.0)
-        pen(canvas,MotionEvent.ACTION_DOWN,start);pen(canvas,MotionEvent.ACTION_MOVE,finish)
-        assertNull(canvas.sourceCaptureRegion())
-        pen(canvas,MotionEvent.ACTION_UP,finish)
-        assertEquals(Rect.fromPoints(start,finish),canvas.sourceCaptureRegion())
-        val saved=canvas.sourceCaptureRegion();canvas.viewport.scrollX+=700;assertEquals(saved,canvas.sourceCaptureRegion())
-        assertTrue(canvas.document.bodyRevision>=revision)
-    }
 }

@@ -28,7 +28,16 @@ import java.util.IdentityHashMap
  *
  * Pure Kotlin, so the whole of the eraser's behaviour is unit-testable without a canvas.
  */
-class EraseSession(private val doc: InfiniteDocument) {
+class EraseSession(private val doc: InfiniteDocument, private val also: Also? = null) {
+
+    /**
+     * Something else on the canvas the same drag erases, outside the item list: a mind map's node
+     * ink. It applies its cuts as the drag goes and hands back one command for them at pen up.
+     */
+    interface Also {
+        fun erase(cx: Double, cy: Double, radius: Double, area: Boolean): Rect?
+        fun command(): Command?
+    }
 
     private class Entry(val at: Int, val original: CanvasItem, val fragments: MutableList<CanvasItem>)
 
@@ -56,7 +65,7 @@ class EraseSession(private val doc: InfiniteDocument) {
      */
     fun erase(cx: Double, cy: Double, radius: Double, area: Boolean): Rect? {
         val box = Rect(cx - radius, cy - radius, radius * 2, radius * 2)
-        var dirty: Rect? = null
+        var dirty: Rect? = also?.erase(cx, cy, radius, area)
         for (item in doc.itemsIn(box)) {
             if (!doc.layers.editable(item) || !EraseRule.erasable(item)) continue
             if (EraseRule.takesFill(item, cx, cy, radius)) {
@@ -102,6 +111,7 @@ class EraseSession(private val doc: InfiniteDocument) {
         val parts = ArrayList<Command>(2)
         if (unfilled.isNotEmpty()) parts += OnCanvas(doc, RefillShapes(unfilled.toList()), unfilled.map { it.shape })
         if (entries.isNotEmpty()) parts += SplitCanvasItems(doc, entries.map { SplitCanvasItems.Split(it.at, it.original, it.fragments.toList()) })
+        also?.command()?.let { parts += it }
         return when (parts.size) {
             0 -> null
             1 -> parts[0]

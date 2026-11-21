@@ -11,7 +11,7 @@ internal class JsonPullException(message: String) : Exception(message)
  * straight off the zip stream: the old org.json DOM held a boxed wrapper for every
  * number, which cost a 58 MB manifest ~150 MB of heap and tens of seconds to open.
  */
-internal class JsonPull(private val reader: Reader,private val strict:Boolean=false,private val tokenLimit:Int=1_048_576) {
+internal class JsonPull(private val reader: Reader,val strict:Boolean=false,private val tokenLimit:Int=1_048_576) {
 
     enum class Token { BEGIN_OBJECT, END_OBJECT, BEGIN_ARRAY, END_ARRAY, NAME, STRING, NUMBER, BOOLEAN, NULL, END_DOCUMENT }
 
@@ -177,10 +177,12 @@ internal class JsonPull(private val reader: Reader,private val strict:Boolean=fa
         var n = 0
         while (hasNext()) {
             if (n >= out.size) {
+                if (strict) throw JsonPullException("Too many stroke sample channels")
                 skipValue()
                 continue
             }
             // One value consumed per slot whatever its type, so a null cannot shift the rest along.
+            if (strict && peek() != Token.NUMBER) throw JsonPullException("Expected numeric stroke sample")
             when (peek()) {
                 Token.NUMBER -> out[n] = nextDouble()
                 Token.STRING -> out[n] = nextString().toDoubleOrNull() ?: Double.NaN

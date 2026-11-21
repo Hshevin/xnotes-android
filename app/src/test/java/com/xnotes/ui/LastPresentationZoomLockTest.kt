@@ -21,23 +21,6 @@ class LastPresentationZoomLockTest {
         }
     }
 
-    @Test fun mixedViewsRetainTheSameLockContract() {
-        val native=JSONObject(wire(3,"true"))
-        val first=native.getJSONArray("slots").getJSONObject(0)
-        val second=native.getJSONArray("slots").getJSONObject(1)
-        val mixed=JSONObject().put("format","xnotes-last-presentation").put("version",3).put("state","mixed")
-            .put("map",JSONObject().put("kind","map").put("documentId","11111111-1111-4111-8111-111111111111").put("uri","content://map/one"))
-            .put("native",first.getJSONObject("hint"))
-            .put("layout",JSONObject().put("mapPane","PRIMARY").put("focusedPane","SECONDARY").put("ratio",0.5).put("reversed",false))
-            .put("nativeView",second.getJSONObject("view"))
-        val parsed=requireNotNull(LastPresentationCodec.parse(mixed.toString().toByteArray()))
-        val encoded=JSONObject(String(LastPresentationCodec.encode(parsed)))
-        assertEquals(3,encoded.getInt("version"))
-        assertTrue(encoded.getJSONObject("nativeView").getBoolean("zoomLocked"))
-        mixed.put("version",2)
-        assertNull(LastPresentationCodec.parse(mixed.toString().toByteArray()))
-    }
-
     @Test fun oldVersion2WithoutALockRemainsReadableAndDoesNotInventAnOverride() {
         val parsed=requireNotNull(LastPresentationCodec.parse(wire(2).toByteArray()))
         val encoded=JSONObject(String(LastPresentationCodec.encode(parsed)))

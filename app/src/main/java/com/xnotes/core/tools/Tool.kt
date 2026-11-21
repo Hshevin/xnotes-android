@@ -25,7 +25,13 @@ enum class Tool(val id: String) {
     TAPE("tape"),
 
     /** Notes only: a drag down opens room across the page under the pen, a drag up inside room closes it. */
-    INSERT_SPACE("insert_space");
+    INSERT_SPACE("insert_space"),
+
+    /**
+     * Canvas only: mind maps. A tap on empty canvas starts a central topic; nodes are picked, dragged
+     * and grown from their handles. A drag on empty canvas pans.
+     */
+    MAP("map");
 
     /** Tools that produce ink via the stroke engine. */
     val isStroke: Boolean get() = this == PEN || this == DASHED || this == CALLIGRAPHY ||

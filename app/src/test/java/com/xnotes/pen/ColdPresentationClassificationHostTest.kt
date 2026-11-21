@@ -4,7 +4,6 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.mindmap.MapWorkspace
 import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
@@ -50,17 +49,11 @@ class ColdPresentationClassificationHostTest {
         (field(f.editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         withContext(Dispatchers.Main) {f.editor=Editor(f.context)}
     }
-    private suspend fun host(f:EditorPageCopyFixture,body:suspend (MapWorkspace,CoroutineScope)->Unit) {
-        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)
-        val maps=withContext(Dispatchers.Main) {MapWorkspace(f.context,scope).also {it.bindHost(Any())}}
-        try {body(maps,scope)}
-        finally {withContext(NonCancellable+Dispatchers.Main) {maps.dispose().join();scope.cancel()}}
-    }
 
     @Test fun absentIsTheOnlyColdClassificationThatReadsTheLegacySession()=runParkingScenario {f->
         val document=seed(f)
-        host(f) {maps,_->withContext(Dispatchers.Main) {
-            val coordinator=ColdPresentationCoordinator(f.editor,maps,ColdPresentationBootstrap())
+        run {withContext(Dispatchers.Main) {
+            val coordinator=ColdPresentationCoordinator(f.editor,ColdPresentationBootstrap())
             try {
                 assertTrue(coordinator.bootstrap())
                 assertTrue(f.editor.noteOpen);assertTrue(f.editor.requiresIndependentSave)
@@ -72,16 +65,36 @@ class ColdPresentationClassificationHostTest {
     @Test fun explicitHomeRemainsSafeAcrossAHostRebindEvenWithACompleteLegacyCache()=runParkingScenario {f->
         seed(f);write(f,LastPresentation.Home)
         val bootstrap=ColdPresentationBootstrap()
-        host(f) {maps,_->
+        run {
             withContext(Dispatchers.Main) {
-                val first=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                val first=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {assertTrue(first.bootstrap());assertFalse(f.editor.noteOpen)} finally {first.close()}
             }
             newEditor(f)
             withContext(Dispatchers.Main) {
-                val rebound=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                val rebound=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {assertTrue(rebound.bootstrap());assertFalse(f.editor.noteOpen)} finally {rebound.close()}
             }
+        }
+    }
+
+    @Test fun retiredWorkspaceMarkersRestoreHomeAndNeverConsumeTheNativeCache() {
+        for (state in listOf("map","mixed","network")) runParkingScenario {f->
+            seed(f)
+            val marker=File(f.context.filesDir,"last-presentation.json").apply {writeText(coldMarkerJson(state).toString())}
+            val bytes=marker.readBytes();val cache=File(directory(f.editor),"document.xnote");val cached=cache.readBytes()
+            val bootstrap=ColdPresentationBootstrap()
+            repeat(2) {attempt->
+                if(attempt>0) newEditor(f)
+                withContext(Dispatchers.Main) {
+                    val coordinator=ColdPresentationCoordinator(f.editor,bootstrap)
+                    try {
+                        assertTrue(coordinator.bootstrap());assertEquals(LastPresentation.Home,bootstrap.presentation)
+                        assertFalse(f.editor.noteOpen);assertFalse(bootstrap.permitsLegacySession);assertNull(bootstrap.problem)
+                    } finally {coordinator.close()}
+                }
+            }
+            assertArrayEquals(bytes,marker.readBytes());assertArrayEquals(cached,cache.readBytes())
         }
     }
 
@@ -92,17 +105,18 @@ class ColdPresentationClassificationHostTest {
                 val marker=File(f.context.filesDir,"last-presentation.json").apply {writeText(raw)}
                 val bytes=marker.readBytes();val cached=File(directory(f.editor),"document.xnote").readBytes()
                 val bootstrap=ColdPresentationBootstrap()
-                host(f) {maps,_->
+                run {
                     withContext(Dispatchers.Main) {
-                        val first=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                        val first=ColdPresentationCoordinator(f.editor,bootstrap)
                         try {
                             assertFalse(first.bootstrap());assertFalse(f.editor.noteOpen)
                             assertEquals(ColdPresentationProblem.INVALID,bootstrap.problem)
+                            assertNull(first.prepareDeparture {true})
                         } finally {first.close()}
                     }
                     newEditor(f)
                     withContext(Dispatchers.Main) {
-                        val rebound=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                        val rebound=ColdPresentationCoordinator(f.editor,bootstrap)
                         try {
                             rebound.bootstrap();assertFalse(f.editor.noteOpen)
                             assertEquals(ColdPresentationProblem.INVALID,bootstrap.problem)
@@ -120,9 +134,9 @@ class ColdPresentationClassificationHostTest {
             NativeRestoreHint(id,null,DocumentKind.NOTE))),ColdNativeLayout(Pane.PRIMARY))
         write(f,value(UUID.randomUUID().toString()))
         val bootstrap=ColdPresentationBootstrap()
-        host(f) {maps,_->
+        run {
             withContext(Dispatchers.Main) {
-                val first=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                val first=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {
                     assertFalse(first.bootstrap());assertFalse(f.editor.noteOpen)
                     assertEquals(ColdPresentationProblem.UNAVAILABLE,bootstrap.problem)
@@ -130,7 +144,7 @@ class ColdPresentationClassificationHostTest {
             }
             newEditor(f)
             withContext(Dispatchers.Main) {
-                val rebound=ColdPresentationCoordinator(f.editor,maps,bootstrap)
+                val rebound=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {
                     rebound.bootstrap();assertFalse(f.editor.noteOpen)
                     assertEquals(ColdPresentationProblem.UNAVAILABLE,bootstrap.problem)

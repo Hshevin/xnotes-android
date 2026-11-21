@@ -111,7 +111,7 @@ internal class NativeDocumentPreview(
         val surface=AndroidRasterSurface.create(widthPx,heightPx);var transferred=false
         try {
             surface.fill(doc.background.paperColor ?: Rgba(255,255,255))
-            val items=doc.layers.ordered(doc.items.toList())
+            val items=com.xnotes.map.ui.MapPaint.ordered(doc,textMeasurer)
             val bounds=items.map {checkActive();it.paintBounds()}.reduceOrNull {a,b->a.union(b)}
             if(bounds!=null && bounds.w>0 && bounds.h>0) {
                 val margin=minOf(widthPx,heightPx)*0.06
@@ -141,7 +141,7 @@ internal class NativeDocumentPreview(
             val bg=doc.background
             val period=bg.clampedSpacing*com.xnotes.core.infinite.BackgroundPattern.levelMultiplier(bg.clampedSpacing,scale)
             paintPagePattern(r,bg.pattern,bg.patternColor,period,region,region)
-            for(item in doc.layers.ordered(doc.items.toList())) {
+            for(item in com.xnotes.map.ui.MapPaint.ordered(doc,textMeasurer)) {
                 checkActive();if(item.paintBounds().intersects(region)) item.paint(r)
             }
             checkActive();transferred=true;return surface.bitmap

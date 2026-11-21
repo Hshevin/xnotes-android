@@ -327,7 +327,7 @@ internal class PreparedNativeOpen private constructor(
             }
             verifyBody()
             val info=BundleReferenceInfo.inspect(body,true) {check();false}
-            if(info.format!=version.kind.extension || info.header.identity?.documentId!=read.documentId || info.header.identity.externalPdf)
+            if(info.kind!=version.kind || info.header.identity?.documentId!=read.documentId || info.header.identity.externalPdf)
                 throw WorkingSessionCache.Invalid()
             val identity=source.verifyWorkingContract(info)
             check(assetRoot.isDirectory || assetRoot.mkdirs()) {"Cannot create decoded asset directory"}

@@ -123,11 +123,11 @@ class LastPresentationStoreTest {
         assertTrue(stages(root).isEmpty());assertTrue(head(root).isFile)
     }
 
-    @Test fun completeMixedCanDescribeAnUnsavedNoteWithoutOpeningAnySourceUri()=scenario {root,_->
-        val ops=Ops();val store=LastPresentationStore(root,ops);val value=coldMarkerSample()
+    @Test fun nativeMarkerDoesNotOpenAnySourceUri()=scenario {root,_->
+        val ops=Ops();val store=LastPresentationStore(root,ops)
         val recent=File(root,"saved-split.json").apply {writeText("keep recent")}
         val source=File(root,"source.xnote").apply {writeText("not a writable source")}
-        val actual=value.copy(value=value.value.copy(map=value.value.map.copy(uri=source.toURI().toString())))
+        val actual=coldMarkerSample(source.toURI().toString())
         val attempt=prepared(store,actual)
         try {assertEquals(LastPresentationWrite.Written,attempt.commit {true})} finally {attempt.close()}
         assertEquals(LastPresentationRead.Ready(actual),store.observe().read)

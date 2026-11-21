@@ -56,30 +56,6 @@ val MinTouchTarget = 48.dp
 val LayerSidebarWidth = 320.dp
 val LayerThumbnailSize = 48.dp
 
-/** Scrollable outline and parent chooser in the independent mind map editor. */
-val MindMapNodeListHeight = 400.dp
-
-val MindMapPenSliderWidth = 240.dp
-
-/** Below this pane height (a top/bottom split) the map folds its graph actions into one row and drops the hint. */
-val MindMapCompactPaneHeight = 640.dp
-
-/** Longest node name beside the enlarged ink editor's Back button. */
-val MindMapInkTitleWidth = 200.dp
-
-/** In-pane map menu: overlays the graph so the native View keeps its size; never covers the last canvas strip. */
-val MindMapMenuWidth = 360.dp
-val MindMapMenuMinCanvas = 160.dp
-
-/** Last source image shown within the graph's existing scrollable source dialog. */
-val MindMapSourcePreviewHeight = 144.dp
-
-/** World units in the native graph surface equal dp at its normal viewing scale. */
-val FileNetworkCardWidth = 240.dp
-val FileNetworkCardHeight = 96.dp
-val FileNetworkColumnStep = 360.dp
-val FileNetworkRowStep = 144.dp
-
 /** Temporary, paper-contrast navigation outline; it never becomes document content. */
 object ReferenceLocatorStyle {
     const val DurationMillis = 1800L
@@ -87,8 +63,5 @@ object ReferenceLocatorStyle {
     val Inset = Space.s4
 }
 
-/** Home sidebar tool panes (original library, file network, recovery) follow the Home/AI pane header dimensions. */
+/** Home sidebar tool panes (recovery) follow the Home/AI pane header dimensions. */
 val HomeToolHeaderHeight = 56.dp
-/** Original library header follows the Home/AI pane header dimensions. */
-val OriginalPdfLibraryHeaderHeight = HomeToolHeaderHeight
-val OriginalPdfLibrarySearchWidth = 300.dp

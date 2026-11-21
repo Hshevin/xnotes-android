@@ -68,7 +68,7 @@ fun LayersSidebar(editor: InfiniteEditor) {
     key(editor.document) {
         val preview = remember(editor.layerContentVersion) { LayerPreview(editor.document.items) }
         LayersPanel(editor.document.layers, preview, editor.layerPreviewMode, { editor.layerPreviewMode = it }, editor.layerContentVersion, editor::selectLayer, editor::editLayers,
-            { id -> editor.document.removeAll(editor.document.items.filter { it.layerId == id }); editor.document.layers.delete(id) },
+            { id -> editor.deleteLayerContent(id) },
             editor::moveSelectionToLayer, editor.hasSelection, { editor.layersSidebarVisible = false })
     }
 }

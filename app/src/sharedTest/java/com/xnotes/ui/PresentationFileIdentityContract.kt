@@ -1,6 +1,5 @@
 package com.xnotes.ui
 
-import com.xnotes.mindmap.*
 import java.io.File
 import java.io.InputStream
 import java.nio.file.Files
@@ -85,43 +84,4 @@ abstract class PresentationFileIdentityContract {
         assertEquals("foreign",foreign.readText())
     }
 
-    @Test fun successiveEditsRemainRecoverableAndReadOnlyObservationDoesNotPublishThem() {
-        val a=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="A")))
-        val b=a.copy(nodes=a.nodes.map {it.copy(text="B")})
-        val c=a.copy(nodes=a.nodes.map {it.copy(text="C")})
-        val original=MapCodec.encode(a)
-        val target=object:MapTarget {
-            override fun read()=original.clone()
-            override fun write(bytes:ByteArray) {throw AssertionError("Local recovery must not overwrite the original")}
-        }
-        fun writer()=MapStore(tmp.root,"edited-map",target,emptySet()) {attributes(it.toPath())}
-        val store=writer();assertEquals(a,store.open().document)
-        store.retainForRecovery(b)
-        assertEquals(b,writer().observe().document)
-        store.retainForRecovery(c)
-        store.retainForRecovery(c)
-        assertEquals(c,writer().observeForIdentity(a.id).document)
-        val reopened=writer();val result=reopened.open(a.id)
-        assertTrue(result.recovered);assertFalse(result.conflict);assertEquals(c,result.document)
-        assertTrue(reopened.verifyOpenedRecovery(requireNotNull(reopened.openedRecoveryProof)))
-        assertArrayEquals(original,target.read())
-        assertTrue(tmp.root.listFiles()!!.none {it.name.endsWith(".pending")})
-    }
-
-    @Test fun openingAnAlreadyWrittenPendingMapNormalizesRecoveryWithoutWritingTheOriginal() {
-        val doc=MindMapDocument(nodes=listOf(MapNode(id="r",parent=null,text="Saved map")))
-        val bytes=MapCodec.encode(doc)
-        val target=object:MapTarget {
-            override fun read()=bytes.clone()
-            override fun write(bytes:ByteArray) {throw AssertionError("Open must not write the original")}
-        }
-        fun writer()=MapStore(tmp.root,"map",target,emptySet()) {attributes(it.toPath())}
-        writer().apply {open();retainForRecovery(doc)}
-        val reopened=writer()
-        assertEquals(doc,reopened.open(doc.id).document)
-        val proof=requireNotNull(reopened.openedRecoveryProof)
-        assertTrue(reopened.verifyOpenedRecovery(proof))
-        assertTrue(tmp.root.listFiles()!!.none {it.name.endsWith(".pending")})
-        assertArrayEquals(bytes,target.read())
-    }
 }
