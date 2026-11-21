@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.mindmap.*
 import com.xnotes.ui.*
 import java.io.File
@@ -24,14 +25,15 @@ import org.robolectric.shadows.ShadowContentResolver
 import org.robolectric.shadows.ShadowSystemClock
 
 /**
- * The emulator path: a Map beside a NOTE newly created from the pane home, with the real cold
- * presentation checkpoint running. Its first working-session snapshot binds the unanchored
+ * The emulator path: a Map beside a NOTE without page ids opened from the pane home, with the real
+ * cold presentation checkpoint running. Its first working-session snapshot binds the unanchored
  * NOTE's root reference scope; that must not look like a provenance change to the arrangement save.
+ * (New notes now get page ids when created, so the unanchored note here is an existing file.)
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest=Config.NONE,sdk=[35])
 class MixedNewNoteArrangementHostTest {
-    @Test fun aNewUnanchoredNoteBesideAMapSavesAfterTheColdWorkingSessionCheckpoint()=runParkingScenario {f->
+    @Test fun anUnanchoredNoteBesideAMapSavesAfterTheColdWorkingSessionCheckpoint()=runParkingScenario {f->
         val authority="mixed-new-note-${UUID.randomUUID()}"
         val mapUri=DocumentsContract.buildDocumentUri(authority,"root/new.xmap")
         val mapFile=File(f.root,"new.xmap").apply {writeBytes(byteArrayOf())}
@@ -80,18 +82,19 @@ class MixedNewNoteArrangementHostTest {
                     beforeAdopt={detach.commit()!=null}))
                 f.editor.mixedPresentationActive=true
             }
-            // New note (template None) created and opened from that pane home, then the split turned top/bottom.
-            val tree=DocumentsContract.buildTreeDocumentUri(f.authority,"root").toString()
-            val made=requireNotNull(withContext(Dispatchers.IO) {
-                f.editor.createNoteFile(tree,"root","new note",Editor.NewNoteSetup(148.0,210.0,PageStyle(template="none"),null))
-            })
+            // An existing note written before page ids, opened from that pane home, then the split turned top/bottom.
+            withContext(Dispatchers.IO) {
+                val old=com.xnotes.core.model.Document(mutableListOf(com.xnotes.core.model.Page(148.0,210.0)))
+                f.source.outputStream().use {f.codec.write(old.fixedWriteSnapshot(),it)}
+            }
+            val made=f.sourceUri
             val nativePane=withContext(Dispatchers.Main) {
-                f.editor.openAsync(made,"new note.xnote");f.editor.view.layout(0,0,1000,1000)
+                f.editor.openAsync(made,"source.xnote");f.editor.view.layout(0,0,1000,1000)
                 val native=requireNotNull(maps.splitPresentation.layout).nativePane
                 assertTrue(maps.updateSplitLayout {it.copy(nativeHome=false,focusedPane=native)})
                 assertTrue(f.editor.focusMixedNativePane(native))
                 assertTrue(maps.updateSplitLayout {it.copy(sideBySide=false)})
-                assertFalse("A new note opens without page identities",f.editor.state.document.hasReferenceAnchors)
+                assertFalse("The existing note opens without page identities",f.editor.state.document.hasReferenceAnchors)
                 native
             }
             // The idle cold checkpoint publishes this Mixed presentation through the NOTE working session.
