@@ -294,3 +294,7 @@
 ## 2026-11-22 导图 v2 test1 打包与设备安装
 
 - 用户要求「打包到连接的movinkpad上，进行一下真机测试」。源码 `32d6dc53`（`mindmap-v2`），新测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 1，全新安装到连接的 MovinkPad；不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test1-2026-11-22.md)。
+
+## 2026-11-22 导图 v2 分支推送
+
+- 用户要求「先提交并推送」。授权将本地分支 `mindmap-v2`（画布导图 v2、来源、删除旧导图及文档）推送为新的远端分支 `origin/mindmap-v2`；不合并到 `master`，不打包、安装或发布 Release。推送前 JVM 测试 4,221 项全部通过，仪器测试与 Release Kotlin 编译通过；真机验收待完成。
