@@ -34,6 +34,7 @@
 | 主分支测试版 | `com.xnotes.movinkpad.branchtest.master` | 初始化脚本，`-PbranchTestId=master` |
 | 图层测试版 | `com.xnotes.movinkpad.branchtest.layers` | 初始化脚本，`-PbranchTestId=layers` |
 | 按键录入测试版 | `com.xnotes.movinkpad.branchtest.penshortcuts` | 初始化脚本，`-PbranchTestId=penshortcuts` |
+| 导图 v2 测试版 | `com.xnotes.movinkpad.branchtest.mindmapv2` | 初始化脚本，`-PbranchTestId=mindmapv2` |
 
 各测试版与正式版独立安装，互不覆盖。分支测试包使用 `scripts/branch-preview.init.gradle`；后续更新沿用各自包名与签名，递增 `branchTestVersion`，交付时报告包名和源码提交。旧 AI / 双窗格专用测试包不再纳入本地打包。不同功能分支未经用户要求不相互合并。
 

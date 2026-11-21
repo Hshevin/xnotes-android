@@ -544,7 +544,8 @@ class MapController(
         }
 
     fun chrome(zoom: Double, touchPx: Double): Chrome? {
-        val outline = selected?.let(shown::rectOf)
+        // While a title is typed the node's own box and the caret mark it; an outline would frame it twice.
+        val outline = selected?.takeIf { editing == null }?.let(shown::rectOf)
         val pr = press
         val relationLine = (pr as? Press.Relating)?.let { r ->
             val from = shown.rectOf(r.from) ?: return@let null

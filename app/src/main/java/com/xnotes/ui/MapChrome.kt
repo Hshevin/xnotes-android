@@ -107,7 +107,6 @@ fun MapTitleField(editor: InfiniteEditor) {
                 modifier = Modifier
                     .graphicsLayer(scaleX = z, scaleY = z, transformOrigin = TransformOrigin(0f, 0f))
                     .widthIn(min = minW, max = maxW)
-                    .border(Dp(1f / z), palette.accent.toComposeColor())
                     .focusRequester(focus)
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

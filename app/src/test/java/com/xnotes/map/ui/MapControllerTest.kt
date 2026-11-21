@@ -224,6 +224,16 @@ class MapControllerTest {
         assertEquals(steps + 1, x.f.undoCount())
     }
 
+    @Test fun aNodeBeingTypedIntoHasNoOutlineOrHandles() {
+        val r = root()
+        c.select(r)
+        assertNotNull(c.chrome(1.0, 48.0)!!.outline)
+        c.editTitle(r)
+        assertNull("the node's own box marks it while typing", c.chrome(1.0, 48.0))
+        c.commitTitle()
+        assertEquals(x.rect(r), c.chrome(1.0, 48.0)!!.outline)
+    }
+
     @Test fun aDragPreviewsWithoutTouchingTheModel() {
         val r = root()
         val a = x.f.child(r, "a")

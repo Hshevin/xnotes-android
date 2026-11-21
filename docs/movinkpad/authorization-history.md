@@ -290,3 +290,7 @@
 ## 2026-11-21 test12 打包与设备安装
 
 - 用户连接 MovinkPad 要求调试当前应用，随后回复「测试」选择打包当前 `master` 并上机测试。源码 `33386908`，code 12；仅覆盖安装 `com.xnotes.movinkpad.branchtest.master`，不动正式版，不推送、不发布 Release。见 [记录](master-test12-2026-11-21.md)。
+
+## 2026-11-22 导图 v2 test1 打包与设备安装
+
+- 用户要求「打包到连接的movinkpad上，进行一下真机测试」。源码 `32d6dc53`（`mindmap-v2`），新测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 1，全新安装到连接的 MovinkPad；不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test1-2026-11-22.md)。
