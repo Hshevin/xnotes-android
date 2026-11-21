@@ -727,6 +727,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             return if (entries.any { it.id == id }) id else entries.first().id
         }
         override fun mapChanged() = onMapChanged()
+        override fun sourceTapped(node: com.xnotes.map.NodeId, sourceId: String?) {
+            val ref = sourceId?.let { id -> map.selectedSources.firstOrNull { it.id == id } }
+            if (ref == null) mapSourcesRequested = true else onFollowMapSource?.invoke(node, ref)
+        }
     }
 
     private val mapContentListener = com.xnotes.map.MapModel.Listener { onContentChanged?.invoke() }
@@ -776,6 +780,15 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             )
         }
     }
+
+    /** The "+N" chip asks the map's menu to show the selected node's sources. Compose clears it. */
+    var mapSourcesRequested by mutableStateOf(false)
+
+    /** Follows a node's source (set by the activity, which owns navigation). */
+    var onFollowMapSource: ((com.xnotes.map.NodeId, com.xnotes.map.SourceRef) -> Unit)? = null
+
+    /** Show [text] as the canvas's transient message. */
+    fun mapMessage(text: String) { onMessage?.invoke(text, null) }
 
     /** The map's menu and style panel need the canvas's swatches. */
     val mapSwatches: SwatchHost get() = this

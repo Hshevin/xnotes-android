@@ -138,6 +138,9 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
     private val edges = LinkedHashMap<NodeId, Pair<MapEdgePart, EdgeLook>>()
     private val relations = LinkedHashMap<RelationId, Pair<MapRelationPart, RelationLook>>()
 
+    /** Each shown node's source chips as drawn: the chip and its source id, null for the "+N" chip. */
+    private val chips = HashMap<NodeId, List<Pair<Rect, String?>>>()
+
     /** The parts in drawing order, grouped by nothing: the caller stacks them by [CanvasItem.layerId]. */
     var items: List<MapPart> = emptyList()
         private set
@@ -181,6 +184,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             changed = true
         }
         for (id in nodes.keys.filter { it !in seenNodes }) {
+            chips.remove(id)
             sink.remove(nodes.remove(id)!!.first)
             changed = true
         }
@@ -239,7 +243,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
 
     /** Forget every record without telling the scene, after the scene itself was reset. */
     fun forget() {
-        nodes.clear(); edges.clear(); relations.clear()
+        nodes.clear(); edges.clear(); relations.clear(); chips.clear()
         items = emptyList()
     }
 
@@ -248,8 +252,17 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         for ((part, _) in nodes.values) sink.remove(part)
         for ((part, _) in edges.values) sink.remove(part)
         for ((part, _) in relations.values) sink.remove(part)
-        nodes.clear(); edges.clear(); relations.clear()
+        nodes.clear(); edges.clear(); relations.clear(); chips.clear()
         items = emptyList()
+    }
+
+    /**
+     * The source chip under [p]: its node and source id, with a null id for the "+N" chip that
+     * stands for the sources that did not fit. Null when [p] is on no chip.
+     */
+    fun chipAt(p: Pt): Pair<NodeId, String?>? {
+        for ((id, row) in chips) for ((r, source) in row) if (r.contains(p)) return id to source
+        return null
     }
 
     /** The relation line whose stroke passes within [reach] of [p], topmost first. */
@@ -297,6 +310,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
                 bounds = bounds.union(placed.paintBounds())
             }
         }
+        chips.remove(node.id)
         frame.sources?.let { row -> parts += chipParts(node, row) }
         if (look.hidden > 0) {
             val badge = badgeRect(r, look.side)
@@ -312,20 +326,28 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
     /** Source chips across [row], as many as fit, then "+N" for the rest. */
     private fun chipParts(node: MapNode, row: Rect): List<MapPiece> {
         val out = ArrayList<MapPiece>()
+        val placed = ArrayList<Pair<Rect, String?>>()
         var x = row.left
         val sources = node.sources
         for ((i, source) in sources.withIndex()) {
             val rest = sources.size - i - 1
             val label = source.label.ifBlank { "?" }
-            val w = min(titles.width(label, CHIP_TEXT) + 2 * CHIP_PAD, CHIP_MAX_W)
+            var w = min(titles.width(label, CHIP_TEXT) + 2 * CHIP_PAD, CHIP_MAX_W)
             val overflowW = if (rest > 0) titles.width("+$rest", CHIP_TEXT) + 2 * CHIP_PAD + CHIP_GAP else 0.0
+            // The first chip always shows, cut (its label ellipsized) to leave room for the "+N" after it.
+            if (i == 0) w = max(CHIP_MIN_W, min(w, row.right - x - overflowW))
             if (x + w + overflowW > row.right && i > 0) {
-                out += chip(Rect(x, row.top, titles.width("+${sources.size - i}", CHIP_TEXT) + 2 * CHIP_PAD, row.h), "+${sources.size - i}")
+                val more = Rect(x, row.top, titles.width("+${sources.size - i}", CHIP_TEXT) + 2 * CHIP_PAD, row.h)
+                out += chip(more, "+${sources.size - i}")
+                placed += more to null
                 break
             }
-            out += chip(Rect(x, row.top, w, row.h), label)
+            val r = Rect(x, row.top, w, row.h)
+            out += chip(r, label)
+            placed += r to source.id
             x += w + CHIP_GAP
         }
+        chips[node.id] = placed
         return out
     }
 
@@ -401,6 +423,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         const val CHIP_PAD = 8.0
         const val CHIP_GAP = 6.0
         const val CHIP_MAX_W = 200.0
+        const val CHIP_MIN_W = 2 * CHIP_PAD + 12.0
         val CHIP_FILL = Rgba(238, 238, 238)
         val CHIP_BORDER = Rgba(170, 170, 170)
         val CHIP_INK = Rgba(60, 60, 60)

@@ -1181,6 +1181,31 @@ private fun EditorScreen(
     }
     DisposableEffect(originalNavigator) {onDispose {originalNavigator.dispose()}}
     LaunchedEffect(originals.resumeRequested) {if(originals.resumeRequested) originalNavigator.resume()}
+    // Map v2 sources: following a node's source link and coming back to the map.
+    val mapSourceOpener=remember(editor,scope) {
+        com.xnotes.map.source.EditorMapSourceOpener(editor,{request,current->
+            when(val decision=guardReference(request,current)) {
+                is com.xnotes.mindmap.MapSourceGuardResult.Ready->com.xnotes.map.source.GuardDecision.Go(decision.discarded)
+                com.xnotes.mindmap.MapSourceGuardResult.Cancelled->com.xnotes.map.source.GuardDecision.Cancelled
+                com.xnotes.mindmap.MapSourceGuardResult.Failed->com.xnotes.map.source.GuardDecision.Failed
+                com.xnotes.mindmap.MapSourceGuardResult.Changed->com.xnotes.map.source.GuardDecision.Changed
+            }
+        },com.xnotes.map.source.SourceResolver(com.xnotes.map.source.AndroidSourceCatalogs(context))) {
+            paneHomes=emptyMap();homeFocus=null;mainMenu=false
+        }
+    }
+    fun followMapSource(canvas:com.xnotes.ui.InfiniteEditor,node:com.xnotes.map.NodeId,ref:com.xnotes.map.SourceRef) {
+        val doc=canvas.document
+        val location=doc.path ?: run {editor.message=context.getString(R.string.map2_link_unsaved);return}
+        val from=com.xnotes.map.source.MapReturn(doc.identity.documentId,location,node,
+            canvas.viewport.scrollX,canvas.viewport.scrollY,canvas.viewport.zoom)
+        scope.launch {
+            val result=mapSourceOpener.follow(ref,from)
+            if(result is com.xnotes.map.source.FollowResult.Failed)
+                editor.message=context.getString(com.xnotes.ui.sourceProblem(result.status) ?: R.string.map2_open_failed)
+        }
+    }
+    SideEffect {editor.followMapSource=::followMapSource}
     val sourceNavigator=remember(editor,maps,mapBinding,scope) {
         com.xnotes.mindmap.MapSourceNavigator(editor,maps,mapBinding,scope,::guardReference,originalNavigator=originalNavigator,
             prepareParking=::prepareSourceParking) {opened,live->
@@ -2224,7 +2249,7 @@ private fun EditorScreen(
                         finally {coldActionBusy=false}
                     }})
             }
-            if(maps.current?.sourceReturn!=null || networks.current!=null && (!networks.visible || orphanNetwork) || libraryNetworkLaunch?.let {
+            if(mapSourceOpener.canGoBack || maps.current?.sourceReturn!=null || networks.current!=null && (!networks.visible || orphanNetwork) || libraryNetworkLaunch?.let {
             networkCoordinator.canCancel(it) || networkCoordinator.failureFor(it)!=null
         }==true) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
@@ -2246,6 +2271,11 @@ private fun EditorScreen(
                 },modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                     Text(stringResource(R.string.cancel),fontSize=TextSize.body)
                 } else {
+                    if(mapSourceOpener.canGoBack) androidx.compose.material3.TextButton(enabled=!mapSourceOpener.busy,onClick={scope.launch {
+                        if(mapSourceOpener.back()==com.xnotes.map.source.BackResult.CANVAS_GONE) editor.message=context.getString(R.string.map2_map_gone)
+                    }},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
+                        Text(stringResource(R.string.map2_back_to_map),fontSize=TextSize.body)
+                    }
                     if(maps.current?.sourceReturn!=null) androidx.compose.material3.TextButton(onClick={backlinkNavigator.cancel();sourceNavigator.returnToMap()},modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget)) {
                         Text(stringResource(R.string.graph_return_map),fontSize=TextSize.body)
                     }
@@ -2428,6 +2458,12 @@ private fun EditorScreen(
                 }
                 // A mind map title being typed on a canvas is finished first.
                 BackHandler(enabled = focused.canvasOpen && focused.infinite.mapField != null) { focused.infinite.map.commitTitle() }
+                // "Copy page link" runs here so a note reloaded by enabling page ids does not cancel it.
+                for (pane in (listOf(editor) + editor.openPanes).distinct()) {
+                    pane.pageLinkRequest?.let { index ->
+                        androidx.compose.runtime.key(pane, index) { com.xnotes.ui.CopyPageLinkFlow(pane, index) { pane.pageLinkRequest = null } }
+                    }
+                }
             }
 
             val actions = PaneActions(
@@ -3389,6 +3425,7 @@ private fun EditorPane(
                             onReferenceSelection = {canvas.sourceSelectionRegion()?.let(editor::requestCanvasRegionReference)==true},
                         )
                         com.xnotes.ui.MapMenu(canvas)
+                        SideEffect {canvas.onFollowMapSource={node,ref->editor.followMapSource?.invoke(canvas,node,ref)}}
                         com.xnotes.ui.ScreenshotMenu(canvas, onShare = actions.onShareImage,
                             onReferenceRegion = {canvas.sourceCaptureRegion()?.let(editor::requestCanvasRegionReference)==true})
                         com.xnotes.ui.CropOverlay(canvas)

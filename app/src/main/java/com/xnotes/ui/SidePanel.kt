@@ -522,6 +522,7 @@ private fun PageThumb(
                         editor, index, page.cover, page.pdfPage != null, menuOpen, { menuOpen = false }, { sizing = true }, { extracting = it },
                         onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover,
                         {editor.requestPageReference(page)},
+                        { editor.pageLinkRequest = index },
                     )
                 }
             }
@@ -567,6 +568,7 @@ private fun PageContextMenu(
     onInsertPdf: (Int) -> Unit,
     onPickCover: () -> Unit,
     onReferencePage: () -> Unit,
+    onCopyPageLink: () -> Unit,
 ) {
     val palette = LocalPalette.current
     var sub by remember { mutableStateOf(MENU_MAIN) }
@@ -602,6 +604,9 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.graph_reference_this_page),fontSize=TextSize.body) },
                     modifier=Modifier.heightIn(min=com.xnotes.ui.theme.MinTouchTarget),
                     leadingIcon=menuIcon(XnotesIcons.link),onClick={onDismiss();onReferencePage()})
+                DropdownMenuItem(text = { Text(stringResource(R.string.map2_copy_page_link), fontSize = TextSize.body) },
+                    modifier = Modifier.heightIn(min = com.xnotes.ui.theme.MinTouchTarget),
+                    leadingIcon = menuIcon(XnotesIcons.link), onClick = { onDismiss(); onCopyPageLink() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })

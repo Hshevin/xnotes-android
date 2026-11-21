@@ -59,6 +59,9 @@ class MapController(
 
         /** Something visible changed: the scene, the chrome, the menu or the title field. */
         fun mapChanged()
+
+        /** A source chip of [node] was tapped: [sourceId], or null for the "+N" chip. */
+        fun sourceTapped(node: NodeId, sourceId: String?) {}
     }
 
     /** A "+" handle beside the selected node. */
@@ -279,7 +282,12 @@ class MapController(
                 editor.applyDrop(pr.node, action)
                 refresh()
             } else {
-                if (selected == pr.node && editing == null) editTitle(pr.node)
+                val chip = projection.chipAt(p)?.takeIf { it.first == pr.node }
+                if (chip != null) {
+                    commitTitle()
+                    select(pr.node)
+                    host.sourceTapped(pr.node, chip.second)
+                } else if (selected == pr.node && editing == null) editTitle(pr.node)
                 else {
                     commitTitle()
                     select(pr.node)
@@ -471,6 +479,28 @@ class MapController(
     val selectedTreeHasOffsets: Boolean
         get() = selected?.let { s -> val root = model.state.rootOf(s); model.state.offsets.keys.any { model.state.rootOf(it) == root } } == true
     val selectedLayout: LayoutKind? get() = selected?.let { model.state.layout[model.state.rootOf(it)] }
+    /** The selected node's sources, in order; empty when none is selected. */
+    val selectedSources: List<com.xnotes.map.SourceRef>
+        get() = selected?.let { shownState.nodes[it]?.sources }.orEmpty()
+
+    /**
+     * Add [refs] to the selected node as one undoable step, skipping any it already links to.
+     * False when nothing was added (no selection, a locked layer, or all were there already).
+     */
+    fun addSources(refs: List<com.xnotes.map.SourceRef>): Boolean {
+        val id = selected ?: return false
+        if (!host.layerEditable(layerOf(id))) return false
+        commitTitle()
+        return editor.addSources(id, refs)
+    }
+
+    /** Remove one source from the selected node as one undoable step. */
+    fun removeSource(sourceId: String): Boolean {
+        val id = selected ?: return false
+        if (!host.layerEditable(layerOf(id))) return false
+        return editor.removeSource(id, sourceId)
+    }
+
     val selectedStyle: NodeStyle? get() = selected?.let { model.state.nodes[it]?.style }
     val selectedArrow: RelationArrow? get() = selectedRelation?.let { model.state.relations[it]?.arrow }
     val selectedRelationLabel: String? get() = selectedRelation?.let { model.state.relations[it]?.label }

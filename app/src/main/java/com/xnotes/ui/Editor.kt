@@ -1506,6 +1506,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return if(pending) PageReferenceEnableResult.Retained else PageReferenceEnableResult.Failed
         } finally {request.owner.endPageReferenceSave(request.model)}
     }
+    /**
+     * Give the open, saved note permanent page ids (map v2 page links). Waits for accepted saves
+     * and input like a page reference does, requires the note to be clean afterwards, upgrades
+     * the file with the storage's byte-preserving page activation against the observed version,
+     * then reloads the note from the file at the same page. Never assigns ids in the live model.
+     */
+    internal suspend fun enablePageIds():com.xnotes.map.source.PageIdEnableResult = TODO("phase 3 backend")
+
     internal suspend fun reopenPageReference(request:PageReferenceRequest):Boolean {
         if(!pageReferenceCurrent(request)) return false
         val uri=request.model.path ?: return false
@@ -1708,6 +1716,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var shapeConfig by mutableStateOf(ShapeConfig())
         private set
     var message by mutableStateOf<String?>(null)
+    /** "Copy page link" asked for this page index; the activity runs the flow (it outlives a reload). */
+    var pageLinkRequest by mutableStateOf<Int?>(null)
+    /** Follows a map v2 node's source; set on the root editor by the activity, which owns navigation. */
+    var followMapSource:((InfiniteEditor,com.xnotes.map.NodeId,com.xnotes.map.SourceRef)->Unit)?=null
     /** A button the next [message] carries, such as Undo, with what it does. */
     var messageAction by mutableStateOf<Pair<String, () -> Unit>?>(null)
 

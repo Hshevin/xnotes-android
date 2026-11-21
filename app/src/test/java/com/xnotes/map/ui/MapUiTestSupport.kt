@@ -31,6 +31,8 @@ class FakeHost : MapController.Host {
     var editable: (String?) -> Boolean = { true }
     var active: String? = null
     var changes = 0
+    val sourceTaps = ArrayList<Pair<NodeId, String?>>()
+    override fun sourceTapped(node: NodeId, sourceId: String?) { sourceTaps += node to sourceId }
     override fun layerVisible(layer: String?) = true
     override fun layerEditable(layer: String?) = editable(layer)
     override fun activeLayer() = active

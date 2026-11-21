@@ -149,7 +149,7 @@ fun MapMenu(editor: InfiniteEditor) {
     val palette = LocalPalette.current
     val density = LocalDensity.current
     val node = map.selected != null
-    val count = if (node) 6 else 5
+    val count = if (node) 7 + (if (map.selectedHasChildren) 1 else 0) else 5
     val barHeightPx = with(density) { MinTouchTarget.toPx() }
     val barWidthPx = with(density) { (MinTouchTarget * count).toPx() }
     val gap = with(density) { Space.s12.toPx() }
@@ -159,6 +159,11 @@ fun MapMenu(editor: InfiniteEditor) {
     val xDp = with(density) { xPx.coerceAtLeast(Space.s8.toPx()).toDp() }
     val yDp = with(density) { yPx.toDp() }
     var open by remember { mutableStateOf<MapMenuOpen?>(null) }
+    // The "+N" chip on the canvas asks for the whole source list.
+    if (editor.mapSourcesRequested) {
+        editor.mapSourcesRequested = false
+        open = MapMenuOpen.SOURCES
+    }
     // The panels are non-focusable popups, so Back reaches the activity: close the panel, not the document.
     androidx.activity.compose.BackHandler(enabled = open != null) { open = null }
 
@@ -192,6 +197,10 @@ fun MapMenu(editor: InfiniteEditor) {
                             )
                         }
                     }
+                }
+                Box {
+                    MapAction(XnotesIcons.link, stringResource(R.string.map2_sources)) { open = MapMenuOpen.SOURCES }
+                    if (open == MapMenuOpen.SOURCES) MapSourcesPanel(editor) { open = null }
                 }
                 Box {
                     MapAction(XnotesIcons.palette, stringResource(R.string.map2_style)) { open = MapMenuOpen.STYLE }
@@ -247,7 +256,7 @@ fun MapMenu(editor: InfiniteEditor) {
     }
 }
 
-private enum class MapMenuOpen { LAYOUT, STYLE, MORE, ARROWS, COLOR, LABEL }
+private enum class MapMenuOpen { LAYOUT, STYLE, SOURCES, MORE, ARROWS, COLOR, LABEL }
 
 private val LAYOUTS = listOf(
     LayoutKind.RIGHT to R.string.map2_layout_right,
