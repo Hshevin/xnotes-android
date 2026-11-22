@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -1372,11 +1373,26 @@ private fun AiModelChip(sessions: AiSessions, chat: AiChat, config: AiConfig, mo
     val groups = config.providers.filter { it.modelChoices.isNotEmpty() }.map { it.id to it.label to it.modelChoices }.ifEmpty { listOf("" to "" to config.modelChoices).filter { it.second.isNotEmpty() } }
     val total = groups.sumOf { it.second.size }
     val needle = query.trim()
+    val interaction = remember { MutableInteractionSource() }
     Box(modifier) {
         Tooltip(title) {
-            Box(Modifier.height(MinTouchTarget).clickable(role = Role.Button, onClickLabel = title) { query = ""; menu = true }.padding(horizontal = Space.s4), contentAlignment = Alignment.Center) {
-                Row(Modifier.height(32.dp).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape).padding(start = Space.s12, end = Space.s8),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s4)) {
+            Box(
+                Modifier
+                    .height(MinTouchTarget)
+                    .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = title) { query = ""; menu = true }
+                    .padding(horizontal = Space.s4),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    Modifier
+                        .height(32.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, palette.border.toComposeColor(), CircleShape)
+                        .indication(interaction, LocalIndication.current)
+                        .padding(start = Space.s12, end = Space.s8),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s4),
+                ) {
                     Text(label, Modifier.weight(1f, fill = false), color = (if (routable) palette.textDim else palette.text).toComposeColor(), fontSize = TextSize.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Icon(XnotesIcons.chevronDown, null, Modifier.size(14.dp), tint = palette.textDim.toComposeColor())
                 }
@@ -1422,16 +1438,28 @@ private fun AiSearchToggle(on: Boolean, onChange: (Boolean) -> Unit) {
     val palette = LocalPalette.current
     val fg = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
     val label = stringResource(R.string.ai_web_search)
+    val interaction = remember { MutableInteractionSource() }
     Tooltip(label) {
-        Box(Modifier.height(MinTouchTarget).toggleable(on, role = Role.Switch, onValueChange = onChange), contentAlignment = Alignment.Center) {
-            Row(
-                Modifier.height(32.dp).clip(CircleShape)
-                    .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier.border(1.dp, palette.border.toComposeColor(), CircleShape))
-                    .padding(horizontal = Space.s12),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s6),
-            ) {
-                Icon(XnotesIcons.globe, label, Modifier.size(16.dp), tint = fg)
-                Text(stringResource(R.string.ai_web), color = fg, fontSize = TextSize.label)
+        Box(
+            Modifier
+                .height(MinTouchTarget)
+                .toggleable(value = on, interactionSource = interaction, indication = null, role = Role.Switch, onValueChange = onChange),
+            contentAlignment = Alignment.Center,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides fg) {
+                Row(
+                    Modifier
+                        .height(32.dp)
+                        .clip(CircleShape)
+                        .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier.border(1.dp, palette.border.toComposeColor(), CircleShape))
+                        .indication(interaction, LocalIndication.current)
+                        .padding(horizontal = Space.s12),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s6),
+                ) {
+                    Icon(XnotesIcons.globe, label, Modifier.size(16.dp), tint = fg)
+                    Text(stringResource(R.string.ai_web), color = fg, fontSize = TextSize.label)
+                }
             }
         }
     }
@@ -1442,11 +1470,26 @@ private fun AiSearchToggle(on: Boolean, onChange: (Boolean) -> Unit) {
 private fun AiSendButton(busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val label = stringResource(if (busy) R.string.ai_stop else R.string.ai_send)
+    val fg = (if (enabled) palette.selectionForeground else palette.textDim).toComposeColor()
+    val interaction = remember { MutableInteractionSource() }
     Tooltip(label) {
-        Box(Modifier.size(MinTouchTarget).clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background((if (enabled) palette.selectionBackground else palette.surface).toComposeColor()), contentAlignment = Alignment.Center) {
-                Icon(if (busy) XnotesIcons.stop else XnotesIcons.arrowUp, label, Modifier.size(18.dp),
-                    tint = (if (enabled) palette.selectionForeground else palette.textDim).toComposeColor())
+        Box(
+            Modifier
+                .size(MinTouchTarget)
+                .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides fg) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background((if (enabled) palette.selectionBackground else palette.surface).toComposeColor())
+                        .indication(interaction, LocalIndication.current),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(if (busy) XnotesIcons.stop else XnotesIcons.arrowUp, label, Modifier.size(18.dp), tint = fg)
+                }
             }
         }
     }

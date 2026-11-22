@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -104,7 +105,7 @@ fun TextStyleBar(editor: TextEditHost) {
                 )
                 Tooltip(stringResource(R.string.done)) {
                     Box(
-                        modifier = Modifier.size(44.dp).clickable { editor.commitText() },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).clickable { editor.commitText() },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -173,7 +174,7 @@ private fun StepButton(glyph: String, label: String, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Tooltip(label) {
         Box(
-            modifier = Modifier.size(40.dp).clickable { onClick() },
+            modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onClick() },
             contentAlignment = Alignment.Center,
         ) {
             Text(glyph, color = palette.text.toComposeColor(), fontSize = TextSize.headline)

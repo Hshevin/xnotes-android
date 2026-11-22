@@ -235,7 +235,7 @@ private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: (
     val palette = LocalPalette.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(96.dp))
-        Box(Modifier.size(34.dp).clickable(onClick = onMinus), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onMinus), contentAlignment = Alignment.Center) {
             Text("−", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
         }
         Text(
@@ -245,7 +245,7 @@ private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: (
             modifier = Modifier.width(72.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
-        Box(Modifier.size(34.dp).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
             Text("+", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
         }
     }

@@ -989,7 +989,7 @@ private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: 
     val color = (if (enabled) palette.text else palette.textDim).toComposeColor()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = color, fontSize = TextSize.label, modifier = Modifier.width(76.dp))
-        Box(Modifier.size(34.dp).clickable(enabled = enabled) { onValue(value - 10) }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = enabled) { onValue(value - 10) }, contentAlignment = Alignment.Center) {
             Text("−", color = color, fontSize = TextSize.heading)
         }
         Text(
@@ -999,7 +999,7 @@ private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: 
             textAlign = TextAlign.Center,
             modifier = Modifier.width(52.dp),
         )
-        Box(Modifier.size(34.dp).clickable(enabled = enabled) { onValue(value + 10) }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = enabled) { onValue(value + 10) }, contentAlignment = Alignment.Center) {
             Text("+", color = color, fontSize = TextSize.heading)
         }
         Spacer(Modifier.weight(1f))

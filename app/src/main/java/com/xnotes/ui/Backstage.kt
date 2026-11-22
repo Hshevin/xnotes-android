@@ -15,10 +15,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -59,6 +61,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -783,17 +786,27 @@ private fun Command(icon: ImageVector, label: String, selected: Boolean = false,
 private fun RailItem(icon: ImageVector, label: String, selected: Boolean = false, labelled: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val pill = MaterialTheme.shapes.large
+    val iconTint = (if (selected) palette.selectionForeground else palette.accent).toComposeColor()
+    val interaction = remember { MutableInteractionSource() }
     val item = @Composable {
         Column(
-            Modifier.width(RAIL_WIDTH).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(top = if (labelled) 6.dp else 8.dp, bottom = 8.dp),
+            Modifier
+                .width(RAIL_WIDTH)
+                .combinedClickable(interactionSource = interaction, indication = null, onClick = onClick, onLongClick = onLongClick)
+                .padding(top = if (labelled) 6.dp else 8.dp, bottom = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                Modifier.size(width = 56.dp, height = 32.dp).clip(pill)
-                    .background(if (selected) palette.selectionBackground.toComposeColor() else Color.Transparent),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, if (labelled) null else label, tint = (if (selected) palette.selectionForeground else palette.accent).toComposeColor(), modifier = Modifier.size(20.dp))
+            androidx.compose.runtime.CompositionLocalProvider(LocalContentColor provides iconTint) {
+                Box(
+                    Modifier
+                        .size(width = 56.dp, height = 32.dp)
+                        .clip(pill)
+                        .background(if (selected) palette.selectionBackground.toComposeColor() else Color.Transparent)
+                        .indication(interaction, LocalIndication.current),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, if (labelled) null else label, tint = iconTint, modifier = Modifier.size(20.dp))
+                }
             }
             if (labelled) {
                 Spacer(Modifier.height(Space.s4))

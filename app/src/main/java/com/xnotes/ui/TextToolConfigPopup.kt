@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -19,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -162,7 +164,7 @@ private fun SpinField(label: String, value: Double, min: Double, max: Double, on
     val palette = LocalPalette.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(74.dp))
-        Box(Modifier.size(34.dp).clickable { onChange((value - 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable { onChange((value - 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
             Text("−", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
         }
         Text(
@@ -171,7 +173,7 @@ private fun SpinField(label: String, value: Double, min: Double, max: Double, on
             fontSize = TextSize.bodyLarge,
             modifier = Modifier.width(30.dp),
         )
-        Box(Modifier.size(34.dp).clickable { onChange((value + 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).clickable { onChange((value + 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
             Text("+", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
         }
     }
