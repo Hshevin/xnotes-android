@@ -128,4 +128,30 @@ class LastPresentationCodecAndroidTest {
         for((index,raw) in duplicates.withIndex()) {assertNotEquals(base,raw);reject(raw,"duplicate object level $index")}
     }
 
+    @Test fun version4CleanReopenPreservesBooleanAndRejectsNullOrOlderSmuggling() {
+        val path="content://editor-page-copy/document/root%2Fsource"
+        val valid=JSONObject().put("format","xnotes-last-presentation").put("version",4).put("state","native")
+            .put("slots",JSONArray().put(JSONObject().put("pane","PRIMARY").put("kind","note")
+                .put("hint",JSONObject().put("kind","note").put("documentId",noteId).put("path",path))
+                .put("reopenFromFile",true)))
+            .put("layout",JSONObject().put("focusedPane","PRIMARY").put("ratio",.5).put("reversed",false))
+        val parsed=parse(valid) as LastPresentation.Native
+        val slot=parsed.slots.single() as ColdNativeSlot.Note
+        assertTrue(slot.reopenFromFile)
+        val encoded=JSONObject(String(LastPresentationCodec.encode(parsed),Charsets.UTF_8))
+        assertEquals(4,encoded.getInt("version"))
+        assertTrue(encoded.getJSONArray("slots").getJSONObject(0).getBoolean("reopenFromFile"))
+
+        val nullFlag=JSONObject(valid.toString())
+        nullFlag.getJSONArray("slots").getJSONObject(0).put("reopenFromFile",JSONObject.NULL)
+        reject(nullFlag.toString())
+
+        val nullPath=JSONObject(valid.toString())
+        nullPath.getJSONArray("slots").getJSONObject(0).getJSONObject("hint").put("path",JSONObject.NULL)
+        reject(nullPath.toString())
+
+        val smuggled=JSONObject(valid.toString()).put("version",3)
+        reject(smuggled.toString())
+    }
+
 }

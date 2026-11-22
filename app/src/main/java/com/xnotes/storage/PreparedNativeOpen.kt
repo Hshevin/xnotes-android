@@ -39,6 +39,8 @@ internal class PreparedNativeOpen private constructor(
     private val originalExternalPdf=note?.identity?.externalPdf==true
     private var editSourceMemo:EditSource?=null
 
+    internal val completelyDecoded:Boolean get()=observedNote!=null || observedCanvas!=null
+
     /** One long-lived source owner per actual adoption; the temporary lease is not retained by it. */
     @Synchronized fun editSource():EditSource {
         check(recoveryBinding==null || recoveryClaimed) {"Recovery requires actual adoption and claim"}

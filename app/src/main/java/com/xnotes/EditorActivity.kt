@@ -408,8 +408,10 @@ class EditorActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        editor?.persistPresentationSettings()
-        documentPresentation?.let {presentation->lifecycleScope.launch {presentation.checkpoint()}}
+        val ed=editor ?: return
+        ed.persistPresentationSettings()
+        ed.flushAutosaveAll()
+        documentPresentation?.let {presentation->lifecycleScope.launch {ed.awaitAutosaveWrites();presentation.checkpoint()}}
     }
 
     override fun onStop() {

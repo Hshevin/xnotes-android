@@ -101,6 +101,9 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
     private var bodyToken:Any?=null
     private var bodyHash:String?=null
     private var bodyId:String?=null
+    private var cleanDiskSource:Boolean?=null
+
+    fun trackDiskReopen(clean:Boolean) {check(state.get()==0);cleanDiskSource=clean}
 
     internal fun claim()=state.compareAndSet(0,1)
     internal fun finishPublishing() {state.set(2);if(closeRequested.get()) cleanup()}
@@ -175,6 +178,8 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
     internal fun executeBounded():LegacyMutationResult {
         val completed=ArrayList<LegacyMutationStep>()
         try {
+            val veto=File(directory,DISK_REOPEN_VETO)
+            if(cleanDiskSource==false && regularOrAbsent(veto)==null) Files.createFile(veto.toPath())
             for(operation in operations) {
                 regularOrAbsent(operation.target)
                 val held=operation.candidate
@@ -190,10 +195,13 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
                 }
                 completed.add(operation.step)
             }
+            if(cleanDiskSource==true && regularOrAbsent(veto)!=null) Files.delete(veto.toPath())
             return LegacyMutationResult.Published(LegacyPublication(bodyTarget,bodyToken,bodyHash,bodyId))
         } catch(error:Exception) {return LegacyMutationResult.Failed(completed.toList(),error)}
     }
     companion object {
+        private const val DISK_REOPEN_VETO="prefer-working-copy"
+        fun allowsDiskReopen(directory:File)=Files.notExists(File(directory,DISK_REOPEN_VETO).toPath(),NOFOLLOW_LINKS)
         private fun prepare(directory:File,fileOps:FileOps,build:PreparedLegacySessionMutation.()->Unit):PreparedLegacySessionMutation {
             val result=PreparedLegacySessionMutation(directory.canonicalFile,fileOps)
             try {LegacySessionBodyCandidates.cleanup(result.directory);result.build()} catch(error:Exception) {result.preparationFailure=error}

@@ -3151,7 +3151,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (editingLabel != null) refreshField()
         // The connection marks are sized for the screen and only cover what is on it.
         if (interaction.marking) publishOverlay()
-        document.lastView = viewport.toWaypoint()
+        if (appliedInitialView) document.lastView = viewport.toWaypoint()
         zoomPercent = Math.round(viewport.zoom * 100).toInt()
         // The menu is anchored in viewport pixels, so a pan or a zoom moves it.
         refreshSelectionMenu()

@@ -41,7 +41,7 @@ internal object LastPresentationCodec {
             .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
         val root=objectValue(JsonReader(text).read())
         require(string(root,"format")=="xnotes-last-presentation")
-        val version=integer(root,"version");require(version in 1..3)
+        val version=integer(root,"version");require(version in 1..4)
         when(string(root,"state")) {
             "home"->{require(version==1);keys(root,setOf("format","version","state"));LastPresentation.Home}
             "mixed","map","network"->LastPresentation.Home
@@ -51,12 +51,12 @@ internal object LastPresentationCodec {
     } catch(_:Exception) {null}
 
     fun encode(value:LastPresentation):ByteArray {
-        // v1/v2 keep their strict contracts; only a description carrying a stored lock needs v3.
         val views=when(value) {
             is LastPresentation.Native->value.slots.mapNotNull {(it as? ColdNativeSlot.Note)?.view ?: (it as? ColdNativeSlot.Shared)?.view}
             else->emptyList()
         }
         val version=when {
+            value is LastPresentation.Native && value.slots.any {it.reopensFile()}->4
             views.any {it.zoomLocked!=null}->3
             value===LastPresentation.Home->1
             else->2
@@ -76,6 +76,7 @@ internal object LastPresentationCodec {
                             item.put("view",JSONObject().put("cx",it.centerX).put("cy",it.centerY).put("zoom",it.zoom))}}
                         is ColdNativeSlot.Shared->{item.put("kind","shared").put("ownerPane",slot.ownerPane.name);slot.view?.let {item.put("view",writeNativeView(it))}}
                     }
+                    if(slot.reopensFile()) item.put("reopenFromFile",true)
                     slots.put(item)
                 }
                 val layout=JSONObject().put("focusedPane",value.layout.focusedPane.name).put("ratio",value.layout.ratio.toDouble())
@@ -86,6 +87,8 @@ internal object LastPresentationCodec {
         }
         return root.toString().toByteArray(Charsets.UTF_8).also {require(it.size<=MAX_BYTES)}
     }
+
+    private fun ColdNativeSlot.reopensFile()=this is ColdNativeSlot.Note && reopenFromFile || this is ColdNativeSlot.Canvas && reopenFromFile
 
     private fun readHint(value:MarkerObject,kind:DocumentKind):NativeRestoreHint {
         keys(value,setOf("kind","documentId","path"));require(string(value,"kind")==kind.name.lowercase())
@@ -109,15 +112,17 @@ internal object LastPresentationCodec {
         keys(root,setOf("format","version","state","slots","layout"))
         val array=required(root,"slots") as? List<*> ?: error("Expected native slots")
         require(array.size in 1..2)
+        val documentKeys=setOf("kind","pane","hint","view") + if(version>=4) setOf("reopenFromFile") else emptySet()
         val slots=array.map {item->
             val json=objectValue(item);val pane=Pane.valueOf(string(json,"pane"))
+            fun reopensFile()="reopenFromFile" in json && boolean(json,"reopenFromFile")
             when(string(json,"kind")) {
                 "home"->{keys(json,setOf("kind","pane"));ColdNativeSlot.Home(pane)}
-                "note"->{keys(json,setOf("kind","pane","hint","view"));ColdNativeSlot.Note(pane,readHint(obj(json,"hint"),DocumentKind.NOTE),optional(json,"view") {readNativeView(obj(json,it),version)})}
+                "note"->{keys(json,documentKeys);ColdNativeSlot.Note(pane,readHint(obj(json,"hint"),DocumentKind.NOTE),optional(json,"view") {readNativeView(obj(json,it),version)},reopensFile())}
                 "canvas"->{
-                    keys(json,setOf("kind","pane","hint","view"))
+                    keys(json,documentKeys)
                     ColdNativeSlot.Canvas(pane,readHint(obj(json,"hint"),DocumentKind.CANVAS),optional(json,"view") {
-                        val view=obj(json,it);keys(view,setOf("cx","cy","zoom"));ColdCanvasView(number(view,"cx"),number(view,"cy"),number(view,"zoom"))})
+                        val view=obj(json,it);keys(view,setOf("cx","cy","zoom"));ColdCanvasView(number(view,"cx"),number(view,"cy"),number(view,"zoom"))},reopensFile())
                 }
                 "shared"->{keys(json,setOf("kind","pane","ownerPane","view"));ColdNativeSlot.Shared(pane,Pane.valueOf(string(json,"ownerPane")),optional(json,"view") {readNativeView(obj(json,it),version)})}
                 else->error("Unknown native slot")

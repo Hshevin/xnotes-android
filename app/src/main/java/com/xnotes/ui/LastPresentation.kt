@@ -8,8 +8,8 @@ internal data class ColdNativeLayout(val focusedPane:Pane,val ratio:Float=.5f,
                                     val sideBySide:Boolean?=null,val reversed:Boolean=false)
 internal sealed interface ColdNativeSlot {
     val pane:Pane
-    data class Note(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdNativeView?=null):ColdNativeSlot
-    data class Canvas(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdCanvasView?=null):ColdNativeSlot
+    data class Note(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdNativeView?=null,val reopenFromFile:Boolean=false):ColdNativeSlot
+    data class Canvas(override val pane:Pane,val hint:NativeRestoreHint,val view:ColdCanvasView?=null,val reopenFromFile:Boolean=false):ColdNativeSlot
     data class Home(override val pane:Pane):ColdNativeSlot
     data class Shared(override val pane:Pane,val ownerPane:Pane,val view:ColdNativeView?=null):ColdNativeSlot
 }

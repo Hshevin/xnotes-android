@@ -44,9 +44,10 @@ internal object LastPresentationContract {
         val notes=value.slots.filterIsInstance<ColdNativeSlot.Note>()
         require(notes.map {it.hint.documentId}.distinct().size==notes.size)
         for(slot in value.slots) when(slot) {
-            is ColdNativeSlot.Note->{validateHint(slot.hint,DocumentKind.NOTE);slot.view?.position?.let(::validateView)}
+            is ColdNativeSlot.Note->{validateHint(slot.hint,DocumentKind.NOTE);require(!slot.reopenFromFile || slot.hint.path!=null);slot.view?.position?.let(::validateView)}
             is ColdNativeSlot.Canvas->{
                 require(value.slots.size==1);validateHint(slot.hint,DocumentKind.CANVAS)
+                require(!slot.reopenFromFile || slot.hint.path!=null)
                 slot.view?.let {require(it.centerX.isFinite() && it.centerY.isFinite() && it.zoom.isFinite() && it.zoom>0)}
             }
             is ColdNativeSlot.Shared->{

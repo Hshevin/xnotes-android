@@ -104,9 +104,11 @@ class LegacySessionMutationBoundaryTest {
             override fun delete(target:File)=PreparedLegacySessionMutation.SystemFileOps.delete(target)
         }
         PreparedLegacySessionMutation.prepareNote(root,codec,Document.blank(4),metadata(),fileOps=ops).use {prepared->
+            prepared.trackDiskReopen(false)
             val result=access.publish(observation,prepared) as LegacyMutationResult.Failed
             assertEquals(listOf(LegacyMutationStep.NOTE_BODY),result.completed)
         }
+        assertFalse(PreparedLegacySessionMutation.allowsDiskReopen(root))
         assertEquals(4,File(root,"document.xnote").inputStream().use {codec.read(it)}.pages.size)
     }
     @Test fun aLateNativeHeadRejectsAllThreePlansWithoutTouchingLegacyFiles() {
