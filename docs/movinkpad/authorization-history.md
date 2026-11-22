@@ -321,3 +321,7 @@
 - 用户基于真机反馈要求调整收起悬浮窗顶部 AI 图标高亮、推理强度单行胶囊滑条及 DeepSeek/Qwen 默认仅开关档位，随后要求「打包并安装到平板上」：基于 `bb4fd8cc` 构建 `com.xnotes.movinkpad.branchtest.master` code 14（`0.9.10-test-master-14`）并覆盖安装至 MovinkPad Pro 14；不动正式版，不推送、不发布 Release。
 - 用户随后确认「合并到主分支并打包到正式版吧，我觉得现在这样可以用了」：改动已在本地 `master`，将 `versionCode` 递增至 99（`2591a0ae`），本地构建正式覆盖更新 APK `build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk`（`com.xnotes.movinkpad` / `0.9.10` / code 99，沿用历史签名、R8 与资源压缩、关闭 debuggable），全量 Release JVM 测试 4,271 项通过。仅本地交付与提交记录，不推送、不安装正式版到设备、不发布 GitHub Release。见 [Release 99 记录](release99-2026-11-22.md)。
 - 用户随后明确要求「安装正式版到平板」：已通过 `adb -s 6el21u1000425 install -r` 将 `XNotes-0.9.10-movinkpad-release99-arm64.apk` 安装到已连接的 MovinkPad Pro 14（`Wacom DTHA140` / Android 15），并确认设备已安装 `com.xnotes.movinkpad` `0.9.10` / `versionCode=99`。不推送、不发布 GitHub Release。
+
+## 2026-11-23 保存简化合入主线并推送
+
+- 用户要求「合并到主分支并把所有改动推送远端」：将 `save-slim`（`a0f6beb6` 测试与约定、`143ea62f` 实现：文件保存是唯一完整编码，恢复备份复用、复制已核实的干净文件或等待已绑定保存；被超越的检查点静默重试，仅实际写入失败提示）以非快进合并入 `master`。合并时 `master` 未前移，合并树与已验证分支相同：全量 JVM `testDebugUnitTest` 通过，收尾修改后定向回归 127 项通过；仪器测试仅编译，真机未验证。同时提交此前未提交的 test13／test14 构建日志（已替换本机路径为 `<仓库根>`、清理行尾空白）。推送 `origin/master`（含此前尚未推送的本地提交）；保留本地 `save-slim` 分支，不新建远端分支，不打包、安装或发布 Release。见 [记录](save-slim-2026-11-22.md)。
