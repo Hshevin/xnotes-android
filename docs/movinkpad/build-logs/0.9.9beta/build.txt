@@ -1,0 +1,99 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResValues FROM-CACHE
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:extractReleaseSupportedLocales FROM-CACHE
+> Task :app:generateReleaseLocaleConfig FROM-CACHE
+> Task :app:generateReleaseResources FROM-CACHE
+> Task :app:mergeReleaseResources FROM-CACHE
+> Task :app:packageReleaseResources FROM-CACHE
+> Task :app:parseReleaseLocalResources FROM-CACHE
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileReleaseUnitTest FROM-CACHE
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:processReleaseUnitTestManifest
+
+> Task :app:configureCMakeRelWithDebInfo[arm64-v8a]
+[CXX5304] This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+[CXX5304] This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+
+> Task :app:buildCMakeRelWithDebInfo[arm64-v8a]
+C/C++: ninja: Entering directory `<仓库根>/tmp/release-0.9.9beta/source/app/.cxx/RelWithDebInfo/2b3l5n1a/arm64-v8a'
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:470:18: warning: overflow converting case value to switch condition type (-1 to 255) [-Wswitch]
+C/C++:   470 |             case SCN_FAIL:
+C/C++:       |                  ^
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:72:18: note: expanded from macro 'SCN_FAIL'
+C/C++:    72 | #define SCN_FAIL (-1)
+C/C++:       |                  ^
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:512:22: warning: overflow converting case value to switch condition type (-1 to 255) [-Wswitch]
+C/C++:   512 |                 case SCN_FAIL:
+C/C++:       |                      ^
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:72:18: note: expanded from macro 'SCN_FAIL'
+C/C++:    72 | #define SCN_FAIL (-1)
+C/C++:       |                  ^
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:526:22: warning: overflow converting case value to switch condition type (-1 to 255) [-Wswitch]
+C/C++:   526 |                 case SCN_FAIL:
+C/C++:       |                      ^
+C/C++: <仓库根>/tmp/release-0.9.9beta/source/app/src/main/cpp/grammars/yaml/scanner.c:72:18: note: expanded from macro 'SCN_FAIL'
+C/C++:    72 | #define SCN_FAIL (-1)
+C/C++:       |                  ^
+C/C++: 3 warnings generated.
+
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseNativeLibs
+> Task :app:mergeReleaseArtProfile SKIPPED
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:stripReleaseDebugSymbols
+> Task :app:compressReleaseAssets FROM-CACHE
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:processReleaseResources
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:compileReleaseKotlin FROM-CACHE
+> Task :app:compileReleaseJavaWithJavac FROM-CACHE
+> Task :app:processReleaseJavaRes
+> Task :app:convertLinkedResourcesToBinaryRelease
+> Task :app:packageReleaseUnitTestForUnitTest
+> Task :app:generateReleaseUnitTestConfig
+> Task :app:expandReleaseArtProfileWildcards SKIPPED
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:mergeReleaseNativeDebugMetadata
+> Task :app:compileReleaseUnitTestKotlin FROM-CACHE
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:mergeReleaseJavaResource
+> Task :app:testReleaseUnitTest
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:minifyReleaseWithR8
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:compileReleaseArtProfile SKIPPED
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+BUILD SUCCESSFUL in 4m 32s
+58 actionable tasks: 44 executed, 14 from cache

@@ -6,7 +6,7 @@
 
 从 [GitHub Releases](https://github.com/Hshevin/xnotes-android/releases) 下载本 fork 的 **ARM64 APK**，在平板上打开安装。已安装本 fork 正式版的用户可用同签名的新版本直接覆盖升级。分支测试包使用独立包名，可与正式版并存，各自保存数据；旧 AI 和双窗格专用测试包不再纳入本地打包。当前分支测试包见[本地交付与验证记录](docs/movinkpad/branch-tests-2026-11-05.md)。
 
-最新本地覆盖更新：[0.9.10 / Release 99 ARM64 APK](build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk)，沿用正式包名（`com.xnotes.movinkpad`）与历史签名（`versionCode = 99`），包含上游合并、画布导图 v2、顶部 AI 按钮、分页／画布统一截图、原始报错展开及分层 JSON／可视化 AI 配置编辑器；全量 Release JVM 测试 4,271 项、R8、验签与 16 KiB 对齐通过，部分真机与真实供应商边界仍待验收，见 [Release 99 打包与验证记录](docs/movinkpad/release99-2026-11-22.md)。此前 Release 98（`0.9.8` / code 98）已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过基础验收，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md) 与 [Release 98 记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，不发布 GitHub Release。
+最新发布：[0.9.9beta](https://github.com/Hshevin/xnotes-android/releases/tag/v0.9.9beta)（测试版），可直接覆盖安装 0.9.8；安装后不能回装 0.9.8。相比 0.9.8 新增画布思维导图、顶部 AI 按钮与统一截图、上游书写功能，并让进出笔记更流畅（恢复记录只在离开应用时写一次，已保存的文档重启后从原文件打开）。见 [0.9.9beta 发布记录](docs/movinkpad/release-0.9.9beta-2026-11-23.md)。0.9.8 已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过基础验收，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。
 
 最新主线独立测试版：[master test14 ARM64 APK](build/branch-tests/master-test14/XNotes-master-bb4fd8cc-test14-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`（code 14），与正式版并存，已覆盖安装至 MovinkPad 验证顶部 AI 按钮、胶囊推理强度滑条与 DeepSeek/Qwen 开关档位；此前 test12 导图触摸检查见 [test12 记录](docs/movinkpad/master-test12-2026-11-21.md)。
 
@@ -21,7 +21,7 @@
 ## 主要功能
 
 - **手写笔记**：使用分页笔记或无限画布，混排手写、文字和图片。
-- **重开工作区（当前源码，尚未打包）**：上次的笔记或画布若已成功自动保存，重启后从工作区文件恢复，继续自动保存，关闭时无需再另存。尚未写回或没有绑定文件的内容仍作为受保护的工作副本恢复，不覆盖原件。见[冷启动恢复说明](docs/movinkpad/clean-workspace-reopen-2026-11-22.md)。
+- **重开工作区**：离开应用时记录一次打开的文档、分屏与页面位置；编辑和切换文档时不再做恢复快照。已成功自动保存的笔记或画布重启后从工作区文件打开，继续自动保存；尚未写回或没有绑定文件的内容作为受保护的工作副本恢复，不覆盖原件。见[恢复记录说明](docs/movinkpad/pause-only-recovery-2026-11-23.md)。
 - **PDF 批注**：导入 PDF，在页面上手写或标注文字，保留原始 PDF。
 - **双窗格**：并排打开笔记或 PDF，也可同时查看同一份分页文档的两个位置。无限画布专供画画与草稿，只能单独打开，不进入分屏（[说明](docs/movinkpad/canvas-sketch-only-2026-11-07.md)）。
 - **手写笔快捷键**：在「设置 → 输入 → 手写笔按键映射」先录入实体按键，再命名并分配工具、撤销或重做。工具支持按住临时使用或按一下切换；临时使用保持工具栏原有选中状态。Release 92 起可为每个录入按键另设双击动作，并调整双击间隔，也可绑定切换上一个工具、橡皮擦或平移。旧 Pro Pen 3 配置不迁移，需重新录入。Release 90 及以前仍使用原三键设置。

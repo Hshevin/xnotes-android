@@ -334,3 +334,7 @@
 
 - 用户选择选项 1「合并到 master 并打包正式版」：将 `pause-only-recovery`（`dcc81887` 测试与约定、`4e040bbe` 实现）以非快进合并入本地 `master`（`7106cf06`），版本提高至 `0.9.12` / code 101（`e6b67ecd`），构建正式 ARM64 APK，Release JVM 4,303 项通过。安装命令被权限检查拦截，未安装，待用户明确要求。不推送、不发布 GitHub Release。见 [Release 101 记录](release101-2026-11-23.md)。
 - 用户随后要求「安装」：已通过 `adb -s 6el21u1000425 install -r` 将 Release 101 覆盖安装到 MovinkPad Pro 14，设备确认 `com.xnotes.movinkpad` `0.9.12` / `versionCode=101`。不推送、不发布 GitHub Release。
+
+## 2026-11-23 发布 0.9.9beta
+
+- 用户要求「推送到远端并发布 release，不要写这是 release101，以后 release 都只写 0.9.8 这样的版本号，这一点写进项目文档；把这次发布写成 0.9.9beta」：versionName 改为 `0.9.9beta`（versionCode 102），重新构建并核验 APK，AGENTS.md 增加版本号命名规则，README 改为指向本次发布；推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta`（附 APK 与 SHA256SUMS.txt）。未安装到设备。见 [发布记录](release-0.9.9beta-2026-11-23.md)。

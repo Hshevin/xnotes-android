@@ -23,6 +23,7 @@
 - 保留用户已有修改。功能阶段或修复完成并通过相关验证后，自动本地提交与本次任务相关的改动，无需再问；不夹带无关修改。
 - 推送、新建远端分支、改 Git 配置、打包 APK、设备安装、GitHub Release 均需用户**每次**明确要求；某次授权只对该次有效，不顺延到后续任务。授权与合并的历史记入 `docs/movinkpad/authorization-history.md`，不写入本文件。
 - 合并开发分支后保留原分支，除非用户要求删除。
+- 版本只用版本号称呼，如 `0.9.8`、`0.9.9beta`：GitHub Release 的标题、标签（`v<版本号>`）、说明、APK 文件名（`XNotes-<版本号>-movinkpad-arm64.apk`）及面向用户的文档都不写「Release N」或 versionCode 序号。应用的 versionName 与发布版本号一致；versionCode 只作覆盖升级用的内部递增值，在核验记录中列出即可。
 
 ### 安装身份
 
