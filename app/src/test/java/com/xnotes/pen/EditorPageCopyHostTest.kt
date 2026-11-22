@@ -74,6 +74,8 @@ internal class EditorPageCopyFixture(base:Context,val root:File,private val name
     @Volatile var beforeTargetRead:(()->Unit)?=null
     @Volatile var beforeTargetWrite:(()->Unit)?=null
     @Volatile var afterTargetWrite:(()->Unit)?=null
+    /** Fail every write to the source document, to model a file autosave that does not land. */
+    @Volatile var failSourceWrites=false
     private fun file(id:String)=when(id.substringAfterLast('/')) {"source"->source;"target"->target;"retry"->retry;"root"->root;else->error("Unknown document: $id")}
     val provider=object:DocumentsProvider() {
         override fun onCreate()=true
@@ -150,7 +152,7 @@ internal class EditorPageCopyFixture(base:Context,val root:File,private val name
                 if(documentId.substringAfterLast('/')=="target") {if(denyTargetRead) throw SecurityException("Target read permission lost");beforeTargetRead?.invoke()}
                 return document.inputStream()
             }
-            override fun write(source:File) {if(documentId.substringAfterLast('/')=="target") beforeTargetWrite?.invoke();writes.incrementAndGet();source.copyTo(document,overwrite=true);if(documentId.substringAfterLast('/')=="target") afterTargetWrite?.invoke()}
+            override fun write(source:File) {if(failSourceWrites && documentId.substringAfterLast('/')=="source") throw java.io.IOException("Source write refused");if(documentId.substringAfterLast('/')=="target") beforeTargetWrite?.invoke();writes.incrementAndGet();source.copyTo(document,overwrite=true);if(documentId.substringAfterLast('/')=="target") afterTargetWrite?.invoke()}
         }
     })
     lateinit var editor:Editor

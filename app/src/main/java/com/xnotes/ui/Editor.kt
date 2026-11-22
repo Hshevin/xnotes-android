@@ -593,6 +593,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     internal var presentationVersion by mutableStateOf(0L)
         private set
+    internal var presentationContentVersion by mutableStateOf(0L)
+        private set
+    internal val saveStats=SaveStats()
+    internal var checkpointBeforeWriteHook:(suspend ()->Unit)?=null
     private val presentationObservationReady=true
     /** Everything a cold presentation publishes for this pane; a change of any field is a new version. */
     private data class PresentationSnapshot(
@@ -617,6 +621,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if(!presentationObservationReady) return
         val snapshot=presentationSnapshot()
         if(snapshot!=lastPresentationSnapshot) {
+            if(lastPresentationSnapshot?.copy(note=snapshot.note,canvas=snapshot.canvas,viewportW=snapshot.viewportW,viewportH=snapshot.viewportH)!=snapshot)
+                presentationContentVersion++
             lastPresentationSnapshot=snapshot;presentationVersion=Math.incrementExact(presentationVersion)
         }
     }
@@ -986,11 +992,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     private var canvasSourceObservation:CanvasSourceObservation?=null
     private var canvasSourceIncomplete=false
+    @Volatile private var rejectedBackupSource:com.xnotes.storage.NativeSourceVersion?=null
+    private var failedSaveRevision:Pair<Any,Long>?=null
     private fun cleanNoteSourceSha():String? {
         if(!noteOpen || canvasOpen || missingDocument!=null || documentOwner!==this || requiresIndependentSave) return null
         val doc=state.document
         val uri=autosaveUri ?: return null
         val observed=noteSourceObservation ?: return null
+        if(observed.version===rejectedBackupSource) return null
         return observed.version.sha256.takeIf {uri==doc.path && !doc.dirty && incompleteNoteModel.get()!==doc &&
             observed.matches(this) && !AudioRecovery.needsBodyEvidence(doc.snapshotOwnerToken) && inDocumentWorkspace(uri)}
     }
@@ -999,6 +1008,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val doc=infiniteOrNull?.document ?: return null
         val uri=canvasAutosaveUri ?: return null
         val observed=canvasSourceObservation ?: return null
+        if(observed.version===rejectedBackupSource) return null
         return observed.version.sha256.takeIf {uri==doc.path && !doc.dirty && !canvasSourceIncomplete &&
             observed.matches(this) && !AudioRecovery.needsBodyEvidence(doc.snapshotOwnerToken) && inDocumentWorkspace(uri)}
     }
@@ -1817,7 +1827,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             runCatching {
                 val tmp = java.io.File.createTempFile("save", ".xcanvas", saveTmpDir)
                 try {
-                    java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }
+                    saveStats.timed("canvas file encode",saveStats.fileEncodes) {java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }}
                     val evidence=recordingEvidence(tmp,doc.snapshotOwnerToken)
                     val version=if(expected==null) notebookStorage.publishNoteObserved(uri,tmp,DocumentKind.CANVAS,doc.displayName ?: doc.title)
                         else notebookStorage.publishExpected(uri,tmp,expected,doc.displayName ?: doc.title)
@@ -1903,6 +1913,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if (canvasOpen && infiniteOrNull?.document === doc) message = appContext.getString(R.string.err_save_note)
             } finally {
                 if(!success && wasDirty) doc.dirty=true
+                if(canvasOpen && infiniteOrNull?.document===doc) {
+                    failedSaveRevision=if(success) null else doc.snapshotOwnerToken to doc.bodyRevision
+                    presentationVersion++
+                }
                 if(canvasOpen && infiniteOrNull?.document===doc) savingNote=false
                 contentTransactionChanged()
                 if(coroutineContext[kotlinx.coroutines.Job]?.isActive!=false) onDone?.invoke(success)
@@ -4211,11 +4225,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private sealed interface WorkingCapture {
         val cleanDiskSource:Boolean get()=false
+        val source:com.xnotes.storage.NativeSourceVersion? get()=null
         data class Note(val model: Document, val revision: Long, val body: Document?,
-            val metadata: com.xnotes.platform.SessionStore.Metadata,override val cleanDiskSource:Boolean): WorkingCapture
+            val metadata: com.xnotes.platform.SessionStore.Metadata,override val cleanDiskSource:Boolean,
+            override val source:com.xnotes.storage.NativeSourceVersion?): WorkingCapture
         data class Canvas(val model: com.xnotes.core.infinite.InfiniteDocument,
             val revision:Long,val body: com.xnotes.core.infinite.InfiniteDocument?,
-            val metadata: com.xnotes.platform.CanvasSessionStore.Metadata,override val cleanDiskSource:Boolean): WorkingCapture
+            val metadata: com.xnotes.platform.CanvasSessionStore.Metadata,override val cleanDiskSource:Boolean,
+            override val source:com.xnotes.storage.NativeSourceVersion?): WorkingCapture
         data object Closed: WorkingCapture
     }
 
@@ -4258,23 +4275,44 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Main only: a view-only note refresh carries no live body to the writer. */
+    private fun waitingForFileSave(forceBody:Boolean=false):Boolean {
+        val owner=documentOwner
+        if(owner.requiresIndependentSave) return false
+        if(canvasOpen) {
+            val doc=infinite.document
+            if(!forceBody && lastCanvasSessionBody===doc && lastCanvasSessionBodyRevision==doc.bodyRevision && lastCanvasSessionBodySha!=null) return false
+            return doc.dirty && doc.path!=null && owner.canvasAutosaveUri==doc.path && owner.failedSaveRevision!=(doc.snapshotOwnerToken to doc.bodyRevision) &&
+                (owner.canvasDebounceJob?.isActive==true || owner.canvasWriteJob?.isActive==true)
+        }
+        val doc=state.document
+        if(!forceBody && lastSessionBody===doc && lastSessionBodyRevision==doc.bodyRevision && lastSessionBodySha!=null) return false
+        return doc.dirty && doc.path!=null && owner.autosaveUri==doc.path && owner.failedSaveRevision!=(doc.snapshotOwnerToken to doc.bodyRevision) &&
+            (owner.noteDebounceJob?.isActive==true || owner.noteWriteJob?.isActive==true)
+    }
     private fun captureWorkingSession(forceBody: Boolean = false): WorkingCapture? {
         if (!noteOpen) return WorkingCapture.Closed
+        if(waitingForFileSave(forceBody)) return null
         val owner = documentOwner
         if (canvasOpen) {
             val canvas = infiniteOrNull ?: return null
             if (owner.canvasWriteJob?.isActive == true || canvas.hasPendingContentTransaction || stylusInContact) return null
             val doc = canvas.document
-            val body=if(forceBody || lastCanvasSessionBody!==doc || lastCanvasSessionBodyRevision!=doc.bodyRevision || lastCanvasSessionBodySha==null)
+            val needed=forceBody || lastCanvasSessionBody!==doc || lastCanvasSessionBodyRevision!=doc.bodyRevision || lastCanvasSessionBodySha==null
+            val clean=cleanCanvasSourceSha()!=null
+            val source=canvasSourceObservation?.version.takeIf {needed && clean}
+            val body=if(needed && source==null)
                 doc.snapshotForWrite(fixedItems=true).also {it.lastView=canvas.viewport.toWaypoint()} else null
             return WorkingCapture.Canvas(doc,doc.bodyRevision,body,
-                com.xnotes.platform.CanvasSessionStore.Metadata(doc.path, doc.displayName, doc.dirty),cleanCanvasSourceSha()!=null)
+                com.xnotes.platform.CanvasSessionStore.Metadata(doc.path, doc.displayName, doc.dirty),clean,source)
         }
         val doc = state.document
         if (owner.noteWriteJob?.isActive == true || noteTransactionsPending(doc)) return null
-        val body = if (forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision)
+        val needed=forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision || lastSessionBodySha==null
+        val clean=cleanNoteSourceSha()!=null
+        val source=noteSourceObservation?.version.takeIf {needed && clean && doc.pdfFile==null}
+        val body = if (needed && source==null)
             doc.fixedWriteSnapshot() else null
-        return WorkingCapture.Note(doc, doc.bodyRevision, body, noteSessionMetadata(doc, checkpointNoteView()),cleanNoteSourceSha()!=null)
+        return WorkingCapture.Note(doc, doc.bodyRevision, body, noteSessionMetadata(doc, checkpointNoteView()),clean,source)
     }
 
     private fun sameWorkingModel(capture: WorkingCapture): Boolean = when (capture) {
@@ -4291,10 +4329,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             com.xnotes.platform.LegacyAbsentResult.ProtectedRecovery->return com.xnotes.platform.LegacyMutationResult.ProtectedRecovery
             is com.xnotes.platform.LegacyAbsentResult.Failed->return com.xnotes.platform.LegacyMutationResult.Failed(emptyList(),observed.cause)
         }
-        val prepared=when(capture) {
-            is WorkingCapture.Note->session.prepareMutation(capture.body,capture.metadata)
-            is WorkingCapture.Canvas->canvasSession.prepareMutation(capture.body,capture.metadata)
-            WorkingCapture.Closed->com.xnotes.platform.PreparedLegacySessionMutation.prepareClosed(sessionDir)
+        val source=capture.source
+        val prepared=if(source!=null) {
+            val path=when(capture) {is WorkingCapture.Canvas->capture.metadata.path;is WorkingCapture.Note->capture.metadata.path;WorkingCapture.Closed->null}
+            val opened=try {notebookStorage.openSource(requireNotNull(path),source.kind)} catch(error:com.xnotes.storage.ReferenceContractViolation) {
+                rejectedBackupSource=source;return com.xnotes.platform.LegacyMutationResult.Changed
+            }
+            opened.use {
+                if(it.version.documentId!=source.documentId || it.version.sha256!=source.sha256) {
+                    rejectedBackupSource=source;return com.xnotes.platform.LegacyMutationResult.Changed
+                }
+                saveStats.timed("working copy",saveStats.workingFromSource) {when(capture) {
+                    is WorkingCapture.Canvas->com.xnotes.platform.PreparedLegacySessionMutation.prepareCanvasFromEncoded(sessionDir,it.file,source.sha256,capture.model.snapshotOwnerToken,source.documentId,capture.metadata)
+                    is WorkingCapture.Note->com.xnotes.platform.PreparedLegacySessionMutation.prepareNoteFromEncoded(sessionDir,it.file,source.sha256,capture.model.snapshotOwnerToken,source.documentId,capture.metadata)
+                    WorkingCapture.Closed->error("Closed capture has no source")
+                }}
+            }
+        } else {
+            val encoded=capture is WorkingCapture.Note && capture.body!=null || capture is WorkingCapture.Canvas && capture.body!=null
+            saveStats.timed(if(encoded) "working encode" else "working metadata",if(encoded) saveStats.workingEncodes else saveStats.workingMetadataOnly) {
+                when(capture) {
+                    is WorkingCapture.Note->session.prepareMutation(capture.body,capture.metadata)
+                    is WorkingCapture.Canvas->canvasSession.prepareMutation(capture.body,capture.metadata)
+                    WorkingCapture.Closed->com.xnotes.platform.PreparedLegacySessionMutation.prepareClosed(sessionDir)
+                }
+            }
         }
         return prepared.use {mutation->mutation.trackDiskReopen(capture.cleanDiskSource);access.publish(observation,mutation).also {result->
             if(result is com.xnotes.platform.LegacyMutationResult.Published) {
@@ -4331,6 +4390,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
                 if (retry != null) { actual = retry; result = writeWorkingCapture(actual) }
             }
+            if(result is com.xnotes.platform.LegacyMutationResult.Published) {
+                val publication=result.publication
+                publication.bodyFile?.let {file->
+                    val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(file)
+                    val kind=if(actual is WorkingCapture.Canvas) DocumentKind.CANVAS else DocumentKind.NOTE
+                    if(info.kind!=kind || info.header.identity?.documentId!=publication.documentId ||
+                        com.xnotes.format.BundleMigration.hash(file)!=publication.bodySha256) result=com.xnotes.platform.LegacyMutationResult.Changed
+                }
+            }
             actual to result
         } ?: return
         sessionPending = false
@@ -4353,7 +4421,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                                 lastSessionBodySha=null;lastCanvasSessionBody=null;lastCanvasSessionBodySha=null
                             }
                             if (sequence == sessionSaveSequence) {
-                                if (result == com.xnotes.platform.LegacyMutationResult.NeedsBody) sessionPending = true
+                                if (result == com.xnotes.platform.LegacyMutationResult.NeedsBody || result == com.xnotes.platform.LegacyMutationResult.Changed) sessionPending = true
                                 else if (result !is com.xnotes.platform.LegacyMutationResult.Published)
                                     message = appContext.getString(if(result==com.xnotes.platform.LegacyMutationResult.ProtectedRecovery)
                                         R.string.recovery_failed else R.string.err_save_recovery_session)
@@ -4541,8 +4609,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return checkpointWorkingSession(stillCurrent)
     }
     /** Persists this physical slot's actual displayed model, including a visible borrowed view. */
-    private suspend fun checkpointWorkingSession(stillCurrent:()->Boolean):WorkingCheckpoint? {
+    private suspend fun checkpointWorkingSession(stillCurrent:()->Boolean,onIssue:(NativeCheckpointResult)->Unit={}):WorkingCheckpoint? {
         if(!noteOpen || missingDocument!=null || !sessionOwner.isCurrent() || !stillCurrent()) return null
+        if(waitingForFileSave()) {onIssue(NativeCheckpointResult.Deferred);return null}
         val request=Any().also {workingCheckpointRequest=it}
         val owner=documentOwner;val canvas=canvasOpen
         val model:Any=if(canvas) infinite.document else state.document
@@ -4577,15 +4646,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             (if(canvas) checkpointCanvasView()==canvasView else checkpointNoteView()==noteView)
         for(forceBody in listOf(false,true)) {
             if(!stable()) return null
-            val capture=if(canvas) {
-                val doc=model as com.xnotes.core.infinite.InfiniteDocument
-                WorkingCapture.Canvas(doc,revision,if(oldSha==null || forceBody) doc.snapshotForWrite(fixedItems=true).also {it.lastView=infinite.viewport.toWaypoint()} else null,
-                    com.xnotes.platform.CanvasSessionStore.Metadata(path,doc.displayName,doc.dirty),cleanSha!=null)
-            } else {
-                val doc=model as Document
-                WorkingCapture.Note(doc,revision,if(oldSha==null || forceBody) doc.fixedWriteSnapshot() else null,
-                    noteSessionMetadata(doc,requireNotNull(noteView)),cleanSha!=null)
-            }
+            if(waitingForFileSave(forceBody)) {onIssue(NativeCheckpointResult.Deferred);return null}
+            val capture=captureWorkingSession(forceBody) ?: return null
+            checkpointBeforeWriteHook?.invoke()
+            if(!stable()) return null
             sessionSaveSequence++;sessionPending=false
             val access=com.xnotes.platform.NativeWorkingSession.legacyAccess(sessionDir)
             val bodyFile=java.io.File(sessionDir,if(canvas) "canvas.xcanvas" else "document.xnote")
@@ -4605,10 +4669,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 is com.xnotes.platform.LegacySessionQueue.Outcome.Success->outcome.value
                 is com.xnotes.platform.LegacySessionQueue.Outcome.Failure->{
                     if(outcome.error is java.util.concurrent.CancellationException) throw outcome.error
+                    onIssue(NativeCheckpointResult.Failed(outcome.error))
                     return null
                 }
             }
             if(read.result==com.xnotes.platform.LegacyMutationResult.NeedsBody && !forceBody) continue
+            if(read.result is com.xnotes.platform.LegacyMutationResult.Failed) onIssue(NativeCheckpointResult.Failed(read.result.cause))
+            if(read.result==com.xnotes.platform.LegacyMutationResult.ProtectedRecovery) message=appContext.getString(R.string.recovery_failed)
             if(read.result !is com.xnotes.platform.LegacyMutationResult.Published || read.sha==null || read.absent==null) return null
             if(basic()) {
                 if(canvas) {lastCanvasSessionBody=model as com.xnotes.core.infinite.InfiniteDocument;lastCanvasSessionBodyRevision=revision;lastCanvasSessionBodySha=read.sha}
@@ -4623,25 +4690,40 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         return null
     }
-    internal suspend fun prepareNativePresentationCheckpoint(homePanes:Set<Pane>,stillCurrent:()->Boolean):PreparedNativePresentationCheckpoint? {
+    internal suspend fun prepareNativePresentationCheckpoint(homePanes:Set<Pane>,stillCurrent:()->Boolean):PreparedNativePresentationCheckpoint? =
+        (prepareNativePresentationCheckpointResult(homePanes,stillCurrent) as? NativeCheckpointResult.Ready)?.checkpoint
+
+    internal suspend fun prepareNativePresentationCheckpointResult(homePanes:Set<Pane>,stillCurrent:()->Boolean):NativeCheckpointResult {
         val root=sibling?.takeIf {it.secondary===this} ?: this
-        if(root!==this) return root.prepareNativePresentationCheckpoint(homePanes,stillCurrent)
+        if(root!==this) return root.prepareNativePresentationCheckpointResult(homePanes,stillCurrent)
+        val start=System.nanoTime()
+        fun recorded(result:NativeCheckpointResult,owner:Editor=this):NativeCheckpointResult {
+            val count=when(result) {
+                is NativeCheckpointResult.Ready->null
+                NativeCheckpointResult.Deferred->owner.saveStats.checkpointDeferred.incrementAndGet()
+                NativeCheckpointResult.Superseded->owner.saveStats.checkpointSuperseded.incrementAndGet()
+                is NativeCheckpointResult.Failed->owner.saveStats.checkpointFailed.incrementAndGet()
+            }
+            android.util.Log.i("XNotesSave","checkpoint ${result.javaClass.simpleName} #${count ?: "-"} ${msSince(start)}ms")
+            return result
+        }
         val panes=listOfNotNull(this,secondary);val identity=captureNativePresentationIdentity()
         fun current()=stillCurrent() && matchesNativePresentationIdentity(identity)
         val slots=ArrayList<ColdNativeSlot>();val proofs=ArrayList<WorkingCheckpoint>()
         for(ed in panes) {
-            if(!current()) return null
+            if(!current()) return recorded(NativeCheckpointResult.Superseded,ed)
             if(ed.pane in homePanes) {slots+=ColdNativeSlot.Home(ed.pane);continue}
             if(!ed.noteOpen || ed.missingDocument!=null) continue
             val shared=ed.documentOwner.takeIf {it!==ed && it.pane !in homePanes}
             if(shared!=null) {slots+=ColdNativeSlot.Shared(ed.pane,shared.pane,ed.checkpointNoteView());continue}
-            val checkpoint=ed.checkpointWorkingSession(::current) ?: return null
+            var issue:NativeCheckpointResult=NativeCheckpointResult.Superseded
+            val checkpoint=ed.checkpointWorkingSession(::current) {issue=it} ?: return recorded(issue,ed.documentOwner)
             proofs+=checkpoint
             slots+=if(ed.canvasOpen) ColdNativeSlot.Canvas(ed.pane,checkpoint.hint,checkpoint.canvasView,checkpoint.reopenFromFile)
                 else ColdNativeSlot.Note(ed.pane,checkpoint.hint,checkpoint.noteView,checkpoint.reopenFromFile)
         }
-        if(slots.none {it is ColdNativeSlot.Note || it is ColdNativeSlot.Canvas}) return null
-        if(slots.any {it is ColdNativeSlot.Canvas} && slots.size!=1) return null
+        if(slots.none {it is ColdNativeSlot.Note || it is ColdNativeSlot.Canvas}) return recorded(NativeCheckpointResult.Superseded)
+        if(slots.any {it is ColdNativeSlot.Canvas} && slots.size!=1) return recorded(NativeCheckpointResult.Superseded)
         val focus=focusedPane.takeIf {p->slots.any {it.pane==p}} ?: slots.first().pane
         val value=LastPresentation.Native(slots,ColdNativeLayout(focus,splitRatio,splitSideBySide,splitReversed))
         fun proof()=current() && proofs.all {it.current()} && slots.filterIsInstance<ColdNativeSlot.Shared>().all {shared->
@@ -4649,7 +4731,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val owner=if(shared.ownerPane==Pane.PRIMARY) this else secondary
             borrower!=null && owner!=null && borrower.sharedOwner===owner && borrower.state.document===owner.state.document && borrower.checkpointNoteView()==shared.view
         }
-        return if(proof()) PreparedNativePresentationCheckpoint(value,::proof) else null
+        return recorded(if(proof()) NativeCheckpointResult.Ready(PreparedNativePresentationCheckpoint(value,::proof)) else NativeCheckpointResult.Superseded)
     }
     internal suspend fun prepareColdNativePresentation(value:LastPresentation.Native,stillCurrent:()->Boolean):PreparedColdNativePresentation? {
         val root=sibling?.takeIf {it.secondary===this} ?: this
@@ -8032,7 +8114,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             try {
                 val encodeStart = System.nanoTime()
                 val timing = com.xnotes.format.DocumentCodec.WriteTiming()
-                java.io.FileOutputStream(tmp).use { if(embedded) codec.write(doc,it,timing=timing,embedPdf=true) else writeLocalNote(doc,it,timing=timing) }
+                saveStats.timed("note file encode",saveStats.fileEncodes) {java.io.FileOutputStream(tmp).use { if(embedded) codec.write(doc,it,timing=timing,embedPdf=true) else writeLocalNote(doc,it,timing=timing) }}
                 val evidence=recordingEvidence(tmp,doc.snapshotOwnerToken)
                 val copyStart = System.nanoTime()
                 val version=if(expected==null) notebookStorage.publishNoteObserved(uri,tmp,DocumentKind.NOTE,doc.displayName ?: doc.title)
@@ -8156,6 +8238,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     if(state.document===doc) dirty=true
                 }
                 if(state.document===doc && !canvasOpen) savingNote=false
+                if(state.document===doc && !canvasOpen) {
+                    failedSaveRevision=if(success) null else doc.snapshotOwnerToken to doc.bodyRevision
+                    presentationVersion++
+                }
                 state.autosaveStatus=if(success) "done" else "failed"
                 state.lastSaveTotalMs=msSince(startNs)
                 contentTransactionChanged()
