@@ -306,3 +306,7 @@
 ## 2026-11-22 导图 v2 test2 打包与设备安装
 
 - 用户连接 MovinkPad 后要求「开始调试吧，我连上了」。源码 `c448605d`（`master`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 2，覆盖安装 test1；经用户同意在设备 `Download/XNotes-mapv2-test` 新建测试文件夹存放测试画布与笔记。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test2-2026-11-22.md)。
+
+## 2026-11-22 导图 v2 test3 打包、设备安装与仪器测试
+
+- 用户要求「来吧，开始调试，你知道要测试哪些功能吧」，即复验 test2 发现 2、3、5 的修复。源码 `3b347dbd`（`mindmap-v2`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 3，`adb install -r` 覆盖 test2；另安装同包测试 APK（`.mindmapv2.test`）并以 `am instrument` 运行单个存储仪器测试，不卸载应用、不清数据。测试文件放在 `Download/XNotes-mapv2-test`，另新建 `Download/XNotes-mapv2-alt` 用于重现。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test3-2026-11-22.md)。

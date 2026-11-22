@@ -1,6 +1,6 @@
 package com.xnotes.storage
 
-import android.system.Os
+import android.net.Uri
 import androidx.core.content.FileProvider
 import com.xnotes.pen.PenTestRunner
 import org.junit.Assert.*
@@ -15,13 +15,14 @@ class AndroidSameFileProbeTest {
         check(dir.mkdirs())
         try {
             val source = File(dir, "original.xcanvas").apply { writeText("same bytes") }
-            val alias = File(dir, "alias.xcanvas")
-            Os.link(source.path, alias.path)
             val copy = source.copyTo(File(dir, "copy.xcanvas"))
             fun uri(file: File) = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file).toString()
             val probe = AndroidSameFileProbe(context.contentResolver)
-            assertNotEquals(uri(source), uri(alias))
-            assertEquals(true, probe.sameFile(uri(source), uri(alias)))
+            // App processes may not create hard links on Android 15 (SELinux EACCES), so the
+            // second location is the same inode reached through a different URI scheme.
+            val alias = Uri.fromFile(source).toString()
+            assertNotEquals(uri(source), alias)
+            assertEquals(true, probe.sameFile(uri(source), alias))
             assertArrayEquals(source.readBytes(), copy.readBytes())
             assertEquals(false, probe.sameFile(uri(source), uri(copy)))
             assertNull(probe.sameFile(uri(source), uri(File(dir, "missing.xcanvas"))))
