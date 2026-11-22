@@ -338,3 +338,4 @@
 ## 2026-11-23 发布 0.9.9beta
 
 - 用户要求「推送到远端并发布 release，不要写这是 release101，以后 release 都只写 0.9.8 这样的版本号，这一点写进项目文档；把这次发布写成 0.9.9beta」：versionName 改为 `0.9.9beta`（versionCode 102），重新构建并核验 APK，AGENTS.md 增加版本号命名规则，README 改为指向本次发布；推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta`（附 APK 与 SHA256SUMS.txt）。未安装到设备。见 [发布记录](release-0.9.9beta-2026-11-23.md)。
+- 用户随后要求安装包文件名去掉「movinkpad」：发布附件改为 `XNotes-0.9.9beta-arm64.apk`（字节不变）并更新 SHA256SUMS.txt 与发布说明；AGENTS.md 的文件名规则同步。包名不变。

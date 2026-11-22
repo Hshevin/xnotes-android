@@ -13,8 +13,10 @@
 
 - 隔离工作树 `tmp/release-0.9.9beta/source`，`--project-cache-dir <仓库根>/tmp/release-0.9.9beta/gradle-arm64`；命令 `:app:testReleaseUnitTest :app:assembleRelease`（离线、4 workers，工作树内未跟踪 `keystore.properties` 使用历史签名）。
 - 日志：[构建](build-logs/0.9.9beta/build.txt)、[APK 核验](build-logs/0.9.9beta/verification.txt)、[SHA-256](build-logs/0.9.9beta/SHA256SUMS.txt)。
-- APK：`build/xnotes/XNotes-0.9.9beta-movinkpad-arm64.apk`，29,154,335 字节，SHA-256 `3ab1eb370f1e65fcbc81000959b18251013a4d0a6fac91bf59e5100621d90bdf`；证书 SHA-256 `a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451`。
+- APK：`build/xnotes/XNotes-0.9.9beta-arm64.apk`，29,154,335 字节，SHA-256 `3ab1eb370f1e65fcbc81000959b18251013a4d0a6fac91bf59e5100621d90bdf`；证书 SHA-256 `a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451`。
 
 ## 发布约定
 
 自本版起，发布标题、标签、说明与 APK 文件名只用版本号（规则见 AGENTS.md「Git、打包与发布」）。
+
+用户随后要求安装包文件名去掉「movinkpad」（应用不再只为 MovinkPad 编写）：发布附件改名为 `XNotes-0.9.9beta-arm64.apk`，字节不变，SHA-256 相同。包名 `com.xnotes.movinkpad` 保持不变，否则无法覆盖升级、原有数据也不会带过去。
