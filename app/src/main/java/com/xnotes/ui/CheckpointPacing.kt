@@ -21,6 +21,7 @@ internal class SaveStats {
     val workingEncodes=AtomicInteger()
     val workingFromSource=AtomicInteger()
     val workingMetadataOnly=AtomicInteger()
+    val checkpointStarted=AtomicInteger()
     val checkpointDeferred=AtomicInteger()
     val checkpointSuperseded=AtomicInteger()
     val checkpointFailed=AtomicInteger()

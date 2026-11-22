@@ -1,7 +1,7 @@
 # 恢复记录只在离开应用时写入（2026-11-23）
 
 用户要求：Release 99 起进出普通 XNote 笔记都卡，Release 98 流畅。自动保存间隔很短，冷恢复用处不大；选择回到 Release 98 的模式：编辑和离开文档时不再做恢复快照，只在应用进入后台（`onPause`）时记录一次；已保存的文档从原文件重开，未保存的修改（工作区外文档、保存失败）才写恢复副本。用户确认分屏布局与页面位置仍像 Release 98 那样在离开应用时记录并恢复。由主代理规划并编写测试，gpt-6.2-astra 编写实际代码。
-状态：讨论完毕，测试已写（未实现，预期 RED）。实现后需 JVM／Robolectric 与 MovinkPad Pro 14 真机验证。
+状态：已实现（gpt-6.2-astra）；已验证全量 JVM／Robolectric `testDebugUnitTest` 4,303 项通过，`compileDebugAndroidTestKotlin` 通过；仪器测试未在设备上运行；MovinkPad Pro 14 真机流畅度待验证。
 本轮边界：分支 `pause-only-recovery`（工作树 `tmp/wt-pause-only`）；不打包、不安装、不推送、不发布。
 
 ## 原因（gpt-6.2-astra 代码分析，见对话记录）
@@ -55,3 +55,11 @@ Release 99 起：
 ## 验证边界
 
 JVM／Robolectric 只证明逻辑；进出笔记是否恢复 Release 98 的流畅度须在 MovinkPad Pro 14 / Android 15 上实测（需用户另行授权打包与安装）。
+
+## 实施记录
+
+- 删除 `ColdPresentationCoordinator.observe`（及 Superseded 重试）与 `EditorActivity` 的调用、`preparePresentationParking`；`prepareDefaultDeparture` 只准备 Home 凭据。
+- 干净文档的检查点改用 `PreparedLegacySessionMutation.prepareNoteDiskReopen`／`prepareCanvasDiskReopen`：删除槽位正文、写元数据、`trackDiskReopen(true)`，不做正文核验。删除 `prepare*FromEncoded` 与 `rejectedBackupSource`。
+- 文件保存失败时 `requestWorkingSession()`；`SaveStats.checkpointStarted`。
+- 实现方未改动、未删除任何现有测试。主代理修正了自己测试的时钟：`editingAndPausingBetweenStrokesNeverStartsACheckpoint` 改为让持有主 Looper 的测试线程推进 Robolectric 虚拟时钟 1.3 s，断言不变。
+- 已知限制：离开应用时的检查点若被新状态超越（`Superseded`）不再自动重试，该次不更新记录，沿用上一份；与 Release 98 一样只在下次离开应用时补记。

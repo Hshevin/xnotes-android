@@ -55,6 +55,9 @@ class SaveSlimHostTest {
     private fun stats(editor: Editor) = editor.saveStats
     private fun recoveryError(f: EditorPageCopyFixture) = f.context.getString(com.xnotes.R.string.err_save_recovery_session)
 
+    /** Set from a scenario to let the looper-owning test thread advance Robolectric's main clock. */
+    @Volatile private var advanceMainClockMs = 0L
+
     private fun runScenario(workspace: Boolean = true, block: suspend (EditorPageCopyFixture) -> Unit) {
         initializeParkingEglHandles()
         val base = RuntimeEnvironment.getApplication()
@@ -110,6 +113,8 @@ class SaveSlimHostTest {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30L)
             while (!job.isCompleted && System.nanoTime() < deadline) {
                 androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                val advance = advanceMainClockMs
+                if (advance > 0L) { advanceMainClockMs = 0L; shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(advance)) }
                 shadowOf(Looper.getMainLooper()).idle()
                 Thread.yield()
             }
@@ -503,7 +508,8 @@ class SaveSlimHostTest {
             f.editor.view.layout(0, 0, 1000, 800)
             f.addStroke(60.0, recordHistory = true); armNoteSave(f.editor)
         }
-        // Let the 1.2 s autosave run and settle with no Activity pause.
+        // Let the 1.2 s autosave debounce elapse on Robolectric's virtual clock, with no Activity pause.
+        advanceMainClockMs = 1300L
         awaitTrue("The autosave must land") { f.writes.get() == 1 && withContext(Dispatchers.Main) { !f.editor.state.document.dirty } }
         sessionOwner(f.editor).awaitAccepted()
         assertEquals(0, stats(f.editor).checkpointStarted.get())
