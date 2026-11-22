@@ -35,9 +35,10 @@ import org.robolectric.annotation.Config
 /**
  * Save simplification (docs/movinkpad/save-slim-2026-11-22.md).
  *
- * Only a file save encodes a document. The recovery working copy is either reused (same model and
- * revision), copied from the verified clean file, deferred to a pending bound file save, or — only
- * when none of those apply — encoded. A checkpoint overtaken by newer state retries silently; only
+ * Only a file save encodes a document. A saved (clean, workspace-bound) document keeps no recovery
+ * working copy at all: the pause record reopens it from its file (docs/movinkpad/pause-only-recovery-2026-11-23.md).
+ * Otherwise the working copy is reused (same model and revision), deferred to a pending bound file
+ * save, or encoded. A checkpoint overtaken by newer state retries silently; only
  * an actual write failure reports "Could not update the recovery session".
  */
 @RunWith(RobolectricTestRunner::class)
@@ -171,7 +172,7 @@ class SaveSlimHostTest {
 
     // --- exit: the file save is the only encode ---
 
-    @Test fun pausingADirtyWorkspaceCanvasEncodesOnceAndCopiesTheSavedFileIntoTheBackup() = runScenario { f ->
+    @Test fun pausingADirtyWorkspaceCanvasEncodesOnceAndKeepsNoBackupOnceSaved() = runScenario { f ->
         seedCanvas(f)
         withContext(Dispatchers.Main) {
             assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
@@ -187,9 +188,8 @@ class SaveSlimHostTest {
         assertEquals(1, f.writes.get())
         assertEquals("Only the file save encodes", 1, stats(f.editor).fileEncodes.get())
         assertEquals("The backup must not be re-encoded", 0, stats(f.editor).workingEncodes.get())
-        assertEquals(1, stats(f.editor).workingFromSource.get())
-        assertArrayEquals("The kept backup is the saved file, byte for byte",
-            f.source.readBytes(), File(slotDir(f.editor), "canvas.xcanvas").readBytes())
+        assertEquals(0, stats(f.editor).workingFromSource.get())
+        assertFalse("A saved canvas keeps no recovery copy; its file is the copy", File(slotDir(f.editor), "canvas.xcanvas").exists())
         assertTrue((marker(f).slots.single() as ColdNativeSlot.Canvas).reopenFromFile)
 
         restartEditor(f)
@@ -205,7 +205,7 @@ class SaveSlimHostTest {
         }
     }
 
-    @Test fun pausingADirtyWorkspaceNoteEncodesOnceAndCopiesTheSavedFileIntoTheBackup() = runScenario { f ->
+    @Test fun pausingADirtyWorkspaceNoteEncodesOnceAndKeepsNoBackupOnceSaved() = runScenario { f ->
         withContext(Dispatchers.IO) { f.seed() }
         withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
@@ -221,8 +221,8 @@ class SaveSlimHostTest {
         assertEquals(1, f.writes.get())
         assertEquals(1, stats(f.editor).fileEncodes.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertEquals(1, stats(f.editor).workingFromSource.get())
-        assertArrayEquals(f.source.readBytes(), File(slotDir(f.editor), "document.xnote").readBytes())
+        assertEquals(0, stats(f.editor).workingFromSource.get())
+        assertFalse(File(slotDir(f.editor), "document.xnote").exists())
         assertTrue((marker(f).slots.single() as ColdNativeSlot.Note).reopenFromFile)
 
         restartEditor(f)
@@ -236,23 +236,7 @@ class SaveSlimHostTest {
         }
     }
 
-    @Test fun closingACanvasToHomeEncodesOnlyForTheFileSave() = runScenario { f ->
-        seedCanvas(f)
-        withContext(Dispatchers.Main) {
-            assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
-            addCanvasStroke(f.editor, 80.0); armCanvasSave(f.editor)
-            // The detach path: settle the file, then the departure checkpoint.
-            assertTrue(f.editor.flushSplitDocument())
-            val result = f.editor.prepareNativePresentationCheckpointResult(emptySet()) { true }
-            assertTrue("Departure checkpoint must be ready: $result", result is NativeCheckpointResult.Ready)
-            assertTrue(((result as NativeCheckpointResult.Ready).checkpoint.value.slots.single() as ColdNativeSlot.Canvas).reopenFromFile)
-        }
-        assertEquals(1, stats(f.editor).fileEncodes.get())
-        assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertEquals(1, stats(f.editor).workingFromSource.get())
-    }
-
-    @Test fun aFreshlyOpenedCleanCanvasBacksUpByCopyNotByEncoding() = runScenario { f ->
+    @Test fun aFreshlyOpenedCleanCanvasNeedsNoBackupAtAll() = runScenario { f ->
         seedCanvas(f)
         withContext(Dispatchers.Main) {
             assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
@@ -261,15 +245,14 @@ class SaveSlimHostTest {
         assertEquals(0, f.writes.get())
         assertEquals(0, stats(f.editor).fileEncodes.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertEquals(1, stats(f.editor).workingFromSource.get())
-        assertArrayEquals(f.source.readBytes(), File(slotDir(f.editor), "canvas.xcanvas").readBytes())
-        // A second checkpoint of the same revision reuses the body: metadata only.
+        assertEquals(0, stats(f.editor).workingFromSource.get())
+        assertFalse(File(slotDir(f.editor), "canvas.xcanvas").exists())
+        assertTrue((marker(f).slots.single() as ColdNativeSlot.Canvas).reopenFromFile)
         withContext(Dispatchers.Main) { assertTrue(checkpoint(f.editor)) }
-        assertEquals(1, stats(f.editor).workingFromSource.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
     }
 
-    @Test fun aPdfNoteBackupIsStillEncodedBecauseItsFileReferencesTheSharedPdf() = runScenario { f ->
+    @Test fun aSavedPdfNoteKeepsNoBackupEither() = runScenario { f ->
         val input = File(f.root, "original.pdf").apply { writeBytes(minimalPdf()) }
         withContext(Dispatchers.IO) {
             val portable = Document(mutableListOf(Page(500.0, 500.0)), pdfFile = input).apply { enableReferenceAnchors() }
@@ -286,9 +269,9 @@ class SaveSlimHostTest {
             assertFalse("The PDF note's file save must land: ${f.editor.message}", f.editor.state.document.dirty)
             assertTrue(checkpoint(f.editor))
         }
-        assertEquals(0, stats(f.editor).workingFromSource.get())
-        assertEquals(1, stats(f.editor).workingEncodes.get())
-        assertTrue(File(slotDir(f.editor), "document.xnote").isFile)
+        assertEquals(0, stats(f.editor).workingEncodes.get())
+        assertFalse("Not re-encoding the embedded PDF is the point", File(slotDir(f.editor), "document.xnote").exists())
+        assertTrue((marker(f).slots.single() as ColdNativeSlot.Note).reopenFromFile)
     }
 
     // --- while writing: defer to the pending file save ---
@@ -315,7 +298,7 @@ class SaveSlimHostTest {
         }
         assertEquals(1, stats(f.editor).fileEncodes.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertEquals(1, stats(f.editor).workingFromSource.get())
+        assertEquals(0, stats(f.editor).workingFromSource.get())
     }
 
     @Test fun aDirtyBoundNoteDefersToo() = runScenario { f ->
@@ -406,31 +389,6 @@ class SaveSlimHostTest {
         }
     }
 
-    @Test fun aCleanSourceThatChangesBeforeTheCopyFallsBackToEncodingWithoutAnError() = runScenario { f ->
-        seedCanvas(f)
-        withContext(Dispatchers.Main) {
-            assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
-            f.editor.checkpointBeforeWriteHook = {
-                f.editor.checkpointBeforeWriteHook = null
-                withContext(Dispatchers.IO) {
-                    val other = InfiniteDocument()
-                    other.add(Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), listOf(Sample(1.0, 2.0, .5), Sample(3.0, 4.0, .5))))
-                    f.source.outputStream().use { canvasCodec().write(other, it) }
-                }
-            }
-            val first = checkpoint(f.editor)
-            assertNull("A changed clean source is not a write failure", f.editor.message)
-            if (!first) assertTrue("The retry must succeed", checkpoint(f.editor))
-            assertNull(f.editor.message)
-        }
-        assertEquals(0, stats(f.editor).workingFromSource.get())
-        assertEquals(1, stats(f.editor).workingEncodes.get())
-        assertEquals(0, stats(f.editor).checkpointFailed.get())
-        val backup = File(slotDir(f.editor), "canvas.xcanvas")
-        val restored = withContext(Dispatchers.IO) { backup.inputStream().use { canvasCodec().read(it, File(f.root, "img").apply { mkdirs() }) } }
-        assertEquals("The backup holds the open model, not the externally changed file", 0, restored.items.size)
-    }
-
     @Test fun anActualWorkingCopyWriteFailureIsStillReported() = runScenario { f ->
         seedCanvas(f)
         withContext(Dispatchers.Main) {
@@ -461,6 +419,114 @@ class SaveSlimHostTest {
             call(f.editor, "presentationChanged")
             assertTrue("A stroke is a content change", f.editor.presentationContentVersion > content)
         }
+    }
+
+    // --- pause-only recovery: nothing records while editing or leaving, only Activity.onPause() ---
+
+    private suspend fun awaitTrue(message: String, condition: suspend () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L)
+        while (!condition()) {
+            assertTrue(message, System.nanoTime() < deadline)
+            delay(20L)
+        }
+    }
+
+    /** The real Home path: the Activity wires the departure gate to the coordinator. */
+    private suspend fun withDepartureGate(f: EditorPageCopyFixture, block: suspend () -> Unit) {
+        val coordinator = withContext(Dispatchers.Main) { ColdPresentationCoordinator(f.editor, ColdPresentationBootstrap()) }
+        try {
+            withContext(Dispatchers.Main) {
+                assertTrue(coordinator.bootstrap())
+                f.editor.onPresentationIntent = { coordinator.retireIntent() }
+                f.editor.preparePresentationDeparture = { coordinator.prepareDeparture(it) }
+            }
+            block()
+        } finally {
+            withContext(NonCancellable + Dispatchers.Main) {
+                f.editor.onPresentationIntent = null; f.editor.preparePresentationDeparture = null
+                coordinator.close()
+            }
+        }
+    }
+
+    @Test fun theCoordinatorNoLongerObservesEveryPresentationChange() {
+        val names = ColdPresentationCoordinator::class.java.declaredMethods.map { it.name }
+        assertFalse("Checkpoints run on pause only; there is no per-change observer: $names", names.any { it == "observe" })
+    }
+
+    @Test fun leavingABoundNoteForHomeSavesTheFileAndRunsNoCheckpoint() = runScenario { f ->
+        withContext(Dispatchers.IO) { f.seed() }
+        withDepartureGate(f) {
+            withContext(Dispatchers.Main) {
+                f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
+                f.editor.view.layout(0, 0, 1000, 800)
+                f.addStroke(120.0, recordHistory = true); armNoteSave(f.editor)
+                f.editor.goHome()
+            }
+            awaitTrue("The note must close") { withContext(Dispatchers.Main) { !f.editor.noteOpen } }
+            sessionOwner(f.editor).awaitAccepted()
+            withContext(Dispatchers.Main) { assertNull(f.editor.message) }
+        }
+        assertEquals("Leaving saves the file", 1, f.writes.get())
+        assertEquals("Leaving must not wait for a working-copy checkpoint", 0, stats(f.editor).checkpointStarted.get())
+        assertEquals(0, stats(f.editor).workingEncodes.get())
+        assertSame(LastPresentation.Home, (LastPresentationStore(f.context.filesDir).observe().read as LastPresentationRead.Ready).value)
+        assertFalse(File(slotDir(f.editor), "document.xnote").exists())
+        val saved = withContext(Dispatchers.IO) { f.source.inputStream().use { f.codec.read(it) } }
+        assertEquals(1, saved.pages.first().items.filterIsInstance<Stroke>().size)
+    }
+
+    @Test fun leavingABoundCanvasForHomeSavesTheFileAndRunsNoCheckpoint() = runScenario { f ->
+        seedCanvas(f)
+        withDepartureGate(f) {
+            withContext(Dispatchers.Main) {
+                assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
+                addCanvasStroke(f.editor, 140.0); armCanvasSave(f.editor)
+                f.editor.goHome()
+            }
+            awaitTrue("The canvas must close") { withContext(Dispatchers.Main) { !f.editor.noteOpen } }
+            sessionOwner(f.editor).awaitAccepted()
+        }
+        assertEquals(1, f.writes.get())
+        assertEquals(0, stats(f.editor).checkpointStarted.get())
+        assertEquals(0, stats(f.editor).workingEncodes.get())
+        assertSame(LastPresentation.Home, (LastPresentationStore(f.context.filesDir).observe().read as LastPresentationRead.Ready).value)
+        assertFalse(File(slotDir(f.editor), "canvas.xcanvas").exists())
+        val saved = withContext(Dispatchers.IO) { f.source.inputStream().use { canvasCodec().read(it, File(f.root, "img").apply { mkdirs() }) } }
+        assertEquals(1, saved.items.filterIsInstance<Stroke>().size)
+    }
+
+    @Test fun editingAndPausingBetweenStrokesNeverStartsACheckpoint() = runScenario { f ->
+        withContext(Dispatchers.IO) { f.seed() }
+        withContext(Dispatchers.Main) {
+            f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
+            f.editor.view.layout(0, 0, 1000, 800)
+            f.addStroke(60.0, recordHistory = true); armNoteSave(f.editor)
+        }
+        // Let the 1.2 s autosave run and settle with no Activity pause.
+        awaitTrue("The autosave must land") { f.writes.get() == 1 && withContext(Dispatchers.Main) { !f.editor.state.document.dirty } }
+        sessionOwner(f.editor).awaitAccepted()
+        assertEquals(0, stats(f.editor).checkpointStarted.get())
+        assertEquals(0, stats(f.editor).workingEncodes.get())
+        assertFalse(File(slotDir(f.editor), "document.xnote").exists())
+    }
+
+    @Test fun aFailedFileSaveWritesAProtectedCopyWithoutWaitingForPause() = runScenario { f ->
+        seedCanvas(f)
+        withContext(Dispatchers.Main) {
+            assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
+            f.failSourceWrites = true
+            addCanvasStroke(f.editor, 160.0); armCanvasSave(f.editor)
+            f.editor.flushAutosaveAll()
+            f.editor.awaitAutosaveWrites()
+            assertTrue(f.editor.infinite.document.dirty)
+        }
+        val body = File(slotDir(f.editor), "canvas.xcanvas")
+        awaitTrue("A failed save must be protected by a working copy before any pause") { body.isFile }
+        sessionOwner(f.editor).awaitAccepted()
+        assertEquals("No pause, no checkpoint", 0, stats(f.editor).checkpointStarted.get())
+        val copy = withContext(Dispatchers.IO) { body.inputStream().use { canvasCodec().read(it, File(f.root, "img").apply { mkdirs() }) } }
+        assertEquals(1, copy.items.filterIsInstance<Stroke>().size)
     }
 
     private fun minimalPdf(): ByteArray {
