@@ -452,6 +452,7 @@ internal fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.INSERT_SPACE -> XnotesIcons.insertSpace
     ToolbarItem.MAP -> XnotesIcons.mindMap
     ToolbarItem.SCREENSHOT -> XnotesIcons.scissors
+    ToolbarItem.AI -> XnotesIcons.ai
     ToolbarItem.WAND -> XnotesIcons.magicWand
     ToolbarItem.TAPE -> XnotesIcons.tape
     ToolbarItem.SHAPE -> XnotesIcons.shape

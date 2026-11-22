@@ -103,6 +103,8 @@ fun Toolbar(
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
+    onToggleAi: () -> Unit = {},
+    aiActive: Boolean = false,
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -160,6 +162,8 @@ fun Toolbar(
                     onInsertAudio = onInsertAudio,
                     onRecordAudio = onRecordAudio,
                     onTakePhoto = onTakePhoto,
+                    onToggleAi = onToggleAi,
+                    aiActive = aiActive,
                 )
             }
         }
@@ -197,6 +201,8 @@ private fun ToolbarItemView(
     onInsertAudio: () -> Unit,
     onRecordAudio: () -> Unit,
     onTakePhoto: () -> Unit,
+    onToggleAi: () -> Unit,
+    aiActive: Boolean,
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
@@ -233,6 +239,8 @@ private fun ToolbarItemView(
             ToolbarIcon(XnotesIcons.magicWand, stringResource(R.string.tool_wand), active = editor.wandEnabled) { editor.toggleWand() }
         ToolbarItem.RULER ->
             ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
+        ToolbarItem.AI ->
+            ToolbarIcon(XnotesIcons.ai, stringResource(R.string.ai_label), active = aiActive, onClick = onToggleAi)
 
         ToolbarItem.IMAGE -> NoteInsertMenu(editor, onInsertImage, onTakePhoto, onAddStickers, onInsertAudio, onRecordAudio)
 

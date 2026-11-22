@@ -65,6 +65,8 @@ fun InfiniteToolbar(
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
+    onToggleAi: () -> Unit = {},
+    aiActive: Boolean = false,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
     // a pen on either canvas rather than like a generic glyph.
@@ -117,6 +119,7 @@ fun InfiniteToolbar(
                 if (shared && entry.item in setOf(ToolbarItem.HOME, ToolbarItem.TITLE)) continue
                 when (val item = entry.item) {
                     ToolbarItem.RULER -> ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
+                    ToolbarItem.AI -> ToolbarIcon(XnotesIcons.ai, stringResource(R.string.ai_label), active = aiActive, onClick = onToggleAi)
                     ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
                     // A name has no room down a side rail.
                     ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Label(if (editor.document.displayName == null && editor.document.path == null) stringResource(R.string.untitled) else editor.title, Modifier.clickable { renaming = true }.padding(end = Space.s4))

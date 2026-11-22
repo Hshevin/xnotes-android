@@ -39,6 +39,9 @@ class AiSessions(
     var windowOffset by mutableStateOf<Pair<Float, Float>?>(null)
     /** The floating card folded to its title strip; kept here so a new capture can unfold it. */
     var floatingCollapsed by mutableStateOf(false)
+    private val floatingChatId: String? get() = activeId?.takeIf { floatingOwner != null && chats.containsKey(it) }
+    val isFloatingOpen: Boolean get() = floatingChatId != null
+    val isFloatingExpanded: Boolean get() = isFloatingOpen && !floatingCollapsed
     /** Documents open in panes, by document key, registered by their editors while composed. */
     val documents = mutableStateMapOf<String, AiDocument>()
     /** Every composed pane's screenshot tool, by a per-pane token: two panes may show one document. */
@@ -244,6 +247,39 @@ class AiSessions(
     }
     /** Unfold the card; ends capture mode, since the chat is about to be read or typed into. */
     fun expand() { floatingCollapsed = false; endCapture() }
+
+    fun toggleFloating(
+        source: String, sourceUri: String = "", owner: String, documentId: String = "",
+        currentPdf: Pair<String, String>? = null,
+    ): Boolean {
+        if (!ready) return false
+        if (isFloatingOpen) {
+            if (floatingCollapsed) expand() else floatingCollapsed = true
+        } else {
+            val id = newChat(source, sourceUri, owner, documentId)
+            floatingCollapsed = false
+            currentPdf?.let { (uri, name) -> offerCurrentPdf(id, uri, name) }
+        }
+        return true
+    }
+
+    fun addScreenshotAndExpand(
+        bytes: ByteArray, source: String, sourceUri: String = "", owner: String, documentId: String = "",
+        currentPdf: Pair<String, String>? = null,
+    ): Boolean {
+        if (!ready) return false
+        val openChat = floatingChatId
+        if (openChat != null) {
+            if (!addScreenshot(openChat, bytes, fromDocument = owner)) return false
+            expand()
+        } else {
+            val id = newChat(source, sourceUri, owner, documentId)
+            addScreenshot(id, bytes)
+            floatingCollapsed = false
+            currentPdf?.let { (uri, name) -> offerCurrentPdf(id, uri, name) }
+        }
+        return true
+    }
     /**
      * Hides the card when its document leaves the screen. A chat that also holds screenshots from a
      * still-visible document moves over to that one instead of closing.

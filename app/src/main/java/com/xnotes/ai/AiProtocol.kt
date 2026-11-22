@@ -22,7 +22,7 @@ object AiThinking {
     val FORMATS = listOf(AUTO, OPENAI, OPENROUTER, DEEPSEEK, QWEN)
     const val OFF = "off"
     /** "" is the provider default; the rest are what the user can pick. */
-    val LEVELS = listOf("", OFF, "low", "medium", "high")
+    val LEVELS = listOf("", OFF, "minimal", "low", "medium", "high", "xhigh")
 
     fun resolve(format: String, url: String): String {
         if (format != AUTO) return format
@@ -43,12 +43,42 @@ object AiThinking {
         else -> "reasoning_effort"
     }
 
-    /**
-     * Whether a refusal's [detail] is about the thinking field a request with [effort] carried, as
-     * models without reasoning (GPT-4o and the like) answer `reasoning_effort` with HTTP 400.
-     */
-    fun refused(detail: String, effort: String, format: String, url: String): Boolean =
-        effort.isNotEmpty() && detail.contains(field(format, url), ignoreCase = true)
+    private val thinkingParams = setOf("reasoning_effort", "reasoning", "reasoning.effort", "thinking", "thinking.type", "enable_thinking")
+    private val effortField = Regex("""\breasoning[_.\s]effort\b""", RegexOption.IGNORE_CASE)
+    private val namedRefusal = Regex(
+        """\b(?:unsupported parameter:|unknown parameter:|invalid value for|unsupported value:[^.;]*?not supported for)\s*['"]([\w.]+)['"]""",
+        RegexOption.IGNORE_CASE,
+    )
+    // Some relays omit the parameter entirely. Match the rejected value, never a value merely
+    // listed as supported, and leave messages that qualify the value with another field alone.
+    private val valueRefusal = Regex(
+        """(?:(?:unsupported|invalid) value:\s*)?['"](\w+)['"]\s+is not supported(?: (?:with|for|by|on) this model)?[.!]?""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val valueBeforeOptions = Regex("""(?:unsupported|invalid) value:\s*['"](\w+)['"][.!]?""", RegexOption.IGNORE_CASE)
+
+    fun refused(detail: String, effort: String, format: String, url: String, rawBody: String = ""): Boolean {
+        if (effort.isEmpty()) return false
+        val param = if (rawBody.isBlank()) null else runCatching {
+            JSONObject(rawBody).optJSONObject("error")?.opt("param") as? String
+        }.getOrNull()?.trim()
+        if (!param.isNullOrEmpty()) return param.lowercase() in thinkingParams
+
+        // A relay may put the rejected parameter in its message and mention reasoning only
+        // when describing the model (e.g. temperature is unsupported on a reasoning model).
+        val named = namedRefusal.find(detail)?.groupValues?.get(1)
+        if (named != null && named.lowercase() !in thinkingParams) return false
+        val field = field(format, url)
+        if (Regex("""\b$field\b""", RegexOption.IGNORE_CASE).containsMatchIn(detail)) return true
+        if (field != "reasoning_effort" && field != "reasoning") return false
+        if (effortField.containsMatchIn(detail)) return true
+
+        val optionsAt = detail.indexOf("Supported values are:", ignoreCase = true)
+        val rejection = (if (optionsAt < 0) detail else detail.take(optionsAt)).trim()
+        val rejected = valueRefusal.matchEntire(rejection)
+            ?: (if (optionsAt >= 0) valueBeforeOptions.matchEntire(rejection) else null)
+        return rejected?.groupValues?.get(1) == (if (effort == OFF) "none" else effort)
+    }
 
     /** Endpoint, model and level found this session to be refused; their requests go without the field. */
     private val refusing = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()

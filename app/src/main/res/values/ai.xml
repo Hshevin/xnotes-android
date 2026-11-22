@@ -105,9 +105,11 @@
     <string name="ai_thinking_summary">Thinking: %1$s</string>
     <string name="ai_effort_default">Default</string>
     <string name="ai_effort_off">Off</string>
+    <string name="ai_effort_minimal">Minimal</string>
     <string name="ai_effort_low">Low</string>
     <string name="ai_effort_medium">Medium</string>
     <string name="ai_effort_high">High</string>
+    <string name="ai_effort_xhigh">Extra high</string>
     <string name="ai_format_auto">Auto (by provider)</string>
     <string name="ai_format_openai">OpenAI (reasoning_effort)</string>
     <string name="ai_format_openrouter">OpenRouter (reasoning)</string>

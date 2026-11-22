@@ -24,7 +24,7 @@ class ToolbarLayoutTest {
             d.sections[2].entries.map { it.item },
         )
         assertEquals(
-            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT, ToolbarItem.AI),
             d.sections[3].entries.map { it.item },
         )
         assertEquals(
@@ -267,5 +267,24 @@ class ToolbarLayoutTest {
         assertTrue(ToolbarItem.INSERT_SPACE !in ToolbarLayout.CANVAS_DEFAULT.items())
         val canvas = ToolbarLayout.fromRaw(listOf(listOf("lasso" to true, "insert_space" to true)), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
         assertTrue(ToolbarItem.INSERT_SPACE !in canvas.items())
+    }
+
+    @Test fun aiButtonAppearsOnBothBarsAndSlotsInAfterScreenshot() {
+        assertTrue(ToolbarItem.AI in ToolbarLayout.NOTE_ITEMS)
+        assertTrue(ToolbarItem.AI in ToolbarLayout.CANVAS_ITEMS)
+        assertTrue(ToolbarItem.AI in ToolbarLayout.DEFAULT.items())
+        assertTrue(ToolbarItem.AI in ToolbarLayout.CANVAS_DEFAULT.items())
+        val note = ToolbarLayout.fromRaw(listOf(listOf("pen" to true, "screenshot" to true, "shape" to true)))
+        val noteItems = note.items()
+        assertEquals(noteItems.indexOf(ToolbarItem.SCREENSHOT) + 1, noteItems.indexOf(ToolbarItem.AI))
+        assertTrue(note.sections.flatMap { it.entries }.single { it.item == ToolbarItem.AI }.visible)
+        val canvas = ToolbarLayout.fromRaw(
+            listOf(listOf("pen" to true, "screenshot" to true, "image" to true)),
+            ToolbarLayout.CANVAS_ITEMS,
+            ToolbarLayout.CANVAS_DEFAULT,
+        )
+        val canvasItems = canvas.items()
+        assertEquals(canvasItems.indexOf(ToolbarItem.SCREENSHOT) + 1, canvasItems.indexOf(ToolbarItem.AI))
+        assertTrue(canvas.sections.flatMap { it.entries }.single { it.item == ToolbarItem.AI }.visible)
     }
 }

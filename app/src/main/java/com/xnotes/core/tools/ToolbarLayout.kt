@@ -57,7 +57,8 @@ enum class ToolbarItem(val id: String) {
     INSERT_SPACE("insert_space"),
 
     /** Canvas only: the mind map tool. */
-    MAP("map");
+    MAP("map"),
+    AI("ai");
 
     companion object {
         fun fromId(id: String?): ToolbarItem? = entries.firstOrNull { it.id == id }
@@ -165,6 +166,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.INSERT_SPACE to ToolbarItem.LASSO,
             ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
             ToolbarItem.MAP to ToolbarItem.SHAPE,
+            ToolbarItem.AI to ToolbarItem.SCREENSHOT,
         )
 
         /**
@@ -179,7 +181,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.WAND,
             ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT,
-            ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
+            ToolbarItem.AI, ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
             ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
         )
@@ -197,7 +199,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
-            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT, ToolbarItem.AI),
             listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
@@ -215,7 +217,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
             listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO),
-            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT, ToolbarItem.AI),
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
@@ -257,7 +259,8 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
 
 /** One stable layout for a split; canvas-only extras follow the paged arrangement. */
 fun workspaceToolbarLayout(paged: ToolbarLayout, canvas: ToolbarLayout): ToolbarLayout {
-    val present = paged.visibleSections.flatMap { it.visibleEntries }.map { it.item }.toSet()
+    // A hidden paged item is still configured there. Importing it from the canvas would unhide it.
+    val present = paged.sections.flatMap { it.entries }.map { it.item }.toSet()
     val extra = canvas.visibleSections.flatMap { it.visibleEntries }.filter { it.item !in present }.distinctBy { it.item }
     return ToolbarLayout(paged.visibleSections + if (extra.isEmpty()) emptyList() else listOf(ToolbarSection(extra)))
 }
@@ -277,7 +280,7 @@ private val ToolbarItem.scope: ToolbarScope get() = when (this) {
     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.PEN, ToolbarItem.DASHED,
     ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED, ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER,
     ToolbarItem.ERASER, ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO,
-    ToolbarItem.SCREENSHOT, ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE,
+    ToolbarItem.SCREENSHOT, ToolbarItem.AI, ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE,
     ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.IMAGE,
     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FULLSCREEN, ToolbarItem.COLORS -> ToolbarScope.COMMON
     ToolbarItem.INSERT_SPACE -> ToolbarScope.PAGED_TOOL

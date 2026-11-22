@@ -637,7 +637,7 @@ class InteractionController(
         // Remember what to re-arm if the eraser/select/screenshot/text later switches back (the tool it replaced).
         if (t == Tool.ERASER) toolBeforeEraser = tool
         if (t == Tool.SELECT) toolBeforeSelect = tool
-        if (t == Tool.SCREENSHOT) toolBeforeScreenshot = tool
+        if (t == Tool.SCREENSHOT && tool != Tool.SCREENSHOT) toolBeforeScreenshot = tool
         if (t == Tool.TEXT_BOX) toolBeforeText = tool
         if (tool == Tool.INSERT_SPACE) insertSpace.hoverAt(null)
         commitTextEdit()
@@ -2168,17 +2168,7 @@ class InteractionController(
     private fun extendScreenshotResize(content: Pt) {
         val start = shotStart ?: return
         val grab = shotGrab ?: return
-        var left = start.left
-        var top = start.top
-        var right = start.right
-        var bottom = start.bottom
-        val dir = ResizeMath.handleDirection(grab)
-        // Floored at SHOT_MIN, so a capture can't be dragged across itself into nothing.
-        if (dir.x < 0) left = min(content.x, right - SHOT_MIN)
-        if (dir.x > 0) right = max(content.x, left + SHOT_MIN)
-        if (dir.y < 0) top = min(content.y, bottom - SHOT_MIN)
-        if (dir.y > 0) bottom = max(content.y, top + SHOT_MIN)
-        screenshotRect = Rect(left, top, right - left, bottom - top)
+        screenshotRect = resizeScreenshot(start, grab, content, SHOT_MIN)
         requestRender()
     }
 
@@ -2242,11 +2232,11 @@ class InteractionController(
         requestRender()
     }
 
-    /** After a capture is copied, return to the previous pen, mirroring the eraser's switch-back. */
+    /** After a screenshot action succeeds, return to the tool it replaced. */
     fun switchBackAfterScreenshot() {
         if (tool != Tool.SCREENSHOT) return
         val back = toolBeforeScreenshot ?: return
-        if (back.isStroke) setTool(back)
+        if (back != Tool.SCREENSHOT) setTool(back)
     }
 
     private fun refreshScreenshotMenu() {
@@ -5376,6 +5366,16 @@ class InteractionController(
 
         /** Min capture size (content px, both axes) for the screenshot tool; below it a drag is a tap. */
         const val SHOT_MIN = 6.0
+
+        /** Drag only the edges belonging to [handle], keeping the opposite edges fixed. */
+        internal fun resizeScreenshot(start: Rect, handle: HandleId, at: Pt, minSize: Double): Rect {
+            val dir = ResizeMath.handleDirection(handle)
+            val left = if (dir.x < 0) min(at.x, start.right - minSize) else start.left
+            val right = if (dir.x > 0) max(at.x, start.left + minSize) else start.right
+            val top = if (dir.y < 0) min(at.y, start.bottom - minSize) else start.top
+            val bottom = if (dir.y > 0) max(at.y, start.top + minSize) else start.bottom
+            return Rect(left, top, right - left, bottom - top)
+        }
 
         /** Min drag (viewport px, either axis) for a text-box gesture to size a box rather than tap-create. */
         const val TEXT_DRAG_SLOP = 14.0

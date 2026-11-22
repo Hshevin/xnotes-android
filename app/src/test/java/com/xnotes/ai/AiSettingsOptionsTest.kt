@@ -21,14 +21,20 @@ class AiSettingsOptionsTest {
 
     @Test fun thinkingFieldFollowsFormatAndHost() {
         fun body(url: String, effort: String, format: String = AiThinking.AUTO) = AiProtocol.request(AiConfig(url, "m", "k", effort = effort, thinkingFormat = format), user)
+        assertEquals("minimal", body("https://api.openai.com/v1", "minimal").getString("reasoning_effort"))
         assertEquals("high", body("https://api.openai.com/v1", "high").getString("reasoning_effort"))
+        assertEquals("xhigh", body("https://api.openai.com/v1", "xhigh").getString("reasoning_effort"))
         assertEquals("none", body("https://api.openai.com/v1", "off").getString("reasoning_effort"))
         assertEquals("enabled", body("https://api.deepseek.com", "low").getJSONObject("thinking").getString("type"))
+        assertEquals("enabled", body("https://api.deepseek.com", "xhigh").getJSONObject("thinking").getString("type"))
         assertEquals("disabled", body("https://api.deepseek.com", "off").getJSONObject("thinking").getString("type"))
         assertFalse(body("https://api.deepseek.com", "high").has("reasoning_effort"))
+        assertEquals("minimal", body("https://openrouter.ai/api/v1", "minimal").getJSONObject("reasoning").getString("effort"))
         assertEquals("medium", body("https://openrouter.ai/api/v1", "medium").getJSONObject("reasoning").getString("effort"))
+        assertEquals("xhigh", body("https://openrouter.ai/api/v1", "xhigh").getJSONObject("reasoning").getString("effort"))
         assertFalse(body("https://openrouter.ai/api/v1", "off").getJSONObject("reasoning").getBoolean("enabled"))
         assertTrue(body("https://dashscope.aliyuncs.com/compatible-mode/v1", "high").getBoolean("enable_thinking"))
+        assertTrue(body("https://dashscope.aliyuncs.com/compatible-mode/v1", "minimal").getBoolean("enable_thinking"))
         // An explicit format overrides the host guess; a look-alike host is not DeepSeek.
         assertEquals("low", body("https://api.deepseek.com", "low", AiThinking.OPENAI).getString("reasoning_effort"))
         assertEquals("high", body("https://deepseek.com.example.net/v1", "high").getString("reasoning_effort"))
@@ -90,6 +96,10 @@ class AiSettingsOptionsTest {
             val store = AiHistoryStore(dir)
             val chat = AiChat(model = "other", effort = "high")
             store.write(chat); assertEquals(chat, store.readAll().first.single())
+            for (extra in listOf("minimal", "xhigh")) {
+                val extraChat = chat.copy(effort = extra)
+                store.write(extraChat); assertEquals(extraChat, store.readAll().first.single())
+            }
             // Records written before this field existed still load and follow the defaults.
             val legacy = java.io.File(dir, "${chat.id}.json")
             legacy.writeText(JSONObject(legacy.readText()).apply { remove("model"); remove("effort") }.toString())

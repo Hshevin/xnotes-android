@@ -95,6 +95,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.SELECT -> R.string.tool_select
         ToolbarItem.LASSO -> R.string.tool_lasso
         ToolbarItem.SCREENSHOT -> R.string.tool_screenshot
+        ToolbarItem.AI -> R.string.ai_label
         ToolbarItem.WAND -> R.string.tool_wand
         ToolbarItem.TAPE -> R.string.tool_tape
         ToolbarItem.INSERT_SPACE -> R.string.tool_insert_space

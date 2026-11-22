@@ -2314,6 +2314,35 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
 
 @Composable
 private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, shared: Boolean = false) {
+    val aiSessions = com.xnotes.ai.AiSessions.get(LocalContext.current)
+    val aiActive = aiSessions.isFloatingExpanded
+    val onToggleAi: () -> Unit = {
+        val source: String
+        val sourceUri: String?
+        val documentId: String
+        val currentPdf: Pair<String, String>?
+        if (editor.canvasOpen) {
+            val doc = editor.infinite.document
+            source = doc.title
+            sourceUri = doc.path
+            documentId = doc.identity.documentId
+            currentPdf = null
+        } else {
+            val doc = editor.state.document
+            source = doc.title
+            sourceUri = editor.currentUri
+            documentId = doc.identity.documentId
+            currentPdf = doc.pdfFile?.let { android.net.Uri.fromFile(it).toString() to "$source.pdf" }
+        }
+        val owner = documentId.ifBlank { sourceUri.orEmpty().ifBlank { source } }
+        aiSessions.toggleFloating(
+            source = source,
+            sourceUri = sourceUri.orEmpty(),
+            owner = owner,
+            documentId = documentId,
+            currentPdf = currentPdf,
+        )
+    }
     val toggleDirection: (() -> Unit)? = if (app.inSplit) ({
         val automatic = editor.view.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         app.splitSideBySide = !(app.splitSideBySide ?: automatic)
@@ -2334,6 +2363,8 @@ private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, sha
             onInsertAudio = { actions.onInsertAudio(editor) },
             onRecordAudio = { actions.onRecordAudio(editor) },
             onTakePhoto = { actions.onTakePhoto(editor) },
+            onToggleAi = onToggleAi,
+            aiActive = aiActive,
         )
     } else {
         Toolbar(editor,
@@ -2348,6 +2379,8 @@ private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, sha
             onInsertAudio = { actions.onInsertAudio(editor) },
             onRecordAudio = { actions.onRecordAudio(editor) },
             onTakePhoto = { actions.onTakePhoto(editor) },
+            onToggleAi = onToggleAi,
+            aiActive = aiActive,
         )
     }
 }

@@ -624,6 +624,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** The tools the eraser and the select tool replaced, for their "switch back" options. */
     private var toolBeforeEraser: Tool? = null
     private var toolBeforeSelect: Tool? = null
+    private var toolBeforeScreenshot: Tool? = null
 
     fun armTool(next: Tool) {
         proPenInput.selected(next)
@@ -635,8 +636,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             previousTool = tool
             if (next == Tool.ERASER) toolBeforeEraser = tool
             if (next == Tool.SELECT) toolBeforeSelect = tool
+            if (next == Tool.SCREENSHOT) toolBeforeScreenshot = tool
         }
         adoptTool(next)
+    }
+
+    fun switchBackAfterScreenshot() {
+        if (tool == Tool.SCREENSHOT) toolBeforeScreenshot?.takeIf { it != Tool.SCREENSHOT }?.let(::armTool)
     }
 
     /**
@@ -819,6 +825,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
         override fun press(at: Pt, finger: Boolean, eraser: Boolean, tool: Tool, connector: Boolean, fingerDraws: Boolean): Boolean {
             if (editingLabel != null) return false
+            // A frozen screenshot handle or frame sits above the map it captures.
+            if (tool == Tool.SCREENSHOT && interaction.fingerHitsCapture(at)) return false
             return map.press(at, viewport.zoom, touchPx(), finger, eraser, tool, connector, fingerDraws)
         }
         override fun move(at: Pt) = map.move(at, viewport.zoom)
@@ -1099,35 +1107,70 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun drawToolOverlay(canvas: android.graphics.Canvas) {
         if(referenceLocatorState.isInitialized()) referenceLocator.draw(canvas)
         interaction.rulerController.draw(canvas, devicePxPerDp, viewport.zoom, document.dpi.toDouble(), view.darkAppearance)
-        val rect = interaction.captureRect?.let { viewport.contentToViewport(it) } ?: return
+        val contentRect = interaction.captureRect ?: return
+        val rect = viewport.contentToViewport(contentRect)
         val line = (2 * devicePxPerDp).toFloat()
+        val halo = (com.xnotes.core.infinite.OverlayTessellator.HALO_PX).toFloat()
         val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
         }
         // An opposite-tone edge under the frame, as for every overlay mark, so it reads on black
         // paper and on an imported white PDF alike.
         val dark = view.darkAppearance
-        p.color = if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-        p.strokeWidth = line + (2 * com.xnotes.core.infinite.OverlayTessellator.HALO_PX).toFloat()
+        val backColor = if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+        val frontColor = if (dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+        p.color = backColor
+        p.strokeWidth = line + 2f * halo
         canvas.drawRect(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat(), p)
-        p.color = if (dark) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+        p.color = frontColor
         p.strokeWidth = line
         canvas.drawRect(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat(), p)
+        if (interaction.isScreenshotFrozen) {
+            val side = (com.xnotes.canvas.InteractionController.HANDLE_SIZE * devicePxPerDp / 2.0).toFloat()
+            val half = side / 2f
+            val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.FILL
+            }
+            for (h in com.xnotes.canvas.ResizeMath.boxHandles(contentRect)) {
+                val pt = viewport.contentToViewport(h.content)
+                val cx = pt.x.toFloat()
+                val cy = pt.y.toFloat()
+                fill.color = backColor
+                canvas.drawRect(cx - half - halo, cy - half - halo, cx + half + halo, cy + half + halo, fill)
+                fill.color = frontColor
+                canvas.drawRect(cx - half, cy - half, cx + half, cy + half, fill)
+            }
+        }
     }
 
-    fun copyScreenshotAsImage() {
-        val bmp = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items + map.parts).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
-        val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes capture")
-        onMessage?.invoke(appContext.getString(if (ok) R.string.image_copied else R.string.err_copy_image), null)
-        if (ok) interaction.clearCapture()
+    private fun renderScreenshotBitmap() = interaction.captureRect?.let { rect ->
+        runCatching {
+            val items = document.layers.ordered(document.items + map.parts).filter { it.paintBounds().intersects(rect) }
+            renderRegionBitmap(rect, items.forExport())
+        }.getOrNull()
     }
-    fun screenshotImageForShare(): java.io.File? {
-        val file = interaction.captureRect?.let { renderRegionBitmap(it, document.layers.ordered(document.items + map.parts).filter { item -> item.paintBounds().intersects(it) }.forExport()) }
-            ?.let { com.xnotes.platform.ShareFiles.png(appContext, it, document.title) }
-        if (file != null) interaction.clearCapture()
-        else onMessage?.invoke(appContext.getString(R.string.err_share_image), null)
+
+    fun finishScreenshot() {
+        interaction.clearCapture()
+        switchBackAfterScreenshot()
+    }
+
+    fun copyScreenshotAsImage(): Boolean {
+        val bmp = renderScreenshotBitmap()
+        val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes capture")
+        if (ok) finishScreenshot()
+        onMessage?.invoke(appContext.getString(if (ok) R.string.image_copied else R.string.err_copy_image), null)
+        return ok
+    }
+
+    fun exportScreenshotImage(): java.io.File? {
+        val file = renderScreenshotBitmap()?.let { com.xnotes.platform.ShareFiles.png(appContext, it, document.title) }
+            ?.takeIf { it.length() > 0 }
+        if (file == null) onMessage?.invoke(appContext.getString(R.string.err_share_image), null)
         return file
     }
+
+    fun screenshotImageForShare(): java.io.File? = exportScreenshotImage()?.also { finishScreenshot() }
 
     override fun copySelectionAsImage() {
         val bmp = renderSelectionBitmap()

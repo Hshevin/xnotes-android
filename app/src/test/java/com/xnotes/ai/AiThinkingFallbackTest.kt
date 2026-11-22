@@ -74,4 +74,60 @@ class AiThinkingFallbackTest {
         assertTrue(AiThinking.refused("Unsupported parameter: 'reasoning_effort' is not supported with this model.", "high", AiThinking.AUTO, "https://api.openai.com/v1"))
         assertFalse(AiThinking.refused("Unsupported parameter: 'reasoning_effort'", "", AiThinking.AUTO, "https://api.openai.com/v1"))
     }
+
+    @Test fun gpt62RefusalWithErrorParamButNoFieldInMessageFallsBackAndRemembers() = runBlocking {
+        val body = """{"error":{"message":"Unsupported value: 'none' is not supported with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.","type":"invalid_request_error","param":"reasoning_effort","code":"unsupported_value"}}"""
+        val script = Script(Fake(400, body), Fake(200, stream), Fake(200, stream))
+        val c = config("gpt-6.2-sol-param-test", effort = AiThinking.OFF)
+        val first = script.client.complete(c, user, emptyList(), null, "auto") {}
+        assertEquals("好", first.content)
+        assertTrue(first.thinkingDropped)
+        assertEquals("none", script.body(0).getString("reasoning_effort"))
+        assertFalse(script.body(1).has("reasoning_effort"))
+        // Remembered for this endpoint + model + level, while another level still sends its value.
+        val next = AiConnection { script.queue.removeFirst().also { script.used += it } }.complete(c, user, emptyList(), null, "auto") {}
+        assertTrue(next.thinkingDropped)
+        assertFalse(script.body(2).has("reasoning_effort"))
+        assertFalse(AiThinking.refuses(c.copy(effort = "xhigh")))
+    }
+
+    @Test fun gpt62RefusalWithUnsupportedValueOrDottedFieldWithoutParamFallsBack() = runBlocking {
+        val cases = listOf(
+            AiThinking.OFF to """{"error":{"message":"Unsupported value: 'none' is not supported with this model. Supported values are: 'low', 'medium', and 'high'."}}""",
+            "xhigh" to """{"error":{"message":"Invalid value for 'reasoning.effort': 'xhigh' is not supported with this model."}}""",
+            "high" to """{"error":{"message":"reasoning effort is not supported for gpt-6.2"}}""",
+            "minimal" to """{"error":{"message":"Unsupported value: 'minimal' is not supported with this model. Supported values are: 'low', 'medium', 'high'."}}""",
+        )
+        cases.forEachIndexed { index, (effort, errorJson) ->
+            val script = Script(Fake(400, errorJson), Fake(200, stream))
+            val reply = script.client.complete(config("gpt-6.2-noparam-$index", effort = effort), user, emptyList(), null, "auto") {}
+            assertEquals("好", reply.content)
+            assertTrue("case $index ($effort) should fall back", reply.thinkingDropped)
+            assertFalse("retry for case $index must omit reasoning_effort", script.body(1).has("reasoning_effort"))
+        }
+    }
+
+    @Test fun gpt62RefusalWithToolsPrioritizesThinkingFallbackOverToolsUnsupported() = runBlocking {
+        val body = """{"error":{"message":"Unsupported value: 'none' is not supported with this model. Supported values are: 'low', 'medium', 'high'.","type":"invalid_request_error","param":"reasoning_effort","code":"unsupported_value"}}"""
+        val script = Script(Fake(400, body), Fake(200, stream))
+        val reply = script.client.complete(config("gpt-6.2-tools-test", effort = AiThinking.OFF), user, emptyList(), AiWebTools.definitions(), "auto") {}
+        assertTrue(reply.thinkingDropped)
+        assertTrue(script.body(1).has("tools"))
+        assertFalse(script.body(1).has("reasoning_effort"))
+    }
+
+    @Test fun unrelatedValueErrorsDoNotTriggerThinkingFallback() {
+        val cases = listOf(
+            "low" to """{"error":{"message":"Unsupported value: 'low' is not supported for 'image_detail'.","param":"image_detail","code":"unsupported_value"}}""",
+            "high" to """{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model.","param":"max_tokens"}}""",
+            "medium" to """{"error":{"message":"Invalid value for 'temperature'","param":"temperature"}}""",
+        )
+        cases.forEachIndexed { index, (effort, errorJson) ->
+            val script = Script(Fake(400, errorJson))
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking { script.client.complete(config("gpt-6.2-unrelated-$index", effort = effort), user, emptyList(), null, "auto") {} }
+            }
+            assertEquals("case $index must not retry", 1, script.used.size)
+        }
+    }
 }

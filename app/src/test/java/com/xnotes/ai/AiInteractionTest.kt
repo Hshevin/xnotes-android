@@ -440,4 +440,106 @@ class AiInteractionTest {
         }
     }
 
+    @Test fun toggleFloatingCreatesNewChatAndTogglesCollapseWithoutDiscardingDraft() = runBlocking {
+        fixture { store, scope ->
+            val sessions = AiSessions(store, scope, { settings })
+            until { sessions.ready }
+            assertFalse(sessions.isFloatingOpen)
+            assertFalse(sessions.isFloatingExpanded)
+            assertTrue(
+                sessions.toggleFloating(
+                    source = "Doc A",
+                    sourceUri = "uri-a",
+                    owner = "doc-a",
+                    documentId = "doc-a",
+                    currentPdf = "file:///a.pdf" to "Doc A.pdf",
+                ),
+            )
+            val id = sessions.activeId!!
+            assertTrue(sessions.isFloatingOpen)
+            assertTrue(sessions.isFloatingExpanded)
+            assertEquals("doc-a", sessions.floatingOwner)
+            assertEquals("file:///a.pdf" to "Doc A.pdf", sessions.currentPdfs[id])
+            // Typing a draft then collapsing via the top bar keeps both the draft and the unstarted chat.
+            sessions.editDraft(id, "keep draft")
+            assertTrue(sessions.toggleFloating(source = "Doc A", sourceUri = "uri-a", owner = "doc-a", documentId = "doc-a"))
+            assertTrue(sessions.isFloatingOpen)
+            assertTrue(sessions.floatingCollapsed)
+            assertFalse(sessions.isFloatingExpanded)
+            assertEquals(id, sessions.activeId)
+            assertEquals("keep draft", sessions.drafts[id])
+            // Tapping again expands it and ends any active capture mode.
+            val log = mutableListOf<String>()
+            sessions.registerCapture(Any(), AiCaptureTarget({ log += "arm" }, { log += "release" }))
+            sessions.startCapture()
+            assertTrue(sessions.capturing)
+            assertTrue(sessions.toggleFloating(source = "Doc A", sourceUri = "uri-a", owner = "doc-a", documentId = "doc-a"))
+            assertFalse(sessions.floatingCollapsed)
+            assertTrue(sessions.isFloatingExpanded)
+            assertFalse(sessions.capturing)
+            assertEquals(listOf("arm", "release"), log)
+        }
+    }
+
+    @Test fun addScreenshotAndExpandUnifiesTopBarAndFloatingCapture() = runBlocking {
+        fixture { store, scope ->
+            val sessions = AiSessions(store, scope, { settings })
+            until { sessions.ready }
+            val log = mutableListOf<String>()
+            sessions.registerCapture(Any(), AiCaptureTarget({ log += "arm A" }, { log += "release A" }))
+            sessions.registerCapture(Any(), AiCaptureTarget({ log += "arm B" }, { log += "release B" }))
+
+            // 1. No floating chat open: creates one, attaches screenshot, offers PDF, opens expanded.
+            assertTrue(
+                sessions.addScreenshotAndExpand(
+                    bytes = byteArrayOf(1),
+                    source = "Doc A",
+                    sourceUri = "uri-a",
+                    owner = "doc-a",
+                    documentId = "doc-a",
+                    currentPdf = "file:///a.pdf" to "Doc A.pdf",
+                ),
+            )
+            val id = sessions.activeId!!
+            assertTrue(sessions.isFloatingExpanded)
+            assertEquals(1, sessions.attachments[id]!!.size)
+            assertEquals("file:///a.pdf" to "Doc A.pdf", sessions.currentPdfs[id])
+
+            // 2. Floating chat in capture mode: adding one screenshot expands the card and releases every pane.
+            sessions.startCapture()
+            assertTrue(sessions.capturing)
+            assertTrue(sessions.floatingCollapsed)
+            assertTrue(
+                sessions.addScreenshotAndExpand(
+                    bytes = byteArrayOf(2),
+                    source = "Doc B",
+                    sourceUri = "uri-b",
+                    owner = "doc-b",
+                    documentId = "doc-b",
+                ),
+            )
+            assertEquals(2, sessions.attachments[id]!!.size)
+            assertFalse(sessions.capturing)
+            assertFalse(sessions.floatingCollapsed)
+            assertEquals(listOf("doc-b"), sessions.chats.getValue(id).relatedDocuments)
+            assertEquals(setOf("release A", "release B"), log.takeLast(2).toSet())
+
+            // 3. Manually collapsed floating chat (not in capture mode): adding a screenshot also expands it.
+            sessions.floatingCollapsed = true
+            assertTrue(sessions.addScreenshotAndExpand(byteArrayOf(3), "Doc A", "uri-a", "doc-a", "doc-a"))
+            assertFalse(sessions.floatingCollapsed)
+            assertEquals(3, sessions.attachments[id]!!.size)
+
+            // 4. Hitting MAX_IMAGES refuses without expanding or leaving capture mode prematurely.
+            repeat(AiProtocol.MAX_IMAGES - 3) {
+                assertTrue(sessions.addScreenshotAndExpand(byteArrayOf((it + 4).toByte()), "Doc A", "uri-a", "doc-a", "doc-a"))
+            }
+            sessions.startCapture()
+            assertFalse(sessions.addScreenshotAndExpand(byteArrayOf(99), "Doc A", "uri-a", "doc-a", "doc-a"))
+            assertEquals(AiProtocol.MAX_IMAGES, sessions.attachments[id]!!.size)
+            assertTrue(sessions.capturing)
+            assertTrue(sessions.floatingCollapsed)
+        }
+    }
+
 }

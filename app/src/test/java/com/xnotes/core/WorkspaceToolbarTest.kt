@@ -36,7 +36,7 @@ class WorkspaceToolbarTest {
                 assertEquals(kind == ToolbarDocument.CANVAS, ToolbarItem.WAYPOINTS in local)
             }
             if (ToolbarDocument.MAP in documents) assertTrue(common.isEmpty())
-            else assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT)))
+            else assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT, ToolbarItem.AI)))
         }
     }
 
@@ -105,5 +105,34 @@ class WorkspaceToolbarTest {
         assertFalse(ToolbarItem.LAYERS in items(ToolbarLayout.fromRaw(raw)))
         assertFalse(ToolbarItem.LAYERS in items(ToolbarLayout.DEFAULT))
         assertTrue(ToolbarItem.LAYERS in items(ToolbarLayout.CANVAS_DEFAULT))
+    }
+
+    @Test fun aiButtonIsCommonAndNeverDuplicatedAcrossDocumentCombinations() {
+        val layout = workspaceToolbarLayout(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)
+        val combinations = listOf(
+            setOf(ToolbarDocument.NOTE),
+            setOf(ToolbarDocument.PDF),
+            setOf(ToolbarDocument.CANVAS),
+            setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF),
+            setOf(ToolbarDocument.NOTE, ToolbarDocument.CANVAS),
+            setOf(ToolbarDocument.PDF, ToolbarDocument.CANVAS),
+        )
+        for (workspace in combinations) {
+            val common = items(layout.forDocumentControls(false, workspace))
+            assertEquals("common bar for $workspace should carry AI once", 1, common.count { it == ToolbarItem.AI })
+            for (doc in workspace) {
+                val local = items(documentToolbarLayout(layout, doc, workspace))
+                assertFalse("document bar for $doc in $workspace must not duplicate AI", ToolbarItem.AI in local)
+            }
+        }
+    }
+
+    @Test fun hidingAiOnPagedBarIsRespectedInSplitEvenWhenCanvasKeepsItVisible() {
+        val secIdx = ToolbarLayout.DEFAULT.sections.indexOfFirst { s -> s.entries.any { it.item == ToolbarItem.AI } }
+        val entryIdx = ToolbarLayout.DEFAULT.sections[secIdx].entries.indexOfFirst { it.item == ToolbarItem.AI }
+        val pagedHidden = ToolbarLayout.DEFAULT.toggleVisible(secIdx, entryIdx)
+        val merged = workspaceToolbarLayout(pagedHidden, ToolbarLayout.CANVAS_DEFAULT)
+        assertFalse(ToolbarItem.AI in items(merged))
+        assertFalse(ToolbarItem.AI in items(merged.forDocumentControls(false, setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF))))
     }
 }

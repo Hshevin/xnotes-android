@@ -47,7 +47,7 @@ import com.xnotes.core.tools.ToolConfig
 import kotlin.math.exp
 
 /** What the current gesture is doing. */
-enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, TEXT_BOX, SCREENSHOT, MAP }
+enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, TEXT_BOX, SCREENSHOT, SHOT_RESIZE, SHOT_MOVE, MAP }
 
 /**
  * The canvas's mind maps, as touch reaches them. Asked first on every press; a press it takes is
@@ -168,6 +168,7 @@ class InfiniteInteraction(
     companion object {
         /** How near a handle a press has to land to grab it, in device pixels. */
         const val HANDLE_TOUCH_PX = 22.0
+        private const val MIN_CAPTURE_PX = 8.0
 
         /** Least on-screen distance between lasso vertices, so a slow drag stays cheap. */
         const val LASSO_MIN_STEP_PX = 3.0
@@ -185,8 +186,67 @@ class InfiniteInteraction(
     internal val rulerController = CanvasRuler()
     var captureRect: Rect? = null
         private set
+    val isScreenshotFrozen: Boolean get() = captureRect != null && mode != CanvasPointerMode.SCREENSHOT && mode != CanvasPointerMode.TEXT_BOX
     private var captureStart = Pt.ZERO
-    fun clearCapture() { captureRect = null; onScreenshot(null); requestRender() }
+    private var shotStart: Rect? = null
+    private var shotGrab: HandleId? = null
+
+    fun clearCapture() {
+        if (shotStart != null || mode == CanvasPointerMode.SCREENSHOT || mode == CanvasPointerMode.TEXT_BOX) mode = CanvasPointerMode.IDLE
+        shotStart = null
+        shotGrab = null
+        captureRect = null
+        onScreenshot(null)
+        requestRender()
+    }
+
+    private fun captureHandle(rect: Rect, at: Pt) =
+        ResizeMath.hitHandle(ResizeMath.boxHandles(rect), at, HANDLE_TOUCH_PX / viewport.zoom)
+
+    internal fun fingerHitsCapture(at: Pt): Boolean {
+        val rect = captureRect ?: return false
+        return isScreenshotFrozen && (rect.contains(at) || captureHandle(rect, at) != null)
+    }
+
+    private fun beginScreenshotGesture(at: Pt) {
+        val rect = captureRect
+        val handle = rect?.let { captureHandle(it, at) }
+        if (rect == null || (handle == null && !rect.contains(at))) {
+            beginCapture(at, false)
+            return
+        }
+        cancelLongPress()
+        tapCandidate = false
+        shotStart = rect
+        shotGrab = handle
+        captureStart = at
+        mode = if (handle == null) CanvasPointerMode.SHOT_MOVE else CanvasPointerMode.SHOT_RESIZE
+        onScreenshot(null)
+    }
+
+    private fun adjustScreenshot(event: MotionEvent) {
+        val start = shotStart ?: return
+        val i = event.findPointerIndex(drawingPointerId)
+        if (i < 0) return
+        val at = viewport.viewportToContent(Pt(event.getX(i).toDouble(), event.getY(i).toDouble()))
+        val handle = shotGrab
+        captureRect = when {
+            at == captureStart -> start
+            handle == null -> start.translate(at.x - captureStart.x, at.y - captureStart.y)
+            else -> InteractionController.resizeScreenshot(start, handle, at, MIN_CAPTURE_PX / viewport.zoom)
+        }
+    }
+
+    /** A normal lift supplies the last sample. A cancel or a pinch gives the original frame back. */
+    private fun endScreenshotAdjust(up: MotionEvent? = null) {
+        if (up == null || InteractionController.isCancelledLift(up)) captureRect = shotStart else adjustScreenshot(up)
+        mode = CanvasPointerMode.IDLE
+        shotGrab = null
+        shotStart = null
+        onScreenshot(captureRect?.let { viewport.contentToViewport(it) })
+        requestRender()
+    }
+
     private fun beginCapture(at: Pt, text: Boolean) {
         clearCapture()
         captureStart = at
@@ -201,7 +261,7 @@ class InfiniteInteraction(
                 Rect(captureStart.x, captureStart.y, 220 * devicePxPerDp() / viewport.zoom, 90 * devicePxPerDp() / viewport.zoom) else rect
             clearCapture()
             onTextBox(box)
-        } else if (rect.w * viewport.zoom >= 8 && rect.h * viewport.zoom >= 8) onScreenshot(viewport.contentToViewport(rect))
+        } else if (rect.w * viewport.zoom >= MIN_CAPTURE_PX && rect.h * viewport.zoom >= MIN_CAPTURE_PX) onScreenshot(viewport.contentToViewport(rect))
         else clearCapture()
     }
 
@@ -653,6 +713,7 @@ class InfiniteInteraction(
             // and a finger may grab it even with finger-draw off. Both are the paged canvas's
             // rules; without them a selection could only be handled by a stylus.
             onSelection && drawing -> Tool.SELECT
+            toolType == MotionEvent.TOOL_TYPE_FINGER && tool == Tool.SCREENSHOT && fingerHitsCapture(at) -> Tool.SCREENSHOT
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff &&
                 onSelection -> Tool.SELECT
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff -> Tool.PAN
@@ -689,7 +750,7 @@ class InfiniteInteraction(
             effective == Tool.LASSO -> beginLasso(vx, vy)
             effective == Tool.TAPE -> beginTape(vx, vy)
             effective == Tool.TEXT_BOX || effective == Tool.TEXT -> beginCapture(at, true)
-            effective == Tool.SCREENSHOT -> beginCapture(at, false)
+            effective == Tool.SCREENSHOT -> beginScreenshotGesture(at)
             else -> beginPan(vx, vy, fromPenButton = buttonHeld && penButtonTool == Tool.PAN)
         }
     }
@@ -784,6 +845,10 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.ERASE && drawingIsStylus) return
         if (mode == CanvasPointerMode.TAPE && drawingIsStylus) return
         if (e.pointerCount >= 2) {
+            if (shotStart != null) {
+                if (drawingIsStylus) return
+                endScreenshotAdjust()
+            }
             if (mode == CanvasPointerMode.MAP) {
                 if (drawingIsStylus) return
                 mapInput?.cancel()
@@ -828,6 +893,10 @@ class InfiniteInteraction(
                 captureRect = Rect.fromPoints(captureStart, viewport.viewportToContent(Pt(e.x.toDouble(), e.y.toDouble())))
                 requestRender()
             }
+            CanvasPointerMode.SHOT_RESIZE, CanvasPointerMode.SHOT_MOVE -> {
+                adjustScreenshot(e)
+                requestRender()
+            }
             CanvasPointerMode.MAP -> {
                 val idx = e.findPointerIndex(drawingPointerId).coerceAtLeast(0)
                 mapInput?.move(viewport.viewportToContent(Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())))
@@ -837,6 +906,11 @@ class InfiniteInteraction(
     }
 
     private fun handlePointerUp(e: MotionEvent) {
+        if (shotStart != null && e.getPointerId(e.actionIndex) == drawingPointerId) {
+            endScreenshotAdjust(e)
+            touchTakenBack = true // the remaining palm does not own this adjustment
+            return
+        }
         if (mode != CanvasPointerMode.PINCH) return
         // Dropping to one finger continues as a pan from wherever that finger is, so a pinch that
         // relaxes into a drag does not jump.
@@ -875,6 +949,7 @@ class InfiniteInteraction(
             onEraseLifted()
         }
         if (mode == CanvasPointerMode.TEXT_BOX || mode == CanvasPointerMode.SCREENSHOT) finishCapture()
+        if (shotStart != null) endScreenshotAdjust(e)
         if (mode == CanvasPointerMode.SHAPE) endShape()
         if (mode == CanvasPointerMode.TAPE) endTape()
         if (mode == CanvasPointerMode.CONNECT) endConnector()
@@ -913,6 +988,7 @@ class InfiniteInteraction(
         tapCandidate = false
         dismissPressAt = null
         cancelLongPress()
+        if (shotStart != null) endScreenshotAdjust()
         if (mode == CanvasPointerMode.TEXT_BOX || mode == CanvasPointerMode.SCREENSHOT) clearCapture()
         if (mode == CanvasPointerMode.DRAW) abandonStroke()
         if (mode == CanvasPointerMode.ERASE) endErase()

@@ -555,6 +555,23 @@ private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () 
     }
 }
 
+/** Shared by both screenshot menus so failure keeps the capture frame, tool, and AI capture mode intact. */
+internal fun runScreenshotAiAction(
+    export: () -> java.io.File?,
+    accept: (java.io.File) -> Boolean,
+    finish: () -> Unit,
+): Boolean {
+    val file = export() ?: return false
+    if (!accept(file)) return false
+    finish()
+    return true
+}
+
+internal fun runScreenshotOtherAction(succeeded: Boolean, onFinished: () -> Unit): Boolean {
+    if (succeeded) onFinished()
+    return succeeded
+}
+
 /**
  * The screenshot tool's floating action, shown above the frozen capture rectangle: a single
  * "Copy as image" button that renders the region and puts it on the system clipboard.
@@ -595,7 +612,7 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            Modifier.clickable { editor.copyScreenshotAsImage() }.padding(horizontal = Space.s16, vertical = Space.s12),
+            Modifier.clickable { runScreenshotOtherAction(editor.copyScreenshotAsImage(), askAi.onFinishedOtherAction) }.padding(horizontal = Space.s16, vertical = Space.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -612,10 +629,15 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
             )
         }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
-        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
+        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) {
+            val file = editor.screenshotImageForShare()
+            if (runScreenshotOtherAction(file != null, askAi.onFinishedOtherAction)) onShare(file!!)
+        }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         Row(
-            Modifier.clickable { editor.screenshotImageForShare(keepTool = askAi.addsToOpenChat)?.let(askAi.take) }.padding(horizontal = Space.s16, vertical = Space.s12),
+            Modifier.clickable {
+                runScreenshotAiAction(editor::exportScreenshotImage, askAi.take, editor::finishScreenshot)
+            }.padding(horizontal = Space.s16, vertical = Space.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(XnotesIcons.ai, null, tint = palette.text.toComposeColor(), modifier = Modifier.size(20.dp))
@@ -659,7 +681,7 @@ fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            Modifier.clickable { editor.copyScreenshotAsImage() }.padding(horizontal = Space.s16, vertical = Space.s12),
+            Modifier.clickable { runScreenshotOtherAction(editor.copyScreenshotAsImage(), askAi.onFinishedOtherAction) }.padding(horizontal = Space.s16, vertical = Space.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -676,10 +698,15 @@ fun ScreenshotMenu(editor: InfiniteEditor, onShare: (java.io.File) -> Unit) {
             )
         }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
-        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
+        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) {
+            val file = editor.screenshotImageForShare()
+            if (runScreenshotOtherAction(file != null, askAi.onFinishedOtherAction)) onShare(file!!)
+        }
         Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
         Row(
-            Modifier.clickable { editor.screenshotImageForShare()?.let(askAi.take) }.padding(horizontal = Space.s16, vertical = Space.s12),
+            Modifier.clickable {
+                runScreenshotAiAction(editor::exportScreenshotImage, askAi.take, editor::finishScreenshot)
+            }.padding(horizontal = Space.s16, vertical = Space.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(XnotesIcons.ai, null, tint = palette.text.toComposeColor(), modifier = Modifier.size(20.dp))

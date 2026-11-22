@@ -3002,27 +3002,33 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     override fun dismissContextMenu() { contextMenu = null }
     fun dismissScreenshot() = controller.clearScreenshot()
 
-    /** Render the screenshot tool's capture rectangle to a PNG and put it on the system clipboard. */
-    fun copyScreenshotAsImage() {
-        val rect = controller.screenshotRect ?: return
-        val bmp = renderRegionBitmap(rect)
-        val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes capture")
-        controller.clearScreenshot()
-        controller.switchBackAfterScreenshot() // return to the previous pen, like the eraser
-        message = if (ok) appContext.getString(R.string.image_copied) else appContext.getString(R.string.err_copy_image)
+    private fun renderScreenshotBitmap() = controller.screenshotRect?.let { rect ->
+        runCatching { renderRegionBitmap(rect) }.getOrNull()
     }
 
-    /**
-     * The screenshot tool's capture as a PNG for the share sheet, putting the capture away; null when it failed.
-     * [keepTool] leaves the screenshot tool armed, for adding several captures to an open AI chat.
-     */
-    fun screenshotImageForShare(keepTool: Boolean = false): java.io.File? {
-        val rect = controller.screenshotRect ?: return null
-        val file = renderRegionBitmap(rect)?.let { com.xnotes.platform.ShareFiles.png(appContext, it, state.document.title) }
+    fun finishScreenshot() {
         controller.clearScreenshot()
-        if (!keepTool) controller.switchBackAfterScreenshot()
+        controller.switchBackAfterScreenshot()
+    }
+
+    fun copyScreenshotAsImage(): Boolean {
+        val bmp = renderScreenshotBitmap()
+        val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes capture")
+        if (ok) finishScreenshot()
+        message = if (ok) appContext.getString(R.string.image_copied) else appContext.getString(R.string.err_copy_image)
+        return ok
+    }
+
+    /** Stage the PNG. The caller finishes the capture once its destination accepts it. */
+    fun exportScreenshotImage(): java.io.File? {
+        val file = renderScreenshotBitmap()?.let { com.xnotes.platform.ShareFiles.png(appContext, it, state.document.title) }
+            ?.takeIf { it.length() > 0 }
         if (file == null) message = appContext.getString(R.string.err_share_image)
         return file
+    }
+
+    fun screenshotImageForShare(keepTool: Boolean = false): java.io.File? = exportScreenshotImage()?.also {
+        if (keepTool) controller.clearScreenshot() else finishScreenshot()
     }
 
     // --- crop: a lone picture cut down to part of itself, for good ---

@@ -134,9 +134,11 @@ internal fun AiSettingsRow() {
 /** The user-facing name of a thinking level; the stored keys are protocol words. */
 private fun effortRes(level: String): Int = when (level) {
     AiThinking.OFF -> R.string.ai_effort_off
+    "minimal" -> R.string.ai_effort_minimal
     "low" -> R.string.ai_effort_low
     "medium" -> R.string.ai_effort_medium
     "high" -> R.string.ai_effort_high
+    "xhigh" -> R.string.ai_effort_xhigh
     else -> R.string.ai_effort_default
 }
 
@@ -171,19 +173,44 @@ private fun SettingsLabel(title: String, detail: String? = null, modifier: Modif
     }
 }
 
-/** One-of-several choice as a pill row; the chosen segment is inverted. Each segment is a 48 dp target. */
+/** One-of-several choice as a pill row; wraps into pill chips when many levels exist. Each target is at least 48 dp tall. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AiSegmented(options: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     val palette = LocalPalette.current
-    Row(modifier.height(MinTouchTarget).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape).padding(Space.s4),
-        horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-        options.forEach { (value, label) ->
-            val on = value == selected
-            Box(Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
-                .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
-                .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) },
-                contentAlignment = Alignment.Center) {
-                Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1)
+    if (options.size <= 5) {
+        Row(modifier.height(MinTouchTarget).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape).padding(Space.s4),
+            horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+            options.forEach { (value, label) ->
+                val on = value == selected
+                Box(Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
+                    .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
+                    .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) },
+                    contentAlignment = Alignment.Center) {
+                    Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1)
+                }
+            }
+        }
+    } else {
+        FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(Space.s6),
+            verticalArrangement = Arrangement.spacedBy(Space.s6),
+        ) {
+            options.forEach { (value, label) ->
+                val on = value == selected
+                Box(
+                    Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget).clip(CircleShape)
+                        .then(
+                            if (on) Modifier.background(palette.selectionBackground.toComposeColor())
+                            else Modifier.border(1.dp, palette.border.toComposeColor(), CircleShape),
+                        )
+                        .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) }
+                        .padding(horizontal = Space.s12),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1)
+                }
             }
         }
     }
@@ -659,7 +686,11 @@ private fun AiProviderEditor(initial: AiProvider, isNew: Boolean, close: () -> U
  * document or, in split screen, the other one — [addsToOpenChat] is true and a capture joins that
  * chat's next question; otherwise it starts a new chat from this document.
  */
-internal class AskAiAction(val addsToOpenChat: Boolean, val take: (File) -> Unit)
+internal class AskAiAction(
+    val addsToOpenChat: Boolean,
+    val onFinishedOtherAction: () -> Unit = {},
+    val take: (File) -> Boolean,
+)
 
 /**
  * [onCapture] arms this pane's screenshot tool and [onRelease] restores the tool it had, for the
@@ -674,8 +705,9 @@ internal fun rememberAskAi(source: String, sourceUri: String?, currentPdf: File?
     val capture by rememberUpdatedState(onCapture)
     val release by rememberUpdatedState(onRelease)
     val pdfUri = currentPdf?.let { android.net.Uri.fromFile(it).toString() }
+    val pdfOffer = pdfUri?.let { it to "$source.pdf" }
     DisposableEffect(sessions, owner, source, sourceUri, pdfUri) {
-        val document = AiDocument(source, sourceUri.orEmpty(), documentId, pdfUri?.let { it to "$source.pdf" })
+        val document = AiDocument(source, sourceUri.orEmpty(), documentId, pdfOffer)
         sessions.documents[owner] = document
         onDispose { if (sessions.documents[owner] === document) sessions.documents.remove(owner) }
     }
@@ -688,23 +720,19 @@ internal fun rememberAskAi(source: String, sourceUri: String?, currentPdf: File?
     var failure by remember { mutableStateOf("") }
     if (failure.isNotEmpty()) AlertDialog(onDismissRequest = { failure = "" }, text = { Text(failure) },
         confirmButton = { TextButton(onClick = { failure = "" }) { Text(stringResource(R.string.ai_ok)) } })
-    val openChat = sessions.activeId?.takeIf { sessions.floatingOwner != null && sessions.chats.containsKey(it) }
-    return AskAiAction(openChat != null) { file ->
+    val openChat = sessions.isFloatingOpen
+    return AskAiAction(
+        addsToOpenChat = openChat,
+        onFinishedOtherAction = { sessions.endCapture() },
+    ) { file ->
         runCatching {
             check(sessions.ready) { context.getString(R.string.ai_history_loading) }
             require(file.length() in 1..(6 * 1024 * 1024)) { context.getString(R.string.ai_screenshot_too_large) }
             val bytes = file.readBytes()
-            if (openChat != null) {
-                check(sessions.addScreenshot(openChat, bytes, fromDocument = owner)) { context.getString(R.string.ai_screenshot_limit, AiProtocol.MAX_IMAGES) }
-                // In capture mode the card stays folded for the next capture; it shows the count.
-                if (!sessions.capturing) sessions.floatingCollapsed = false
-            } else {
-                val id = sessions.newChat(source, sourceUri.orEmpty(), owner, documentId)
-                sessions.addScreenshot(id, bytes)
-                sessions.floatingCollapsed = false
-                pdfUri?.let { sessions.offerCurrentPdf(id, it, "$source.pdf") }
+            check(sessions.addScreenshotAndExpand(bytes, source, sourceUri.orEmpty(), owner, documentId, pdfOffer)) {
+                context.getString(R.string.ai_screenshot_limit, AiProtocol.MAX_IMAGES)
             }
-        }.onFailure { failure = it.message ?: context.getString(R.string.ai_screenshot_failed) }
+        }.onFailure { failure = it.message ?: context.getString(R.string.ai_screenshot_failed) }.isSuccess
     }
 }
 
