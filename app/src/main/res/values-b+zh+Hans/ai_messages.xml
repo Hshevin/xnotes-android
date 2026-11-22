@@ -97,4 +97,8 @@
     <string name="ai_msg_image_invalid_reply">图像接口未返回可用的图片</string>
     <string name="ai_msg_image_too_large">生成的图片过大</string>
     <string name="ai_msg_thinking_unsupported">当前模型不支持所选的思考设置，本次按模型默认回答</string>
+    <string name="ai_msg_config_json_invalid">配置文件不是有效的 JSON：%1$s</string>
+    <string name="ai_msg_config_json_version_unsupported">不支持的配置文件版本（%1$d）</string>
+    <string name="ai_msg_config_thinking_payload_invalid">思考档位「%1$s」参数无效：%2$s</string>
+    <string name="ai_msg_config_token_field_invalid">输出上限字段只能为 max_tokens 或 max_completion_tokens</string>
 </resources>

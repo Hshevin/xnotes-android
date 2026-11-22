@@ -9,7 +9,8 @@ import org.json.JSONObject
 
 data class AiDraft(val text: String = "", val images: List<String> = emptyList(), val pdf: AiPdf? = null, val search: Boolean = false)
 
-data class AiTurn(val user: AiMessage, val answer: String = "", val state: String = "生成中", val error: String = "", val progress: String = "", val steps: List<String> = emptyList())
+data class AiTurn(val user: AiMessage, val answer: String = "", val state: String = "生成中", val error: String = "",
+                  val progress: String = "", val steps: List<String> = emptyList(), val rawError: String = "")
 data class AiChat(val id: String = UUID.randomUUID().toString(), val title: String = "新会话", val source: String = "", val updated: Long = System.currentTimeMillis(), val turns: List<AiTurn> = emptyList(), val sourceUri: String = "", val draft: AiDraft = AiDraft(), val sourceDocumentId: String = "",
     /**
      * The model and thinking level picked in this chat; blank / null follow the settings defaults.
@@ -25,14 +26,14 @@ data class AiChat(val id: String = UUID.randomUUID().toString(), val title: Stri
     /** What this chat sends with: its own picks over the defaults in [config]. */
     fun settings(config: AiConfig): AiConfig {
         val effort = effort ?: config.effort
-        if (config.providers.isEmpty()) return config.copy(model = model.ifBlank { config.model }, effort = effort)
         val route = when {
             model.isBlank() -> config.provider to config.model
             provider.isNotBlank() -> provider to model
             // Picked before providers existed: whichever provider lists the model, else the default.
             else -> (config.ownerOf(model) ?: config.provider) to model
         }
-        return config.route(route.first, route.second).copy(effort = effort)
+        val routed = config.route(route.first, route.second)
+        return routed.copy(effort = effort.takeIf { it.isEmpty() || it in routed.availableEfforts() }.orEmpty())
     }
     /** False when this chat's picked provider has been deleted, so it must pick again before sending. */
     fun routable(config: AiConfig): Boolean = config.providers.isEmpty() || config.providerOf(settings(config).provider) != null
@@ -61,7 +62,8 @@ class AiHistoryStore(private val directory: File, private val resources: com.xno
         val turns = JSONArray()
         chat.turns.forEach { turn -> turns.put(JSONObject().put("user", turn.user.text).put("images", JSONArray(turn.user.images))
             .put("pdf", pdfJson(turn.user.pdf))
-            .put("sources", turn.user.searchContext).put("answer", turn.answer).put("state", turn.state).put("error", turn.error).put("progress", turn.progress).put("steps", JSONArray(turn.steps))) }
+            .put("sources", turn.user.searchContext).put("answer", turn.answer).put("state", turn.state).put("error", turn.error)
+            .put("rawError", turn.rawError).put("progress", turn.progress).put("steps", JSONArray(turn.steps))) }
         val json = JSONObject().put("version", 1).put("id", chat.id).put("title", chat.title).put("source", chat.source).put("updated", chat.updated).put("sourceUri", chat.sourceUri).put("sourceDocumentId", chat.sourceDocumentId).put("model", chat.model).put("provider", chat.provider).put("effort", chat.effort ?: JSONObject.NULL).put("related", JSONArray(chat.relatedDocuments)).put("trashedAt", chat.trashedAt).put("turns", turns).put("draft", JSONObject().put("text", chat.draft.text).put("images", JSONArray(chat.draft.images)).put("pdf", pdfJson(chat.draft.pdf)).put("search", chat.draft.search))
         val bytes = json.toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 64 * 1024 * 1024) { AiText.t(AiMsg.CHAT_TOO_LARGE) }
@@ -88,9 +90,10 @@ class AiHistoryStore(private val directory: File, private val resources: com.xno
                 val turns = json.getJSONArray("turns")
                 AiChat(id, json.getString("title"), json.optString("source", ""), json.getLong("updated"), (0 until turns.length()).map { i ->
                     val t = turns.getJSONObject(i)
-                    AiTurn(AiMessage("user", t.getString("user"), readImages(t), t.optString("sources", ""), readPdf(t.optJSONObject("pdf"))), t.getString("answer"), t.getString("state"), t.optString("error", ""), t.optString("progress", ""), t.optJSONArray("steps")?.let { steps -> (0 until steps.length()).map { steps.getString(it) } } ?: emptyList())
+                    AiTurn(AiMessage("user", t.getString("user"), readImages(t), t.optString("sources", ""), readPdf(t.optJSONObject("pdf"))), t.getString("answer"), t.getString("state"), t.optString("error", ""), t.optString("progress", ""), t.optJSONArray("steps")?.let { steps -> (0 until steps.length()).map { steps.getString(it) } } ?: emptyList(),
+                        rawError = (t.opt("rawError") as? String).orEmpty())
                 }, json.optString("sourceUri", ""), json.optJSONObject("draft")?.let { d -> AiDraft(d.optString("text", ""), readImages(d), readPdf(d.optJSONObject("pdf")), d.optBoolean("search", false)) } ?: AiDraft(), json.optString("sourceDocumentId", ""),
-                    model = (json.opt("model") as? String).orEmpty(), provider = (json.opt("provider") as? String).orEmpty(), effort = (json.opt("effort") as? String)?.takeIf { it in AiThinking.LEVELS },
+                    model = (json.opt("model") as? String).orEmpty(), provider = (json.opt("provider") as? String).orEmpty(), effort = (json.opt("effort") as? String)?.takeIf(AiThinking::isValidLevelName),
                     relatedDocuments = json.optJSONArray("related")?.let { list -> (0 until list.length()).mapNotNull { list.opt(it) as? String } } ?: emptyList(),
                     trashedAt = json.optLong("trashedAt", 0L).coerceAtLeast(0L))
             } catch (_: Exception) { damaged++; null }

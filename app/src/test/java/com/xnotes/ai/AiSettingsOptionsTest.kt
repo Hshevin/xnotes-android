@@ -104,9 +104,12 @@ class AiSettingsOptionsTest {
             val legacy = java.io.File(dir, "${chat.id}.json")
             legacy.writeText(JSONObject(legacy.readText()).apply { remove("model"); remove("effort") }.toString())
             assertEquals(chat.copy(model = "", effort = null), store.readAll().first.single())
-            // An unknown stored level is ignored rather than sent.
-            legacy.writeText(JSONObject(legacy.readText()).put("effort", "ultra").toString())
+            // An illegal stored level (control char / newline) is dropped on read, and an unconfigured level is ignored rather than sent.
+            legacy.writeText(JSONObject(legacy.readText()).put("effort", "bad\nlevel").toString())
             assertNull(store.readAll().first.single().effort)
+            legacy.writeText(JSONObject(legacy.readText()).put("effort", "ultra").toString())
+            val loadedUnknown = store.readAll().first.single()
+            assertEquals("", loadedUnknown.settings(config).effort)
         } finally { dir.deleteRecursively() }
     }
 

@@ -65,7 +65,7 @@ internal fun AiChat.displayTitle(): String = if (title == AiChat().title) string
 
 /** A 48 dp icon action with a tooltip; the AI chrome has no bare text buttons. */
 @Composable
-private fun AiIconButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun AiIconButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Tooltip(label) {
         IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(MinTouchTarget)) {
@@ -110,7 +110,7 @@ internal fun AiSettingsRow() {
         runCatching { AiConfigStore(context).load() }.getOrNull()?.let { c ->
             if (c.providers.isEmpty()) context.getString(R.string.ai_settings_not_set)
             else listOfNotNull(c.providerOf(c.provider)?.label?.takeIf { c.providers.size > 1 }, c.model.ifBlank { context.getString(R.string.ai_settings_no_model) },
-                c.effort.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.ai_thinking_summary, context.getString(effortRes(it))) },
+                c.effort.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.ai_thinking_summary, effortSummary(context, it)) },
                 context.getString(if (c.searchKey.isBlank()) R.string.ai_settings_web_off else R.string.ai_settings_web_on)).joinToString(" · ")
         } ?: context.getString(R.string.ai_settings_unreadable_short)
     }
@@ -140,6 +140,11 @@ private fun effortRes(level: String): Int = when (level) {
     "high" -> R.string.ai_effort_high
     "xhigh" -> R.string.ai_effort_xhigh
     else -> R.string.ai_effort_default
+}
+
+private fun effortSummary(context: android.content.Context, level: String): String = when (level) {
+    "", AiThinking.OFF, "minimal", "low", "medium", "high", "xhigh" -> context.getString(effortRes(level))
+    else -> level
 }
 
 private fun formatRes(format: String): Int = when (format) {
@@ -176,7 +181,7 @@ private fun SettingsLabel(title: String, detail: String? = null, modifier: Modif
 /** One-of-several choice as a pill row; wraps into pill chips when many levels exist. Each target is at least 48 dp tall. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AiSegmented(options: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
+internal fun AiSegmented(options: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     val palette = LocalPalette.current
     if (options.size <= 5) {
         Row(modifier.height(MinTouchTarget).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape).padding(Space.s4),
@@ -228,7 +233,7 @@ internal fun AiSwitchRow(title: String, detail: String, checked: Boolean, enable
 }
 
 @Composable
-private fun effortOptions(): List<Pair<String, String>> = AiThinking.LEVELS.map { it to stringResource(effortRes(it)) }
+private fun effortOptions(levels: List<String> = AiThinking.LEVELS): List<Pair<String, String>> = levels.map { it to effortLabel(it) }
 
 /**
  * The provider's model list, searchable and sorted by what each model is for ([AiModelKinds]): ticking
@@ -309,9 +314,14 @@ internal fun AiSettings(close: () -> Unit) {
     val palette = LocalPalette.current
     val store = remember { AiConfigStore(context) }
     var error by remember { mutableStateOf("") }
+    var notice by remember { mutableStateOf("") }
     var confirmClear by remember { mutableStateOf(false) }
     var config by remember { mutableStateOf(runCatching { store.load() }.getOrElse { error = context.getString(R.string.ai_settings_unreadable); AiConfig() }) }
     var maxTokens by remember { mutableStateOf(config.maxTokens.toString()) }
+    var jsonMode by remember { mutableStateOf(false) }
+    var showKeys by remember { mutableStateOf(false) }
+    var jsonText by remember { mutableStateOf("") }
+    var renderedJson by remember { mutableStateOf("") }
     // The provider on the editor sheet, and whether it is new (not yet in the list).
     var editing by remember { mutableStateOf<Pair<AiProvider, Boolean>?>(null) }
     var defaultModelMenu by remember { mutableStateOf(false) }
@@ -319,12 +329,52 @@ internal fun AiSettings(close: () -> Unit) {
     var promptMenu by remember { mutableStateOf(false) }
     val localDefaultPrompt = AiDefaults.instructions(context.resources.configuration.locales[0].toLanguageTag())
     val many = config.providers.size > 1
-    fun save() {
-        val tokens = maxTokens.trim().toIntOrNull()
-        if (tokens == null || tokens !in AiProtocol.MIN_MAX_TOKENS..AiProtocol.MAX_MAX_TOKENS) {
-            error = AiText.t(AiMsg.CONFIG_MAX_TOKENS_INVALID, AiProtocol.MIN_MAX_TOKENS, AiProtocol.MAX_MAX_TOKENS); return
+    fun switchMode(toJson: Boolean) {
+        if (toJson == jsonMode) return
+        error = ""; notice = ""
+        if (toJson) {
+            val tokens = maxTokens.trim().toIntOrNull()
+            if (tokens == null || tokens !in AiProtocol.MIN_MAX_TOKENS..AiProtocol.MAX_MAX_TOKENS) {
+                error = AiText.t(AiMsg.CONFIG_MAX_TOKENS_INVALID, AiProtocol.MIN_MAX_TOKENS, AiProtocol.MAX_MAX_TOKENS)
+                return
+            }
+            val draft = config.copy(maxTokens = tokens)
+            config = draft
+            val exported = AiConfigFile.exportJson(draft, includeKeys = showKeys, includeEffectiveThinking = true)
+            jsonText = exported
+            renderedJson = exported
+            jsonMode = true
+        } else {
+            if (jsonText == renderedJson) {
+                jsonMode = false
+                return
+            }
+            runCatching {
+                AiConfigFile.parseAndApply(jsonText, config, localDefaultPrompt, AiConfigFile.ImportMode.REPLACE)
+            }.onSuccess { parsed ->
+                config = parsed
+                maxTokens = parsed.maxTokens.toString()
+                jsonMode = false
+            }.onFailure {
+                error = it.message ?: context.getString(R.string.ai_settings_invalid)
+            }
         }
-        val next = config.copy(maxTokens = tokens)
+    }
+    fun save() {
+        error = ""; notice = ""
+        val next = if (jsonMode) {
+            if (jsonText == renderedJson) config else runCatching {
+                AiConfigFile.parseAndApply(jsonText, config, localDefaultPrompt, AiConfigFile.ImportMode.REPLACE)
+            }.onFailure {
+                error = it.message ?: context.getString(R.string.ai_settings_invalid)
+            }.getOrNull() ?: return
+        } else {
+            val tokens = maxTokens.trim().toIntOrNull()
+            if (tokens == null || tokens !in AiProtocol.MIN_MAX_TOKENS..AiProtocol.MAX_MAX_TOKENS) {
+                error = AiText.t(AiMsg.CONFIG_MAX_TOKENS_INVALID, AiProtocol.MIN_MAX_TOKENS, AiProtocol.MAX_MAX_TOKENS); return
+            }
+            config.copy(maxTokens = tokens)
+        }
         runCatching { store.save(next) }.onSuccess { AiSessions.get(context).configRevision++; close() }.onFailure {
             error = if (it is IllegalArgumentException) it.message ?: context.getString(R.string.ai_settings_invalid) else context.getString(R.string.ai_settings_save_failed)
         }
@@ -348,8 +398,60 @@ internal fun AiSettings(close: () -> Unit) {
                 TextButton(onClick = ::save) { Text(stringResource(R.string.save), fontWeight = FontWeight.Bold) }
             }
             HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.fillMaxWidth().padding(horizontal = Space.s16, vertical = Space.s8)) {
+                AiSegmented(
+                    options = listOf(
+                        "visual" to stringResource(R.string.ai_settings_mode_visual),
+                        "json" to stringResource(R.string.ai_settings_mode_json),
+                    ),
+                    selected = if (jsonMode) "json" else "visual",
+                    modifier = Modifier.fillMaxWidth(),
+                ) { switchMode(it == "json") }
+            }
+            HorizontalDivider(color = palette.border.toComposeColor())
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s20)) {
                 if (error.isNotEmpty()) AiBanner(error)
+                if (notice.isNotEmpty() && error.isEmpty()) AiBanner(notice)
+                if (jsonMode) {
+                    AiJsonConfigPane(
+                        config = config,
+                        jsonText = jsonText,
+                        renderedJson = renderedJson,
+                        showKeys = showKeys,
+                        defaultInstructions = localDefaultPrompt,
+                        onJsonChange = { jsonText = it; error = ""; notice = "" },
+                        onShowKeysChange = { reveal ->
+                            error = ""; notice = ""
+                            if (jsonText == renderedJson) {
+                                showKeys = reveal
+                                val exported = AiConfigFile.exportJson(config, includeKeys = reveal, includeEffectiveThinking = true)
+                                jsonText = exported
+                                renderedJson = exported
+                                return@AiJsonConfigPane
+                            }
+                            val parsed = runCatching {
+                                AiConfigFile.parseAndApply(jsonText, config, localDefaultPrompt, AiConfigFile.ImportMode.REPLACE)
+                            }.onFailure {
+                                error = it.message ?: context.getString(R.string.ai_settings_invalid)
+                            }.getOrNull() ?: return@AiJsonConfigPane
+                            config = parsed
+                            maxTokens = parsed.maxTokens.toString()
+                            showKeys = reveal
+                            val exported = AiConfigFile.exportJson(parsed, includeKeys = reveal, includeEffectiveThinking = true)
+                            jsonText = exported
+                            renderedJson = exported
+                        },
+                        onApplied = { updated, rendered ->
+                            config = updated
+                            maxTokens = updated.maxTokens.toString()
+                            jsonText = rendered
+                            renderedJson = rendered
+                            error = ""
+                        },
+                        onError = { error = it; notice = "" },
+                        onNotice = { notice = it; error = "" },
+                    )
+                } else {
                 SettingsGroup(stringResource(R.string.ai_settings_providers), stringResource(R.string.ai_settings_providers_note)) {
                     if (config.providers.isEmpty()) Text(stringResource(R.string.ai_providers_empty), color = palette.textDim.toComposeColor(), fontSize = TextSize.body)
                     else Column {
@@ -389,7 +491,7 @@ internal fun AiSettings(close: () -> Unit) {
                     }
                     HorizontalDivider(color = palette.border.toComposeColor())
                     SettingsLabel(stringResource(R.string.ai_thinking_default))
-                    AiSegmented(effortOptions(), config.effort, Modifier.fillMaxWidth()) { config = config.copy(effort = it) }
+                    AiSegmented(effortOptions(config.availableEfforts()), config.effort, Modifier.fillMaxWidth()) { config = config.copy(effort = it) }
                     HorizontalDivider(color = palette.border.toComposeColor())
                     AiSwitchRow(stringResource(R.string.ai_default_search), stringResource(R.string.ai_default_search_note), config.searchByDefault) { config = config.copy(searchByDefault = it) }
                     HorizontalDivider(color = palette.border.toComposeColor())
@@ -464,6 +566,7 @@ internal fun AiSettings(close: () -> Unit) {
                 } else TextButton(onClick = { confirmClear = true }, contentPadding = PaddingValues(horizontal = Space.s4)) {
                     Icon(XnotesIcons.trash, null, Modifier.size(16.dp)); Spacer(Modifier.width(Space.s8)); Text(stringResource(R.string.ai_settings_clear))
                 }
+                }
             }
         }
     }
@@ -492,12 +595,20 @@ private fun AiProviderRow(provider: AiProvider, isDefault: Boolean, onClick: () 
     }
 }
 
-/** One saved model of a provider, with ✕ to drop it from the list. */
+/** One saved model of a provider, with optional per-model override action and ✕ to drop it. */
 @Composable
-private fun AiModelRow(name: String, onRemove: () -> Unit) {
+private fun AiModelRow(name: String, customized: Boolean = false, onConfigure: (() -> Unit)? = null, onRemove: () -> Unit) {
     val palette = LocalPalette.current
-    Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).padding(start = Space.s8), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+    Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).padding(start = Space.s8), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s4)) {
         Text(name, Modifier.weight(1f), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (customized) Text(
+            stringResource(R.string.ai_model_override_badge),
+            Modifier.clip(CircleShape).background(palette.surface.toComposeColor()).border(1.dp, palette.border.toComposeColor(), CircleShape)
+                .padding(horizontal = Space.s8, vertical = Space.s2),
+            color = palette.textDim.toComposeColor(),
+            fontSize = TextSize.caption,
+        )
+        onConfigure?.let { AiIconButton(XnotesIcons.sliders, stringResource(R.string.ai_model_override), onClick = it) }
         AiIconButton(XnotesIcons.close, stringResource(R.string.ai_model_remove, name), onClick = onRemove)
     }
 }
@@ -517,6 +628,7 @@ private fun AiProviderEditor(initial: AiProvider, isNew: Boolean, close: () -> U
     var formatMenu by remember { mutableStateOf(false) }
     var presetMenu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var configuringModel by remember { mutableStateOf<String?>(null) }
     // Fetching the provider's list is the one network call here, and only on tap.
     var fetching by remember { mutableStateOf<AiConnection?>(null) }
     var fetched by remember { mutableStateOf<List<String>?>(null) }
@@ -557,6 +669,21 @@ private fun AiProviderEditor(initial: AiProvider, isNew: Boolean, close: () -> U
         AiModelPicker(list, choices(), images(), onToggle = { id, image ->
             if (image) setImages(if (id in images()) images() - id else images() + id) else setChoices(if (id in choices()) choices() - id else choices() + id)
         }) { fetched = null }
+    }
+    configuringModel?.let { modelName ->
+        val providerLevels = provider.thinkingLevels ?: AiThinking.defaultLevels(provider.thinkingFormat, provider.url)
+        AiModelOverrideDialog(
+            modelName = modelName,
+            initial = provider.modelOverrides[modelName],
+            providerLevels = providerLevels,
+            onDismiss = { configuringModel = null },
+            onSave = { override ->
+                val next = LinkedHashMap(provider.modelOverrides)
+                if (override == null) next.remove(modelName) else next[modelName] = override
+                provider = provider.copy(modelOverrides = next)
+                configuringModel = null
+            },
+        )
     }
     androidx.compose.ui.window.Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         val shape = MaterialTheme.shapes.large
@@ -602,7 +729,13 @@ private fun AiProviderEditor(initial: AiProvider, isNew: Boolean, close: () -> U
                     Column {
                         choices().forEachIndexed { index, name ->
                             if (index > 0) HorizontalDivider(color = palette.border.toComposeColor())
-                            key(name) { AiModelRow(name) { setChoices(choices() - name) } }
+                            key(name) {
+                                AiModelRow(
+                                    name = name,
+                                    customized = provider.modelOverrides[name]?.let { it.tokenField.isNotEmpty() || it.thinkingLevels != null } == true,
+                                    onConfigure = { configuringModel = name },
+                                ) { setChoices(choices() - name) }
+                            }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
@@ -663,6 +796,12 @@ private fun AiProviderEditor(initial: AiProvider, isNew: Boolean, close: () -> U
                             }
                         }
                     }
+                    HorizontalDivider(color = palette.border.toComposeColor())
+                    AiThinkingLevelsEditor(
+                        levels = provider.thinkingLevels,
+                        defaultLevels = AiThinking.defaultLevels(provider.thinkingFormat, provider.url),
+                        onChange = { provider = provider.copy(thinkingLevels = it) },
+                    )
                 }
                 // Deleting asks again in place; chats that used this provider will ask for another model.
                 if (!isNew) {
@@ -920,6 +1059,7 @@ private fun AiTurnView(chatId: String, index: Int, turn: AiTurn, canRetry: Boole
     val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     val scope = rememberCoroutineScope()
     var details by remember(chatId, index) { mutableStateOf(false) }
+    var showRawError by remember(chatId, index) { mutableStateOf(false) }
     val running = turn.state == STATE_RUNNING
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.s12)) {
         Column(Modifier.align(Alignment.End).widthIn(max = 560.dp).fillMaxWidth(0.85f), horizontalAlignment = Alignment.End,
@@ -947,14 +1087,52 @@ private fun AiTurnView(chatId: String, index: Int, turn: AiTurn, canRetry: Boole
             Text(stateLabel(turn.state) + if (turn.error.isNotBlank()) " · ${turn.error}" else "", color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
         }
         val sources = (turn.steps + turn.user.searchContext).filter { it.isNotBlank() }
+        val hasRawError = turn.rawError.isNotBlank()
         if (!running) Row(verticalAlignment = Alignment.CenterVertically) {
             if (turn.answer.isNotBlank()) AiIconButton(XnotesIcons.copy, stringResource(R.string.ai_copy_answer)) {
                 scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText("AI", turn.answer))) }
             }
             if (turn.state in RETRYABLE_STATES && canRetry) AiIconButton(XnotesIcons.restore, stringResource(R.string.ai_ask_again), onClick = onRetry)
+            if (hasRawError) TextButton(onClick = { showRawError = !showRawError }) {
+                Text(stringResource(if (showRawError) R.string.ai_raw_error_hide else R.string.ai_raw_error_show), fontSize = TextSize.label, color = palette.textDim.toComposeColor())
+                Icon(if (showRawError) XnotesIcons.chevronUp else XnotesIcons.chevronDown, null, Modifier.padding(start = Space.s4).size(14.dp), tint = palette.textDim.toComposeColor())
+            }
             if (sources.isNotEmpty()) TextButton(onClick = { details = !details }) {
                 Text(stringResource(if (details) R.string.ai_details_hide else R.string.ai_details_show), fontSize = TextSize.label, color = palette.textDim.toComposeColor())
                 Icon(if (details) XnotesIcons.chevronUp else XnotesIcons.chevronDown, null, Modifier.padding(start = Space.s4).size(14.dp), tint = palette.textDim.toComposeColor())
+            }
+        }
+        if (showRawError && hasRawError) {
+            val shape = MaterialTheme.shapes.medium
+            Column(
+                Modifier.fillMaxWidth().clip(shape).background(palette.surface.toComposeColor())
+                    .border(1.dp, palette.border.toComposeColor(), shape),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = Space.s12, end = Space.s4),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.ai_raw_error_show),
+                        Modifier.weight(1f),
+                        color = palette.textDim.toComposeColor(),
+                        fontSize = TextSize.label,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    AiIconButton(XnotesIcons.copy, stringResource(R.string.ai_raw_error_copy)) {
+                        scope.launch {
+                            clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText("AI Raw Error", turn.rawError)))
+                        }
+                    }
+                }
+                HorizontalDivider(color = palette.border.toComposeColor())
+                Text(
+                    turn.rawError,
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(Space.s12),
+                    color = palette.text.toComposeColor(),
+                    fontSize = TextSize.caption,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
             }
         }
         if (details && sources.isNotEmpty()) Text(sources.joinToString("\n"),
@@ -1114,7 +1292,7 @@ private fun AiModelChip(sessions: AiSessions, chat: AiChat, config: AiConfig, mo
     val provider = config.providerOf(current.provider)
     val label = if (!routable) stringResource(R.string.ai_model_select)
         else listOfNotNull(provider?.label?.takeIf { config.providers.size > 1 }, current.model.ifBlank { stringResource(R.string.ai_settings_no_model) },
-            current.effort.takeIf { it.isNotEmpty() }?.let { stringResource(effortRes(it)) }).joinToString(" · ")
+            current.effort.takeIf { it.isNotEmpty() }?.let { effortLabel(it) }).joinToString(" · ")
     // Each group is a provider and its models; a setup from before providers is one unnamed group.
     val groups = config.providers.filter { it.modelChoices.isNotEmpty() }.map { it.id to it.label to it.modelChoices }.ifEmpty { listOf("" to "" to config.modelChoices).filter { it.second.isNotEmpty() } }
     val total = groups.sumOf { it.second.size }
@@ -1153,7 +1331,8 @@ private fun AiModelChip(sessions: AiSessions, chat: AiChat, config: AiConfig, mo
                 leadingIcon = { Icon(XnotesIcons.sliders, null, Modifier.size(18.dp)) }, onClick = { menu = false; onSettings() })
             HorizontalDivider(Modifier.padding(vertical = Space.s4), color = palette.border.toComposeColor())
             Text(stringResource(R.string.ai_settings_thinking), Modifier.padding(horizontal = Space.s16, vertical = Space.s4), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
-            AiSegmented(effortOptions(), current.effort, Modifier.padding(horizontal = Space.s12).fillMaxWidth()) { sessions.choose(chat.id, effort = it) }
+            val modelEfforts = config.availableEfforts(current.provider, current.model)
+            AiSegmented(effortOptions(modelEfforts), current.effort, Modifier.padding(horizontal = Space.s12).fillMaxWidth()) { sessions.choose(chat.id, effort = it) }
             Text(stringResource(R.string.ai_thinking_menu_note), Modifier.padding(horizontal = Space.s16, vertical = Space.s8), color = palette.textDim.toComposeColor(), fontSize = TextSize.caption)
         }
     }

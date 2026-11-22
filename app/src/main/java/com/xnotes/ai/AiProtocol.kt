@@ -23,6 +23,37 @@ object AiThinking {
     const val OFF = "off"
     /** "" is the provider default; the rest are what the user can pick. */
     val LEVELS = listOf("", OFF, "minimal", "low", "medium", "high", "xhigh")
+    const val MAX_CUSTOM_LEVELS = 20
+    val RESERVED_REQUEST_KEYS = setOf("model", "messages", "stream", "tools", "tool_choice")
+
+    fun isValidLevelName(level: String): Boolean = level.isEmpty() ||
+        (level.isNotBlank() && level.length <= 40 && level.none { it.isISOControl() || it == '\u2028' || it == '\u2029' })
+
+    fun defaultLevels(format: String, url: String): LinkedHashMap<String, String> =
+        LEVELS.filter { it.isNotEmpty() }.associateWithTo(linkedMapOf()) { level ->
+            JSONObject().also { apply(it, level, format, url) }.toString()
+        }
+
+    fun validatePayload(level: String, payloadJson: String): JSONObject {
+        val payload = try {
+            strictJsonContainer(payloadJson) as? JSONObject
+        } catch (e: com.xnotes.format.JsonPullException) {
+            throw IllegalArgumentException(AiText.t(AiMsg.CONFIG_THINKING_PAYLOAD_INVALID, level, e.message.orEmpty()))
+        } catch (_: Exception) { null }
+        requireNotNull(payload) { AiText.t(AiMsg.CONFIG_THINKING_PAYLOAD_INVALID, level, "JSONObject") }
+        val reserved = RESERVED_REQUEST_KEYS.firstOrNull(payload::has)
+        require(reserved == null) { AiText.t(AiMsg.CONFIG_THINKING_PAYLOAD_INVALID, level, reserved.orEmpty()) }
+        return payload
+    }
+
+    fun resolvePayload(config: AiConfig): JSONObject? {
+        if (config.effort.isEmpty()) return null
+        val p = config.providerOf(config.provider)
+        val levels = p?.levelsFor(config.model)
+        if (levels != null) return levels[config.effort]?.let { validatePayload(config.effort, it) }
+        if (config.effort !in LEVELS) return null
+        return JSONObject().also { apply(it, config.effort, p?.thinkingFormat ?: config.thinkingFormat, p?.url ?: config.url) }
+    }
 
     fun resolve(format: String, url: String): String {
         if (format != AUTO) return format
@@ -43,10 +74,9 @@ object AiThinking {
         else -> "reasoning_effort"
     }
 
-    private val thinkingParams = setOf("reasoning_effort", "reasoning", "reasoning.effort", "thinking", "thinking.type", "enable_thinking")
     private val effortField = Regex("""\breasoning[_.\s]effort\b""", RegexOption.IGNORE_CASE)
     private val namedRefusal = Regex(
-        """\b(?:unsupported parameter:|unknown parameter:|invalid value for|unsupported value:[^.;]*?not supported for)\s*['"]([\w.]+)['"]""",
+        """\b(?:unsupported parameter:|unknown parameter:|invalid value for)\s*(?:['"]([^'"]+)['"]|([\w.-]+))|\bunsupported value:[^.;]*?not supported for\s*['"]([^'"]+)['"]""",
         RegexOption.IGNORE_CASE,
     )
     // Some relays omit the parameter entirely. Match the rejected value, never a value merely
@@ -57,20 +87,23 @@ object AiThinking {
     )
     private val valueBeforeOptions = Regex("""(?:unsupported|invalid) value:\s*['"](\w+)['"][.!]?""", RegexOption.IGNORE_CASE)
 
-    fun refused(detail: String, effort: String, format: String, url: String, rawBody: String = ""): Boolean {
+    fun refused(detail: String, effort: String, format: String, url: String, rawBody: String = "", sentKeys: Set<String> = emptySet()): Boolean {
         if (effort.isEmpty()) return false
+        val keys = sentKeys.ifEmpty { setOf(field(format, url)) }
+        val reasoning = "reasoning_effort" in keys || "reasoning" in keys
+        fun matches(name: String) = keys.any { name.equals(it, true) || name.startsWith(it + ".", true) } ||
+            (reasoning && effortField.matches(name))
         val param = if (rawBody.isBlank()) null else runCatching {
             JSONObject(rawBody).optJSONObject("error")?.opt("param") as? String
         }.getOrNull()?.trim()
-        if (!param.isNullOrEmpty()) return param.lowercase() in thinkingParams
+        if (!param.isNullOrEmpty()) return matches(param)
 
         // A relay may put the rejected parameter in its message and mention reasoning only
         // when describing the model (e.g. temperature is unsupported on a reasoning model).
-        val named = namedRefusal.find(detail)?.groupValues?.get(1)
-        if (named != null && named.lowercase() !in thinkingParams) return false
-        val field = field(format, url)
-        if (Regex("""\b$field\b""", RegexOption.IGNORE_CASE).containsMatchIn(detail)) return true
-        if (field != "reasoning_effort" && field != "reasoning") return false
+        val named = namedRefusal.find(detail)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
+        if (named != null) return matches(named)
+        if (keys.any { Regex("(?<![\\w.-])" + Regex.escape(it) + "(?![\\w-])", RegexOption.IGNORE_CASE).containsMatchIn(detail) }) return true
+        if (!reasoning) return false
         if (effortField.containsMatchIn(detail)) return true
 
         val optionsAt = detail.indexOf("Supported values are:", ignoreCase = true)
@@ -81,13 +114,20 @@ object AiThinking {
     }
 
     /** Endpoint, model and level found this session to be refused; their requests go without the field. */
-    private val refusing = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val refusing = java.util.concurrent.ConcurrentHashMap.newKeySet<List<String>>()
 
-    private fun key(config: AiConfig) = listOf(config.url.trim().trimEnd('/'), config.model.trim(), config.effort).joinToString("\n")
+    private fun key(config: AiConfig): List<String>? {
+        if (config.effort.isEmpty()) return null
+        val p = config.providerOf(config.provider)
+        val levels = p?.levelsFor(config.model)
+        val mapping = if (levels == null) resolve(p?.thinkingFormat ?: config.thinkingFormat, config.url)
+                      else levels[config.effort] ?: return null
+        return listOf(config.url.trim().trimEnd('/'), config.model.trim(), config.effort, mapping)
+    }
 
-    fun refuses(config: AiConfig): Boolean = config.effort.isNotEmpty() && key(config) in refusing
+    fun refuses(config: AiConfig): Boolean = key(config)?.let(refusing::contains) == true
 
-    fun markRefused(config: AiConfig) { refusing += key(config) }
+    fun markRefused(config: AiConfig) { key(config)?.let(refusing::add) }
 
     fun apply(body: JSONObject, effort: String, format: String, url: String) {
         if (effort.isEmpty()) return
@@ -131,7 +171,9 @@ object AiProtocol {
     }
 
     fun endpoint(raw: String): String {
-        val uri = URI(raw.trim())
+        val uri = try { URI(raw.trim()) } catch (_: java.net.URISyntaxException) {
+            throw IllegalArgumentException(AiText.t(AiMsg.ENDPOINT_INVALID))
+        }
         require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { AiText.t(AiMsg.ENDPOINT_INVALID) }
         val base = raw.trim().trimEnd('/')
         return if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
@@ -142,7 +184,10 @@ object AiProtocol {
      * [tail] holds this answer's tool rounds (assistant tool calls and tool results) after [messages];
      * [tools] offers native tool calls with [toolChoice], "none" forcing an answer from what was gathered.
      */
-    fun request(config: AiConfig, messages: List<AiMessage>, tail: List<JSONObject> = emptyList(), tools: JSONArray? = null, toolChoice: String = "auto"): JSONObject {
+    fun request(config: AiConfig, messages: List<AiMessage>, tail: List<JSONObject> = emptyList(), tools: JSONArray? = null, toolChoice: String = "auto"): JSONObject =
+        request(config, messages, tail, tools, toolChoice, AiThinking.resolvePayload(config))
+
+    internal fun request(config: AiConfig, messages: List<AiMessage>, tail: List<JSONObject>, tools: JSONArray?, toolChoice: String, thinking: JSONObject?): JSONObject {
         val model = config.model
         require(model.isNotBlank()) { AiText.t(AiMsg.MODEL_REQUIRED) }
         require(messages.isNotEmpty() && messages.size <= 40) { AiText.t(AiMsg.CHAT_TOO_LONG) }
@@ -173,8 +218,11 @@ object AiProtocol {
             items.put(JSONObject().put("role", message.role).put("content", content))
         }
         tail.forEach(items::put)
-        return JSONObject().put("model", model).put("stream", true).put(tokenField(config.url), config.maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)).put("messages", items)
-            .also { AiThinking.apply(it, config.effort, config.thinkingFormat, config.url) }
+        return JSONObject().put("model", model).put("stream", true).put(config.effectiveTokenField(), config.maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)).put("messages", items)
+            .also { body -> thinking?.keys()?.forEach { key ->
+                require(key !in AiThinking.RESERVED_REQUEST_KEYS) { AiText.t(AiMsg.CONFIG_THINKING_PAYLOAD_INVALID, config.effort, key) }
+                body.put(key, thinking.get(key))
+            } }
             .also { if (tools != null) it.put("tools", tools).put("tool_choice", toolChoice) }
     }
 
@@ -190,18 +238,43 @@ object AiProtocol {
 
     /** Longest provider error message shown with a failed request. */
     const val ERROR_DETAIL_MAX = 300
+    const val RAW_ERROR_MAX = 16384
+
+    fun maskSecrets(text: String, keys: Collection<String>): String {
+        var masked = text
+        val spellings = keys.filter { it.length >= 8 }.flatMap { listOf(it, JSONObject.quote(it).removeSurrounding("\"")) }
+        for (key in spellings.distinct().sortedByDescending { it.length }) masked = masked.replace(key, "***")
+        return masked
+    }
+
+    internal fun boundedError(text: String): String =
+        if (text.length <= RAW_ERROR_MAX) text else text.take(RAW_ERROR_MAX - 1) + "…"
+
+    fun formatRawError(status: Int?, endpoint: String, model: String, thinkingPayload: JSONObject?, hasTools: Boolean,
+                       rawBody: String, keysToMask: Collection<String> = emptyList()): String {
+        val body = try {
+            when (val json = strictJsonContainer(rawBody)) {
+                is JSONObject -> json.toString(2)
+                is JSONArray -> json.toString(2)
+                else -> rawBody.trim()
+            }
+        } catch (_: Exception) { rawBody.trim() }
+        val report = "HTTP ${status ?: "?"} · POST $endpoint\nmodel: $model | thinking: ${thinkingPayload ?: "—"} | tools: $hasTools\n\n$body"
+        return boundedError(maskSecrets(report, keysToMask))
+    }
 
     /**
      * The message of an OpenAI-style error body (`{"error":{"message":…}}`, or `error` / `message` as a
      * string), on one line, bounded, and with [key] masked in case a provider echoes it; "" when the
      * body is not such JSON, so HTML pages and other noise are never shown.
      */
-    fun providerError(body: String, key: String): String {
-        val json = runCatching { JSONObject(body.trim()) }.getOrNull() ?: return ""
+    fun providerError(body: String, key: String): String = providerError(body, listOf(key))
+
+    internal fun providerError(body: String, keys: Collection<String>): String {
+        val json = runCatching { strictJsonContainer(body) as? JSONObject }.getOrNull() ?: return ""
         val error = json.opt("error")
         val raw = (error as? JSONObject)?.opt("message") as? String ?: error as? String ?: json.opt("message") as? String ?: return ""
-        var text = raw.replace(Regex("\\s+"), " ").trim()
-        if (key.length >= 8) text = text.replace(key, "***")
+        val text = maskSecrets(raw, keys).replace(Regex("\\s+"), " ").trim()
         return if (text.length <= ERROR_DETAIL_MAX) text else text.take(ERROR_DETAIL_MAX - 1) + "…"
     }
     fun delta(json: String): String {

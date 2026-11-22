@@ -101,7 +101,11 @@ enum class AiMsg(val zh: String) {
     IMAGE_MODEL_REQUIRED("请先在 AI 设置中设置图像模型"),
     IMAGE_INVALID_REPLY("图像接口未返回可用的图片"),
     IMAGE_TOO_LARGE("生成的图片过大"),
-    THINKING_UNSUPPORTED("当前模型不支持所选的思考设置，本次按模型默认回答");
+    THINKING_UNSUPPORTED("当前模型不支持所选的思考设置，本次按模型默认回答"),
+    CONFIG_JSON_INVALID("配置文件不是有效的 JSON：%1\$s"),
+    CONFIG_JSON_VERSION_UNSUPPORTED("不支持的配置文件版本（%1\$d）"),
+    CONFIG_THINKING_PAYLOAD_INVALID("思考档位「%1\$s」参数无效：%2\$s"),
+    CONFIG_TOKEN_FIELD_INVALID("输出上限字段只能为 max_tokens 或 max_completion_tokens");
 }
 
 object AiText {

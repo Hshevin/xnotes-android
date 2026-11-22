@@ -310,7 +310,11 @@ class AiSessions(
      */
     fun choose(id: String, model: String? = null, effort: String? = null, provider: String? = null) {
         val chat = chats[id] ?: return
-        val next = chat.copy(model = model?.trim() ?: chat.model, provider = provider ?: chat.provider, effort = effort?.takeIf { it in AiThinking.LEVELS } ?: chat.effort)
+        val routed = chat.copy(model = model?.trim() ?: chat.model, provider = provider ?: chat.provider)
+        val selected = effort?.takeIf { level ->
+            level in AiThinking.LEVELS || runCatching { level in routed.settings(config()).availableEfforts() }.getOrDefault(false)
+        }
+        val next = routed.copy(effort = selected ?: chat.effort)
         if (next != chat) { chats[id] = next; persist(next) }
     }
     fun isRunning(id: String) = requests.containsKey(id)
@@ -322,10 +326,12 @@ class AiSessions(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             var started = false
             var pdfLease: AutoCloseable? = null
+            var secrets = emptyList<String>()
             try {
                 val defaults = config()
                 require(original.routable(defaults)) { AiText.t(AiMsg.PROVIDER_REMOVED) }
                 val settings = original.settings(defaults)
+                secrets = listOf(settings.key, settings.searchKey)
                 val tools = settings.forTools()
                 require(settings.key.isNotBlank()) { AiText.t(AiMsg.PROVIDER_NOT_CONFIGURED) }
                 AiProtocol.endpoint(settings.url)
@@ -358,6 +364,8 @@ class AiSessions(
                 var offerWeb = useSearch
                 var unsupported = ""
                 var thinkingDropped = false
+                var thinkingDiagnostic = ""
+                var toolsDiagnostic = ""
                 var rounds = 0
                 var lastSave = System.nanoTime()
                 val append: suspend (String) -> Unit = { chunk ->
@@ -377,6 +385,7 @@ class AiSessions(
                     val reply = try {
                         withContext(Dispatchers.IO) { client.complete(settings, history + prepared, tail, offered, choice ?: "auto", append) }
                     } catch (e: AiToolsUnsupported) {
+                        if (toolsDiagnostic.isEmpty()) toolsDiagnostic = e.rawError
                         // A model that takes no pictures refuses the request carrying page images: drop them,
                         // tell it so, and go on reading text. Only once, so another cause still ends the turn.
                         val textOnly = if (reader != null && !reader.imagesOff) AiPdfTools.withoutImages(tail) else null
@@ -386,7 +395,7 @@ class AiSessions(
                             continue
                         }
                         // Only the first request can be refused for offering tools; later ones already carry tool rounds.
-                        if (choice == null || tail.isNotEmpty()) throw IllegalStateException(e.message)
+                        if (choice == null || tail.isNotEmpty()) throw e
                         if (offerWeb) { offerWeb = false; unsupported = AiText.t(AiMsg.TOOLS_UNSUPPORTED); progress(id, unsupported) }
                         if (reader != null && access != null) {
                             pdfReader = null
@@ -396,6 +405,7 @@ class AiSessions(
                         continue
                     }
                     if (reply.thinkingDropped) thinkingDropped = true
+                    if (thinkingDiagnostic.isEmpty()) thinkingDiagnostic = reply.thinkingFallbackDetail
                     if (reply.calls.isEmpty() || choice != "auto") break
                     rounds++
                     // Each call goes to the tool set that was offered; anything else is answered, not run.
@@ -424,14 +434,24 @@ class AiSessions(
                     c.copy(turns = c.turns.dropLast(1) + c.turns.last().let { it.copy(user = it.user.copy(searchContext = evidence.joinToString("\n\n").take(AiWebTools.EVIDENCE_MAX))) })
                 }?.let { persist(it) }
                 check(chats[id]?.turns?.lastOrNull()?.answer?.isNotBlank() == true) { AiText.t(AiMsg.NO_TEXT_RETURNED) }
-                finish(id, "已完成", listOfNotNull(unsupported.ifEmpty { null }, AiText.t(AiMsg.THINKING_UNSUPPORTED).takeIf { thinkingDropped }, failures.firstOrNull()?.let { AiText.t(AiMsg.WEB_TOOL_FAILED, it) }).joinToString(" · "))
+                val notice = listOfNotNull(unsupported.ifEmpty { null }, AiText.t(AiMsg.THINKING_UNSUPPORTED).takeIf { thinkingDropped },
+                    failures.firstOrNull()?.let { AiText.t(AiMsg.WEB_TOOL_FAILED, it) }).joinToString(" · ")
+                finish(id, "已完成", AiProtocol.maskSecrets(notice, secrets),
+                    AiProtocol.boundedError(AiProtocol.maskSecrets(thinkingDiagnostic.ifEmpty { toolsDiagnostic }, secrets)))
             } catch (e: CancellationException) {
                 if (started) finish(id, "已停止", AiText.t(AiMsg.STOPPED_BY_USER))
                 throw e
             } catch (e: Exception) {
-                val message = if (e is IllegalArgumentException || e is IllegalStateException) e.message ?: AiText.t(AiMsg.REQUEST_FAILED) else AiText.t(AiMsg.NETWORK_ERROR)
-                if (started) finish(id, "生成失败", message)
-                else update(id) { c -> c.copy(turns = c.turns + AiTurn(user, state = "生成失败", error = message)) }?.let { persist(it) }
+                val summary = if (e is IllegalArgumentException || e is IllegalStateException) e.message ?: AiText.t(AiMsg.REQUEST_FAILED) else AiText.t(AiMsg.NETWORK_ERROR)
+                val message = AiProtocol.maskSecrets(summary, secrets)
+                val diagnostic = when (e) {
+                    is AiRequestFailure -> e.rawError
+                    is AiToolsUnsupported -> e.rawError
+                    else -> "${e.javaClass.simpleName}: ${e.message.orEmpty()}"
+                }
+                val rawError = AiProtocol.boundedError(AiProtocol.maskSecrets(diagnostic, secrets))
+                if (started) finish(id, "生成失败", message, rawError)
+                else update(id) { c -> c.copy(turns = c.turns + AiTurn(user, state = "生成失败", error = message, rawError = rawError)) }?.let { persist(it) }
             } finally {
                 try { withContext(NonCancellable + Dispatchers.IO) { pdfLease?.close() } }
                 finally { requests.remove(id) }
@@ -439,8 +459,8 @@ class AiSessions(
         }
         requests[id] = client to job; job.start()
     }
-    private fun finish(id: String, state: String, error: String) {
-        update(id) { c -> c.copy(updated = System.currentTimeMillis(), turns = c.turns.dropLast(1) + c.turns.last().copy(state = state, error = error)) }?.let { persist(it) }
+    private fun finish(id: String, state: String, error: String, rawError: String = "") {
+        update(id) { c -> c.copy(updated = System.currentTimeMillis(), turns = c.turns.dropLast(1) + c.turns.last().copy(state = state, error = error, rawError = rawError)) }?.let { persist(it) }
     }
     fun stop(id: String) { requests[id]?.let { (client, job) -> client.cancel(); job.cancel() } }
     /**

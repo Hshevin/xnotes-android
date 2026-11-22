@@ -12,10 +12,13 @@ data class AiToolCall(val id: String, val name: String, val arguments: String)
  * One streamed completion: its text, reasoning to hand back alongside tool calls, and the calls.
  * [thinkingDropped] when it went without the chosen thinking level, which the model refuses.
  */
-data class AiReply(val content: String = "", val reasoning: String = "", val calls: List<AiToolCall> = emptyList(), val thinkingDropped: Boolean = false)
+data class AiReply(val content: String = "", val reasoning: String = "", val calls: List<AiToolCall> = emptyList(),
+                   val thinkingDropped: Boolean = false, val thinkingFallbackDetail: String = "")
 
 /** The provider rejected a request that offered tools: the model or API cannot take tool calls. */
-class AiToolsUnsupported(val status: Int, detail: String = "") : IllegalStateException(AiConnection.httpFailure(status, detail))
+class AiToolsUnsupported(val status: Int, detail: String = "", val rawError: String = "") : IllegalStateException(AiConnection.httpFailure(status, detail))
+
+class AiRequestFailure(summary: String, val rawError: String) : IllegalStateException(summary)
 
 /**
  * Collects Chat Completions stream chunks into tool calls. Fragments arrive per `index`: the id and

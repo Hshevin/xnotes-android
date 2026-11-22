@@ -97,4 +97,8 @@
     <string name="ai_msg_image_invalid_reply">The image service returned no usable picture</string>
     <string name="ai_msg_image_too_large">The generated picture is too large</string>
     <string name="ai_msg_thinking_unsupported">This model does not support the chosen thinking setting; it answered with its own default</string>
+    <string name="ai_msg_config_json_invalid">Configuration is not valid JSON: %1$s</string>
+    <string name="ai_msg_config_json_version_unsupported">Unsupported configuration version (%1$d)</string>
+    <string name="ai_msg_config_thinking_payload_invalid">Invalid payload for thinking level “%1$s”: %2$s</string>
+    <string name="ai_msg_config_token_field_invalid">Output token field must be max_tokens or max_completion_tokens</string>
 </resources>
