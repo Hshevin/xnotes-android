@@ -105,6 +105,7 @@
     <string name="ai_thinking_summary">Thinking: %1$s</string>
     <string name="ai_effort_default">Default</string>
     <string name="ai_effort_off">Off</string>
+    <string name="ai_effort_on">On</string>
     <string name="ai_effort_minimal">Minimal</string>
     <string name="ai_effort_low">Low</string>
     <string name="ai_effort_medium">Medium</string>

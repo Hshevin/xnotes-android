@@ -95,6 +95,7 @@ internal fun validateThinkingLevelEntry(
 internal fun effortLabel(level: String): String = when (level) {
     "" -> stringResource(R.string.ai_effort_default)
     AiThinking.OFF -> stringResource(R.string.ai_effort_off)
+    AiThinking.ON -> stringResource(R.string.ai_effort_on)
     "minimal" -> stringResource(R.string.ai_effort_minimal)
     "low" -> stringResource(R.string.ai_effort_low)
     "medium" -> stringResource(R.string.ai_effort_medium)

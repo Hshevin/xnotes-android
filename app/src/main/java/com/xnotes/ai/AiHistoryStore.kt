@@ -33,7 +33,7 @@ data class AiChat(val id: String = UUID.randomUUID().toString(), val title: Stri
             else -> (config.ownerOf(model) ?: config.provider) to model
         }
         val routed = config.route(route.first, route.second)
-        return routed.copy(effort = effort.takeIf { it.isEmpty() || it in routed.availableEfforts() }.orEmpty())
+        return routed.copy(effort = AiThinking.normalizeEffort(effort, routed.availableEfforts()))
     }
     /** False when this chat's picked provider has been deleted, so it must pick again before sending. */
     fun routable(config: AiConfig): Boolean = config.providers.isEmpty() || config.providerOf(settings(config).provider) != null

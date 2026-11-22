@@ -25,6 +25,7 @@ class AiSettingsOptionsTest {
         assertEquals("high", body("https://api.openai.com/v1", "high").getString("reasoning_effort"))
         assertEquals("xhigh", body("https://api.openai.com/v1", "xhigh").getString("reasoning_effort"))
         assertEquals("none", body("https://api.openai.com/v1", "off").getString("reasoning_effort"))
+        assertEquals("enabled", body("https://api.deepseek.com", AiThinking.ON).getJSONObject("thinking").getString("type"))
         assertEquals("enabled", body("https://api.deepseek.com", "low").getJSONObject("thinking").getString("type"))
         assertEquals("enabled", body("https://api.deepseek.com", "xhigh").getJSONObject("thinking").getString("type"))
         assertEquals("disabled", body("https://api.deepseek.com", "off").getJSONObject("thinking").getString("type"))
@@ -33,11 +34,40 @@ class AiSettingsOptionsTest {
         assertEquals("medium", body("https://openrouter.ai/api/v1", "medium").getJSONObject("reasoning").getString("effort"))
         assertEquals("xhigh", body("https://openrouter.ai/api/v1", "xhigh").getJSONObject("reasoning").getString("effort"))
         assertFalse(body("https://openrouter.ai/api/v1", "off").getJSONObject("reasoning").getBoolean("enabled"))
+        assertTrue(body("https://dashscope.aliyuncs.com/compatible-mode/v1", AiThinking.ON).getBoolean("enable_thinking"))
+        assertFalse(body("https://dashscope.aliyuncs.com/compatible-mode/v1", "off").getBoolean("enable_thinking"))
         assertTrue(body("https://dashscope.aliyuncs.com/compatible-mode/v1", "high").getBoolean("enable_thinking"))
         assertTrue(body("https://dashscope.aliyuncs.com/compatible-mode/v1", "minimal").getBoolean("enable_thinking"))
+        assertFalse("OpenAI must not emit invalid reasoning_effort='on'", body("https://api.openai.com/v1", AiThinking.ON).has("reasoning_effort"))
         // An explicit format overrides the host guess; a look-alike host is not DeepSeek.
         assertEquals("low", body("https://api.deepseek.com", "low", AiThinking.OPENAI).getString("reasoning_effort"))
         assertEquals("high", body("https://deepseek.com.example.net/v1", "high").getString("reasoning_effort"))
+    }
+
+    @Test fun toggleOnlyProvidersExposeOnlyDefaultOffAndOnWhileUpgradingLegacyEfforts() {
+        assertEquals(listOf(AiThinking.OFF, AiThinking.ON), AiThinking.defaultLevels(AiThinking.AUTO, "https://api.deepseek.com/v1").keys.toList())
+        assertEquals(listOf(AiThinking.OFF, AiThinking.ON), AiThinking.defaultLevels(AiThinking.DEEPSEEK, "https://relay.example.com/v1").keys.toList())
+        assertEquals(listOf(AiThinking.OFF, AiThinking.ON), AiThinking.defaultLevels(AiThinking.AUTO, "https://dashscope.aliyuncs.com/compatible-mode/v1").keys.toList())
+        assertEquals(listOf(AiThinking.OFF, AiThinking.ON), AiThinking.defaultLevels(AiThinking.QWEN, "https://relay.example.com/v1").keys.toList())
+        assertEquals(listOf("off", "minimal", "low", "medium", "high", "xhigh"), AiThinking.defaultLevels(AiThinking.AUTO, "https://api.openai.com/v1").keys.toList())
+
+        val ds = AiProvider("ds", "DeepSeek", "https://api.deepseek.com/v1", "sk-ds-12345678", listOf("deepseek-reasoner"))
+        val oa = AiProvider("oa", "OpenAI", "https://api.openai.com/v1", "sk-oa-12345678", listOf("gpt-6.2"))
+        val cfg = AiConfig(providers = listOf(ds, oa), provider = "ds", effort = "high").withValidDefault()
+        assertEquals(listOf("", AiThinking.OFF, AiThinking.ON), cfg.availableEfforts("ds", "deepseek-reasoner"))
+        assertEquals(AiThinking.LEVELS, cfg.availableEfforts("oa", "gpt-6.2"))
+        // Legacy graded effort "high" normalizes to "on" for toggle-only DeepSeek.
+        assertEquals(AiThinking.ON, cfg.effort)
+        AiConfigStore.validate(cfg)
+
+        // Switching a chat with "high" onto DeepSeek normalizes to "on"; switching a chat with "on" onto OpenAI normalizes to "".
+        assertEquals(AiThinking.ON, AiChat(provider = "ds", model = "deepseek-reasoner", effort = "high").settings(cfg).effort)
+        assertEquals("", AiChat(provider = "oa", model = "gpt-6.2", effort = AiThinking.ON).settings(cfg).effort)
+        assertEquals(AiThinking.OFF, AiChat(provider = "oa", model = "gpt-6.2", effort = AiThinking.OFF).settings(cfg).effort)
+
+        // Decoding a legacy config that saved effort="high" on DeepSeek upgrades cleanly to "on".
+        val legacyJson = AiConfigStore.encode(cfg.copy(effort = "high"))
+        assertEquals(AiThinking.ON, AiConfigStore.decode(legacyJson, "Default").effort)
     }
 
     @Test fun instructionsLeadAndKeepSearchGroundingRules() {

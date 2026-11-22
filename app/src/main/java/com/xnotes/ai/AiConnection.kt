@@ -86,7 +86,7 @@ data class AiConfig(
     }
 
     fun availableEfforts(providerId: String = provider, modelName: String = model): List<String> =
-        providerOf(providerId)?.levelsFor(modelName)?.let { listOf("") + it.keys } ?: AiThinking.LEVELS
+        listOf("") + effectiveThinkingLevels(providerId, modelName).keys
 
     fun effectiveTokenField(providerId: String = provider, modelName: String = model): String {
         val p = providerOf(providerId)
@@ -116,7 +116,8 @@ data class AiConfig(
         val p = providerOf(provider)?.takeIf { it.modelChoices.isNotEmpty() }
             ?: providers.firstOrNull { it.modelChoices.isNotEmpty() } ?: providers.firstOrNull()
             ?: return image.copy(provider = "", model = "", url = "", key = "", models = emptyList())
-        return image.route(p.id, model.trim().takeIf { it in p.modelChoices } ?: p.modelChoices.firstOrNull().orEmpty())
+        val routed = image.route(p.id, model.trim().takeIf { it in p.modelChoices } ?: p.modelChoices.firstOrNull().orEmpty())
+        return routed.copy(effort = AiThinking.normalizeEffort(routed.effort, routed.availableEfforts()))
     }
     /** The provider a model picked before providers existed belongs to: the default's if it lists it. */
     fun ownerOf(model: String): String? =
@@ -221,7 +222,7 @@ class AiConfigStore(context: Context) {
                 imageModel = json.optString("imageModel", "").trim())
                 .let { if (it.imageProvider.isEmpty()) it.copy(imageModel = "") else it }
             val routed = if (providers.isEmpty()) config.copy(model = model) else config.route(provider, model)
-            return if (routed.effort in AiThinking.LEVELS || routed.effort in routed.availableEfforts()) routed else routed.copy(effort = "")
+            return routed.copy(effort = AiThinking.normalizeEffort(routed.effort, routed.availableEfforts()))
         }
 
         /** What one provider needs before it can be kept: an HTTPS endpoint, a key and at least one model. */
@@ -264,7 +265,9 @@ class AiConfigStore(context: Context) {
             require(!config.searchKey.contains('\n') && !config.searchKey.contains('\r')) { AiText.t(AiMsg.CONFIG_SEARCH_KEY_INVALID) }
             require(config.maxTokens in AiProtocol.MIN_MAX_TOKENS..AiProtocol.MAX_MAX_TOKENS) { AiText.t(AiMsg.CONFIG_MAX_TOKENS_INVALID, AiProtocol.MIN_MAX_TOKENS, AiProtocol.MAX_MAX_TOKENS) }
             require(config.instructions.length <= AiProtocol.MAX_INSTRUCTIONS) { AiText.t(AiMsg.CONFIG_INSTRUCTIONS_TOO_LONG, AiProtocol.MAX_INSTRUCTIONS) }
-            require(config.effort in AiThinking.LEVELS || config.effort in config.availableEfforts()) { AiText.t(AiMsg.CONFIG_THINKING_INVALID) }
+            require(config.effort.isEmpty() || AiThinking.normalizeEffort(config.effort, config.availableEfforts()).isNotEmpty()) {
+                AiText.t(AiMsg.CONFIG_THINKING_INVALID)
+            }
             val imageModel = config.imageModel.trim()
             if (imageModel.isNotEmpty()) {
                 val p = config.providerOf(config.imageProvider)

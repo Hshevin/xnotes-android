@@ -103,6 +103,7 @@
     <string name="ai_thinking_summary">思考：%1$s</string>
     <string name="ai_effort_default">默认</string>
     <string name="ai_effort_off">关闭</string>
+    <string name="ai_effort_on">开启</string>
     <string name="ai_effort_minimal">极低</string>
     <string name="ai_effort_low">低</string>
     <string name="ai_effort_medium">中</string>

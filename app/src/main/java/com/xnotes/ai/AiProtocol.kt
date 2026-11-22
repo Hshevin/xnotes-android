@@ -21,18 +21,37 @@ object AiThinking {
     const val QWEN = "qwen"
     val FORMATS = listOf(AUTO, OPENAI, OPENROUTER, DEEPSEEK, QWEN)
     const val OFF = "off"
-    /** "" is the provider default; the rest are what the user can pick. */
-    val LEVELS = listOf("", OFF, "minimal", "low", "medium", "high", "xhigh")
+    const val ON = "on"
+    private val gradedLevels = listOf(OFF, "minimal", "low", "medium", "high", "xhigh")
+    private val toggleLevels = listOf(OFF, ON)
+    /** Built-in choices for graded formats, including the provider default. */
+    val LEVELS = listOf("") + gradedLevels
     const val MAX_CUSTOM_LEVELS = 20
     val RESERVED_REQUEST_KEYS = setOf("model", "messages", "stream", "tools", "tool_choice")
 
     fun isValidLevelName(level: String): Boolean = level.isEmpty() ||
         (level.isNotBlank() && level.length <= 40 && level.none { it.isISOControl() || it == '\u2028' || it == '\u2029' })
 
-    fun defaultLevels(format: String, url: String): LinkedHashMap<String, String> =
-        LEVELS.filter { it.isNotEmpty() }.associateWithTo(linkedMapOf()) { level ->
-            JSONObject().also { apply(it, level, format, url) }.toString()
+    fun isToggleOnly(format: String, url: String): Boolean = when (resolve(format, url)) {
+        DEEPSEEK, QWEN -> true
+        else -> false
+    }
+
+    private fun levelNames(format: String, url: String) =
+        if (isToggleOnly(format, url)) toggleLevels else gradedLevels
+
+    fun defaultLevels(format: String, url: String): LinkedHashMap<String, String> {
+        val resolved = resolve(format, url)
+        return levelNames(resolved, url).associateWithTo(linkedMapOf()) { level ->
+            JSONObject().also { apply(it, level, resolved, url) }.toString()
         }
+    }
+
+    fun normalizeEffort(effort: String, available: List<String>): String = when {
+        effort.isEmpty() || effort in available -> effort
+        ON in available && effort in gradedLevels && effort != OFF -> ON
+        else -> ""
+    }
 
     fun validatePayload(level: String, payloadJson: String): JSONObject {
         val payload = try {
@@ -51,8 +70,8 @@ object AiThinking {
         val p = config.providerOf(config.provider)
         val levels = p?.levelsFor(config.model)
         if (levels != null) return levels[config.effort]?.let { validatePayload(config.effort, it) }
-        if (config.effort !in LEVELS) return null
         return JSONObject().also { apply(it, config.effort, p?.thinkingFormat ?: config.thinkingFormat, p?.url ?: config.url) }
+            .takeIf { it.length() > 0 }
     }
 
     fun resolve(format: String, url: String): String {
@@ -120,9 +139,12 @@ object AiThinking {
         if (config.effort.isEmpty()) return null
         val p = config.providerOf(config.provider)
         val levels = p?.levelsFor(config.model)
-        val mapping = if (levels == null) resolve(p?.thinkingFormat ?: config.thinkingFormat, config.url)
-                      else levels[config.effort] ?: return null
-        return listOf(config.url.trim().trimEnd('/'), config.model.trim(), config.effort, mapping)
+        val url = p?.url ?: config.url
+        val format = resolve(p?.thinkingFormat ?: config.thinkingFormat, url)
+        val effort = if (levels == null) normalizeEffort(config.effort, levelNames(format, url)) else config.effort
+        if (effort.isEmpty()) return null
+        val mapping = if (levels == null) format else levels[effort] ?: return null
+        return listOf(config.url.trim().trimEnd('/'), config.model.trim(), effort, mapping)
     }
 
     fun refuses(config: AiConfig): Boolean = key(config)?.let(refusing::contains) == true
@@ -130,13 +152,15 @@ object AiThinking {
     fun markRefused(config: AiConfig) { key(config)?.let(refusing::add) }
 
     fun apply(body: JSONObject, effort: String, format: String, url: String) {
-        if (effort.isEmpty()) return
-        val on = effort != OFF
-        when (resolve(format, url)) {
+        val resolved = resolve(format, url)
+        val level = normalizeEffort(effort, levelNames(resolved, url))
+        if (level.isEmpty()) return
+        val on = level != OFF
+        when (resolved) {
             DEEPSEEK -> body.put("thinking", JSONObject().put("type", if (on) "enabled" else "disabled"))
             QWEN -> body.put("enable_thinking", on)
-            OPENROUTER -> body.put("reasoning", if (on) JSONObject().put("effort", effort) else JSONObject().put("enabled", false))
-            else -> body.put("reasoning_effort", if (on) effort else "none")
+            OPENROUTER -> body.put("reasoning", if (on) JSONObject().put("effort", level) else JSONObject().put("enabled", false))
+            else -> body.put("reasoning_effort", if (on) level else "none")
         }
     }
 }

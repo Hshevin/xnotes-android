@@ -134,6 +134,18 @@ object AiConfigFile {
         }
     }
 
+    private fun hasExpandedDefaults(provider: AiProvider): Boolean {
+        val levels = provider.thinkingLevels ?: return false
+        val defaults = AiThinking.defaultLevels(provider.thinkingFormat, provider.url)
+        if (sameThinkingLevels(levels, defaults)) return true
+        if (!AiThinking.isToggleOnly(provider.thinkingFormat, provider.url)) return false
+        // Older exports expanded toggle defaults into one off and five identical enabled payloads.
+        val legacy = AiThinking.LEVELS.filter { it.isNotEmpty() }.associateWith { level ->
+            defaults.getValue(if (level == AiThinking.OFF) AiThinking.OFF else AiThinking.ON)
+        }
+        return sameThinkingLevels(levels, legacy)
+    }
+
     fun parseAndApply(rawJson: String, existing: AiConfig, defaultInstructions: String, mode: ImportMode = ImportMode.REPLACE): AiConfig {
         val json = try {
             strictJsonContainer(rawJson) as? JSONObject
@@ -163,9 +175,7 @@ object AiConfigFile {
                 val previous = localProviders.firstOrNull { it.id == id }
                 val parsed = readProvider(entry, id, if (merging) previous else null)
                 // Viewing or editing unrelated JSON fields should not freeze expanded default levels.
-                val p = if (parsed.thinkingLevels != null && previous?.thinkingLevels == null &&
-                    sameThinkingLevels(parsed.thinkingLevels, AiThinking.defaultLevels(parsed.thinkingFormat, parsed.url))
-                ) parsed.copy(thinkingLevels = null) else parsed
+                val p = if (previous?.thinkingLevels == null && hasExpandedDefaults(parsed)) parsed.copy(thinkingLevels = null) else parsed
                 providers[id] = if (p.key.isEmpty() || p.key == REDACTED_KEY) {
                     val endpoint = endpointIdentity(p.url)
                     val host = endpoint.first
@@ -180,7 +190,7 @@ object AiConfigFile {
             }
         }
         val searchKey = json.string("searchKey", base.searchKey)
-        return base.copy(
+        val imported = base.copy(
             providers = providers.values.toList(), provider = json.string("defaultProvider", base.provider),
             model = json.string("defaultModel", base.model), effort = json.string("defaultEffort", base.effort),
             maxTokens = json.integer("maxTokens", base.maxTokens), instructions = json.string("instructions", base.instructions),
@@ -188,6 +198,10 @@ object AiConfigFile {
             attachPdfByDefault = json.bool("attachPdfByDefault", base.attachPdfByDefault),
             searchKey = if (searchKey == REDACTED_KEY) existing.searchKey else searchKey,
             imageProvider = json.string("imageProvider", base.imageProvider), imageModel = json.string("imageModel", base.imageModel),
-        ).withValidDefault().also(AiConfigStore::validate)
+        )
+        val routed = imported.withValidDefault()
+        // Validate an explicit selection against the imported route before returning its normalized value.
+        AiConfigStore.validate(if (json.has("defaultEffort")) routed.copy(effort = imported.effort) else routed)
+        return routed
     }
 }

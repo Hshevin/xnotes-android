@@ -311,8 +311,9 @@ class AiSessions(
     fun choose(id: String, model: String? = null, effort: String? = null, provider: String? = null) {
         val chat = chats[id] ?: return
         val routed = chat.copy(model = model?.trim() ?: chat.model, provider = provider ?: chat.provider)
-        val selected = effort?.takeIf { level ->
-            level in AiThinking.LEVELS || runCatching { level in routed.settings(config()).availableEfforts() }.getOrDefault(false)
+        val selected = effort?.let { level ->
+            runCatching { AiThinking.normalizeEffort(level, routed.settings(config()).availableEfforts()) }
+                .getOrNull()?.takeIf { it.isNotEmpty() || level.isEmpty() }
         }
         val next = routed.copy(effort = selected ?: chat.effort)
         if (next != chat) { chats[id] = next; persist(next) }

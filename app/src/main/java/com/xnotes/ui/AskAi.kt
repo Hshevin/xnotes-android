@@ -134,6 +134,7 @@ internal fun AiSettingsRow() {
 /** The user-facing name of a thinking level; the stored keys are protocol words. */
 private fun effortRes(level: String): Int = when (level) {
     AiThinking.OFF -> R.string.ai_effort_off
+    AiThinking.ON -> R.string.ai_effort_on
     "minimal" -> R.string.ai_effort_minimal
     "low" -> R.string.ai_effort_low
     "medium" -> R.string.ai_effort_medium
@@ -143,7 +144,7 @@ private fun effortRes(level: String): Int = when (level) {
 }
 
 private fun effortSummary(context: android.content.Context, level: String): String = when (level) {
-    "", AiThinking.OFF, "minimal", "low", "medium", "high", "xhigh" -> context.getString(effortRes(level))
+    "", AiThinking.OFF, AiThinking.ON, "minimal", "low", "medium", "high", "xhigh" -> context.getString(effortRes(level))
     else -> level
 }
 
@@ -178,46 +179,116 @@ private fun SettingsLabel(title: String, detail: String? = null, modifier: Modif
     }
 }
 
-/** One-of-several choice as a pill row; wraps into pill chips when many levels exist. Each target is at least 48 dp tall. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Computes pixel widths for each segment inside [AiSegmented]:
+ * 1. When equal widths fit every segment's natural width, every segment gets an equal share of [viewportWidth].
+ * 2. Otherwise, when all natural widths fit inside [viewportWidth], leftover width is split evenly so the capsule stays full without clipping.
+ * 3. Otherwise, each segment keeps its natural width so the single-row capsule track scrolls horizontally without clipping.
+ */
+internal fun computeSegmentedWidths(naturalWidths: IntArray, viewportWidth: Int, gapPx: Int): IntArray {
+    val n = naturalWidths.size
+    if (n == 0) return IntArray(0)
+    val gaps = gapPx * (n - 1)
+    val avail = (viewportWidth - gaps).coerceAtLeast(0)
+    val maxNatural = naturalWidths.max()
+    if (avail > 0 && maxNatural.toLong() * n <= avail.toLong()) {
+        val base = avail / n
+        val rem = avail % n
+        return IntArray(n) { i -> base + if (i < rem) 1 else 0 }
+    }
+    val naturalSum = naturalWidths.fold(0L) { acc, w -> acc + w }
+    if (avail > 0 && naturalSum <= avail.toLong()) {
+        val extra = (avail.toLong() - naturalSum).toInt()
+        val per = extra / n
+        val rem = extra % n
+        return IntArray(n) { i -> naturalWidths[i] + per + if (i < rem) 1 else 0 }
+    }
+    return naturalWidths.copyOf()
+}
+
+/**
+ * One-of-several choice as a single capsule segmented bar. Supports intrinsic width queries (safe
+ * inside Material 3 [DropdownMenu]), fills equally when every label fits, and scrolls horizontally
+ * inside the same capsule track when labels or count overflow.
+ */
 @Composable
 internal fun AiSegmented(options: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     val palette = LocalPalette.current
-    if (options.size <= 5) {
-        Row(modifier.height(MinTouchTarget).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape).padding(Space.s4),
-            horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            options.forEach { (value, label) ->
-                val on = value == selected
-                Box(Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
-                    .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
-                    .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) },
-                    contentAlignment = Alignment.Center) {
-                    Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1)
+    val scroll = rememberScrollState()
+    val policy = remember {
+        object : androidx.compose.ui.layout.MeasurePolicy {
+            private fun naturalWidths(
+                measurables: List<androidx.compose.ui.layout.IntrinsicMeasurable>,
+                height: Int,
+                minPx: Int,
+            ): IntArray = IntArray(measurables.size) { i -> maxOf(minPx, measurables[i].maxIntrinsicWidth(height)) }
+
+            override fun androidx.compose.ui.layout.MeasureScope.measure(
+                measurables: List<androidx.compose.ui.layout.Measurable>,
+                constraints: androidx.compose.ui.unit.Constraints,
+            ): androidx.compose.ui.layout.MeasureResult {
+                val h = if (constraints.hasBoundedHeight) constraints.maxHeight else MinTouchTarget.roundToPx()
+                if (measurables.isEmpty()) return layout(constraints.minWidth, h) {}
+                val gap = Space.s2.roundToPx()
+                val minPx = MinTouchTarget.roundToPx()
+                val natural = naturalWidths(measurables, h, minPx)
+                val viewport = when {
+                    constraints.minWidth > 0 -> constraints.minWidth
+                    constraints.hasBoundedWidth -> constraints.maxWidth
+                    else -> 0
+                }
+                val widths = computeSegmentedWidths(natural, viewport, gap)
+                val placeables = measurables.mapIndexed { i, m ->
+                    m.measure(androidx.compose.ui.unit.Constraints.fixed(widths[i], h))
+                }
+                val totalW = (widths.sum() + gap * (widths.size - 1)).coerceAtLeast(constraints.minWidth)
+                return layout(totalW, h) {
+                    var x = 0
+                    placeables.forEach { p ->
+                        p.placeRelative(x, 0)
+                        x += p.width + gap
+                    }
                 }
             }
-        }
-    } else {
-        FlowRow(
-            modifier = modifier,
-            horizontalArrangement = Arrangement.spacedBy(Space.s6),
-            verticalArrangement = Arrangement.spacedBy(Space.s6),
-        ) {
-            options.forEach { (value, label) ->
-                val on = value == selected
-                Box(
-                    Modifier.heightIn(min = MinTouchTarget).widthIn(min = MinTouchTarget).clip(CircleShape)
-                        .then(
-                            if (on) Modifier.background(palette.selectionBackground.toComposeColor())
-                            else Modifier.border(1.dp, palette.border.toComposeColor(), CircleShape),
-                        )
-                        .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) }
-                        .padding(horizontal = Space.s12),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1)
-                }
+
+            override fun androidx.compose.ui.layout.IntrinsicMeasureScope.minIntrinsicWidth(
+                measurables: List<androidx.compose.ui.layout.IntrinsicMeasurable>,
+                height: Int,
+            ): Int = if (measurables.isEmpty()) 0 else MinTouchTarget.roundToPx()
+
+            override fun androidx.compose.ui.layout.IntrinsicMeasureScope.maxIntrinsicWidth(
+                measurables: List<androidx.compose.ui.layout.IntrinsicMeasurable>,
+                height: Int,
+            ): Int {
+                if (measurables.isEmpty()) return 0
+                val gap = Space.s2.roundToPx()
+                val natural = naturalWidths(measurables, height, MinTouchTarget.roundToPx())
+                return natural.sum() + gap * (measurables.size - 1)
             }
         }
+    }
+    Box(
+        modifier.height(MinTouchTarget).clip(CircleShape)
+            .border(1.dp, palette.border.toComposeColor(), CircleShape).padding(Space.s4),
+    ) {
+        androidx.compose.ui.layout.Layout(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight().horizontalScroll(scroll),
+            content = {
+                options.forEach { (value, label) ->
+                    val on = value == selected
+                    Box(
+                        Modifier.fillMaxHeight().clip(CircleShape)
+                            .then(if (on) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
+                            .clickable(role = Role.RadioButton, onClickLabel = label) { onSelect(value) }
+                            .padding(horizontal = Space.s12),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(label, color = (if (on) palette.selectionForeground else palette.text).toComposeColor(), fontSize = TextSize.body, maxLines = 1, softWrap = false)
+                    }
+                }
+            },
+            measurePolicy = policy,
+        )
     }
 }
 
@@ -483,7 +554,11 @@ internal fun AiSettings(close: () -> Unit) {
                                 Text(p.label, Modifier.padding(horizontal = Space.s16, vertical = Space.s4), color = palette.textDim.toComposeColor(), fontSize = TextSize.label,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 p.modelChoices.forEach { name ->
-                                    DropdownMenuItem(text = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = { config = config.route(p.id, name); defaultModelMenu = false },
+                                    DropdownMenuItem(text = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
+                                        val routed = config.route(p.id, name)
+                                        config = routed.copy(effort = AiThinking.normalizeEffort(routed.effort, routed.availableEfforts()))
+                                        defaultModelMenu = false
+                                    },
                                         trailingIcon = { if (p.id == config.provider && name == config.model) Icon(XnotesIcons.check, null, Modifier.size(16.dp)) })
                                 }
                             }
@@ -1307,7 +1382,7 @@ private fun AiModelChip(sessions: AiSessions, chat: AiChat, config: AiConfig, mo
                 }
             }
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.widthIn(min = 260.dp, max = 360.dp).heightIn(max = 520.dp)) {
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.widthIn(min = 280.dp, max = 420.dp).heightIn(max = 520.dp)) {
             // Search only pays off on a long list, as in DSH's model menu.
             if (total > SEARCH_MODELS_AFTER) OutlinedTextField(query, { query = it }, Modifier.padding(horizontal = Space.s12, vertical = Space.s4).fillMaxWidth(), singleLine = true,
                 leadingIcon = { Icon(XnotesIcons.search, null, Modifier.size(18.dp)) }, placeholder = { Text(stringResource(R.string.ai_models_filter)) })

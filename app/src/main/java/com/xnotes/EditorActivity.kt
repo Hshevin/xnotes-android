@@ -2315,7 +2315,7 @@ internal fun SplitHost(editor: Editor, actions: PaneActions, homes: Set<com.xnot
 @Composable
 private fun EditorToolbar(editor: Editor, app: Editor, actions: PaneActions, shared: Boolean = false) {
     val aiSessions = com.xnotes.ai.AiSessions.get(LocalContext.current)
-    val aiActive = aiSessions.isFloatingExpanded
+    val aiActive = aiSessions.isFloatingOpen
     val onToggleAi: () -> Unit = {
         val source: String
         val sourceUri: String?

@@ -359,4 +359,20 @@ class AiConfigFileTest {
         assertTrue(freshRename.isSuccess)
         assertEquals("ultra", freshRename.getOrThrow().first)
     }
+
+    @Test fun deepseekConfigJsonExportsOnlyOffAndOnAndPreservesNullDefaults() {
+        val ds = AiConfig(
+            providers = listOf(
+                AiProvider("ds", "DeepSeek", "https://api.deepseek.com/v1", "sk-ds-12345678", listOf("deepseek-reasoner")),
+            ),
+            provider = "ds",
+            effort = AiThinking.ON,
+        ).withValidDefault()
+        val exported = AiConfigFile.exportJson(ds, includeKeys = false, includeEffectiveThinking = true)
+        val levels = JSONObject(exported).getJSONArray("providers").getJSONObject(0).getJSONObject("thinkingLevels")
+        assertEquals(setOf(AiThinking.OFF, AiThinking.ON), levels.keys().asSequence().toSet())
+        val reapplied = AiConfigFile.parseAndApply(exported, ds, "Default", AiConfigFile.ImportMode.REPLACE)
+        assertEquals(AiThinking.ON, reapplied.effort)
+        assertNull("untouched DeepSeek default thinkingLevels stays null", reapplied.providerOf("ds")!!.thinkingLevels)
+    }
 }
