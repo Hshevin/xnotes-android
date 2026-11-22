@@ -329,3 +329,7 @@
 ## 2026-11-23 正式版 Release 100 打包与安装
 
 - 用户要求「打包一个正式版我体验一下」，随后「直接安装到机器上」：基于 `e3fbca08`（`0.9.11` / code 100，含保存简化）构建正式 ARM64 APK，Release JVM 4,307 项通过，验签与历史证书一致，`adb -s 6el21u1000425 install -r` 覆盖安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。见 [Release 100 记录](release100-2026-11-23.md)。
+
+## 2026-11-23 恢复记录简化合入主线与 Release 101 打包
+
+- 用户选择选项 1「合并到 master 并打包正式版」：将 `pause-only-recovery`（`dcc81887` 测试与约定、`4e040bbe` 实现）以非快进合并入本地 `master`（`7106cf06`），版本提高至 `0.9.12` / code 101（`e6b67ecd`），构建正式 ARM64 APK，Release JVM 4,303 项通过。安装命令被权限检查拦截，未安装，待用户明确要求。不推送、不发布 GitHub Release。见 [Release 101 记录](release101-2026-11-23.md)。

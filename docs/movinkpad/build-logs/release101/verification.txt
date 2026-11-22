@@ -1,0 +1,21 @@
+APK: build/xnotes/XNotes-0.9.12-movinkpad-release101-arm64.apk
+Size: 29154339 bytes
+SHA-256: 4ad74b433f61dc766fe10b1de1f24633636e05f3d5607a25c16e0b434a658650
+Byte-identical to tmp/release101/source/app/build/outputs/apk/release/app-release.apk: PASS
+
+aapt2 dump badging:
+package: name='com.xnotes.movinkpad' versionCode='101' versionName='0.9.12' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+application-label:'xnotes'
+native-code: 'arm64-v8a'
+application-debuggable: absent
+testOnly: absent
+
+zipalign -c -P 16 4:
+ZIPALIGN_OK
+
+apksigner verify --print-certs:
+
+Signer #1 certificate DN: C=US, O=Android, CN=Android Debug
+Signer #1 certificate SHA-256 digest: a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451
+Signer #1 certificate SHA-1 digest: 60e8cf996eba8c532e703c62186f7303ec81de9c
+Signer #1 certificate MD5 digest: 70615fb360ee2c9a3dfacf10560474cc
