@@ -310,3 +310,7 @@
 ## 2026-11-22 导图 v2 test3 打包、设备安装与仪器测试
 
 - 用户要求「来吧，开始调试，你知道要测试哪些功能吧」，即复验 test2 发现 2、3、5 的修复。源码 `3b347dbd`（`mindmap-v2`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 3，`adb install -r` 覆盖 test2；另安装同包测试 APK（`.mindmapv2.test`）并以 `am instrument` 运行单个存储仪器测试，不卸载应用、不清数据。测试文件放在 `Download/XNotes-mapv2-test`，另新建 `Download/XNotes-mapv2-alt` 用于重现。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test3-2026-11-22.md)。
+
+## 2026-11-22 导图 v2 修复合入主线
+
+- 用户要求「合并进去吧」：将 `mindmap-v2`（`94c94093`：长按画布空白处弹菜单、来源面板放节点旁、同一文件两个 URI 合并登记（登记表 v4）、未保存提示显示画布名、test2／test3 记录）以非快进合并入本地 `master`。合并树与分支相同，沿用分支上已通过的 4,237 项 JVM 测试与目标设备仪器测试结果，合并后未重跑。保留 `mindmap-v2` 与 `fix-same-file-locations` 分支。仅本地合并，不推送、不打包、不发布 Release。
