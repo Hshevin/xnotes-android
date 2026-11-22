@@ -62,6 +62,11 @@ class SaveSlimHostTest {
         val treeUri = DocumentsContract.buildTreeDocumentUri(f.authority, "root").toString()
         val singleton = NotebookStorage::class.java.getDeclaredField("instance").apply { isAccessible = true }
         val previous = singleton.get(null)
+        // The browse root lives in process-wide LiveSettings; isolate it so an earlier workspace
+        // scenario cannot leave this one bound. Null forces a reload from this fixture's own files.
+        val live = com.xnotes.settings.LiveSettings::class.java.getDeclaredField("value").apply { isAccessible = true }
+        val previousSettings = live.get(com.xnotes.settings.LiveSettings)
+        live.set(com.xnotes.settings.LiveSettings, null)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var failure: Throwable? = null
         var initialized = false
@@ -95,6 +100,7 @@ class SaveSlimHostTest {
                         SplitRecentWriter.forFilesDir(f.context.filesDir).awaitAccepted()
                     }
                     singleton.set(null, previous)
+                    live.set(com.xnotes.settings.LiveSettings, previousSettings)
                     withContext(Dispatchers.IO) { f.storage.registry.close() }
                 }
             }
