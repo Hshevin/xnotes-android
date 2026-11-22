@@ -6,9 +6,9 @@
 
 从 [GitHub Releases](https://github.com/Hshevin/xnotes-android/releases) 下载本 fork 的 **ARM64 APK**，在平板上打开安装。已安装本 fork 正式版的用户可用同签名的新版本直接覆盖升级。分支测试包使用独立包名，可与正式版并存，各自保存数据；旧 AI 和双窗格专用测试包不再纳入本地打包。当前分支测试包见[本地交付与验证记录](docs/movinkpad/branch-tests-2026-11-05.md)。
 
-最新本地覆盖更新：[0.9.8 / Release 98 ARM64 APK](build/xnotes/XNotes-0.9.8-movinkpad-release98-arm64.apk)，沿用正式包名与签名，包含 AI 模板文字 / 图像模型自选，以及无限画布退出分屏黑屏修复；三键、黑白界面、图层、分屏湿墨与黑屏、单份 PDF 重新关联已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md)。见 [打包与验证记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，日志推送远端，不发布 GitHub Release。
+最新本地覆盖更新：[0.9.10 / Release 99 ARM64 APK](build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk)，沿用正式包名（`com.xnotes.movinkpad`）与历史签名（`versionCode = 99`），包含上游合并、画布导图 v2、顶部 AI 按钮、分页／画布统一截图、原始报错展开及分层 JSON／可视化 AI 配置编辑器；全量 Release JVM 测试 4,271 项、R8、验签与 16 KiB 对齐通过，部分真机与真实供应商边界仍待验收，见 [Release 99 打包与验证记录](docs/movinkpad/release99-2026-11-22.md)。此前 Release 98（`0.9.8` / code 98）已在 MovinkPad Pro 14 / Android 15 / Pro Pen 3 真机通过基础验收，见 [真机验收](docs/movinkpad/device-acceptance-release98-2026-11-08.md) 与 [Release 98 记录](docs/movinkpad/release98-2026-11-07.md)。APK 仅本地交付，不发布 GitHub Release。
 
-最新主线独立测试版：[master test12 ARM64 APK](build/branch-tests/master-test12/XNotes-master-33386908-test12-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`，与正式版并存，会升级已有 master 测试版。在 test11 上游合并基础上修复导图双指缩放与平移；4,988 项 JVM 测试通过，已在 MovinkPad 覆盖安装并以注入手势检查导图触摸，笔拖动与掌触待实机确认。见 [打包记录](docs/movinkpad/master-test12-2026-11-21.md)。
+最新主线独立测试版：[master test14 ARM64 APK](build/branch-tests/master-test14/XNotes-master-bb4fd8cc-test14-arm64.apk)，包名 `com.xnotes.movinkpad.branchtest.master`（code 14），与正式版并存，已覆盖安装至 MovinkPad 验证顶部 AI 按钮、胶囊推理强度滑条与 DeepSeek/Qwen 开关档位；此前 test12 导图触摸检查见 [test12 记录](docs/movinkpad/master-test12-2026-11-21.md)。
 
 **test8 实测警示（2026-11-11）：** 主画布与文字输入已可用，但新建/打开放大手写节点和手写同级节点会闪退；混合分屏保存仍失败。绘制崩溃与新建空白笔记检查点导致的分屏保存失败已有源码修复，侧栏工具面板改造已集成，尚未打包或运行修复后 APK。见[实测与修复记录](docs/movinkpad/master-test8-map-emulator-2026-11-11.md)。
 

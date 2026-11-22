@@ -314,3 +314,9 @@
 ## 2026-11-22 导图 v2 修复合入主线
 
 - 用户要求「合并进去吧」：将 `mindmap-v2`（`94c94093`：长按画布空白处弹菜单、来源面板放节点旁、同一文件两个 URI 合并登记（登记表 v4）、未保存提示显示画布名、test2／test3 记录）以非快进合并入本地 `master`。合并后全部 JVM 测试 4,238 项通过（0 失败）；同文件仪器测试沿用 test3 在目标设备的通过结果，合并后未重跑。保留 `mindmap-v2` 与 `fix-same-file-locations` 分支。仅本地合并，不推送、不打包、不发布 Release。
+
+## 2026-11-22 AI 与截图改进测试包（test13 / test14）及正式版 Release 99 打包
+
+- 用户要求「真机测试」并确认打包安装 `master test13`：基于 `6667ae01` 构建 `com.xnotes.movinkpad.branchtest.master` code 13（`0.9.10-test-master-13`）并覆盖安装至已连接的 MovinkPad Pro 14（`Wacom DTHA140`）；不动正式版，不推送、不发布 Release。
+- 用户基于真机反馈要求调整收起悬浮窗顶部 AI 图标高亮、推理强度单行胶囊滑条及 DeepSeek/Qwen 默认仅开关档位，随后要求「打包并安装到平板上」：基于 `bb4fd8cc` 构建 `com.xnotes.movinkpad.branchtest.master` code 14（`0.9.10-test-master-14`）并覆盖安装至 MovinkPad Pro 14；不动正式版，不推送、不发布 Release。
+- 用户随后确认「合并到主分支并打包到正式版吧，我觉得现在这样可以用了」：改动已在本地 `master`，将 `versionCode` 递增至 99（`2591a0ae`），本地构建正式覆盖更新 APK `build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk`（`com.xnotes.movinkpad` / `0.9.10` / code 99，沿用历史签名、R8 与资源压缩、关闭 debuggable），全量 Release JVM 测试 4,271 项通过。仅本地交付与提交记录，不推送、不安装正式版到设备、不发布 GitHub Release。见 [Release 99 记录](release99-2026-11-22.md)。
