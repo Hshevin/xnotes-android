@@ -60,6 +60,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.window.PopupProperties
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
@@ -200,7 +201,6 @@ fun MapMenu(editor: InfiniteEditor) {
                 }
                 Box {
                     MapAction(XnotesIcons.link, stringResource(R.string.map2_sources)) { open = MapMenuOpen.SOURCES }
-                    if (open == MapMenuOpen.SOURCES) MapSourcesPanel(editor) { open = null }
                 }
                 Box {
                     MapAction(XnotesIcons.palette, stringResource(R.string.map2_style)) { open = MapMenuOpen.STYLE }
@@ -250,6 +250,12 @@ fun MapMenu(editor: InfiniteEditor) {
                 MapAction(XnotesIcons.trash, stringResource(R.string.delete)) { map.deleteSelected() }
             }
         }
+    }
+    if (open == MapMenuOpen.SOURCES && node) {
+        val nodeRect = IntRect(rect.left.roundToInt(), rect.top.roundToInt(), rect.right.roundToInt(), rect.bottom.roundToInt())
+        val barX = xPx.coerceAtLeast(with(density) { Space.s8.toPx() }).roundToInt()
+        val barRect = IntRect(barX, yPx.roundToInt(), barX + barWidthPx.roundToInt(), yPx.roundToInt() + barHeightPx.roundToInt())
+        MapSourcesPanel(editor, nodeRect, barRect) { open = null }
     }
     if (open == MapMenuOpen.LABEL) {
         RelationLabelDialog(map.selectedRelationLabel.orEmpty(), onConfirm = { open = null; map.setRelationLabel(it) }, onDismiss = { open = null })

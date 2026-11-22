@@ -60,6 +60,18 @@ class NotebookIdentityReadTest {
             assertArrayEquals(bytes,input.readBytes());assertEquals(a,storage.registry.idAt(uri));assertFalse(storage.hasRecovery(uri))
         }
     }
+    @Test fun openingAFileDoesNotRetireAnotherLocationWhenItsProviderCannotProveFileIdentity() = scenario { storage, root ->
+        val input = bundle(root)
+        val bytes = input.readBytes()
+        val uri = Uri.fromFile(input).toString()
+        val inaccessible = "content://missing-provider/document/a"
+        storage.registry.register(a, "xnote", "old grant", inaccessible)
+        storage.ensureForOpen(uri, "reopened.xnote", "xnote")
+        assertEquals(setOf(inaccessible, uri), storage.registry.locations(a).toSet())
+        assertThrows(IllegalStateException::class.java) { storage.registry.resolve(a) }
+        assertArrayEquals(bytes, input.readBytes())
+    }
+
     @Test fun movedUuidEvidenceRefusesMissingPageMetadataWithoutWritingOrRegisteringNewLocation() = scenario {storage,root->
         val input=bundle(root);val uri=Uri.fromFile(input).toString();val bytes=input.readBytes()
         storage.registry.register(a,"xnote","original","content://example/document/old",pageReferences=true)

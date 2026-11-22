@@ -130,8 +130,6 @@ class InfiniteInteraction(
      * release the locked item it landed on, which arrives as the third argument.
      */
     private val onContextMenu: (Pt, Pt, CanvasItem?) -> Unit = { _, _, _ -> },
-    /** Whether copied items or a clipboard image are waiting, so empty canvas has a menu to offer. */
-    private val hasPasteContent: () -> Boolean = { false },
     /** A tool this layer armed by itself, so the chrome can follow: a long-press grab and its end. */
     private val onToolChanged: (Tool) -> Unit = {},
     /** Two quick taps in one place, at this viewport point, by this pointer type, with what was selected as the first went down. */
@@ -699,7 +697,7 @@ class InfiniteInteraction(
     // --- long press: grab an item, or the paste menu on empty canvas ---
 
     /**
-     * Arm what a finger held still does: pick up the item under it, or open the paste menu when
+     * Arm what a finger held still does: pick up the item under it, or open the canvas menu when
      * there is nothing there.
      *
      * Finger only, like the paged canvas: the stylus always draws, so resting it never grabs or pops
@@ -719,8 +717,8 @@ class InfiniteInteraction(
         // stands whatever tool is armed, since no tool can do anything else with one.
         longPressLocked = hit?.takeIf { it.locked }
         if (hit != null && longPressLocked == null && !grabbable) return
-        // Like the paged canvas, empty space only pops the menu when there is something to paste.
-        if (hit == null && !hasPasteContent()) return
+        // Empty space always pops the menu: besides pasting it offers inserting an image and copying
+        // this canvas's link, which are there whether or not anything was copied.
         longPressCandidate = hit?.takeUnless { it.locked }
         longPressAt = at
         val r = Runnable { triggerLongPress() }

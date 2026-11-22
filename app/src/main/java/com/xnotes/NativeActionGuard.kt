@@ -58,6 +58,9 @@ internal fun requiresNativeClosePrompt(target:Editor):Boolean = when {
     else->target.requiresIndependentSave || if(target.canvasOpen) target.infinite.document.dirty else target.dirty
 }
 
+/** The name the unsaved-changes prompt shows: the document on screen, which for a canvas is not the paged buffer under it. */
+internal fun nativePromptTitle(target:Editor):String = if(target.canvasOpen) target.infinite.title else target.title
+
 /** Main's ordinary Save dispatch uses the writer for the actual displayed native model. */
 internal fun captureDisplayedNativeSave(target:Editor):()->Boolean {
     val owner=target.documentOwner

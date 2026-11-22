@@ -57,6 +57,15 @@ class NativeSavePickerRouteHostTest {
         }
     }
 
+    @Test fun theClosePromptNamesTheCanvasOnScreenNotThePagedBufferUnderIt()=runParkingScenario {f->
+        protectedCanvas(f)
+        withContext(Dispatchers.Main) {
+            assertTrue(requiresNativeClosePrompt(f.editor))
+            assertEquals(f.editor.infinite.title,nativePromptTitle(f.editor))
+            assertNotEquals(f.editor.title,nativePromptTitle(f.editor))
+        }
+    }
+
     @Test fun protectedCanvasUsesTheMainPickerCanvasSuffixAndActualDestinationWriter()=runParkingScenario {f->
         val model=protectedCanvas(f);val oldId=model.identity.documentId
         val original=f.source.readBytes();val done=CompletableDeferred<Unit>();val stops=mutableListOf<NativeActionStop>()

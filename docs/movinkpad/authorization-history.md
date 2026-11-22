@@ -302,3 +302,11 @@
 ## 2026-11-22 撤销导图 v2 远端分支并合入主线
 
 - 用户随后要求「撤销提交，合并进主分支再提交」，并选择：删除远端分支 `origin/mindmap-v2`，以合并提交（保留历史）将 `mindmap-v2` 合入 `master`，再推送 `origin/master`。本地 `mindmap-v2` 按约定保留。合并树与已验证的 `mindmap-v2` 完全一致（JVM 4,221 项通过，仪器测试与 Release Kotlin 编译通过），不重复运行。不打包、安装或发布 Release；真机验收待完成。上一条「不合并到 master」的边界由本条取代。
+
+## 2026-11-22 导图 v2 test2 打包与设备安装
+
+- 用户连接 MovinkPad 后要求「开始调试吧，我连上了」。源码 `c448605d`（`master`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 2，覆盖安装 test1；经用户同意在设备 `Download/XNotes-mapv2-test` 新建测试文件夹存放测试画布与笔记。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test2-2026-11-22.md)。
+
+## 2026-11-22 导图 v2 test3 打包、设备安装与仪器测试
+
+- 用户要求「来吧，开始调试，你知道要测试哪些功能吧」，即复验 test2 发现 2、3、5 的修复。源码 `3b347dbd`（`mindmap-v2`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 3，`adb install -r` 覆盖 test2；另安装同包测试 APK（`.mindmapv2.test`）并以 `am instrument` 运行单个存储仪器测试，不卸载应用、不清数据。测试文件放在 `Download/XNotes-mapv2-test`，另新建 `Download/XNotes-mapv2-alt` 用于重现。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test3-2026-11-22.md)。

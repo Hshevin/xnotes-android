@@ -7,7 +7,7 @@
 ## 构建
 
 - 源码 `32d6dc53`（`mindmap-v2`），工作树 `<工作树 wt-mindmap-v2>`，JDK 21，独立 `--project-cache-dir`。
-- 命令：`./gradlew --init-script scripts/branch-preview.init.gradle -PbranchTestId=mindmapv2 -PbranchTestLabel=导图v2 -PbranchTestVersion=1 :app:assembleRelease`（ARM64）。
+- 命令：`./gradlew --init-script scripts/branch-preview.init.gradle -PbranchTestId=mindmapv2 -PbranchTestLabel=导图v2 -PbranchTestVersion=1 :app:assembleDebug`（ARM64；分支测试包为 Debug 构建，原记录误写为 `assembleRelease`，2026-11-22 test2 时更正）。
 - 产物 `XNotes-mindmapv2-32d6dc53-test1-arm64.apk`；SHA-256 见 [`build-logs/mindmapv2-test1/SHA256SUMS.txt`](build-logs/mindmapv2-test1/SHA256SUMS.txt)。
 - 包名 `com.xnotes.movinkpad.branchtest.mindmapv2`，versionCode 1，versionName `0.9.10-test-mindmapv2-1`，名称「XNotes 导图v2 测试版」，仅 arm64-v8a。
 - 签名证书 SHA-256 与 AGENTS.md 一致（`A0:45:3B:…:84:51`）。全新安装，未覆盖其他包。

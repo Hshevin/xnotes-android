@@ -1905,7 +1905,7 @@ private fun EditorScreen(
         com.xnotes.ui.AlertDialog(
             onDismissRequest = {if(guardState.consume(request)) request.stop(NativeActionStop.CANCELLED)},
             title = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes)) },
-            text = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes_prompt, guarded.title)) },
+            text = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes_prompt, nativePromptTitle(guarded))) },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     if(!guardState.consume(request)) return@TextButton

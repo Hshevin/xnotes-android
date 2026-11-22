@@ -1142,7 +1142,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         val locationKey = notebookStorage.registry.locationKey(uri)
         fun registeredHere() = notebookStorage.registry.locations(identity.documentId).singleOrNull()
-            ?.let(notebookStorage.registry::locationKey) == locationKey
+            ?.let { notebookStorage.registry.sameLocation(it, uri) } == true
         owner.pageReferenceProtection = PageReferenceProtection(doc, locationKey)
         panes.forEach { it.pageIdActivation = operation }
         owner.beginPageReferenceSave()
@@ -1982,7 +1982,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val coroutine=kotlinx.coroutines.currentCoroutineContext()
                 val identity = notebookStorage.ensure(uri, "", if (missing.snapshot.optBoolean(missing.prefix + "Canvas")) "xcanvas" else "xnote") {coroutine.ensureActive()}
                 require(missing.id.isBlank() || identity.documentId == missing.id) { appContext.getString(R.string.missing_wrong_file) }
-                if (missing.uri != uri) notebookStorage.registry.markUnavailable(missing.uri)
+                if (!notebookStorage.registry.sameLocation(missing.uri, uri)) notebookStorage.registry.markUnavailable(missing.uri)
             }
             if (missing.snapshot.optBoolean(missing.prefix + "Canvas")) openCanvasAsync(uri,null) else openAsync(uri)
             if (missingDocument != null) return false
@@ -5561,7 +5561,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val kind=registry.kindForId(actual.documentId)
         if(kind!=null && kind!="xnote" || registry.reservedOriginalId(actual.documentId))
             throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.UNSUPPORTED)
-        if(registry.locations(actual.documentId).any {registry.locationKey(it)!=actual.locationKey})
+        if(registry.hasCompetingLocation(actual.documentId, uri))
             throw com.xnotes.storage.NativeReferenceFailure(com.xnotes.storage.NativeReferenceIssue.DUPLICATE)
         com.xnotes.storage.ReferenceContract.verifyObserved(registry.expectationAt(uri),registry.expectationForId(actual.documentId),
             com.xnotes.format.BundleHeader.read(source.file) {checkActive();false})
