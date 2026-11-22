@@ -333,3 +333,4 @@
 ## 2026-11-23 恢复记录简化合入主线与 Release 101 打包
 
 - 用户选择选项 1「合并到 master 并打包正式版」：将 `pause-only-recovery`（`dcc81887` 测试与约定、`4e040bbe` 实现）以非快进合并入本地 `master`（`7106cf06`），版本提高至 `0.9.12` / code 101（`e6b67ecd`），构建正式 ARM64 APK，Release JVM 4,303 项通过。安装命令被权限检查拦截，未安装，待用户明确要求。不推送、不发布 GitHub Release。见 [Release 101 记录](release101-2026-11-23.md)。
+- 用户随后要求「安装」：已通过 `adb -s 6el21u1000425 install -r` 将 Release 101 覆盖安装到 MovinkPad Pro 14，设备确认 `com.xnotes.movinkpad` `0.9.12` / `versionCode=101`。不推送、不发布 GitHub Release。
