@@ -304,15 +304,15 @@ class CleanColdReopenHostTest {
         assertEquals(0, f.writes.get())
     }
 
-    @Test fun cleanReopenRejectsReplacedDocumentIdAndMissingDiskFileWithoutLosingSessionBackup() = runWorkspaceScenario { f, _ ->
+    /** Pause-only recovery: a saved note keeps no working copy, so a replaced or missing file means Home. */
+    @Test fun cleanReopenRejectsReplacedDocumentIdAndMissingDiskFileAndKeepsNoStaleBackup() = runWorkspaceScenario { f, _ ->
         withContext(Dispatchers.IO) { f.seed() }
         withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
             checkpointAndClose(f.editor)
         }
         val backupBody = File(slotDir(f.editor), "document.xnote")
-        assertTrue(backupBody.exists())
-        val backupBytes = backupBody.readBytes()
+        assertFalse("A saved note's file is its only copy", backupBody.exists())
 
         // Subcase 1: File at the path was replaced by a different document (different UUID).
         withContext(Dispatchers.IO) { f.seed(f.source) }
@@ -328,7 +328,7 @@ class CleanColdReopenHostTest {
                 coordinator.close()
             }
         }
-        assertArrayEquals(backupBytes, backupBody.readBytes())
+        assertFalse(backupBody.exists())
 
         // Subcase 2: File on disk was deleted.
         assertTrue(f.source.delete())
@@ -344,7 +344,7 @@ class CleanColdReopenHostTest {
                 coordinator.close()
             }
         }
-        assertArrayEquals(backupBytes, backupBody.readBytes())
+        assertFalse(backupBody.exists())
     }
 
     @Test fun dirtyWorkspaceNoteStillRestoresAsProtectedSessionCopy() = runWorkspaceScenario { f, _ ->

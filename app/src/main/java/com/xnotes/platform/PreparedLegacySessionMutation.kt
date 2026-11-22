@@ -138,28 +138,20 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
             candidate(step,name,file) {}
         } catch(error:Throwable) {original.cleanup();throw error}
     }
-    private fun encodeBody(step:LegacyMutationStep,name:String,owner:Any,id:String,expectedSha:String?=null,write:(java.io.OutputStream)->Unit) {
+    private fun encodeBody(step:LegacyMutationStep,name:String,owner:Any,id:String,write:(java.io.OutputStream)->Unit) {
         check(directory.isDirectory || directory.mkdirs())
         val held=LegacySessionBodyCandidates.create(directory,if(step==LegacyMutationStep.NOTE_BODY) "document-" else "canvas-",
             if(step==LegacyMutationStep.NOTE_BODY) ".xnote.tmp" else ".xcanvas.tmp")
         try {
-            val digest=expectedSha?.let {java.security.MessageDigest.getInstance("SHA-256")}
             FileOutputStream(held.file).use {output->
                 val stream=object:FilterOutputStream(output) {
                     override fun write(bytes:ByteArray,offset:Int,length:Int)=output.write(bytes,offset,length)
                     override fun close() {flush()}
                 }
-                write(if(digest==null) stream else java.security.DigestOutputStream(stream,digest));output.fd.sync()
+                write(stream);output.fd.sync()
             }
             check(held.ownsFile()) {"Legacy body candidate was replaced"}
-            val hash=if(digest==null) BundleMigration.hash(held.file) else {
-                val actual=digest.digest().joinToString("") {"%02x".format(it)}
-                require(actual==expectedSha)
-                val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(held.file)
-                val kind=if(step==LegacyMutationStep.NOTE_BODY) com.xnotes.core.util.DocumentKind.NOTE else com.xnotes.core.util.DocumentKind.CANVAS
-                require(info.kind==kind && info.header.identity?.documentId==id)
-                actual
-            }
+            val hash=BundleMigration.hash(held.file)
             candidate(step,name,held.file,held::unregister)
             bodyTarget=target(name);bodyToken=owner;bodyHash=hash;bodyId=id
         } catch(error:Throwable) {held.close();throw error}
@@ -222,10 +214,8 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
                 body.snapshotOwnerToken,body.identity.documentId) {codec.write(body,it)}
             noteMetadata(metadata,clearCanvas)
         }
-        internal fun prepareNoteFromEncoded(directory:File,encoded:File,expectedSha256:String,ownerToken:Any,documentId:String,
-            metadata:SessionStore.Metadata,clearCanvas:Boolean=true,fileOps:FileOps=SystemFileOps)=prepare(directory,fileOps) {
-            encodeBody(LegacyMutationStep.NOTE_BODY,"document.xnote",ownerToken,documentId,expectedSha256) {out->encoded.inputStream().use {it.copyTo(out)}}
-            noteMetadata(metadata,clearCanvas)
+        internal fun prepareNoteDiskReopen(directory:File,metadata:SessionStore.Metadata)=prepare(directory,SystemFileOps) {
+            delete(LegacyMutationStep.NOTE_BODY,"document.xnote");noteMetadata(metadata,true)
         }
         private fun PreparedLegacySessionMutation.noteMetadata(metadata:SessionStore.Metadata,clearCanvas:Boolean) {
             val json=JSONObject().put("dirty",metadata.dirty).put("zoom",metadata.zoom).put("scrollX",metadata.scrollX)
@@ -241,10 +231,8 @@ internal class PreparedLegacySessionMutation private constructor(internal val di
                 body.snapshotOwnerToken,body.identity.documentId) {codec.write(body,it)}
             canvasMetadata(metadata,clearNote)
         }
-        internal fun prepareCanvasFromEncoded(directory:File,encoded:File,expectedSha256:String,ownerToken:Any,documentId:String,
-            metadata:CanvasSessionStore.Metadata,clearNote:Boolean=true,fileOps:FileOps=SystemFileOps)=prepare(directory,fileOps) {
-            encodeBody(LegacyMutationStep.CANVAS_BODY,"canvas.xcanvas",ownerToken,documentId,expectedSha256) {out->encoded.inputStream().use {it.copyTo(out)}}
-            canvasMetadata(metadata,clearNote)
+        internal fun prepareCanvasDiskReopen(directory:File,metadata:CanvasSessionStore.Metadata)=prepare(directory,SystemFileOps) {
+            delete(LegacyMutationStep.CANVAS_BODY,"canvas.xcanvas");canvasMetadata(metadata,true)
         }
         private fun PreparedLegacySessionMutation.canvasMetadata(metadata:CanvasSessionStore.Metadata,clearNote:Boolean) {
             val json=JSONObject().put("dirty",metadata.dirty)

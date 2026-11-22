@@ -573,22 +573,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     internal var preparePresentationDeparture:(suspend ((()->Boolean))->PreparedHomeGate?)?=null
     private fun presentationRoot()=sibling?.takeIf {it.secondary===this} ?: this
     private fun acceptPresentationIntent() {presentationRoot().onPresentationIntent?.invoke()}
-    private class PresentationDeparture(val gate:PreparedHomeGate?,val checkpoint:PreparedNativePresentationCheckpoint?) {
-        fun current()=checkpoint?.current()!=false
-        fun commit(current:()->Boolean)=current() && this.current() && (gate?.commit(current) ?: true)
+    private class PresentationDeparture(val gate:PreparedHomeGate?) {
+        fun commit(current:()->Boolean)=current() && (gate?.commit(current) ?: true)
         suspend fun close() {withContext(kotlinx.coroutines.NonCancellable) {gate?.close()}}
     }
     /** Only default public entry points own this gate; prepared operations use their caller's gate. */
     private suspend fun prepareDefaultDeparture(current:()->Boolean):PresentationDeparture? {
         val root=presentationRoot()
-        val prepare=root.preparePresentationDeparture ?: return if(current()) PresentationDeparture(null,null) else null
-        // Legacy split recovery may show only MissingDocument placeholders. Those panes contain
-        // no adopted body; departing them must not checkpoint their inert blank buffers.
-        val checkpoint=if(root.openPanes.any {it.missingDocument==null})
-            root.prepareNativePresentationCheckpoint(emptySet(),current) ?: return null else null
-        val gate=prepare {current() && checkpoint?.current()!=false} ?: return null
-        val result=PresentationDeparture(gate,checkpoint)
-        if(!current() || !result.current()) {result.close();return null}
+        val prepare=root.preparePresentationDeparture ?: return if(current()) PresentationDeparture(null) else null
+        val gate=prepare(current) ?: return null
+        val result=PresentationDeparture(gate)
+        if(!current()) {result.close();return null}
         return result
     }
     internal var presentationVersion by mutableStateOf(0L)
@@ -812,7 +807,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if(!settleOpenSlots(slots,whole,explicitlyDiscarded,null) || !current()) return@launch
                 departure=prepareDefaultDeparture(::current) ?: return@launch
                 val held=requireNotNull(departure)
-                if(!current() || !held.current()) return@launch
+                if(!current()) return@launch
                 // Draft permission is consumed before the Home marker, then no business veto remains.
                 if(newDraft && !permitNewSessionDraft()) return@launch
                 if(!(held.gate?.commit(::current) ?: current())) return@launch
@@ -992,14 +987,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     private var canvasSourceObservation:CanvasSourceObservation?=null
     private var canvasSourceIncomplete=false
-    @Volatile private var rejectedBackupSource:com.xnotes.storage.NativeSourceVersion?=null
     private var failedSaveRevision:Pair<Any,Long>?=null
     private fun cleanNoteSourceSha():String? {
         if(!noteOpen || canvasOpen || missingDocument!=null || documentOwner!==this || requiresIndependentSave) return null
         val doc=state.document
         val uri=autosaveUri ?: return null
         val observed=noteSourceObservation ?: return null
-        if(observed.version===rejectedBackupSource) return null
         return observed.version.sha256.takeIf {uri==doc.path && !doc.dirty && incompleteNoteModel.get()!==doc &&
             observed.matches(this) && !AudioRecovery.needsBodyEvidence(doc.snapshotOwnerToken) && inDocumentWorkspace(uri)}
     }
@@ -1008,7 +1001,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val doc=infiniteOrNull?.document ?: return null
         val uri=canvasAutosaveUri ?: return null
         val observed=canvasSourceObservation ?: return null
-        if(observed.version===rejectedBackupSource) return null
         return observed.version.sha256.takeIf {uri==doc.path && !doc.dirty && !canvasSourceIncomplete &&
             observed.matches(this) && !AudioRecovery.needsBodyEvidence(doc.snapshotOwnerToken) && inDocumentWorkspace(uri)}
     }
@@ -1915,6 +1907,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if(!success && wasDirty) doc.dirty=true
                 if(canvasOpen && infiniteOrNull?.document===doc) {
                     failedSaveRevision=if(success) null else doc.snapshotOwnerToken to doc.bodyRevision
+                    if(!success) requestWorkingSession()
                     presentationVersion++
                 }
                 if(canvasOpen && infiniteOrNull?.document===doc) savingNote=false
@@ -4225,14 +4218,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private sealed interface WorkingCapture {
         val cleanDiskSource:Boolean get()=false
-        val source:com.xnotes.storage.NativeSourceVersion? get()=null
         data class Note(val model: Document, val revision: Long, val body: Document?,
-            val metadata: com.xnotes.platform.SessionStore.Metadata,override val cleanDiskSource:Boolean,
-            override val source:com.xnotes.storage.NativeSourceVersion?): WorkingCapture
+            val metadata: com.xnotes.platform.SessionStore.Metadata,override val cleanDiskSource:Boolean): WorkingCapture
         data class Canvas(val model: com.xnotes.core.infinite.InfiniteDocument,
             val revision:Long,val body: com.xnotes.core.infinite.InfiniteDocument?,
-            val metadata: com.xnotes.platform.CanvasSessionStore.Metadata,override val cleanDiskSource:Boolean,
-            override val source:com.xnotes.storage.NativeSourceVersion?): WorkingCapture
+            val metadata: com.xnotes.platform.CanvasSessionStore.Metadata,override val cleanDiskSource:Boolean): WorkingCapture
         data object Closed: WorkingCapture
     }
 
@@ -4299,20 +4289,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val doc = canvas.document
             val needed=forceBody || lastCanvasSessionBody!==doc || lastCanvasSessionBodyRevision!=doc.bodyRevision || lastCanvasSessionBodySha==null
             val clean=cleanCanvasSourceSha()!=null
-            val source=canvasSourceObservation?.version.takeIf {needed && clean}
-            val body=if(needed && source==null)
+            val body=if(needed && !clean)
                 doc.snapshotForWrite(fixedItems=true).also {it.lastView=canvas.viewport.toWaypoint()} else null
             return WorkingCapture.Canvas(doc,doc.bodyRevision,body,
-                com.xnotes.platform.CanvasSessionStore.Metadata(doc.path, doc.displayName, doc.dirty),clean,source)
+                com.xnotes.platform.CanvasSessionStore.Metadata(doc.path, doc.displayName, doc.dirty),clean)
         }
         val doc = state.document
         if (owner.noteWriteJob?.isActive == true || noteTransactionsPending(doc)) return null
         val needed=forceBody || lastSessionBody !== doc || lastSessionBodyRevision != doc.bodyRevision || lastSessionBodySha==null
         val clean=cleanNoteSourceSha()!=null
-        val source=noteSourceObservation?.version.takeIf {needed && clean && doc.pdfFile==null}
-        val body = if (needed && source==null)
+        val body = if (needed && !clean)
             doc.fixedWriteSnapshot() else null
-        return WorkingCapture.Note(doc, doc.bodyRevision, body, noteSessionMetadata(doc, checkpointNoteView()),clean,source)
+        return WorkingCapture.Note(doc, doc.bodyRevision, body, noteSessionMetadata(doc, checkpointNoteView()),clean)
     }
 
     private fun sameWorkingModel(capture: WorkingCapture): Boolean = when (capture) {
@@ -4329,28 +4317,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             com.xnotes.platform.LegacyAbsentResult.ProtectedRecovery->return com.xnotes.platform.LegacyMutationResult.ProtectedRecovery
             is com.xnotes.platform.LegacyAbsentResult.Failed->return com.xnotes.platform.LegacyMutationResult.Failed(emptyList(),observed.cause)
         }
-        val source=capture.source
-        val prepared=if(source!=null) {
-            val path=when(capture) {is WorkingCapture.Canvas->capture.metadata.path;is WorkingCapture.Note->capture.metadata.path;WorkingCapture.Closed->null}
-            val opened=try {notebookStorage.openSource(requireNotNull(path),source.kind)} catch(error:com.xnotes.storage.ReferenceContractViolation) {
-                rejectedBackupSource=source;return com.xnotes.platform.LegacyMutationResult.Changed
-            }
-            opened.use {
-                if(it.version.documentId!=source.documentId || it.version.sha256!=source.sha256) {
-                    rejectedBackupSource=source;return com.xnotes.platform.LegacyMutationResult.Changed
-                }
-                saveStats.timed("working copy",saveStats.workingFromSource) {when(capture) {
-                    is WorkingCapture.Canvas->com.xnotes.platform.PreparedLegacySessionMutation.prepareCanvasFromEncoded(sessionDir,it.file,source.sha256,capture.model.snapshotOwnerToken,source.documentId,capture.metadata)
-                    is WorkingCapture.Note->com.xnotes.platform.PreparedLegacySessionMutation.prepareNoteFromEncoded(sessionDir,it.file,source.sha256,capture.model.snapshotOwnerToken,source.documentId,capture.metadata)
-                    WorkingCapture.Closed->error("Closed capture has no source")
-                }}
-            }
-        } else {
+        val prepared=run {
             val encoded=capture is WorkingCapture.Note && capture.body!=null || capture is WorkingCapture.Canvas && capture.body!=null
             saveStats.timed(if(encoded) "working encode" else "working metadata",if(encoded) saveStats.workingEncodes else saveStats.workingMetadataOnly) {
                 when(capture) {
-                    is WorkingCapture.Note->session.prepareMutation(capture.body,capture.metadata)
-                    is WorkingCapture.Canvas->canvasSession.prepareMutation(capture.body,capture.metadata)
+                    is WorkingCapture.Note->if(capture.cleanDiskSource) com.xnotes.platform.PreparedLegacySessionMutation.prepareNoteDiskReopen(sessionDir,capture.metadata)
+                        else session.prepareMutation(capture.body,capture.metadata)
+                    is WorkingCapture.Canvas->if(capture.cleanDiskSource) com.xnotes.platform.PreparedLegacySessionMutation.prepareCanvasDiskReopen(sessionDir,capture.metadata)
+                        else canvasSession.prepareMutation(capture.body,capture.metadata)
                     WorkingCapture.Closed->com.xnotes.platform.PreparedLegacySessionMutation.prepareClosed(sessionDir)
                 }
             }
@@ -4411,10 +4385,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                             if (result is com.xnotes.platform.LegacyMutationResult.Published && actual is WorkingCapture.Note) {
                                 lastSessionBody = actual.model
                                 lastSessionBodyRevision = actual.revision
-                                result.publication.bodySha256?.let {lastSessionBodySha=it}
+                                if(actual.cleanDiskSource) lastSessionBodySha=null else result.publication.bodySha256?.let {lastSessionBodySha=it}
                             } else if(result is com.xnotes.platform.LegacyMutationResult.Published && actual is WorkingCapture.Canvas) {
                                 lastCanvasSessionBody=actual.model;lastCanvasSessionBodyRevision=actual.revision
-                                result.publication.bodySha256?.let {lastCanvasSessionBodySha=it}
+                                if(actual.cleanDiskSource) lastCanvasSessionBodySha=null else result.publication.bodySha256?.let {lastCanvasSessionBodySha=it}
                             } else {
                                 lastSessionBody = null
                                 lastSessionBodyRevision = -1L
@@ -4610,6 +4584,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
     /** Persists this physical slot's actual displayed model, including a visible borrowed view. */
     private suspend fun checkpointWorkingSession(stillCurrent:()->Boolean,onIssue:(NativeCheckpointResult)->Unit={}):WorkingCheckpoint? {
+        saveStats.checkpointStarted.incrementAndGet()
         if(!noteOpen || missingDocument!=null || !sessionOwner.isCurrent() || !stillCurrent()) return null
         if(waitingForFileSave()) {onIssue(NativeCheckpointResult.Deferred);return null}
         val request=Any().also {workingCheckpointRequest=it}
@@ -4656,6 +4631,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val operation=sessionOwner.submitTracked {
                 val result=writeWorkingCapture(capture)
                 if(result !is com.xnotes.platform.LegacyMutationResult.Published) WorkingCheckpointRead(result)
+                else if(capture.cleanDiskSource) WorkingCheckpointRead(result,absent=(access.observeAbsent() as? com.xnotes.platform.LegacyAbsentResult.Granted)?.observation)
                 else {
                     val info=com.xnotes.format.BundleReferenceInfo.inspectStrict(bodyFile)
                     val actual=com.xnotes.format.BundleMigration.hash(bodyFile)
@@ -4676,7 +4652,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if(read.result==com.xnotes.platform.LegacyMutationResult.NeedsBody && !forceBody) continue
             if(read.result is com.xnotes.platform.LegacyMutationResult.Failed) onIssue(NativeCheckpointResult.Failed(read.result.cause))
             if(read.result==com.xnotes.platform.LegacyMutationResult.ProtectedRecovery) message=appContext.getString(R.string.recovery_failed)
-            if(read.result !is com.xnotes.platform.LegacyMutationResult.Published || read.sha==null || read.absent==null) return null
+            if(read.result !is com.xnotes.platform.LegacyMutationResult.Published || (cleanSha==null && read.sha==null) || read.absent==null) return null
             if(basic()) {
                 if(canvas) {lastCanvasSessionBody=model as com.xnotes.core.infinite.InfiniteDocument;lastCanvasSessionBodyRevision=revision;lastCanvasSessionBodySha=read.sha}
                 else {lastSessionBody=model as Document;lastSessionBodyRevision=revision;lastSessionBodySha=read.sha}
@@ -8240,6 +8216,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if(state.document===doc && !canvasOpen) savingNote=false
                 if(state.document===doc && !canvasOpen) {
                     failedSaveRevision=if(success) null else doc.snapshotOwnerToken to doc.bodyRevision
+                    if(!success) requestWorkingSession()
                     presentationVersion++
                 }
                 state.autosaveStatus=if(success) "done" else "failed"

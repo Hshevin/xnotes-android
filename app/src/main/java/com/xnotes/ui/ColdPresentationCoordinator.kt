@@ -1,17 +1,11 @@
 package com.xnotes.ui
 
 import androidx.annotation.MainThread
-import androidx.compose.runtime.snapshotFlow
 import com.xnotes.R
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** One UI host's finite publication and bootstrap work. The retained owner stores only routing facts. */
@@ -109,56 +103,30 @@ internal class ColdPresentationCoordinator(
         } finally {cap.close()}
     }
 
-    /** Both Main and the cold-host tests use this same actual-presentation producer. */
-    fun observe(scope:CoroutineScope):Job=scope.launch {
-        var previous=editor.presentationContentVersion to editor.secondary?.presentationContentVersion
-        snapshotFlow {
-            listOf(frameProvider(),
-                editor.presentationVersion,editor.secondary?.presentationVersion,
-                editor.splitRatio,editor.splitSideBySide,editor.splitReversed,editor.focusedPane)
-        }.collectLatest {
-            val intent=publication
-            val content=editor.presentationContentVersion to editor.secondary?.presentationContentVersion
-            val changed=previous!=content;previous=content
-            delay(CheckpointPacing.settleMs(changed))
-            if(publication===intent) {
-                var retry=false
-                checkpoint {retry=true}
-                if(retry) {
-                    val attempt=publication
-                    delay(CheckpointPacing.CONTENT_SETTLE_MS)
-                    if(publication===attempt) checkpoint()
-                }
-            }
-        }
-    }
-
     internal class OutgoingCheckpoint internal constructor(private val check:()->Boolean) {
         fun current()=check()
     }
 
     /** Parked buffers still get local durability; the returned Native description is never published. */
-    suspend fun checkpointOutgoing(stillCurrent:()->Boolean):OutgoingCheckpoint?=checkpointOutgoing({},stillCurrent)
-    private suspend fun checkpointOutgoing(superseded:()->Unit,stillCurrent:()->Boolean):OutgoingCheckpoint? {
+    private suspend fun checkpointOutgoing(stillCurrent:()->Boolean):OutgoingCheckpoint? {
         if(!hostCurrent() || !stillCurrent()) return null
         val nativeIdentity=editor.captureNativePresentationIdentity()
         fun current()=hostCurrent() && stillCurrent() && editor.matchesNativePresentationIdentity(nativeIdentity)
         val native=if(editor.openPanes.any {it.noteOpen}) {
-            native(emptySet(),superseded,::current) ?: return null
+            native(emptySet(),::current) ?: return null
         } else null
         val result=OutgoingCheckpoint {current() && native?.current()!=false}
         return result.takeIf {it.current()}
     }
 
-    private suspend fun native(home:Set<Pane>,superseded:()->Unit,current:()->Boolean):Editor.PreparedNativePresentationCheckpoint? =
+    private suspend fun native(home:Set<Pane>,current:()->Boolean):Editor.PreparedNativePresentationCheckpoint? =
         when(val result=editor.prepareNativePresentationCheckpointResult(home,current)) {
             is NativeCheckpointResult.Ready->result.checkpoint
-            NativeCheckpointResult.Superseded->{superseded();null}
+            NativeCheckpointResult.Superseded->null
             NativeCheckpointResult.Deferred->null
             is NativeCheckpointResult.Failed->{failedCheckpoint(current);null}
         }
-    suspend fun checkpoint():Boolean=checkpoint {}
-    private suspend fun checkpoint(superseded:()->Unit):Boolean {
+    suspend fun checkpoint():Boolean {
         if(!hostCurrent() || !bootstrap.completed || bootstrap.problem!=null) return false
         if(bootstrap.observation==null && bootstrap.presentation==null && editor.openPanes.none {it.noteOpen})
             return false
@@ -174,29 +142,29 @@ internal class ColdPresentationCoordinator(
             listOf(editor.splitRatio,editor.splitSideBySide,editor.splitReversed,editor.focusedPane)==nativeLayout &&
             editor.matchesNativePresentationIdentity(nativeIdentity)
         val parked=frame.parked || frame.homePanes.isNotEmpty()
-        val outgoing=if(parked) checkpointOutgoing(superseded,::current) ?: return false else null
+        val outgoing=if(parked) checkpointOutgoing(::current) ?: return false else null
         var proof:()->Boolean=::current
         val value=when {
             frame.parked->{proof={current() && outgoing?.current()!=false};LastPresentation.Home}
             editor.openPanes.any {it.noteOpen && it.pane !in frame.homePanes}->{
-                val native=native(frame.homePanes,superseded,::current) ?: return false
+                val native=native(frame.homePanes,::current) ?: return false
                 proof={current() && native.current() && outgoing?.current()!=false}
                 native.value
             }
             else->{proof={current() && outgoing?.current()!=false};LastPresentation.Home}
         }
-        if(!proof()) {superseded();return false}
+        if(!proof()) return false
         val attempt=store.begin(ticket,value)
         return try {
             when(attempt.prepare()) {
                 LastPresentationPrepare.Failed->return failedCheckpoint(::current)
-                LastPresentationPrepare.Changed->{superseded();return false}
+                LastPresentationPrepare.Changed->return false
                 LastPresentationPrepare.PreservedInvalid->return failedCheckpoint(::current)
                 LastPresentationPrepare.Ready->Unit
             }
             when(attempt.commit(proof)) {
                 LastPresentationWrite.Written->{bootstrap.presented(value);true}
-                LastPresentationWrite.Changed->{superseded();false}
+                LastPresentationWrite.Changed->false
                 LastPresentationWrite.PreservedInvalid->failedCheckpoint(::current)
                 LastPresentationWrite.Failed->failedCheckpoint(::current)
             }

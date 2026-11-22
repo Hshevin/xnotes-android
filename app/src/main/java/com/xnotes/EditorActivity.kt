@@ -521,10 +521,8 @@ private fun EditorScreen(
             editor.onPresentationIntent=presentationIntent
             editor.preparePresentationDeparture=presentationDeparture
         }
-        val observer=coldPresentation?.observe(scope)
         coldPresentation?.onRestored=restoredPresentation
         onDispose {
-            observer?.cancel()
             if(editor.onPresentationIntent===presentationIntent) editor.onPresentationIntent=null
             if(editor.preparePresentationDeparture===presentationDeparture) editor.preparePresentationDeparture=null
             if(coldPresentation?.onRestored===restoredPresentation) coldPresentation.onRestored=null
@@ -954,11 +952,6 @@ private fun EditorScreen(
             paneHomes==homes && mainMenu==menu && editor.splitReversed==reversed &&
             (guardState.current===prompt || allowedGuardTag!=null && guardState.current?.sourceNavigation===allowedGuardTag)}
     }
-    suspend fun preparePresentationParking(current:()->Boolean):(() -> Boolean)? {
-        val coordinator=coldPresentation ?: return {current()}
-        val checkpoint=coordinator.checkpointOutgoing(current) ?: return null
-        return {checkpoint.current()}
-    }
     // Map v2 sources: following a node's source link and coming back to the map.
     val mapSourceOpener=remember(editor,scope) {
         com.xnotes.map.source.EditorMapSourceOpener(editor,::guardReference,com.xnotes.map.source.SourceResolver(com.xnotes.map.source.AndroidSourceCatalogs(context))) {
@@ -1080,9 +1073,8 @@ private fun EditorScreen(
             other.currentUri?.let { target.isSameDocument(it, uriStr) } == true) {
             coldPresentation?.retireIntent()
             val current=captureNativeHost()
-            val persisted=preparePresentationParking(current) ?: return null
             val parking=editor.awaitMapSourceParking() ?: return null
-            fun ready()=current() && persisted() && parking.current()
+            fun ready()=current() && parking.current()
             val provider=editor.preparePresentationDeparture
             val gate=provider?.invoke(::ready)
             if(provider!=null && gate==null) return null
@@ -1132,9 +1124,8 @@ private fun EditorScreen(
         val current=captureNativeHost()
         coldPresentation?.retireIntent()
         scope.launch {
-            val persisted=preparePresentationParking(current) ?: return@launch
             val proof=editor.awaitMapSourceParking() ?: return@launch
-            fun ready()=current() && persisted() && proof.current()
+            fun ready()=current() && proof.current()
             val provider=editor.preparePresentationDeparture
             val gate=provider?.invoke(::ready)
             if(provider!=null && gate==null) return@launch
@@ -1695,9 +1686,8 @@ private fun EditorScreen(
                         val current=captureNativeHost()
                         coldPresentation?.retireIntent()
                         scope.launch {
-                            val persisted=preparePresentationParking(current) ?: return@launch
                             val proof=editor.awaitMapSourceParking() ?: return@launch
-                            fun ready()=current() && persisted() && proof.current()
+                            fun ready()=current() && proof.current()
                             val provider=editor.preparePresentationDeparture
                             val gate=provider?.invoke(::ready)
                             if(provider!=null && gate==null) return@launch
