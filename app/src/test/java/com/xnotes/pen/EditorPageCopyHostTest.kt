@@ -531,7 +531,8 @@ class EditorPageCopyHostTest {
         val after=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.target)
         assertNotEquals(before.header.identity!!.documentId,after.header.identity!!.documentId)
         assertEquals(before.orderedPageIds.size,after.orderedPageIds.size);assertTrue(before.pageIds.intersect(after.pageIds).isEmpty())
-        assertFalse(after.header.identity.externalPdf);assertEquals(pdfHash,after.header.identity.pdfResource)
+        val copyIdentity=requireNotNull(after.header.identity)
+        assertFalse(copyIdentity.externalPdf);assertEquals(pdfHash,copyIdentity.pdfResource)
         assertEquals(pdfHash,after.embeddedPdfHash)
         val excluded=setOf(com.xnotes.format.BundleIdentity.ENTRY,com.xnotes.format.AnchorMetadata.ENTRY,"manifest.json",com.xnotes.format.BundlePdf.ENTRY)
         assertEquals(com.xnotes.format.BundleMigration.fingerprints(f.source).filterKeys {it !in excluded},

@@ -1,0 +1,1280 @@
+package com.xnotes.format
+
+import com.xnotes.core.pal.AssetFile
+import com.xnotes.core.pal.assetPath
+import com.xnotes.kio.openRead
+import okio.*
+import com.xnotes.core.FakeImageCodec
+import com.xnotes.core.model.ImageData
+import com.xnotes.core.FakeTextMeasurer
+import com.xnotes.core.geometry.Affine
+import com.xnotes.core.geometry.Flip
+import com.xnotes.core.geometry.Pt
+import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.AudioData
+import com.xnotes.core.model.AudioItem
+import com.xnotes.core.model.Bookmark
+import com.xnotes.core.model.ConnectorEnd
+import com.xnotes.core.model.ConnectorItem
+import com.xnotes.core.model.snapshot
+import com.xnotes.core.model.deepCopy
+import com.xnotes.core.model.Document
+import com.xnotes.core.model.Glue
+import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.Orientation
+import com.xnotes.core.model.Page
+import com.xnotes.core.model.PageMargins
+import com.xnotes.core.model.PagePattern
+import com.xnotes.core.model.PageSize
+import com.xnotes.core.model.PageSizeChoice
+import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Routing
+import com.xnotes.core.model.ShapeItem
+import com.xnotes.core.pal.FontFace
+import com.xnotes.core.model.TextStyle
+import com.xnotes.core.model.ShapeLabel
+import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.SyncMark
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.model.TapeShape
+import com.xnotes.core.model.TextItem
+import com.xnotes.core.stroke.Sample
+import com.xnotes.core.stroke.StrokeSimplify
+import com.xnotes.core.shapes.Axis
+import com.xnotes.core.shapes.Elbow
+import com.xnotes.core.shapes.FreePath
+import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
+import com.xnotes.core.tools.Tool
+import com.xnotes.core.tools.ToolConfig
+import com.xnotes.core.tools.ToolDefaults
+import com.xnotes.core.testkit.assertArrayEquals
+import com.xnotes.core.testkit.assertEquals
+import com.xnotes.core.testkit.assertFalse
+import com.xnotes.core.testkit.assertNotNull
+import com.xnotes.core.testkit.assertNull
+import com.xnotes.core.testkit.assertSame
+import kotlin.test.assertFailsWith
+import com.xnotes.core.testkit.assertTrue
+import kotlin.test.Test
+
+class DocumentCodecTest : BundleTestFiles() {
+
+    @Test fun bodyStartSurvivesAutosaveSnapshot() {
+        val doc = Document().apply { bodyStartPage = 4 }
+        val saved = doc.snapshot()
+        doc.bodyStartPage = null
+        assertEquals(4, roundTrip(saved).bodyStartPage)
+        assertNull(roundTrip(doc.snapshot()).bodyStartPage)
+    }
+
+    @Test fun bodyStartSurvivesIndependentCopy() {
+        val doc = Document().apply { bodyStartPage = 4 }
+        val copy = doc.deepCopy(FakeTextMeasurer())
+        doc.bodyStartPage = null
+        assertEquals(4, roundTrip(copy).bodyStartPage)
+        assertNull(roundTrip(doc.deepCopy(FakeTextMeasurer())).bodyStartPage)
+    }
+
+    @Test fun bodyStartSurvivesSaveAndAutomaticReset() {
+        val doc = Document.blank(count = 12)
+        doc.bodyStartPage = 4
+        assertEquals(4, roundTrip(doc).bodyStartPage)
+        doc.bodyStartPage = null
+        assertNull(roundTrip(doc).bodyStartPage)
+    }
+
+    private val codec = DocumentCodec(FakeImageCodec(), FakeTextMeasurer())
+
+    private fun imageFile(bytes: ByteArray = byteArrayOf(1, 2, 3, 4)): AssetFile =
+        testFile("img", null).apply { setBytes(bytes) }
+
+    /** The manifest's JSON text out of a written bundle. */
+    private fun manifestOf(bundle: ByteArray): String {
+        bundleReader(Buffer().write(bundle)).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                if (entry.name == "manifest.json") return requireNotNull(entry).data.readByteArray().decodeToString()
+                entry.finish()
+                entry = zis.next()
+            }
+        }
+        return ""
+    }
+
+    private fun roundTrip(doc: Document): Document {
+        val out = Buffer()
+        codec.write(doc, out)
+        val imageDir = testDirectory("xnotes-img")
+        return codec.read(Buffer().write(out.bytes()), imageDir = imageDir)
+    }
+
+    private fun entryNames(bundle: ByteArray): List<String> {
+        val out = ArrayList<String>()
+        bundleReader(Buffer().write(bundle)).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                out += entry.name
+                entry = zis.next()
+            }
+        }
+        return out
+    }
+
+    @Test fun markupsRideTheirOwnEntryJustBeforeTheManifest() {
+        val doc = Document(dpi = 150)
+        doc.pages += Page(1240.0, 1754.0)
+        doc.pages += Page(1240.0, 1754.0)
+        val m = com.xnotes.core.model.TextMarkup(
+            "id-1", com.xnotes.core.model.MarkupType.SQUIGGLY, Rgba(88, 196, 255), 0.7,
+            listOf(com.xnotes.core.pdf.TextQuad(10f, 20f, 30f, 40f, 0)), "text", "note", 1000L, 2000L,
+        )
+        doc.pages[1].markups = listOf(m)
+        val out = Buffer()
+        codec.write(doc, out)
+        assertEquals(listOf(MarkupsXfdf.ENTRY_NAME, "manifest.json"), entryNames(out.bytes()).takeLast(2))
+        val back = codec.read(Buffer().write(out.bytes()))
+        assertTrue(back.pages[0].markups.isEmpty())
+        val r = back.pages[1].markups.single()
+        assertEquals("id-1", r.id)
+        assertEquals(com.xnotes.core.model.MarkupType.SQUIGGLY, r.type)
+        assertEquals(m.quads, r.quads)
+        assertEquals("note", r.note)
+
+        doc.pages[1].markups = emptyList()
+        val plain = Buffer()
+        codec.write(doc, plain)
+        assertFalse(MarkupsXfdf.ENTRY_NAME in entryNames(plain.bytes()))
+    }
+
+    @Test fun lockedItemsSurviveARoundTripAndOnlyThoseLockedComeBackLocked() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val pinnedStroke = Stroke(
+            Tool.PEN,
+            ToolDefaults.configFor(Tool.PEN),
+            mutableListOf(Sample(1.0, 2.0, 1.0), Sample(3.0, 4.0, 1.0)),
+        ).apply { locked = true }
+        val freeStroke = Stroke(
+            Tool.PEN,
+            ToolDefaults.configFor(Tool.PEN),
+            mutableListOf(Sample(5.0, 6.0, 1.0), Sample(7.0, 8.0, 1.0)),
+        )
+        page.items.add(pinnedStroke)
+        page.items.add(freeStroke)
+        page.items.add(ImageItem(ImageData(imageFile(), 20, 10), Rect(0.0, 0.0, 20.0, 10.0)).apply { locked = true })
+        page.items.add(TextItem(Pt(1.0, 1.0), 100.0, 0.0, "hi", Rgba(0, 0, 0), 12.0, measurer = FakeTextMeasurer()).apply { locked = true })
+        page.items.add(
+            ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(9.0, 9.0), Rgba(1, 2, 3, 255)).apply { locked = true },
+        )
+        doc.pages.add(page)
+
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(5, back.size)
+        assertTrue(back[0].locked)
+        assertFalse(back[1].locked)
+        assertTrue(back[2].locked)
+        assertTrue(back[3].locked)
+        assertTrue(back[4].locked)
+    }
+
+    @Test fun groupsSurviveARoundTripAndLooseItemsWriteNone() {
+        val doc = Document.blank(count = 1)
+        val grouped = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(1.0, 2.0, 1.0))).also { it.group = 4 }
+        val loose = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(3.0, 4.0, 1.0)))
+        doc.pages[0].items.addAll(listOf(grouped, loose))
+        val out = Buffer()
+        codec.write(doc, out)
+        assertEquals(1, Regex("\"group\"").findAll(manifestOf(out.bytes())).count())
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(listOf(4, null), back.map { it.group })
+    }
+
+    @Test fun aTurnedPdfPageKeepsItsTurnAndAPlainOneWritesNone() {
+        val doc = Document.blank(count = 2)
+        doc.pages[0].pdfPage = 0
+        doc.pages[0].pdfTurn = 3
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.bytes())
+        assertEquals(1, Regex("\"pdf_turn\"").findAll(manifest).count())
+        val back = roundTrip(doc)
+        assertEquals(3, back.pages[0].pdfTurn)
+        assertEquals(0, back.pages[1].pdfTurn)
+    }
+
+    @Test fun createdTimeRoundTripsAsIsoUtc() {
+        val doc = Document(dpi = 150, created = 1_789_720_071_123L)
+        doc.pages.add(Page(100.0, 100.0))
+        val out = Buffer()
+        codec.write(doc, out)
+        assertTrue(manifestOf(out.bytes()).contains("2026-09-18T08:27:51.123Z"))
+        assertEquals(1_789_720_071_123L, codec.read(Buffer().write(out.bytes())).created)
+    }
+
+    @Test fun aNoteWithoutCreatedWritesNoCreatedField() {
+        val doc = Document(dpi = 150)
+        doc.pages.add(Page(100.0, 100.0))
+        val out = Buffer()
+        codec.write(doc, out)
+        assertFalse(manifestOf(out.bytes()).contains("\"created\""))
+        assertNull(roundTrip(doc).created)
+    }
+
+    @Test fun anUnlockedNoteWritesNoLockField() {
+        val doc = Document(dpi = 150)
+        val page = Page(100.0, 100.0)
+        page.items.add(Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(1.0, 1.0, 1.0))))
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        assertFalse(out.bytes().map { (it.toInt() and 255).toChar() }.joinToString("").contains("\"locked\""))
+    }
+
+    @Test fun fullRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(
+            Stroke(
+                Tool.CALLIGRAPHY,
+                ToolConfig(6.0, true, 0.40, 0.60, Rgba(0, 230, 118, 255)),
+                mutableListOf(Sample(10.0, 20.0, 0.5), Sample(30.0, 40.0, 0.9)),
+            ),
+        )
+        page.items.add(ImageItem(ImageData(imageFile(),64, 48), Rect(5.0, 6.0, 64.0, 48.0), angle = 0.5))
+        page.items.add(TextItem(Pt(100.0, 110.0), width = 250.0, text = "hello\nworld", rgba = Rgba(236, 236, 236, 255), pointSize = 13.0, measurer = FakeTextMeasurer()))
+        page.items.add(ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(50.0, 30.0), Rgba(255, 92, 92, 255), 3.0, Rgba(255, 92, 92, 64)))
+        doc.pages.add(page)
+        doc.bookmarks.add(Bookmark(0, "Intro"))
+
+        val back = roundTrip(doc)
+
+        assertEquals(1, back.pages.size)
+        assertEquals(150, back.dpi)
+        assertEquals(1240.0, back.pages[0].width, 1e-9)
+        val items = back.pages[0].items
+        assertEquals(4, items.size)
+
+        val stroke = items[0] as Stroke
+        assertEquals(Tool.CALLIGRAPHY, stroke.tool)
+        assertEquals(0.60, stroke.config.directionStrength, 1e-9)
+        assertEquals(2, stroke.samples.size)
+        assertEquals(Sample(10.0, 20.0, 0.5), stroke.samples[0])
+
+        val image = items[1] as ImageItem
+        assertEquals(Rect(5.0, 6.0, 64.0, 48.0), image.rect)
+        assertEquals(0.5, image.angle, 1e-9)
+
+        val text = items[2] as TextItem
+        assertEquals("hello\nworld", text.text)
+        assertEquals(250.0, text.width, 1e-9)
+
+        val shape = items[3] as ShapeItem
+        assertEquals(ShapeKind.RECTANGLE, shape.shape)
+        assertNotNull(shape.fillRgba)
+        assertEquals(Rgba(255, 92, 92, 64), shape.fillRgba)
+
+        assertEquals(1, back.bookmarks.size)
+        assertEquals("Intro", back.bookmarks[0].label)
+    }
+
+    @Test fun manifestIsStoredAndDeflatedCorrectly() {
+        val doc = Document.blank(count = 1)
+        doc.pages[0].items.add(ImageItem(ImageData(imageFile(),10, 10), Rect(0.0, 0.0, 10.0, 10.0)))
+        val out = Buffer()
+        codec.write(doc, out)
+
+        val names = mutableListOf<String>()
+        bundleReader(Buffer().write(out.bytes())).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                names += entry.name
+                entry.finish()
+                entry = zis.next()
+            }
+        }
+        assertTrue(names.contains("manifest.json"))
+        assertTrue(names.contains("assets/image-000.png"))
+        // The manifest goes last, always: an in-place save replaces the tail of the file, which
+        // only works while nothing sits behind it. See ZipTail.
+        assertEquals("manifest.json", names.last())
+    }
+
+    @Test fun svgImageIsStoredWithSvgExtensionAndRoundTrips() {
+        val markup = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"/>"
+        val doc = Document.blank(count = 1)
+        doc.pages[0].items.add(ImageItem(ImageData(imageFile(markup.encodeToByteArray()), 10, 10), Rect(0.0, 0.0, 10.0, 10.0)))
+        val out = Buffer()
+        codec.write(doc, out)
+
+        val names = mutableListOf<String>()
+        bundleReader(Buffer().write(out.bytes())).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                names += entry.name
+                entry.finish()
+                entry = zis.next()
+            }
+        }
+        assertTrue(names.contains("assets/image-000.svg"))
+
+        val imageDir = testDirectory("xnotes-img")
+        val back = codec.read(Buffer().write(out.bytes()), imageDir = imageDir)
+        val item = back.pages[0].items[0] as ImageItem
+        assertEquals(markup, item.image.file.fileText())
+    }
+
+    @Test fun rejectsNonXnote() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json","{\"format\":\"other\"}".encodeToByteArray())
+        }
+        assertFailsWith<XNoteFormatException> {
+            codec.read(Buffer().write(out.bytes()))
+        }
+    }
+
+    @Test fun emptyPagesFallBackToOneBlank() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json","{\"format\":\"xnote\",\"version\":1,\"pages\":[]}".encodeToByteArray())
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        assertEquals(1, doc.pages.size)
+    }
+
+    @Test fun unknownItemKindIsSkipped() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"version\":1,\"pages\":[" +
+                    "{\"width\":100,\"height\":100,\"items\":[" +
+                    "{\"kind\":\"future-thing\"},{\"kind\":\"text\",\"pos\":[1,2],\"text\":\"ok\"}]}]}").encodeToByteArray(),
+            )
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        assertEquals(1, doc.pages[0].items.size)
+        assertTrue(doc.pages[0].items[0] is TextItem)
+    }
+
+    @Test fun pdfFileRoundTrip() {
+        val srcDir = testDirectory("xnote-src")
+        val outDir = testDirectory("xnote-out")
+        try {
+            val pdf = srcDir.child("in.pdf").apply { setBytes(byteArrayOf(37, 80, 68, 70)) } // "%PDF"
+            val doc = Document.blank(count = 1)
+            doc.pages[0].pdfPage = 0
+            doc.pdfFile = pdf
+            val out = Buffer()
+            codec.write(doc, out)
+            // Reading with a pdfDir streams the embedded PDF back out to a fresh file (never into RAM).
+            val back = codec.read(Buffer().write(out.bytes()), outDir)
+            assertNotNull(back.pdfFile)
+            assertEquals(0, back.pages[0].pdfPage)
+            assertArrayEquals(byteArrayOf(37, 80, 68, 70), back.pdfFile!!.fileBytes())
+            // Reading without a pdfDir skips the PDF entirely (validation-only reads).
+            val noPdf = codec.read(Buffer().write(out.bytes()))
+            assertNull(noPdf.pdfFile)
+        } finally {
+            srcDir.deleteTree(); outDir.deleteTree()
+        }
+    }
+
+    @Test fun aPeekCountsPagesAndSeesThePdfWithoutReadingIt() {
+        val dir = testDirectory("xnote-peek")
+        try {
+            val pdf = dir.child("in.pdf").apply { setBytes(ByteArray(200_000) { (it % 251).toByte() }) }
+            val doc = Document.blank(count = 3)
+            doc.pdfFile = pdf
+            doc.created = 1_758_000_000_000L
+            val file = dir.child("n.xnote")
+            file.fileSink().use { codec.write(doc, it) }
+            val viaChannel = openRead(file.assetPath()).use { codec.peek(it) }!!
+            assertEquals(3, viaChannel.pages)
+            assertTrue(viaChannel.hasPdf)
+            assertEquals(1_758_000_000_000L, viaChannel.created)
+            val viaStream = file.input().use { codec.peek(it) }!!
+            assertEquals(3, viaStream.pages)
+            assertTrue(viaStream.hasPdf)
+            val plain = dir.child("p.xnote")
+            plain.fileSink().use { codec.write(Document.blank(count = 1), it) }
+            val one = openRead(plain.assetPath()).use { codec.peek(it) }!!
+            assertEquals(1, one.pages)
+            assertFalse(one.hasPdf)
+            assertNull(one.created)
+        } finally {
+            dir.deleteTree()
+        }
+    }
+
+    @Test fun aPeekAtSomethingElseComesBackEmpty() {
+        val junk = testFile("junk", ".xnote").apply { setBytes(byteArrayOf(1, 2, 3)) }
+        assertNull(openRead(junk.assetPath()).use { codec.peek(it) })
+        assertNull(codec.peek(Buffer().write(byteArrayOf(1, 2, 3))))
+        assertNull(codec.peekManifest(Buffer().write("""{"format":"xcanvas","items":[]}""".encodeToByteArray())))
+    }
+
+    @Test fun speedStrokeTimestampsRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(
+            Stroke(
+                Tool.SPEED,
+                ToolDefaults.configFor(Tool.SPEED),
+                mutableListOf(Sample(0.0, 0.0, 1.0, 0.0), Sample(10.0, 0.0, 0.8, 16.0), Sample(20.0, 0.0, 0.6, 33.0)),
+                2.5,
+            ),
+        )
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertEquals(Tool.SPEED, s.tool)
+        assertEquals(0.8, s.config.speedStrength, 1e-9)
+        assertEquals(2.5, s.speedScale, 1e-9)       // gesture-speed scale survives
+        assertEquals(3, s.samples.size)
+        assertEquals(16.0, s.samples[1].t, 1e-9)   // the 4th sample element survives
+        assertEquals(33.0, s.samples[2].t, 1e-9)
+    }
+
+    @Test fun speedStrokeKeepsItsWidthsThroughASave() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        val drawn = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5)
+        drawn.freezeSpeedWidths()
+        page.items.add(drawn)
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        for (i in samples.indices) assertEquals(drawn.samples[i].widthFactor, s.samples[i].widthFactor, 5e-4)
+    }
+
+    @Test fun speedStrokeSmoothingAndTopSpeedRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val cfg = ToolDefaults.configFor(Tool.SPEED).copy(speedSmoothing = 0.6, speedTop = 0.9)
+        page.items.add(Stroke(Tool.SPEED, cfg, listOf(Sample(0.0, 0.0, 1.0, 0.0), Sample(9.0, 0.0, 1.0, 8.0)), 0.5))
+        page.items.add(Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), listOf(Sample(0.0, 0.0, 1.0), Sample(9.0, 0.0, 1.0))))
+        doc.pages.add(page)
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(0.6, (back[0] as Stroke).config.speedSmoothing, 1e-9)
+        assertEquals(0.9, (back[0] as Stroke).config.speedTop, 1e-9)
+        assertEquals(ToolDefaults.configFor(Tool.PEN).speedTop, (back[1] as Stroke).config.speedTop, 1e-9)
+    }
+
+    @Test fun speedStrokeFromBeforeKeptWidthsWorksThemOutOnLoad() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        page.items.add(Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5))
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        val fresh = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5).apply { freezeSpeedWidths() }
+        for (i in samples.indices) assertEquals(fresh.samples[i].widthFactor, s.samples[i].widthFactor, 1e-6)
+    }
+
+    @Test fun neonAndTaperFlagsRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(neon = true, neonStrength = 0.85), mutableListOf(Sample(1.0, 2.0, 1.0))))
+        page.items.add(Stroke(Tool.TAPER, ToolConfig(taperEnabled = true, taperMinFactor = 0.30), mutableListOf(Sample(3.0, 4.0, 1.0), Sample(8.0, 9.0, 1.0))))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        assertTrue((items[0] as Stroke).config.neon)
+        assertEquals(0.85, (items[0] as Stroke).config.neonStrength, 1e-9)   // intensity survives
+        val taper = items[1] as Stroke
+        assertTrue(taper.config.taperEnabled)
+        assertEquals(0.30, taper.config.taperMinFactor, 1e-9)   // tip-width floor survives
+        assertEquals(0.0, taper.samples[0].t, 1e-9)   // non-speed stroke writes no time
+    }
+
+    @Test fun legacyTaperLengthLoadsAsEnabledTaper() {
+        // Files written before the whole-stroke taper carry taper_length but no taper_enabled; a
+        // positive legacy length must still load as an enabled taper so old notes keep tapering.
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"pages\":[{\"width\":100,\"height\":100,\"items\":[" +
+                    "{\"kind\":\"stroke\",\"tool\":\"taper\",\"config\":{\"taper_length\":40.0}," +
+                    "\"samples\":[[1,2,1.0]]}]}]}").encodeToByteArray(),
+            )
+        }
+        val stroke = codec.read(Buffer().write(out.bytes())).pages[0].items[0] as Stroke
+        assertTrue(stroke.config.taperEnabled)
+        assertEquals(0.30, stroke.config.taperMinFactor, 1e-9)   // legacy taper assumes the legacy tip
+    }
+
+    @Test fun taperZeroTipWidthRoundTripsAsZero() {
+        // A deliberately sharp taper (0% tip) must survive as 0, not pick up the legacy default.
+        val doc = Document(dpi = 150)
+        val page = Page(100.0, 100.0)
+        page.items.add(Stroke(Tool.TAPER, ToolConfig(taperEnabled = true, taperMinFactor = 0.0), mutableListOf(Sample(1.0, 2.0, 1.0), Sample(8.0, 9.0, 1.0))))
+        doc.pages.add(page)
+        val stroke = roundTrip(doc).pages[0].items[0] as Stroke
+        assertTrue(stroke.config.taperEnabled)
+        assertEquals(0.0, stroke.config.taperMinFactor, 1e-9)
+    }
+
+    @Test fun strokeMissingFieldsTakeDefaults() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"pages\":[{\"width\":100,\"height\":100,\"items\":[" +
+                    "{\"kind\":\"stroke\",\"samples\":[[1,2,1.0]]}]}]}").encodeToByteArray(),
+            )
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        val stroke = doc.pages[0].items[0] as Stroke
+        assertEquals(ToolConfig().baseWidth, stroke.config.baseWidth, 1e-9)
+        assertEquals(InkPalette.LEGACY, stroke.config.rgba) // the ink default when it was written, not today's
+        assertNull(doc.pdfFile)
+    }
+
+    @Test fun itemKeyOrderDoesNotMatter() {
+        // The streaming parser must not depend on "kind" (or any key) coming first.
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"pages\":[{\"items\":[" +
+                    "{\"samples\":[[1,2,0.5]],\"tool\":\"pen\",\"kind\":\"stroke\"}]," +
+                    "\"width\":100,\"height\":100}],\"format\":\"xnote\"}").encodeToByteArray(),
+            )
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        val stroke = doc.pages[0].items[0] as Stroke
+        assertEquals(Tool.PEN, stroke.tool)
+        assertEquals(Sample(1.0, 2.0, 0.5), stroke.samples[0])
+    }
+
+    @Test fun legacyFileInkCompactsOnLoad() {
+        // No "writer" field = written before pen-up sample reduction shipped: dense ink is
+        // compacted once at load. 100 collinear samples 0.2 px apart carry nothing the ribbon
+        // needs beyond the ends and the EMA gap cap. Reads the master switch like the two pen-up
+        // paths do, so the test turns it on for itself rather than depending on how it is left.
+        val samples = (0 until 100).joinToString(",") { "[${it * 0.2},5,1]" }
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"version\":1,\"pages\":[{\"width\":100,\"height\":100,\"items\":[" +
+                    "{\"kind\":\"stroke\",\"tool\":\"pen\",\"samples\":[$samples]}]}]}").encodeToByteArray(),
+            )
+        }
+        val was = StrokeSimplify.enabled
+        StrokeSimplify.enabled = true
+        val doc = try {
+            codec.read(Buffer().write(out.bytes()))
+        } finally {
+            StrokeSimplify.enabled = was
+        }
+        val stroke = doc.pages[0].items[0] as Stroke
+        assertTrue(doc.compactedOnLoad)
+        assertTrue("dense legacy ink should compact", stroke.samples.size < 30)
+        assertEquals(Sample(0.0, 5.0, 1.0), stroke.samples.first())
+        assertEquals(19.8, stroke.samples.last().x, 1e-4) // samples are stored as float offsets
+    }
+
+    @Test fun currentWriterInkIsNotRecompacted() {
+        // A file this codec wrote carries writer=43, so its (already pen-up-reduced) ink must
+        // load back sample-for-sample.
+        val doc = Document(dpi = 150)
+        val page = Page(100.0, 100.0)
+        page.items.add(
+            Stroke(
+                Tool.PEN,
+                ToolConfig(),
+                (0 until 100).mapTo(mutableListOf()) { Sample(it * 0.2, 5.0, 1.0) },
+            ),
+        )
+        doc.pages.add(page)
+        val loaded = roundTrip(doc)
+        assertFalse(loaded.compactedOnLoad)
+        assertEquals(100, (loaded.pages[0].items[0] as Stroke).samples.size)
+    }
+
+    @Test fun aMirroredImageRoundTripsInANote() {
+        val doc = Document(dpi = 150)
+        val page = Page(200.0, 200.0)
+        page.items.add(ImageItem(ImageData(imageFile(), 8, 8), Rect(0.0, 0.0, 8.0, 8.0), angle = 0.5, flip = Flip.Y))
+        doc.pages.add(page)
+        val back = roundTrip(doc).pages[0].items.single() as ImageItem
+        assertEquals(Flip.Y, back.flip)
+        assertEquals(0.5, back.angle, 1e-12)
+    }
+
+    @Test fun imageKeepsItsZOrderSlot() {
+        // Image files stream out of the zip after the manifest, so image items are
+        // inserted late; they must still land between the items they were drawn between.
+        val doc = Document(dpi = 150)
+        val page = Page(200.0, 200.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(1.0, 1.0, 1.0))))
+        page.items.add(ImageItem(ImageData(imageFile(), 8, 8), Rect(0.0, 0.0, 8.0, 8.0)))
+        page.items.add(TextItem(Pt(5.0, 5.0), text = "top", measurer = FakeTextMeasurer()))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        assertTrue(items[0] is Stroke)
+        assertTrue(items[1] is ImageItem)
+        assertTrue(items[2] is TextItem)
+    }
+
+    @Test fun stringEscapesAndExponentNumbersParse() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"pages\":[{\"width\":100,\"height\":100,\"items\":[" +
+                    "{\"kind\":\"text\",\"pos\":[1,2],\"text\":\"a\\\"b\\\\c\\n\\u00e9\\ud83d\\ude00\"}," +
+                    "{\"kind\":\"stroke\",\"samples\":[[1.5e2,-2E-1,1]]}]}]}").encodeToByteArray(),
+            )
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        assertEquals("a\"b\\c\né😀", (doc.pages[0].items[0] as TextItem).text)
+        val s = (doc.pages[0].items[1] as Stroke).samples[0]
+        assertEquals(150.0, s.x, 1e-9)
+        assertEquals(-0.2, s.y, 1e-9)
+    }
+
+    @Test fun malformedManifestJsonRejectsAsNonXnote() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json","{\"format\":\"xnote\",\"pages\":[{".encodeToByteArray())
+        }
+        assertFailsWith<XNoteFormatException> {
+            codec.read(Buffer().write(out.bytes()))
+        }
+    }
+
+    @Test fun nullFillAndShapePointsRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(200.0, 200.0)
+        page.items.add(ShapeItem(ShapeKind.LINE, Pt(0.0, 0.0), Pt(50.0, 30.0), Rgba(1, 2, 3, 255), 2.0, null))
+        page.items.add(ShapeItem.poly(ShapeKind.POLYGON, listOf(Pt(0.0, 0.0), Pt(10.0, 0.0), Pt(5.0, 8.0)), Rgba(9, 8, 7, 255), 1.0, Rgba(4, 5, 6, 32), false, 0.6))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        val line = items[0] as ShapeItem
+        assertNull(line.fillRgba)
+        val poly = items[1] as ShapeItem
+        assertEquals(ShapeKind.POLYGON, poly.shape)
+        assertEquals(3, poly.vertices()!!.size)
+        assertEquals(Rgba(4, 5, 6, 32), poly.fillRgba)
+    }
+
+    @Test fun dashedShapeRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(200.0, 200.0)
+        page.items.add(
+            ShapeItem(
+                ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(50.0, 30.0), Rgba(1, 2, 3, 255), 2.0, null,
+                dashed = true, dashLength = 14.0, dashGap = 6.0,
+            ),
+        )
+        page.items.add(
+            ShapeItem.poly(
+                ShapeKind.POLYLINE, listOf(Pt(0.0, 0.0), Pt(10.0, 0.0), Pt(5.0, 8.0)), Rgba(9, 8, 7, 255),
+                1.0, null, false, 0.6, dashed = true, dashLength = 3.0, dashGap = 2.0,
+            ),
+        )
+        page.items.add(ShapeItem(ShapeKind.LINE, Pt(0.0, 0.0), Pt(50.0, 30.0), Rgba(1, 2, 3, 255), 2.0, null))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        val rect = items[0] as ShapeItem
+        assertTrue(rect.dashed)
+        assertEquals(14.0, rect.dashLength, 1e-9)
+        assertEquals(6.0, rect.dashGap, 1e-9)
+        val poly = items[1] as ShapeItem
+        assertTrue(poly.dashed)
+        assertEquals(3.0, poly.dashLength, 1e-9)
+        assertEquals(2.0, poly.dashGap, 1e-9)
+        val line = items[2] as ShapeItem
+        assertFalse(line.dashed)
+    }
+
+    @Test fun manifestBytesMatchTheHistoricalForm() {
+        // The streaming writer must emit the form the org.json DOM produced on Android
+        // (key order, integral doubles as longs, escaped slashes); the only departure is
+        // that sample values serialize rounded (x/y 2dp, pressure 3dp). The writer stamp is
+        // the versionCode, so it is read from the codec rather than typed in: spelled out it
+        // turns every release bump into a failing test.
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = PagePattern.LINES.id, spacing = 48.0)
+        doc.bookmarks.add(Bookmark(0, "Intro"))
+        val page = Page(100.0, 200.0)
+        page.items.add(
+            Stroke(
+                Tool.SPEED,
+                ToolConfig(baseWidth = 3.5, pressureEnabled = false, pressureMinFactor = 0.4, directionStrength = 0.0, rgba = Rgba(1, 2, 3, 255), speedStrength = 0.8),
+                mutableListOf(Sample(1.5, 2.0, 1.0, 0.0), Sample(3.0, 4.25, 0.5, 16.0), Sample(1.23456789, 2.3459999, 0.87654321, 33.0)),
+                2.5,
+            ),
+        )
+        page.items.add(TextItem(Pt(10.0, 20.0), width = 250.0, text = "a/b\n\"c\"", rgba = Rgba(9, 8, 7, 255), pointSize = 13.0, measurer = FakeTextMeasurer()))
+        page.items.add(ShapeItem(ShapeKind.LINE, Pt(0.0, 0.0), Pt(50.0, 30.0), Rgba(5, 6, 7, 255), 2.0, null))
+        doc.pages.add(page)
+
+        val out = Buffer()
+        codec.write(doc, out)
+        var manifest: String? = null
+        bundleReader(Buffer().write(out.bytes())).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                if (entry.name == "manifest.json") manifest = requireNotNull(entry).data.readUtf8()
+                entry.finish()
+                entry = zis.next()
+            }
+        }
+        assertEquals(
+            "{\"format\":\"xnote\",\"version\":1,\"writer\":${DocumentCodec.WRITER},\"dpi\":150,\"has_pdf\":false," +
+                "\"bookmarks\":[{\"page\":0,\"label\":\"Intro\"}]," +
+                "\"pages\":[{\"width\":100,\"height\":200,\"pdf_page\":null,\"items\":[" +
+                "{\"kind\":\"stroke\",\"tool\":\"speed\",\"config\":{\"base_width\":3.5," +
+                "\"pressure_enabled\":false,\"pressure_min_factor\":0.4,\"direction_strength\":0," +
+                "\"rgba\":[1,2,3,255],\"speed_strength\":0.8}," +
+                "\"samples\":[[1.5,2,1,0],[3,4.25,0.5,16],[1.23,2.35,0.877,33]],\"speed_scale\":2.5}," +
+                "{\"kind\":\"text\",\"pos\":[10,20],\"width\":250,\"text\":\"a\\/b\\n\\\"c\\\"\"," +
+                "\"rgba\":[9,8,7,255],\"point_size\":13}," +
+                "{\"kind\":\"shape\",\"shape\":\"line\",\"start\":[0,0],\"end\":[50,30]," +
+                "\"stroke_rgba\":[5,6,7,255],\"stroke_width\":2,\"fill_rgba\":null}]}]," +
+                "\"style\":{\"pattern\":\"lines\",\"spacing\":48}}",
+            manifest,
+        )
+
+        // And the escaped slash must come back out as a plain one.
+        val back = codec.read(Buffer().write(out.bytes()))
+        assertEquals("a/b\n\"c\"", (back.pages[0].items[1] as TextItem).text)
+    }
+
+    @Test fun samplesRoundTripAtWritePrecision() {
+        // Samples serialize rounded to 0.01 px / 0.001 pressure; the read-back must land
+        // exactly on the rounded values (and a re-save of those is then byte-stable).
+        val doc = Document(dpi = 150)
+        val page = Page(100.0, 100.0)
+        page.items.add(
+            Stroke(
+                Tool.PEN,
+                ToolConfig(),
+                mutableListOf(Sample(369.6723697692391, 33.3059117626799, 0.031501833349466324)),
+            ),
+        )
+        doc.pages.add(page)
+
+        // Samples are held as float offsets, so a read-back lands on the float nearest the written
+        // decimal rather than on the decimal itself. That is ~1e-5 here, three orders below the
+        // 0.01 the format stores, so it cannot change what the next write emits.
+        val once = roundTrip(doc)
+        val back = (once.pages[0].items[0] as Stroke).samples[0]
+        assertEquals(369.67, back.x, 1e-4)
+        assertEquals(33.31, back.y, 1e-4)
+        assertEquals(0.032, back.pressure, 1e-6)
+
+        // The property that actually matters: writing is a fixed point, so a note re-saved
+        // untouched does not drift sample by sample.
+        val twice = (roundTrip(once).pages[0].items[0] as Stroke).samples[0]
+        assertEquals(back.x, twice.x, 0.0)
+        assertEquals(back.y, twice.y, 0.0)
+        assertEquals(back.pressure, twice.pressure, 0.0)
+    }
+
+    @Test fun olderNotesKeepWhatTheirPagesBorrowedAcrossTemplates() {
+        // No "writer" field: written when a page's built-in ruling took the note's spacing and colour.
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"version\":1,\"style\":{\"pattern\":\"lines\",\"spacing\":48,\"pattern_color\":[1,2,3,4]}," +
+                    "\"pages\":[{\"width\":100,\"height\":100,\"style\":{\"pattern\":\"grid\"},\"items\":[]}]}").encodeToByteArray(),
+            )
+        }
+        val s = codec.read(Buffer().write(out.bytes())).pages[0].style
+        assertEquals(PagePattern.GRID.id, s.template)
+        assertEquals(48.0, s.spacing!!, 0.0)
+        assertEquals(Rgba(1, 2, 3, 4), s.patternColor)
+    }
+
+    @Test fun aCurrentNoteKeepsAPagesDefaultColour() {
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = PagePattern.LINES.id, patternColor = Rgba(1, 2, 3, 4))
+        doc.pages.add(Page(100.0, 100.0).also { it.style = PageStyle(template = PagePattern.GRID.id) })
+        assertNull(roundTrip(doc).pages[0].style.patternColor)
+    }
+
+    @Test fun pageStyleRoundTrips() {
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = PagePattern.LINES.id, spacing = 48.0) // document-wide ("all pages")
+        val page = Page(1240.0, 1754.0)
+        page.style = PageStyle(
+            pageColor = Rgba(20, 20, 20),
+            template = PagePattern.GRID.id,
+            patternColor = Rgba(100, 100, 100, 120),
+            spacing = 32.0,
+        )
+        doc.pages.add(page)
+
+        val back = roundTrip(doc)
+
+        assertEquals(PagePattern.LINES.id, back.style.template)
+        assertEquals(48.0, back.style.spacing!!, 1e-9)
+        assertNull(back.style.pageColor) // unset fields stay null (inherit)
+        val s = back.pages[0].style
+        assertEquals(Rgba(20, 20, 20), s.pageColor)
+        assertEquals(PagePattern.GRID.id, s.template)
+        assertEquals(Rgba(100, 100, 100, 120), s.patternColor)
+        assertEquals(32.0, s.spacing!!, 1e-9)
+    }
+
+    @Test fun embeddedTemplatesRoundTripWithTheirParameters() {
+        val text = """{ "xtemplate": 1, "name": "Staff", "items": [] }"""
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = "0123456789abcdef", accentColor = Rgba(1, 2, 3, 4), params = mapOf("gap" to 2.5))
+        doc.templates = mapOf("0123456789abcdef" to text, "fedcba9876543210" to "unused")
+        val page = Page(100.0, 100.0)
+        page.style = PageStyle(colors = mapOf("frame" to Rgba(9, 8, 7)))
+        doc.pages.add(page)
+
+        val back = roundTrip(doc)
+
+        assertEquals("0123456789abcdef", back.style.template)
+        assertEquals(Rgba(1, 2, 3, 4), back.style.accentColor)
+        assertEquals(mapOf("gap" to 2.5), back.style.params)
+        assertEquals(mapOf("frame" to Rgba(9, 8, 7)), back.pages[0].style.colors)
+        // Only templates a style names are carried.
+        assertEquals(mapOf("0123456789abcdef" to text), back.templates)
+    }
+
+    @Test fun theCoverFlagRoundTripsAndOnlyACoverWritesIt() {
+        val doc = Document(dpi = 150)
+        doc.pages += Page(100.0, 100.0)
+        doc.pages += Page(100.0, 100.0)
+        val plain = Buffer().also { codec.write(doc, it) }.bytes()
+        assertFalse(manifestOf(plain).contains("\"cover\""))
+
+        doc.pages[0].cover = true
+        val back = roundTrip(doc)
+
+        assertTrue(back.pages[0].cover)
+        assertFalse(back.pages[1].cover)
+    }
+
+    @Test fun aCoverFlagOffTheFirstPageIsDropped() {
+        val doc = Document(dpi = 150)
+        doc.pages += Page(100.0, 100.0)
+        doc.pages += Page(100.0, 100.0)
+        doc.pages[1].cover = true
+
+        val back = roundTrip(doc)
+
+        assertFalse(back.pages[0].cover)
+        assertFalse(back.pages[1].cover)
+    }
+
+    @Test fun aPackagedTemplateIsAStoredAssetAheadOfTheManifest() {
+        val key = "0123456789abcdef"
+        val pkg = imageFile(byteArrayOf(0x50, 0x4b, 3, 4, 9, 9))
+        val doc = Document(dpi = 150)
+        doc.pages += Page(100.0, 100.0)
+        doc.pages[0].style = PageStyle(template = key)
+        doc.templatePackages = mapOf(key to pkg, "fedcba9876543210" to imageFile())
+        val bundle = Buffer().also { codec.write(doc, it) }.bytes()
+
+        val names = entryNames(bundle)
+        assertEquals(listOf("assets/template-$key.xtemplate", BundleIdentity.ENTRY, "manifest.json"), names)
+        val method = bundleReader(Buffer().write(bundle)).use { it.next()!!.method }
+        assertEquals(0, method)
+
+        val back = codec.read(Buffer().write(bundle), imageDir = testDirectory("xnotes-img"))
+        assertEquals(setOf(key), back.templatePackages.keys)
+        assertTrue(back.templatePackages.getValue(key).fileBytes().contentEquals(pkg.fileBytes()))
+        assertTrue(back.templates.isEmpty())
+    }
+
+    @Test fun storedEntriesListImagesThenPackagesThenThePdf() {
+        val img = imageFile()
+        val pkg = imageFile()
+        val pdf = imageFile()
+        val doc = Document(dpi = 150, pdfFile = pdf)
+        doc.pages += Page(100.0, 100.0)
+        doc.pages[0].items.add(ImageItem(ImageData(img, 2, 2), Rect(0.0, 0.0, 2.0, 2.0)))
+        doc.style = PageStyle(template = "0123456789abcdef")
+        doc.templatePackages = mapOf("0123456789abcdef" to pkg)
+
+        val entries = codec.storedEntries(doc, codec.imageAssets(doc))
+
+        assertEquals(listOf("assets/image-000.png", "assets/template-0123456789abcdef.xtemplate", "assets/source.pdf"), entries.map { it.first })
+        assertEquals(listOf(img, pkg, pdf), entries.map { it.second })
+    }
+
+    @Test fun builtInTemplatesKeepTheOldPatternName() {
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = "dots")
+        doc.pages.add(Page(100.0, 100.0))
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = bundleReader(Buffer().write(out.bytes())).use { zis ->
+            val entry = generateSequence { zis.next() }.first { it.name == "manifest.json" }
+            requireNotNull(entry).data.readByteArray().decodeToString()
+        }
+        assertTrue(manifest.contains("\"pattern\":\"dots\""))
+        assertFalse(manifest.contains("\"template\""))
+    }
+
+    @Test fun emptyStyleReadsBackEmpty() {
+        val doc = Document(dpi = 150)
+        doc.pages.add(Page(100.0, 100.0)) // default (empty) styles on page + document
+        val back = roundTrip(doc)
+        assertTrue(back.style.isEmpty)
+        assertTrue(back.pages[0].style.isEmpty)
+    }
+
+    @Test fun partialStyleFieldsTakeDefaults() {
+        // A page whose style sets only the pattern: every other field inherits (stays null), and a
+        // manifest with no document-level "style" reads back an empty document style.
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"pages\":[{\"width\":100,\"height\":100," +
+                    "\"style\":{\"pattern\":\"dots\"},\"items\":[]}]}").encodeToByteArray(),
+            )
+        }
+        val doc = codec.read(Buffer().write(out.bytes()))
+        val s = doc.pages[0].style
+        assertEquals(PagePattern.DOTS.id, s.template)
+        assertNull(s.pageColor)
+        assertNull(s.patternColor)
+        assertNull(s.spacing)
+        assertTrue(doc.style.isEmpty)
+    }
+
+    @Test fun marginsRoundTripPerPageAndPerDocument() {
+        val doc = Document(pages = mutableListOf(Page(400.0, 800.0), Page(400.0, 800.0)))
+        doc.margins = PageMargins(left = 0.25, bottom = 0.4)
+        doc.pages[1].margins = PageMargins(top = 0.1)
+
+        val read = roundTrip(doc)
+
+        assertEquals(PageMargins(left = 0.25, bottom = 0.4), read.margins)
+        assertTrue(read.pages[0].margins.isEmpty)
+        assertEquals(PageMargins(top = 0.1), read.pages[1].margins)
+    }
+
+    @Test fun noMarginsWritesNoMarginsObject() {
+        val out = Buffer()
+        codec.write(Document(pages = mutableListOf(Page(400.0, 800.0))), out)
+        assertFalse(manifestOf(out.bytes()).contains("margins"))
+    }
+
+    @Test fun outOfRangeMarginsAreClampedOnRead() {
+        val doc = Document(pages = mutableListOf(Page(400.0, 800.0)))
+        doc.pages[0].margins = PageMargins(left = 9.0, right = -3.0)
+        val read = roundTrip(doc)
+        assertEquals(1.0, read.pages[0].margins.left!!, 1e-9)
+        assertEquals(0.0, read.pages[0].margins.right!!, 1e-9)
+    }
+
+    @Test fun aNewPageSizeRoundTripsAndANoteWithoutOneWritesNothing() {
+        val doc = Document(pages = mutableListOf(Page(400.0, 800.0)))
+        val plain = Buffer().also { codec.write(doc, it) }
+        assertFalse(manifestOf(plain.bytes()).contains("new_page_size"))
+        assertNull(roundTrip(doc).newPageSize)
+
+        doc.newPageSize = PageSizeChoice(PageSize.SLIDE_16_9, Orientation.LANDSCAPE, 100.0, 150.0)
+        assertEquals(doc.newPageSize, roundTrip(doc).newPageSize)
+        doc.newPageSize = PageSizeChoice(PageSize.CUSTOM, customWidthMm = 90.5, customHeightMm = 160.0)
+        assertEquals(doc.newPageSize, roundTrip(doc).newPageSize)
+    }
+
+    @Test fun aNewPageSizeFromElsewhereReadsForgivingly() {
+        fun read(newPageSize: String): PageSizeChoice? {
+            val out = Buffer()
+            bundleWriter(out).use {
+                it.putDeflated("manifest.json",
+                    ("{\"format\":\"xnote\",\"pages\":[{\"width\":100,\"height\":100,\"items\":[]}]," +
+                        "\"new_page_size\":$newPageSize}").encodeToByteArray(),
+                )
+            }
+            return codec.read(Buffer().write(out.bytes())).newPageSize
+        }
+        // A size this build lacks, or no object at all, leaves added pages copying the page before.
+        assertNull(read("{\"size\":\"b5\",\"orientation\":\"landscape\"}"))
+        assertNull(read("\"a4\""))
+        assertEquals(PageSizeChoice(PageSize.A5), read("{\"size\":\"A5\"}"))
+        assertEquals(
+            PageSizeChoice(PageSize.CUSTOM, Orientation.PORTRAIT, PageSize.CUSTOM_MAX_MM, PageSize.A4.longMm),
+            read("{\"size\":\"custom\",\"custom_width_mm\":9000,\"custom_height_mm\":\"NaN\"}"),
+        )
+    }
+
+    @Test fun aPageWithNoAreaLoadsAtItsNeighboursSize() {
+        val out = Buffer()
+        bundleWriter(out).use {
+            it.putDeflated("manifest.json",
+                ("{\"format\":\"xnote\",\"dpi\":150,\"pages\":[" +
+                    "{\"width\":0,\"height\":0,\"pdf_page\":0}," +
+                    "{\"width\":1275,\"height\":1650,\"pdf_page\":1}," +
+                    "{\"width\":0,\"height\":0,\"pdf_page\":2}," +
+                    "{\"width\":\"NaN\",\"height\":-1}]}").encodeToByteArray(),
+            )
+        }
+        val pages = codec.read(Buffer().write(out.bytes())).pages
+        val (a4w, a4h) = PageSize.A4.pixels(Orientation.PORTRAIT, 150)
+        assertEquals(a4w, pages[0].width, 1e-9)
+        assertEquals(a4h, pages[0].height, 1e-9)
+        assertNull(pages[0].pdfPage)
+        assertEquals(1, pages[1].pdfPage)
+        for (page in pages.drop(2)) {
+            assertEquals(1275.0, page.width, 1e-9)
+            assertEquals(1650.0, page.height, 1e-9)
+            assertNull(page.pdfPage)
+        }
+    }
+
+    @Test fun aShapesLabelRoundTripsAndOnlyLabelledShapesWriteOne() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val box = ShapeItem(ShapeKind.RECTANGLE, Pt(10.0, 20.0), Pt(110.0, 70.0), Rgba(1, 2, 3, 255), 2.0)
+        box.label = ShapeLabel("Start\nhere", TextStyle(Rgba(9, 8, 7, 255), 18.0, FontFace.SERIF), FakeTextMeasurer())
+        val mono = ShapeItem(ShapeKind.ELLIPSE, Pt(10.0, 20.0), Pt(110.0, 70.0), Rgba(1, 2, 3, 255), 2.0)
+        mono.label = ShapeLabel("x", TextStyle(Rgba(1, 2, 3, 255), 13.0, TextItem.DEFAULT_FACE), FakeTextMeasurer())
+        page.items.add(box)
+        page.items.add(mono)
+        page.items.add(ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(5.0, 5.0), Rgba(1, 2, 3, 255)))
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.bytes())
+        assertEquals("only the two labelled shapes", 2, Regex("\"label\"").findAll(manifest).count())
+        assertEquals("the default face goes unwritten", 1, Regex("\"font_face\"").findAll(manifest).count())
+        val back = roundTrip(doc).pages[0].items.map { it as ShapeItem }
+        assertEquals("Start\nhere", back[0].label!!.text)
+        assertEquals(TextStyle(Rgba(9, 8, 7, 255), 18.0, FontFace.SERIF), back[0].label!!.style)
+        assertEquals(TextItem.DEFAULT_FACE, back[1].label!!.style.face)
+        assertNull(back[2].label)
+    }
+
+    @Test fun drawnTextRoundTripsInANote() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val box = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 100.0), Rgba(4, 5, 6, 255), 2.0)
+        box.label = ShapeLabel("ab", TextStyle(Rgba(4, 5, 6, 255), 10.0, FontFace.SANS), FakeTextMeasurer())
+        page.items.add(box.labelAsGlyphs()!!)
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        assertTrue(manifestOf(out.bytes()).contains("\"kind\":\"glyphs\""))
+        val back = roundTrip(doc).pages[0].items.single() as ShapeItem
+        assertEquals(ShapeKind.GLYPHS, back.shape)
+        assertEquals(Rgba(4, 5, 6, 255), back.fillRgba)
+    }
+
+    @Test fun aFillRoundTripsInANoteUnderAKindOlderReadersSkip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val outer = listOf(Pt(10.0, 10.0), Pt(210.0, 10.0), Pt(210.0, 110.0), Pt(10.0, 110.0))
+        val hole = listOf(Pt(60.0, 40.0), Pt(100.0, 40.0), Pt(100.0, 80.0), Pt(60.0, 80.0))
+        page.items.add(ShapeItem.fill(listOf(outer, hole), Rgba(30, 140, 220, 255)))
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.bytes())
+        assertTrue(manifest.contains("\"kind\":\"fill\""))
+        assertFalse("no point list for an older reader", manifest.contains("\"points\""))
+        val back = roundTrip(doc).pages[0].items.single() as ShapeItem
+        assertEquals(ShapeKind.FILL, back.shape)
+        assertEquals(Rgba(30, 140, 220, 255), back.fillRgba)
+        assertTrue(back.contains(Pt(20.0, 20.0)))
+        assertFalse("the hole stays open", back.contains(Pt(80.0, 60.0)))
+    }
+
+    @Test fun turnedShapesRoundTripInANote() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val rect = ShapeItem(ShapeKind.RECTANGLE, Pt(10.0, 20.0), Pt(110.0, 70.0), Rgba(1, 2, 3, 255), 2.0)
+        rect.applyTransform(Affine.rotateAbout(rect.box.center, 0.4))
+        val oval = ShapeItem(ShapeKind.ELLIPSE, Pt(10.0, 20.0), Pt(110.0, 70.0), Rgba(1, 2, 3, 255), 2.0, Rgba(1, 2, 3, 64))
+        oval.applyTransform(Affine.rotateAbout(Pt.ZERO, -1.0))
+        page.items.add(rect)
+        page.items.add(oval)
+        doc.pages.add(page)
+        val back = roundTrip(doc).pages[0].items.map { it as ShapeItem }
+        assertEquals(ShapeKind.RECTANGLE, back[0].shape)
+        assertEquals(0.4, back[0].rotation, 1e-12)
+        assertEquals(ShapeKind.ELLIPSE, back[1].shape)
+        assertEquals(oval.rotation, back[1].rotation, 1e-12)
+        assertEquals(oval.box.centerX, back[1].box.centerX, 1e-9)
+        assertEquals(Rgba(1, 2, 3, 64), back[1].fillRgba)
+    }
+
+    @Test fun aFlippedShapeRoundTripsInANote() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val bent = ShapeItem(com.xnotes.core.shapes.ArrowKinds.BENT, Pt(10.0, 20.0), Pt(110.0, 90.0), Rgba(1, 2, 3, 255), 2.0)
+        bent.flip = Flip.XY
+        bent.applyTransform(Affine.rotateAbout(bent.box.center, -0.3))
+        page.items.add(bent)
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        val text = manifestOf(out.bytes())
+        assertTrue(text.contains("\"flip_geom\":\"arrow_bent\""))
+        assertTrue(text.contains("\"flip\":\"xy\""))
+        val back = roundTrip(doc).pages[0].items.single() as ShapeItem
+        assertEquals(com.xnotes.core.shapes.ArrowKinds.BENT, back.shape)
+        assertEquals(Flip.XY, back.flip)
+        assertEquals(-0.3, back.rotation, 1e-12)
+        assertEquals(bent.box.centerX, back.box.centerX, 1e-9)
+    }
+
+    @Test fun aConnectorGluesToATextBoxAndAShapeOnItsOwnPage() {
+        val ink = Rgba(1, 2, 3, 255)
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val text = TextItem(Pt(10.0, 10.0), width = 100.0, text = "box", measurer = FakeTextMeasurer())
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(300.0, 300.0), Pt(400.0, 360.0), ink, 2.0)
+        val c = ConnectorItem(Routing.ROUNDED, ConnectorEnd(Glue.point(text, 6)!!.at, text, 6), ConnectorEnd(Glue.point(shape, 4)!!.at, shape, 4), ink, 2.0)
+        c.elbow = Elbow(Axis.V, doubleArrayOf(200.0))
+        page.items += listOf(text, c, shape)
+        val other = Page(1240.0, 1754.0)
+        other.items += ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(50.0, 50.0), ink)
+        doc.pages += listOf(page, other)
+        val out = Buffer()
+        codec.write(doc, out)
+        assertEquals(2, Regex("\"id\":").findAll(manifestOf(out.bytes())).count())
+        val back = roundTrip(doc).pages
+        val bc = back[0].items[1] as ConnectorItem
+        assertSame(back[0].items[0], bc.start.target)
+        assertEquals(6, bc.start.point)
+        assertSame(back[0].items[2], bc.end.target)
+        assertEquals(Routing.ROUNDED, bc.routing)
+        assertEquals(c.elbow, bc.elbow)
+        assertEquals(1, back[1].items.size)
+    }
+
+    private fun recording(bytes: ByteArray = byteArrayOf(9, 8, 7, 6, 5), ext: String = "m4a", rid: Int = 1) =
+        AudioItem(
+            AudioData(imageFile(bytes), ext, 125_000, byteArrayOf(0, 64, 127, -1)),
+            Rect(30.0, 40.0, 378.0, 83.0), "22 Oct, 14:05", rid, FakeTextMeasurer(),
+        )
+
+    @Test fun aRecordingRoundTripsWithItsAudioWaveformNameAndSlot() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(1.0, 1.0, 1.0))))
+        page.items.add(recording(ext = "mp3", rid = 7).apply { locked = true })
+        page.items.add(TextItem(Pt(5.0, 5.0), text = "top", measurer = FakeTextMeasurer()))
+        doc.pages.add(page)
+
+        val out = Buffer()
+        codec.write(doc, out)
+        val names = mutableListOf<String>()
+        bundleReader(Buffer().write(out.bytes())).use { zis ->
+            var entry = zis.next()
+            while (entry != null) {
+                names.add(entry.name)
+                if (entry.name.startsWith("assets/audio-")) assertEquals(0, entry.method)
+                entry = zis.next()
+            }
+        }
+        assertTrue(names.contains("assets/audio-000.mp3"))
+
+        val items = roundTrip(doc).pages[0].items
+        assertTrue(items[0] is Stroke)
+        val back = items[1] as AudioItem
+        assertTrue(items[2] is TextItem)
+        assertArrayEquals(byteArrayOf(9, 8, 7, 6, 5), back.audio.file.fileBytes())
+        assertEquals("mp3", back.audio.ext)
+        assertEquals(125_000, back.audio.durationMs)
+        assertArrayEquals(byteArrayOf(0, 64, 127, -1), back.audio.peaks)
+        assertEquals(Rect(30.0, 40.0, 378.0, 83.0), back.rect)
+        assertEquals("22 Oct, 14:05", back.name)
+        assertEquals(7, back.rid)
+        assertTrue(back.locked)
+        assertEquals(-1, back.playhead)
+    }
+
+    @Test fun syncMarksRideEveryKindAndOnlyWhereSet() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val stroke = Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(1.0, 1.0, 1.0))).apply { sync = SyncMark(3, 4_500) }
+        val plain = Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(2.0, 2.0, 1.0)))
+        val image = ImageItem(ImageData(imageFile(), 8, 8), Rect(0.0, 0.0, 8.0, 8.0)).apply { sync = SyncMark(3, 9_000) }
+        val text = TextItem(Pt(5.0, 5.0), text = "t", measurer = FakeTextMeasurer()).apply { sync = SyncMark(3, 12_000) }
+        val shape = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(9.0, 9.0), Rgba(1, 2, 3, 255)).apply { sync = SyncMark(4, 1) }
+        page.items.addAll(listOf(stroke, plain, image, text, shape))
+        doc.pages.add(page)
+
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(SyncMark(3, 4_500), back[0].sync)
+        assertNull(back[1].sync)
+        assertEquals(SyncMark(3, 9_000), back[2].sync)
+        assertEquals(SyncMark(3, 12_000), back[3].sync)
+        assertEquals(SyncMark(4, 1), back[4].sync)
+    }
+
+    @Test fun aNoteWithoutRecordingsWritesNoRecordingFields() {
+        val doc = Document(dpi = 150)
+        doc.pages.add(Page(200.0, 200.0).apply { items.add(Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(1.0, 1.0, 1.0)))) })
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.bytes())
+        assertFalse(manifest.contains("\"rec\""))
+        assertFalse(manifest.contains("audio"))
+    }
+
+    @Test fun recordingsSitBetweenTheImagesAndThePdfInTheStoredEntries() {
+        val doc = Document(dpi = 150)
+        val page = Page(200.0, 200.0)
+        page.items.add(recording())
+        page.items.add(ImageItem(ImageData(imageFile(), 8, 8), Rect(0.0, 0.0, 8.0, 8.0)))
+        doc.pages.add(page)
+        doc.pdfFile = imageFile(byteArrayOf(0x25, 0x50, 0x44, 0x46))
+        val entries = codec.storedEntries(doc, codec.imageAssets(doc)).map { it.first }
+        assertEquals(listOf("assets/image-000.png", "assets/audio-000.m4a", "assets/source.pdf"), entries)
+    }
+
+    @Test fun aRecordingWhoseAudioIsMissingIsDroppedAndTheRestKeepTheirOrder() {
+        val manifest = """{"format":"xnote","version":1,"dpi":150,"pages":[{"width":200,"height":200,"items":[""" +
+            """{"kind":"audio","asset":"assets/audio-000.m4a","rect":[0,0,10,2],"rid":1,"name":"x","duration_ms":5},""" +
+            """{"kind":"text","pos":[1,1],"width":10,"text":"after"}]}]}"""
+        val bundle = Buffer().also { out ->
+            bundleWriter(out).use { zos ->
+                zos.putDeflated("manifest.json",manifest.encodeToByteArray())
+            }
+        }.bytes()
+        val imageDir = testDirectory("xnotes-img")
+        val items = codec.read(Buffer().write(bundle), imageDir = imageDir).pages[0].items
+        assertEquals(1, items.size)
+        assertEquals("after", (items[0] as TextItem).text)
+    }
+
+    @Test fun tapeRoundTripsInANoteAndOpensCovered() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val strip = TapeItem(TapeShape(TapeMode.STRAIGHT, listOf(Pt(10.0, 20.0), Pt(300.0, 20.0)), 30.0), Rgba(240, 200, 90, 255), TapePattern.STRIPES)
+        strip.peeled = true
+        strip.locked = true
+        val band = TapeItem(TapeShape(TapeMode.FREEHAND, listOf(Pt(0.0, 0.0), Pt(40.0, 10.0), Pt(80.0, 0.0)), 12.0), Rgba(20, 20, 20, 255))
+        band.group = 3
+        page.items.add(strip)
+        page.items.add(band)
+        doc.pages.add(page)
+        val out = Buffer()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.bytes())
+        assertTrue(manifest.contains("\"kind\":\"tape\""))
+        assertFalse("a solid tape writes no pattern", manifest.contains("\"solid\""))
+        val back = roundTrip(doc).pages[0].items.map { it as TapeItem }
+        assertEquals(strip.shape, back[0].shape)
+        assertEquals(TapePattern.STRIPES, back[0].pattern)
+        assertEquals(Rgba(240, 200, 90, 255), back[0].rgba)
+        assertFalse("peeling is never saved", back[0].peeled)
+        assertTrue(back[0].locked)
+        assertEquals(band.shape, back[1].shape)
+        assertEquals(TapePattern.SOLID, back[1].pattern)
+        assertEquals(3, back[1].group)
+    }
+}

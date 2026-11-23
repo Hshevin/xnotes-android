@@ -182,7 +182,7 @@ class NativeWorkingRecoveryTest {
                 assertArrayEquals(before,f.sourceFile.readBytes());f.publish(p)
                 val info=BundleReferenceInfo.inspect(f.sourceFile,true)
                 assertEquals(external,info.header.identity!!.externalPdf)
-                assertEquals(sourceIdentity.pdfResource,info.header.identity.pdfResource)
+                assertEquals(sourceIdentity.pdfResource,info.header.identity!!.pdfResource)
                 assertEquals(BundleMigration.hash(original),info.originalPdfHash)
             }
         }

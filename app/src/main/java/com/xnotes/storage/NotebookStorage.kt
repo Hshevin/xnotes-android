@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import com.xnotes.format.BundleIdentity
 import com.xnotes.format.BundleMigration
+import com.xnotes.format.read
 import com.xnotes.format.BundleHeader
 import com.xnotes.platform.AppStorageDocumentsProvider
 import java.io.File
@@ -18,7 +19,7 @@ class NotebookStorage internal constructor(private val context:Context,
     val registry = DocumentRegistry(context)
     internal val pdfResources by lazy {PdfResources(context,registry)}
     private val lock = Any()
-    private val creationIssuer=Any()
+    private val creationIssuer=NativeCreationIssuer()
     private val saveIssuer=Any()
     /** An actual retained stage, not a source context or evidence that a working cache is durable. */
     internal class StagedSave private constructor(
@@ -281,7 +282,7 @@ class NotebookStorage internal constructor(private val context:Context,
                 ?: throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
             val inspected=NativeSourceVersion.inspect(snapshot.file,registry.locationKey(uri),actualKind,checkActive)
             verifyObserved(uri,inspected.info)
-            val source=NativeSourceSnapshot.open(snapshot,inspected,pdfResources,requireNotNull(lease),ids,checkActive)
+            val source=NativeSourceSnapshot.open(snapshot,inspected,pdfResources.forSourceSnapshot(),requireNotNull(lease),ids,checkActive)
             lease=null // Ownership transfers only on success.
             source
         } catch(error:Throwable) {
@@ -696,16 +697,16 @@ class NotebookStorage internal constructor(private val context:Context,
     }
 
     /** Called at an explicit new/create/Save-As action, before handing control to a file picker. No IO. */
-    internal fun beginCreation(kind:com.xnotes.core.util.DocumentKind)=NativeCreationIntent.issue(creationIssuer,kind)
+    internal fun beginCreation(kind:com.xnotes.core.util.DocumentKind)=creationIssuer.begin(kind)
 
     /** IO-only. The caller must bind this request to its original model before accepting a picker result. */
     internal fun prepareNewTarget(intent:NativeCreationIntent,uri:String,checkActive:()->Unit={}):NativeCreationPermit = synchronized(lock) {
-        intent.consume(creationIssuer);checkActive()
+        creationIssuer.consume(intent);checkActive()
         if (targetOverride == null) checkBundleDestination(Uri.parse(uri))
         if(journal(uri).pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
         registry.verifyCreation(intent.documentId,intent.kind.extension,uri)
         requireEmptyTarget(target(uri),checkActive)
-        NativeCreationPermit.issue(creationIssuer,intent,registry.locationKey(uri))
+        creationIssuer.permit(intent,registry.locationKey(uri))
     }
     private fun requireEmptyTarget(backend:MigrationPublication.Target,checkActive:()->Unit) {
         checkActive()
@@ -743,7 +744,7 @@ class NotebookStorage internal constructor(private val context:Context,
     }
     /** Full candidate is private and complete before this call. A permit grants one attempt, never replacement of a nonempty file. */
     internal fun publishCreated(uri:String,candidate:File,permit:NativeCreationPermit,name:String,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
-        permit.consume(creationIssuer);checkActive()
+        creationIssuer.consume(permit);checkActive()
         if(permit.locationKey!=registry.locationKey(uri)) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         val pending=journal(uri)
         if(pending.pending) throw recovery(StorageMsg.MIGRATION_RECOVERY_PENDING)
@@ -758,7 +759,7 @@ class NotebookStorage internal constructor(private val context:Context,
             try {
                 val digest=pending.stage(empty,candidate,creationPurpose(permit.kind),expectedCandidateHash=checked.version.sha256,checkActive=checkActive)
                 // No callback or lease release may intervene between the actual stage and this binding.
-                permit.recordStage(creationIssuer,checked.version.sha256,digest)
+                creationIssuer.record(permit,checked.version.sha256,digest)
             } finally {empty.delete()}
         }
         publishCreation(uri,name,creationPurpose(permit.kind),permit.documentId,checkActive,staged.recordDigest,staged.candidateSha256)
@@ -766,7 +767,7 @@ class NotebookStorage internal constructor(private val context:Context,
     /** Only this intent's actual stage can become a retry. No target write, cache claim or new permit. */
     internal fun retainedCreation(intent:NativeCreationIntent,uri:String,name:String,checkActive:()->Unit={}):NativeCreationPending? = synchronized(lock) {
         checkActive()
-        val staged=intent.retainedStage(creationIssuer,registry.locationKey(uri)) ?: return@synchronized null
+        val staged=creationIssuer.stage(intent,registry.locationKey(uri)) ?: return@synchronized null
         val pending=journal(uri)
         if(!pending.pending) return@synchronized null
         var protection:CreationProtection?=null;var failure:Throwable?=null
@@ -781,14 +782,14 @@ class NotebookStorage internal constructor(private val context:Context,
                 if(checked.version.sha256!=staged.candidateSha256) throw recovery(StorageMsg.MIGRATION_RECOVERY_INVALID)
                 if(requireNotNull(protection).ids!=dependencies(checked.info)) throw ReferenceContractViolation(StorageMsg.REFERENCE_METADATA_INVALID)
                 registry.verifyCreation(intent.documentId,intent.kind.extension,uri,true,checked.info.header.anchors!=null)
-                NativeCreationPending.issue(creationIssuer,intent,staged,uri,name)
+                creationIssuer.pending(intent,staged,uri,name)
             }
         } catch(error:Throwable) {failure=error;throw error}
         finally {try {protection?.close()} catch(close:Throwable) {if(failure!=null) failure.addSuppressed(close) else throw close}}
     }
     /** Runtime continuation of the exact failed attempt; a replacement journal cannot use this token. */
     internal fun completeCreation(pending:NativeCreationPending,checkActive:()->Unit={}):NativeSourceVersion = synchronized(lock) {
-        pending.checkIssuer(creationIssuer);checkActive()
+        creationIssuer.check(pending);checkActive()
         if(registry.locationKey(pending.uri)!=pending.locationKey) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         publishCreation(pending.uri,pending.name,creationPurpose(pending.kind),pending.documentId,checkActive,pending.recordDigest,pending.candidateSha256)
     }

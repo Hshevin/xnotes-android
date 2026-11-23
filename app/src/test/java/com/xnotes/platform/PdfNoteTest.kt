@@ -10,6 +10,9 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.xnotes.format.FileWindow
 import com.xnotes.format.MiniPdf
 import com.xnotes.format.XnotesPdf
+import com.xnotes.format.appendTail
+import com.xnotes.format.inspect
+import com.xnotes.format.embedded
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

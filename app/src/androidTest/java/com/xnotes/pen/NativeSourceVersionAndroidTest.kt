@@ -1,9 +1,11 @@
 package com.xnotes.pen
 
+import com.xnotes.storage.admitOriginalPdf
 import android.content.ContextWrapper
 import android.provider.DocumentsContract
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.AnchorMetadata
+import com.xnotes.format.write
 import com.xnotes.format.BundleIdentity
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.DocumentCodec

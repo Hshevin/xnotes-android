@@ -21,6 +21,7 @@ expect object KFiles {
 data class FileIdentity(val device: Long, val inode: Long)
 expect fun fileIdentity(path: Path): FileIdentity?
 internal expect fun openWritable(path: Path, exclusive: Boolean): FileHandle
+internal expect fun atomicReplace(source: Path, target: Path)
 
 fun atomicWrite(fs: FileSystem, target: Path, write: (BufferedSink) -> Unit) {
     val temp = (target.parent ?: ".".toPath()) / ".${Uuids.random()}.tmp"
@@ -37,11 +38,18 @@ fun atomicWrite(fs: FileSystem, target: Path, write: (BufferedSink) -> Unit) {
     }
 }
 
-class KFileHandle internal constructor(private val handle: FileHandle) : AutoCloseable {
-    fun size(): Long = handle.size()
-    fun read(at: Long, into: ByteArray, offset: Int, length: Int): Int = handle.read(at, into, offset, length)
-    fun write(at: Long, bytes: ByteArray, offset: Int, length: Int) { writable(); handle.write(at, bytes, offset, length) }
-    fun truncate(size: Long) { writable(); handle.resize(size) }
+interface PositionedFile {
+    fun size(): Long
+    fun read(at: Long, into: ByteArray, offset: Int, length: Int): Int
+    fun write(at: Long, bytes: ByteArray, offset: Int, length: Int)
+    fun truncate(size: Long)
+}
+
+class KFileHandle internal constructor(private val handle: FileHandle) : AutoCloseable, PositionedFile {
+    override fun size(): Long = handle.size()
+    override fun read(at: Long, into: ByteArray, offset: Int, length: Int): Int = handle.read(at, into, offset, length)
+    override fun write(at: Long, bytes: ByteArray, offset: Int, length: Int) { writable(); handle.write(at, bytes, offset, length) }
+    override fun truncate(size: Long) { writable(); handle.resize(size) }
     fun sync() { writable(); handle.flush() }
     private fun writable() { if (!handle.readWrite) throw KioException("Read-only file handle") }
     override fun close() = handle.close()
