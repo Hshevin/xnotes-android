@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "xnotes"
 include(":app")
+include(":shared")
