@@ -5412,10 +5412,10 @@ class InteractionController(
 
         /** A line/arrow drawn with the shape tool snaps flat when within this angle (deg) of an axis.
          *  Half the recognizer's hold-to-snap angle: a live drag is steadier, so it needs less help. */
-        const val SHAPE_AXIS_SNAP_DEG = 4.0
+        const val SHAPE_AXIS_SNAP_DEG = ResizeMath.SHAPE_AXIS_SNAP_DEG
 
         /** With the Perfect switch on, a line/arrow keeps its angle to whole steps of this (deg). */
-        const val SHAPE_PERFECT_STEP_DEG = 15.0
+        const val SHAPE_PERFECT_STEP_DEG = ResizeMath.SHAPE_PERFECT_STEP_DEG
 
         // Inertial fling tuning (viewport px/s).
         const val VEL_SMOOTH = 0.4 // EMA weight on the previous velocity estimate

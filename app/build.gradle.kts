@@ -24,6 +24,7 @@ android {
     namespace = "com.xnotes"
     sourceSets {
         getByName("test").java.srcDir("src/sharedTest/java")
+        getByName("test").java.srcDirs("../shared/src/commonTestFixtures/kotlin", "../shared/src/androidUnitTest/appIntegration")
         getByName("androidTest").java.srcDir("src/sharedTest/java")
     }
     compileSdk = 36
@@ -141,6 +142,7 @@ tasks.configureEach {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)

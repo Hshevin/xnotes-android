@@ -15,6 +15,8 @@ import androidx.core.content.ContextCompat
 import com.xnotes.R
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.StagedCopy
+import com.xnotes.core.util.endHash
+import com.xnotes.core.util.of
 import com.xnotes.core.util.copyOver
 import com.xnotes.format.FileWindow
 import com.xnotes.format.XnotesPdf

@@ -110,7 +110,8 @@ internal object MapJson {
             j.name("style").beginObject().name("shape").value(style.shape.id)
             j.name("border").color(style.border)
             j.name("fill")
-            if (style.fill == null) j.nullValue() else j.color(style.fill)
+            val fill = style.fill
+            if (fill == null) j.nullValue() else j.color(fill)
             j.name("text").color(style.text)
             j.name("borderWidth").value(style.borderWidth).name("textSize").value(style.textSize)
             j.name("bold").value(style.bold).endObject()

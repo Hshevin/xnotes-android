@@ -199,6 +199,7 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-20 [上游合并与 MovinkPad 适配](process/upstream-merge-2026-11-20.md)
 - 2026-11-23 [iPadOS 移植方案](process/ipados-migration-plan-2026-11-23.md)
 - 2026-11-23 [iPadOS Apple Pencil 输入契约](process/ipados-pencil-input-contract-2026-11-23.md)
+- 2026-11-24 [iPadOS W1-A：共享核心与便携 I/O 验证](process/ipados-shared-core-2026-11-24.md)
 
 ## 已归档（`archive/`）
 
