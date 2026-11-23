@@ -17,7 +17,7 @@
 - **W3-A 查看器**：打开、只读显示、文字绘制。
 - **W3-B 共享笔画捕获**：在共享模块实现笔画捕获，并让 Android 改用它。
 - **W3-C 精简保存**：`LiteStore` / `LiteSession`。
-- **W3-D 书写整合**：Pencil 书写、橡皮、撤销、保存接入 iPad 编辑器；契约在前三项合入后编写。
+- **W3-D 书写整合**：Pencil 书写、橡皮、撤销、保存接入 iPad 编辑器；契约见下文「W3-D」。
 
 ## W3-A 查看器（`:iosKit`、`shared/src/iosMain`）
 
@@ -45,6 +45,21 @@
 - 恢复记录只在进入后台时由宿主调用 `writeRecovery()`，并且只在有未保存修改时写入。记录与正文都放在私有目录，不进「文稿」。恢复打开时不写原文件，会话标记为未保存。
 - 旧版 `.xmap` 与混合 `.xsplit` v3 按 AGENTS.md 拒绝打开，文件保持不变。
 - 测试：`shared/src/commonTest/kotlin/com/xnotes/storage/lite/LiteStoreTest.kt`（JVM 与 iOS；复用 W2-1 的互通金样）。
+
+## W3-D 书写整合（`:iosKit`、`shared`）
+
+前提：W3-A、W3-B、W3-C 已合入，查看器已通过五份金样的日夜间截图验收（见文末）。
+
+- **打开与保存接入**：首页改用 W3-C 的 `LiteStore`，删除 W3-A 的临时只读打开器 `ReadOnlyLiteStore`。拒绝原因的提示沿用。查看器去掉「只读」标记，改为可编辑。
+- **Pencil 进笔迹**：`UITouch.type == .pencil` 才书写；手指只平移、滚动、缩放（设置里有「手指绘画」开关，默认关，开启时手指也书写）。笔接触屏幕期间忽略手指（防误触）。触摸经 `PencilSample` 转换后进入 `PencilFeed`（契约见下），放行的采样再交给 `PagedStrokeCapture`。分页笔记的 `PageSpace` 用查看器的页面布局；无限画布用一个覆盖整个内容空间的单页 `PageSpace`，不分页、不交接。湿墨显示 `PagedStrokeCapture.live` 加 `PencilFeed.wetTail()`；正式笔画只来自 `finish()` 的分段，入页并作为一个撤销步骤。
+- **`PencilFeed`**（`shared/src/commonMain/kotlin/com/xnotes/pen/pencil/`）：`PencilFeed(pressureSupported, settleMs = 40)`；`begin(sample): Released`（首点立即放行，以便落笔时选页）；`move(coalesced, predicted): List<Released>`；`update(index, force, maxForce): List<Released>`；`end(last): List<Released>`；`cancel()`；`wetTail(): List<Released>`（仍在排队的采样加上本轮预测）。`Released(x, y, pressure, timeMs)`，`timeMs` 为 `timestamp × 1000` 取整。力度仍是估计值的采样最多等 `settleMs`（相对最新采样的时间），等到更新就用新压力；队首未放行时后面的采样也不放行，保持顺序；超时后用估计值放行，迟到的更新忽略；抬笔放行全部。无压感时不等待，压力恒为 1.0。压力换算与 `PencilStrokeAssembler` 相同。测试：`shared/src/commonTest/kotlin/com/xnotes/pen/pencil/PencilFeedTest.kt`。
+- **工具**：笔、荧光笔、橡皮（按 `ToolConfig` 的擦除方式，复用 `core` 现有的整笔擦除与局部擦除函数；画布用 `EraseSession`）、撤销、重做。工具栏只用黑白与 `Tokens`，触控区不小于 48 dp；用户可见文字放入 `Localizable.strings`（英文与简体中文）。双击、捏压经 W2-3 的 `PencilGestures`（跟随系统偏好），笔画中收到的手势在抬笔后生效，取消则丢弃。笔画中途不切换工具。
+- **撤销**：每次抬笔（含跨页的多段）一步，用 `core` 的 `History` 与现有命令（`AddItem`、`CompositeCommand`、擦除命令）。
+- **保存时机**：返回首页时保存；场景进入后台时先保存，再在仍有未保存修改时调用 `writeRecovery()`；停笔 3 秒后自动保存。正在书写时不保存，保存时等抬笔。保存失败或冲突时用一条黑白提示说明结果和受保护副本所在，不丢弃修改。启动时若有待恢复记录，首页顶部提示「恢复」或「放弃」。
+- **验收**：
+  - 单元测试：`PencilFeedTest` 及全部既有测试（共享 JVM、iOS 模拟器、原生库、Android 应用）。
+  - 模拟器（经 Device 面板）：打开「手指绘画」后，在分页笔记和画布上各画两笔（分页笔记中有一笔跨页）；撤销、重做、橡皮各操作一次，返回首页后再打开，确认内容保留；截图记录。模拟器不产生 Pencil 事件，Pencil 路径只能由单元测试与真机覆盖。
+  - 真机（待用户在 iPad Air + Apple Pencil Pro 上验收）：压感、延迟、悬停光标、双击与捏压、防误触、后台被杀后的恢复。
 
 ## 共同规则
 
