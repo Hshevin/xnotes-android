@@ -12,7 +12,7 @@ import com.xnotes.kio.KFiles
 import com.xnotes.kio.Uuids
 import com.xnotes.nativelibs.Pdfium
 import com.xnotes.platform.ios.*
-import okio.Path
+import com.xnotes.storage.ios.IosStorageLocations
 import platform.UIKit.UIImage
 import kotlin.math.roundToInt
 
@@ -23,7 +23,8 @@ internal fun Page.paperRect(doc: Document) = insets(doc).let {
     Rect(-it.left, -it.top, width + it.left + it.right, height + it.top + it.bottom)
 }
 
-internal class PageImages(private val doc: Document, private val dark: Boolean, private val assets: Path) : AutoCloseable {
+internal class PageImages(private val doc: Document, private val dark: Boolean) : AutoCloseable {
+    private val assets = lazy { (IosStorageLocations.cache / Uuids.random()).also { KFiles.system.createDirectory(it, mustCreate = true) } }
     private val layout = TemplateLayoutCache(TemplateEval())
     private val templates = mutableMapOf<String, Template>()
     private val pictures = mutableMapOf<Pair<String, String>, ImageData>()
@@ -101,7 +102,7 @@ internal class PageImages(private val doc: Document, private val dark: Boolean, 
                 Rect(paper.x / scale, paper.y / scale, paper.w / scale, paper.h / scale), ink, page.resolvedAccentColor(doc), values)
             TemplatePainter.paint(renderer, layout.layout(template, definition), scale, paper) { src ->
                 if (pkg == null) null else pictures.getOrPut(key to src) {
-                    val file = assets / Uuids.random()
+                    val file = assets.value / Uuids.random()
                     check(TemplatePackage.extract(pkg, src, file))
                     val size = checkNotNull(CgImageCodec.probeFile(file.toString()))
                     ImageData(file, size.width, size.height)
@@ -110,5 +111,5 @@ internal class PageImages(private val doc: Document, private val dark: Boolean, 
         }
     }
 
-    override fun close() { pdf?.close(); pdf = null }
+    override fun close() { pdf?.close(); pdf = null; if (assets.isInitialized()) KFiles.system.deleteRecursively(assets.value) }
 }

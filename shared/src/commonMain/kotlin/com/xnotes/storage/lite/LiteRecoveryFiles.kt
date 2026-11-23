@@ -15,6 +15,8 @@ internal data class Stamp(val identity: FileIdentity, val hash: String)
 internal data class RecoveryEntry(val recovery: LiteRecovery, val stamp: Stamp, val body: Path, val hash: String)
 internal data class Protected(val body: Path, val recovery: LiteRecovery?, val problem: Exception? = null)
 
+internal fun Path.recoveryBody(kind: LiteKind) = this / "body.${kind.extension}"
+
 internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: Path, private val documents: Path) {
     fun write(path: Path, id: String, stamp: Stamp, writeBody: (Path) -> String, verifyBody: (Path, String) -> Unit): Protected {
         fs.createDirectories(root)
@@ -22,11 +24,10 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
         val stage = root / "unclaimed-$token"
         val ready = root / token
         val kind = requireNotNull(LiteKind.of(path))
-        val name = "body.${kind.extension}"
         fs.createDirectory(stage, mustCreate = true)
         var written = false
         try {
-            val file = stage / name
+            val file = stage.recoveryBody(kind)
             val hash = writeBody(file)
             written = true
             try {
@@ -44,7 +45,7 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
             } catch (failure: Exception) {
                 return Protected(file, null, failure)
             }
-            return Protected(ready / name, LiteRecovery(path, id, ready / "record"))
+            return Protected(ready.recoveryBody(kind), LiteRecovery(path, id, ready / "record"))
         } finally {
             if (!written) fs.deleteRecursively(stage)
         }
@@ -78,7 +79,7 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
             val stamp = Stamp(identity, digestField())
             val hash = digestField()
             require(exhausted())
-            val body = dir / "body.${kind.extension}"
+            val body = dir.recoveryBody(kind)
             require(fs.metadata(body).isRegularFile)
             RecoveryEntry(LiteRecovery(path, id, record), stamp, body, hash)
         }

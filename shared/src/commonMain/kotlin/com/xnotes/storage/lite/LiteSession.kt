@@ -21,6 +21,7 @@ class LiteSession internal constructor(
     private var closed = false
     private var writing = false
     val dirty get() = revision != savedRevision
+    val registeredRecoveryCopy: Path? get() = recovery?.record?.parent?.recoveryBody(kind)
 
     init {
         note?.path = path.toString()
