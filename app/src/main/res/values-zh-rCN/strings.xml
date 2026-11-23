@@ -43,7 +43,7 @@
     <string name="toolbar_zoom_lock">缩放锁定</string>
     <string name="toolbar_fullscreen">全屏</string>
     <string name="toolbar_colours">颜色</string>
-    <string name="toolbar_waypoints">保存的视图</string>
+    <string name="toolbar_waypoints">已保存视图</string>
     <string name="toolbar_minimap">小地图</string>
     <string name="edge_left">左侧</string>
     <string name="edge_right">右侧</string>
@@ -70,12 +70,12 @@
     <string name="caption_top_speed">最高速度</string>
     <string name="caption_tip_width">笔尖宽度百分比</string>
     <string name="caption_width">笔画宽度</string>
-    <string name="caption_scale">缩放比例</string>
-    <string name="caption_dash">虚线</string>
+    <string name="caption_scale">随页面缩放</string>
+    <string name="caption_dash">线段长度</string>
     <string name="caption_gap">间隔</string>
     <string name="caption_intensity">强度</string>
     <string name="caption_straight_line">直线</string>
-    <string name="caption_inverse">反向</string>
+    <string name="caption_inverse">深色页面上提亮</string>
     <string name="caption_stabilization">防抖</string>
     <string name="caption_strength">强度</string>
     <string name="caption_crossover">慢速阈值</string>
@@ -96,7 +96,7 @@
     <string name="pattern_dots">点阵</string>
     <string name="pattern_grid">网格</string>
     <string name="caption_pattern_colour">纹理颜色</string>
-    <string name="default_for_new_notes">新笔记的默认值</string>
+    <string name="default_for_new_notes">设为新笔记默认样式</string>
     <string name="reset">重置</string>
     <string name="caption_new_page_size">新页面大小</string>
     <string name="same_as_previous">与上一页相同</string>
@@ -120,7 +120,7 @@
     <string name="filter_screen">滤色</string>
     <string name="caption_keep_images">不过滤图片</string>
     <string name="caption_scrollbar">滚动条</string>
-    <string name="default_for_all_notes">所有笔记的默认值</string>
+    <string name="default_for_all_notes">设为所有笔记默认样式</string>
     <string name="off">关闭</string>
     <string name="title_go_to_page">跳转到页面</string>
     <string name="go">跳转</string>
@@ -131,7 +131,7 @@
     <string name="eraser_stroke">笔迹</string>
     <string name="eraser_area">范围</string>
     <string name="caption_size">大小</string>
-    <string name="caption_switch_back">切换回去</string>
+    <string name="caption_switch_back">用完自动切回</string>
     <string name="caption_erase_markups">擦除 PDF 文本标注</string>
     <string name="caption_scribble_erase">涂抹擦除</string>
     <string name="title_select">选择</string>
@@ -168,7 +168,7 @@
     <string name="shape_flow_alt_process">可选过程</string>
     <string name="shape_flow_decision">决策</string>
     <string name="shape_flow_data">数据</string>
-    <string name="shape_flow_terminator">终止</string>
+    <string name="shape_flow_terminator">起止</string>
     <string name="shape_flow_preparation">准备</string>
     <string name="shape_flow_predefined">预定义过程</string>
     <string name="shape_flow_internal_storage">内部存储</string>
@@ -185,9 +185,9 @@
     <string name="shape_flow_stored_data">存储数据</string>
     <string name="shape_flow_sort">排序</string>
     <string name="shape_flow_merge">合并</string>
-    <string name="shape_flow_extract">摘录</string>
+    <string name="shape_flow_extract">提取</string>
     <string name="shape_flow_summing">汇总连接</string>
-    <string name="shape_flow_or">或者</string>
+    <string name="shape_flow_or">或</string>
     <string name="shape_page_arrows">箭头和标注</string>
     <string name="shape_arrow_right">右箭头</string>
     <string name="shape_arrow_left">左箭头</string>
@@ -197,7 +197,7 @@
     <string name="shape_arrow_up_down">上下箭头</string>
     <string name="shape_arrow_quad">十字箭头</string>
     <string name="shape_arrow_bent">直角箭头</string>
-    <string name="shape_arrow_u_turn">U形箭头</string>
+    <string name="shape_arrow_u_turn">U 形箭头</string>
     <string name="shape_arrow_chevron">燕尾形</string>
     <string name="shape_arrow_pentagon">五边形箭头</string>
     <string name="shape_arrow_notched">燕尾形箭头</string>
@@ -210,7 +210,7 @@
     <string name="shape_callout_rect">矩形标注</string>
     <string name="shape_callout_round">圆角矩形标注</string>
     <string name="shape_callout_oval">椭圆形标注</string>
-    <string name="shape_callout_thought">思想气泡</string>
+    <string name="shape_callout_thought">思考气泡</string>
     <string name="shape_callout_line">线形标注</string>
     <string name="shape_burst">爆炸形</string>
     <string name="shape_page_solids_math">立体和数学</string>
@@ -279,8 +279,8 @@
     <string name="caption_fill">填充</string>
     <string name="caption_perfect">规整</string>
     <string name="caption_opacity">不透明度</string>
-    <string name="caption_dashed">虚线笔</string>
-    <string name="default_suffix">"  (默认)"</string>
+    <string name="caption_dashed">虚线</string>
+    <string name="default_suffix">"（默认）"</string>
     <string name="caption_opacity_percent">"不透明度  %1$d%%"</string>
     <string name="caption_rotate_degrees">"旋转  %1$d°"</string>
     <string name="caption_glow_intensity">发光强度</string>
@@ -310,8 +310,8 @@
     <string name="untitled">未命名</string>
     <string name="insert_image">插入图片</string>
     <string name="fit_all">显示全部</string>
-    <string name="gl_unavailable">GL 不可用</string>
-    <string name="canvas_out_of_memory">内存不足，部分墨迹未显示</string>
+    <string name="gl_unavailable">图形显示不可用</string>
+    <string name="canvas_out_of_memory">内存不足，部分笔迹未显示</string>
 
     <!-- Toolbar customizer -->
     <string name="drop_here">放到此处</string>
@@ -356,7 +356,7 @@
     <string name="pref_pdf_export">PDF 导出</string>
     <string name="pref_pdf_heading_bookmarks">根据标题生成书签</string>
     <string name="pref_performance">性能</string>
-    <string name="pref_cache_help">设置越高，平移和缩放越流畅，但会使用更多内存。无论如何设置，墨迹和 PDF 都会保持清晰。</string>
+    <string name="pref_cache_help">设置越高，平移和缩放越流畅，但会使用更多内存。无论如何设置，笔迹和 PDF 都会保持清晰。</string>
     <string name="pref_disable_front_buffering">禁用前缓冲绘制</string>
     <string name="pref_front_buffering_help">前缓冲绘制可降低笔迹延迟。部分屏幕可能出现笔迹闪烁或跟笔延迟，遇到这些问题时可关闭此功能，使用常规画布绘制。</string>
     <string name="pref_code_highlighting">代码高亮</string>
@@ -378,7 +378,7 @@
     <string name="toggle_eraser">切换橡皮擦</string>
     <string name="toggle_previous">切换上一个工具</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss 会展开为创建日期和时间。# 会变为序号以确保文件夹中的名称不重复。</string>
-    <string name="pref_next_note_named">下一个笔记将命名为 %1$s</string>
+    <string name="pref_next_note_named">下一篇笔记将命名为 %1$s</string>
     <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
     <string name="pref_max_cache_px">"最大缓存分辨率  %1$d px"</string>
     <string name="pref_toolbar_colours_n">"工具栏颜色  %1$d"</string>
@@ -567,7 +567,7 @@
     <string name="unpin_from_top">取消固定到顶部</string>
     <string name="err_pin_note">无法固定笔记。</string>
     <string name="pref_backup">备份</string>
-    <string name="pref_backup_help">你的笔和工具、工具栏、颜色、主题、手势和手写笔按键、新笔记、画布和表格的默认设置、浏览器视图、导入的字体和代码主题，打包成一个文件，带到另一台设备上。笔记文件夹、固定项、最近项和这台设备的性能设置不会带走。</string>
+    <string name="pref_backup_help">把笔和工具、工具栏、颜色、主题、手势与手写笔按键，新笔记、画布和表格的默认设置，文件浏览器视图，以及导入的字体和代码主题存成一个文件，方便带到另一台设备。笔记文件夹、固定项、最近打开记录和本机的性能设置不包含在内。</string>
     <string name="export_settings">导出设置…</string>
     <string name="import_settings">导入设置…</string>
     <string name="import_settings_title">导入设置？</string>
@@ -638,7 +638,7 @@
     <string name="back_rotate">"‹  旋转"</string>
     <string name="rotate_right">向右</string>
     <string name="rotate_left">向左</string>
-    <string name="rotate_upside_down">上下颠倒</string>
+    <string name="rotate_upside_down">旋转 180°</string>
     <string name="page_size">页面大小</string>
     <string name="page_size_ellipsis">页面大小…</string>
     <string name="apply">应用</string>
@@ -677,7 +677,7 @@
     <string name="paste_code">粘贴为代码</string>
 
     <!-- About -->
-    <string name="app_tagline">Android 手写笔记与素描应用</string>
+    <string name="app_tagline">Android 手写笔记与草图应用</string>
     <string name="copy_version">复制版本号</string>
     <string name="help_make_better">帮助改进 xnotes</string>
     <string name="report_bug">报告问题</string>
@@ -746,7 +746,7 @@
     <string name="caption_paper">纸张</string>
     <string name="paper_theme">主题</string>
     <string name="default_for_new_canvases">设为新画布默认样式</string>
-    <string name="title_waypoints">保存的视图</string>
+    <string name="title_waypoints">已保存视图</string>
     <string name="no_waypoints">尚无已保存视图。</string>
     <string name="caption_save_view">保存此视图</string>
 
@@ -966,7 +966,7 @@
     <string name="split_position_right">右边</string>
     <string name="split_position_top">上方</string>
     <string name="split_position_bottom">下方</string>
-    <string name="split_delete_confirm">删除这个分屏文件？其中的笔记、PDF 和画布会保留。</string>
+    <string name="split_delete_confirm">删除这个分屏文件？其中的文档会保留。</string>
 
     <!-- Page templates and customization -->
     <string name="caption_template">模板</string>
@@ -1000,9 +1000,9 @@
     <string name="audio_name">名称</string>
     <string name="audio_save">将音频保存为文件…</string>
     <string name="audio_share">分享音频…</string>
-    <string name="audio_unlink">取消关联墨迹</string>
-    <string name="audio_unlinked">已取消墨迹与此录音的关联</string>
-    <string name="audio_nothing_linked">没有墨迹与此录音关联。</string>
+    <string name="audio_unlink">取消关联笔迹</string>
+    <string name="audio_unlinked">已取消笔迹与此录音的关联</string>
+    <string name="audio_nothing_linked">没有笔迹与此录音关联。</string>
     <string name="audio_saved">音频已保存</string>
     <string name="err_save_audio">无法保存音频。</string>
     <string name="err_share_audio">无法分享音频。</string>
@@ -1039,7 +1039,7 @@
     <string name="templates_built_in">内置</string>
     <string name="templates_examples">示例</string>
     <string name="templates_imported">已导入</string>
-    <string name="templates_imported_help">保存在笔记文件夹中，会随笔记一起同步。</string>
+    <string name="templates_imported_help">保存在笔记文件夹里，会和笔记一起备份、迁移。</string>
     <string name="cover_designs">设计</string>
     <string name="import_template_file">导入模板</string>
     <string name="page_from_image">用图片制作页面模板</string>

@@ -24,6 +24,6 @@
     <string name="layers_preview_failed">Preview unavailable</string>
     <string name="layers_preview_mode">Thumbnail display</string>
     <string name="layers_preview_none">Do not show</string>
-    <string name="layers_preview_content">Note content area</string>
+    <string name="layers_preview_content">Content area</string>
     <string name="layers_preview_page">Entire page</string>
 </resources>

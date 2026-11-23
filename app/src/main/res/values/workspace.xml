@@ -1,8 +1,8 @@
 <resources>
-    <string name="workspace_switch">Switch workspace</string>
+    <string name="workspace_switch">Switch workspace folder</string>
     <string name="workspace_add">Add folder…</string>
-    <string name="workspace_unavailable">Folder unavailable. Grant access again using Add folder. Your current workspace is unchanged.</string>
-    <string name="workspace_save_failed">Could not save the workspace. Your current workspace is unchanged.</string>
+    <string name="workspace_unavailable">Folder unavailable. Grant access again using Add folder. Your current workspace folder is unchanged.</string>
+    <string name="workspace_save_failed">Couldn’t save the workspace folder. Your current one is unchanged.</string>
     <string name="folder_tree_expand">Expand %1$s</string>
     <string name="folder_tree_collapse">Collapse %1$s</string>
 </resources>

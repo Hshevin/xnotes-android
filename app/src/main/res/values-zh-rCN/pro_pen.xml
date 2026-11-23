@@ -1,6 +1,6 @@
 <resources>
     <string name="pro_pen_save_failed">按键映射保存失败，已保留原有设置。</string>
-    <string name="pro_pen_hold">按住临时启用，松开恢复</string>
-    <string name="pro_pen_select">按下切换，松开保持</string>
+    <string name="pro_pen_hold">按住时使用</string>
+    <string name="pro_pen_select">按一下切换</string>
     <string name="pro_pen_once">每次按下执行一次，持续按住不会重复。</string>
 </resources>

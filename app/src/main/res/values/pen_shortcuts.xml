@@ -16,7 +16,7 @@
     <string name="pen_shortcuts_invalid">Could not save: the mappings contain duplicate or invalid buttons, or exceed the limit.</string>
     <string name="pen_shortcut_near_screen">Requires the pen near the screen. To use a remote key away from the screen, record it there instead.</string>
     <string name="pen_record_multiple">More than one button was detected. Record one button at a time.</string>
-    <string name="pen_single_press">Press</string>
+    <string name="pen_single_press">Press / hold</string>
     <string name="pen_double_press">Double press</string>
     <string name="pen_double_delay">Double-press interval: %1$d ms</string>
     <string name="pen_double_delay_help">For a button with a double-press action, a press that picks a tool or runs a command waits this long for a second press. Holding still starts at once.</string>

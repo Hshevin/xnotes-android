@@ -3,5 +3,5 @@
     <string name="native_open_changed">打开期间文档发生了变化，已保留当前工作区。请重新打开。</string>
     <string name="native_save_picker_busy">请先完成或取消当前的另存文件选择。</string>
     <string name="native_split_open_failed">无法打开此分屏，当前工作区仍保留。</string>
-    <string name="split_arrangement_invalid">此分屏安排不存在、已损坏或暂不支持，当前工作区仍保留。</string>
+    <string name="split_arrangement_invalid">这个分屏组合不存在、已损坏或暂不支持，当前工作区保持不变。</string>
 </resources>

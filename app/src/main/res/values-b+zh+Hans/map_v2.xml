@@ -41,14 +41,14 @@
     <string name="map2_title_hint">主题</string>
     <string name="map2_sources">来源</string>
     <string name="map2_paste_link">粘贴链接</string>
-    <string name="map2_no_link">剪贴板中没有 XNotes 页面链接</string>
+    <string name="map2_no_link">剪贴板里没有 XNotes 链接</string>
     <string name="map2_link_already">该主题已链接到这里</string>
     <string name="map2_link_added">已添加来源</string>
     <string name="map2_copy_page_link">复制页面链接</string>
     <string name="map2_copy_canvas_link">复制画布链接</string>
     <string name="map2_link_copied">已复制链接，可粘贴到导图主题</string>
     <string name="map2_link_unsaved">请先保存笔记再复制页面链接</string>
-    <string name="map2_link_page_not_saved">此页尚未保存，请稍后再试</string>
+    <string name="map2_link_page_not_saved">请先保存笔记，再复制此页链接</string>
     <string name="map2_link_not_in_doc">该页已不在笔记中</string>
     <string name="map2_enable_ids_title">启用页面链接？</string>
     <string name="map2_enable_ids_body">页面链接需要为此笔记启用永久页编号。每页获得一个跟随该页的编号，加页、删页或调整顺序都不会改变它。页面和笔迹不会改动，但旧版 XNotes 将无法打开此笔记。</string>
@@ -65,7 +65,7 @@
     <string name="map2_source_wrong_kind">文档类型与链接不符</string>
     <string name="map2_remove_source">移除来源</string>
     <string name="map2_open_source">打开</string>
-    <string name="map2_no_sources">还没有来源。在笔记的页面菜单中复制页面链接，再粘贴到这里。</string>
+    <string name="map2_no_sources">还没有来源。复制笔记页面链接或画布链接，再粘贴到这里。</string>
     <string name="map2_back_to_map">返回导图</string>
     <string name="map2_map_gone">导图所在画布已不在原处</string>
     <string name="map2_open_failed">无法打开来源</string>

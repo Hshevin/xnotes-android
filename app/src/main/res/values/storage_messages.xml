@@ -1,36 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Storage messages; names mirror com.xnotes.storage.StorageMsg. -->
 <resources>
-    <string name="storage_msg_migration_recovery_pending">Finish the previous recovery before saving again.</string>
-    <string name="storage_msg_migration_recovery_invalid">Recovery files are missing, damaged or unsupported. Existing recovery data was kept; check the current file before choosing how to recover.</string>
-    <string name="storage_msg_migration_index_incomplete">Document registration is incomplete. The current file and recovery backups were kept. Retry to finish registration.</string>
+    <string name="storage_msg_migration_recovery_pending">Finish dealing with the earlier recovery, then save again.</string>
+    <string name="storage_msg_migration_recovery_invalid">Recovery materials are missing, damaged or unrecognized. Nothing was deleted. Check the current file, then choose how to recover.</string>
+    <string name="storage_msg_migration_index_incomplete">This document hasn’t finished being registered in the app. The current file and recovery materials are kept. Try again.</string>
 
-    <string name="storage_msg_reference_identity_mismatch">The document identity no longer matches. Saving was blocked. Locate the original or explicitly open this file as a different document.</string>
-    <string name="storage_msg_reference_identity_missing">The existing file has no document identity. Restore its identity or explicitly upgrade it before saving.</string>
-    <string name="storage_msg_reference_page_metadata_missing">Page reference metadata is missing. Restore the original reference metadata before saving.</string>
+    <string name="storage_msg_reference_identity_mismatch">This file is no longer the document you opened, so it wasn’t saved over. Find the original, or open this file as a separate document.</string>
+    <string name="storage_msg_reference_identity_missing">The existing file has no document ID, so it wasn’t overwritten. Restore the original file, or upgrade this one before saving.</string>
+    <string name="storage_msg_reference_page_metadata_missing">This file’s page link information is missing, so it wasn’t saved over. Restore the original file and try again.</string>
 
-    <string name="storage_msg_duplicate_document_id">Several files share this document ID. Choose the original or give the copy a new identity first</string>
-    <string name="storage_msg_pdf_resource_unregistered">PDF resource is not registered</string>
-    <string name="storage_msg_pdf_resource_missing">PDF resource does not exist</string>
-    <string name="storage_msg_migration_interrupted">The upgrade was interrupted or the file was changed elsewhere. The original note backup was kept; restore the backup or keep the current file</string>
-    <string name="storage_msg_migration_verify_failed">Upgrade write verification failed</string>
-    <string name="storage_msg_migration_write_incomplete">The upgrade write did not finish. The original note backup was kept; restore it and try again</string>
+    <string name="storage_msg_duplicate_document_id">Several files claim to be this same document. Choose the original, or make the copy a separate document first</string>
+    <string name="storage_msg_pdf_resource_unregistered">The original PDF for this note isn’t recorded in the app</string>
+    <string name="storage_msg_pdf_resource_missing">The original PDF for this note can’t be found</string>
+    <string name="storage_msg_migration_interrupted">The last upgrade was interrupted, or the file was changed elsewhere. The backup from before the upgrade is kept; restore it or keep the current file</string>
+    <string name="storage_msg_migration_verify_failed">The upgraded file didn’t pass verification</string>
+    <string name="storage_msg_migration_write_incomplete">The upgrade didn’t finish writing. The backup from before the upgrade is kept; restore it and try again</string>
     <string name="storage_msg_no_backup_to_restore">No previous note to restore</string>
-    <string name="storage_msg_restore_verify_failed">Restore verification failed; the backup is still kept</string>
-    <string name="storage_msg_migration_record_failed">Could not finish the migration record</string>
+    <string name="storage_msg_restore_verify_failed">The restored file didn’t pass verification; the backup is still kept</string>
+    <string name="storage_msg_migration_record_failed">Couldn’t save the upgrade record</string>
     <string name="storage_msg_note_unreadable">Can\'t read the note</string>
-    <string name="storage_msg_note_not_writable">The note is not writable</string>
-    <string name="storage_msg_legacy_note_read_only">The old note is read-only and was not changed. Save a writable copy and try again</string>
-    <string name="storage_msg_file_read_only_upgrade">The file is read-only and can\'t be upgraded. Save a writable copy</string>
-    <string name="storage_msg_split_missing_document_id">The old split view has no document ID. Locate the document manually</string>
-    <string name="storage_msg_search_limit_reached">Checked 5000 items. Narrow the authorised folder or locate the document manually</string>
-    <string name="storage_msg_duplicate_documents_found">Found several documents with the same ID. Choose the original manually or make the copy an independent document</string>
-    <string name="storage_msg_invalid_note_path">Invalid note path</string>
-    <string name="storage_msg_pdf_resource_verify_failed">PDF resource verification failed</string>
-    <string name="storage_msg_pdf_resource_corrupt">The original PDF this note refers to is not stored in this app. Another installed version may have upgraded the note, or the app was reinstalled or its data cleared. Your ink and annotations are intact: choose the same original PDF, or an older note file or exported package that still embeds it, to re-link</string>
-    <string name="storage_msg_pdf_resource_mismatch">The selected file does not match this note\'s original PDF. Nothing was changed; choose the same PDF you first imported, or an older note file that contains it</string>
-    <string name="storage_msg_reference_metadata_invalid">Unable to verify the document identity or page references. The source file was not changed. Check the original file or use recovery data.</string>
-    <string name="storage_msg_reference_write_context_invalid">This save does not match the original document type, page reference state, or original PDF. The file was not overwritten. Use the corresponding copy, recovery, or upgrade operation.</string>
-    <string name="storage_msg_reference_source_changed">The source file content has changed. Saving was blocked and your edits are retained. Check the source or save a separate copy.</string>
-    <string name="storage_msg_native_creation_target_invalid">The target is not a verified new empty file and was not overwritten. Please choose a new file.</string>
+    <string name="storage_msg_note_not_writable">Can’t write to this note</string>
+    <string name="storage_msg_legacy_note_read_only">The old note is read-only and was not changed. Save an editable copy and try again</string>
+    <string name="storage_msg_file_read_only_upgrade">The file is read-only and can’t be upgraded. Save an editable copy</string>
+    <string name="storage_msg_split_missing_document_id">This older split file doesn’t record which document it holds. Find the document manually</string>
+    <string name="storage_msg_search_limit_reached">Checked 5000 items without finding it. Narrow the authorized folder or find the document manually</string>
+    <string name="storage_msg_duplicate_documents_found">Found several copies of the same document. Choose the original manually, or make the copy a separate document</string>
+    <string name="storage_msg_invalid_note_path">Invalid note location</string>
+    <string name="storage_msg_pdf_resource_verify_failed">The original PDF failed its integrity check and may be damaged</string>
+    <string name="storage_msg_pdf_resource_corrupt">This note’s original PDF isn’t in the app. Another installed version may have moved it, or the app was reinstalled or its data cleared. Your ink and annotations are safe: choose the same original PDF, or an older note file or export that still contains it, to re-link</string>
+    <string name="storage_msg_pdf_resource_mismatch">The selected file isn’t this note’s original PDF. Nothing was changed; choose the same PDF you first imported, or an older note file that contains it</string>
+    <string name="storage_msg_reference_metadata_invalid">Couldn’t verify this document’s ID or page links. The original file wasn’t changed. Check the original file or use the recovery materials.</string>
+    <string name="storage_msg_reference_write_context_invalid">This save doesn’t match the original file’s type, page links or original PDF, so the file wasn’t overwritten. Save a copy, recover, or upgrade instead.</string>
+    <string name="storage_msg_reference_source_changed">The original file was changed elsewhere, so it wasn’t saved over. Your edits are still here; check the original or save a copy.</string>
+    <string name="storage_msg_native_creation_target_invalid">The selected destination isn’t a new empty file, so it wasn’t overwritten. Choose a new file.</string>
 </resources>

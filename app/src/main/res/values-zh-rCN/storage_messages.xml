@@ -1,36 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Storage messages; names mirror com.xnotes.storage.StorageMsg. -->
 <resources>
-    <string name="storage_msg_migration_recovery_pending">请先处理上一份恢复记录，再继续保存。</string>
-    <string name="storage_msg_migration_recovery_invalid">恢复资料缺失、损坏或版本不受支持，现有恢复资料未清除。请检查当前文件后选择恢复方式。</string>
-    <string name="storage_msg_migration_index_incomplete">文档登记尚未完成，当前文件和恢复资料均已保留，可以重试完成登记。</string>
+    <string name="storage_msg_migration_recovery_pending">上次的恢复还没处理完，请先处理，再保存。</string>
+    <string name="storage_msg_migration_recovery_invalid">恢复资料缺失、损坏或无法识别，已全部保留。请先检查当前文件，再选择恢复方式。</string>
+    <string name="storage_msg_migration_index_incomplete">这份文档还没在应用中登记完成。当前文件和恢复资料都已保留，请重试。</string>
 
-    <string name="storage_msg_reference_identity_mismatch">文档身份已改变，已阻止覆盖。请定位原文档，或明确将当前文件作为另一文档打开。</string>
-    <string name="storage_msg_reference_identity_missing">现有文件缺少文档身份。请先恢复身份或明确升级文件，未覆盖原文件。</string>
-    <string name="storage_msg_reference_page_metadata_missing">页面引用元数据缺失，已阻止覆盖。请恢复原引用信息后重试。</string>
+    <string name="storage_msg_reference_identity_mismatch">这个文件已不是原来打开的那份文档，为防止覆盖没有保存。请找到原文档，或把这个文件作为另一份文档打开。</string>
+    <string name="storage_msg_reference_identity_missing">现有文件缺少文档标识，没有覆盖它。请先恢复原文件，或升级这个文件后再保存。</string>
+    <string name="storage_msg_reference_page_metadata_missing">文件里的页面链接信息丢失了，为防止覆盖没有保存。请恢复原文件后重试。</string>
 
-    <string name="storage_msg_duplicate_document_id">文档 ID 存在多份文件，请先选择原件或为副本分配新身份</string>
-    <string name="storage_msg_pdf_resource_unregistered">PDF 资源未登记</string>
-    <string name="storage_msg_pdf_resource_missing">PDF 资源不存在</string>
-    <string name="storage_msg_migration_interrupted">升级曾被中断或文件已被外部修改；原笔记备份已保留，请选择恢复备份或保留当前文件</string>
-    <string name="storage_msg_migration_verify_failed">升级写入验证失败</string>
-    <string name="storage_msg_migration_write_incomplete">升级写入未完成，原笔记备份已保留。请恢复备份后重试</string>
+    <string name="storage_msg_duplicate_document_id">有多个文件是同一份文档。请先选出原件，或把副本设为独立文档</string>
+    <string name="storage_msg_pdf_resource_unregistered">应用里没有这份笔记原始 PDF 的记录</string>
+    <string name="storage_msg_pdf_resource_missing">找不到这份笔记的原始 PDF</string>
+    <string name="storage_msg_migration_interrupted">上次升级被中断，或文件在别处被改过。升级前的备份已保留，请选择恢复备份或保留当前文件</string>
+    <string name="storage_msg_migration_verify_failed">升级后的文件校验未通过</string>
+    <string name="storage_msg_migration_write_incomplete">升级没有写完，升级前的备份已保留。请恢复备份后重试</string>
     <string name="storage_msg_no_backup_to_restore">没有可恢复的旧笔记</string>
-    <string name="storage_msg_restore_verify_failed">恢复验证失败，备份仍保留</string>
-    <string name="storage_msg_migration_record_failed">无法完成迁移记录</string>
+    <string name="storage_msg_restore_verify_failed">恢复后的文件校验未通过，备份仍保留</string>
+    <string name="storage_msg_migration_record_failed">无法保存升级记录</string>
     <string name="storage_msg_note_unreadable">无法读取笔记</string>
-    <string name="storage_msg_note_not_writable">笔记不可写</string>
-    <string name="storage_msg_legacy_note_read_only">旧笔记为只读，原文件未修改；请保存可写副本后重试</string>
-    <string name="storage_msg_file_read_only_upgrade">文件为只读，无法升级；请保存可写副本</string>
-    <string name="storage_msg_split_missing_document_id">旧分屏没有文档 ID，请手动重新定位</string>
-    <string name="storage_msg_search_limit_reached">已检查5000个条目，请缩小授权文件夹范围或手动重新定位</string>
-    <string name="storage_msg_duplicate_documents_found">找到多份相同ID的文档，请手动选择原件或将副本设为独立文档</string>
-    <string name="storage_msg_invalid_note_path">非法笔记路径</string>
-    <string name="storage_msg_pdf_resource_verify_failed">PDF 资源校验失败</string>
-    <string name="storage_msg_pdf_resource_corrupt">此笔记引用的原始 PDF 不在本应用中，可能已被另一个安装版本迁移，或应用曾重装 / 清除数据。笔迹与批注未受影响：请选择同一份原始 PDF，或仍内嵌 PDF 的旧笔记文件 / 导出包重新关联</string>
-    <string name="storage_msg_pdf_resource_mismatch">所选文件与此笔记的原始 PDF 内容不一致，未做任何更改；请选择当初导入的同一份 PDF，或包含它的旧笔记文件</string>
-    <string name="storage_msg_reference_metadata_invalid">无法验证文档身份或页面引用信息，未修改原文件。请检查原文件或使用恢复资料。</string>
-    <string name="storage_msg_reference_write_context_invalid">本次保存与原文档的类型、页引用状态或原始 PDF 不一致，未覆盖原文件。请使用对应的复制、恢复或升级操作。</string>
-    <string name="storage_msg_reference_source_changed">来源文件内容已变化，已阻止覆盖。当前编辑内容仍保留，请检查原文件或另存副本。</string>
-    <string name="storage_msg_native_creation_target_invalid">无法确认这是本次新建的空文件，未覆盖目标。请重新选择新文件。</string>
+    <string name="storage_msg_note_not_writable">无法写入这份笔记</string>
+    <string name="storage_msg_legacy_note_read_only">旧笔记是只读的，原文件没有改动。请另存一份可编辑的副本后重试</string>
+    <string name="storage_msg_file_read_only_upgrade">文件是只读的，无法升级。请另存一份可编辑的副本</string>
+    <string name="storage_msg_split_missing_document_id">这个旧分屏文件没有记下文档标识，请手动找到文档</string>
+    <string name="storage_msg_search_limit_reached">已查找 5000 个项目仍未找到。请缩小授权的文件夹范围，或手动找到文档</string>
+    <string name="storage_msg_duplicate_documents_found">找到同一份文档的多个副本。请手动选出原件，或把副本设为独立文档</string>
+    <string name="storage_msg_invalid_note_path">笔记路径无效</string>
+    <string name="storage_msg_pdf_resource_verify_failed">原始 PDF 校验未通过，可能已损坏</string>
+    <string name="storage_msg_pdf_resource_corrupt">找不到这份笔记使用的原始 PDF。可能是另一个安装版本迁移了它，或应用重装、清除过数据。笔迹和批注都还在：请重新选择当初那份 PDF，或仍包含它的旧笔记文件、导出包来重新关联</string>
+    <string name="storage_msg_pdf_resource_mismatch">所选文件和这份笔记的原始 PDF 不是同一份，没有做任何更改。请选择当初导入的那份 PDF，或包含它的旧笔记文件</string>
+    <string name="storage_msg_reference_metadata_invalid">无法确认这份文档的标识或页面链接信息，原文件没有改动。请检查原文件，或使用恢复资料。</string>
+    <string name="storage_msg_reference_write_context_invalid">这次保存和原文件的类型、页面链接或原始 PDF 对不上，没有覆盖原文件。请改用另存副本、恢复或升级。</string>
+    <string name="storage_msg_reference_source_changed">原文件在别处被改动过，为防止覆盖没有保存。你的修改仍在，请检查原文件或另存副本。</string>
+    <string name="storage_msg_native_creation_target_invalid">所选位置不是新建的空文件，没有覆盖它。请重新选择一个新文件。</string>
 </resources>

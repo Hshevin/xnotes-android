@@ -7,12 +7,12 @@
     <string name="split_picker_hint">Choose an imported PDF note, a note or a canvas from this workspace.</string>
     <string name="split_parent_folder">Parent folder</string>
     <string name="split_loading">Loading…</string>
-    <string name="split_no_documents">No notes or canvases in this folder.</string>
+    <string name="split_no_documents">No split files here.</string>
     <string name="split_replace_document">Replace this document</string>
     <string name="split_close_document">Close this document</string>
     <string name="split_drag_hint">Drag divider; double tap for equal halves</string>
     <string name="split_centered">50%</string>
-    <string name="split_save_before_replace">Save this canvas to a file before replacing it.</string>
+    <string name="split_save_before_replace">Save this document to a file before continuing.</string>
     <string name="split_locations">Locations</string>
     <string name="split_other_folder">Choose another folder</string>
     <string name="split_save">Save current split</string>

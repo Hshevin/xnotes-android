@@ -7,12 +7,12 @@
     <string name="split_picker_hint">选择当前工作文件夹中的 PDF 笔记、普通笔记或画布。</string>
     <string name="split_parent_folder">返回上级文件夹</string>
     <string name="split_loading">正在读取…</string>
-    <string name="split_no_documents">此文件夹中没有笔记或画布。</string>
+    <string name="split_no_documents">这里没有分屏文件。</string>
     <string name="split_replace_document">替换本侧文件</string>
     <string name="split_close_document">关闭本侧文件</string>
     <string name="split_drag_hint">拖动分割线调整比例，双击均分</string>
     <string name="split_centered">50%</string>
-    <string name="split_save_before_replace">请先将此画布保存为文件，再替换当前窗格。</string>
+    <string name="split_save_before_replace">请先把这份文档保存为文件，再继续。</string>
     <string name="split_locations">位置</string>
     <string name="split_other_folder">选择其他文件夹</string>
     <string name="split_save">保存当前分屏</string>

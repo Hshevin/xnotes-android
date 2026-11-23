@@ -54,7 +54,7 @@
     <string name="ai_attachment_preparing">附件准备中</string>
     <string name="ai_retry_save">重试</string>
     <string name="ai_locate">重新定位</string>
-    <string name="ai_open_source">打开原文</string>
+    <string name="ai_open_source">打开来源文档</string>
     <string name="ai_loading">正在读取…</string>
     <string name="ai_no_matches">没有匹配的会话</string>
     <string name="ai_no_chats">还没有会话</string>
@@ -76,10 +76,10 @@
     <string name="ai_history_loading">AI 历史正在载入，请稍后重试</string>
     <string name="ai_screenshot_too_large">截图过大，请缩小选区</string>
     <string name="ai_screenshot_failed">无法载入截图</string>
-    <string name="ai_source_unsaved">来源文档尚未保存，请先保存笔记</string>
+    <string name="ai_source_unsaved">来源文档还没保存，请先保存</string>
     <string name="ai_source_lost">来源文档已移动或替换，请重新定位</string>
     <string name="ai_source_wrong">所选文件不是该会话的来源文档</string>
-    <string name="ai_source_locate_failed">无法重新定位原文</string>
+    <string name="ai_source_locate_failed">找不到来源文档</string>
     <string name="ai_settings_row">供应商、模型与提示词</string>
     <string name="ai_settings_not_set">尚未配置</string>
     <string name="ai_settings_unreadable_short">配置无法读取</string>
@@ -94,7 +94,7 @@
     <string name="ai_settings_search_key">DeepSeek 搜索 API Key</string>
     <string name="ai_settings_privacy">密钥仅加密保存在本机，不随笔记导出。</string>
     <string name="ai_settings_clear">清除配置</string>
-    <string name="ai_settings_clear_confirm">清除地址、模型和全部密钥？</string>
+    <string name="ai_settings_clear_confirm">清除全部供应商、模型、密钥和 AI 设置？</string>
     <string name="ai_settings_clear_do">清除</string>
     <string name="ai_settings_cleared">已清除配置</string>
     <string name="ai_settings_unreadable">配置无法读取，请重新填写并保存。</string>
@@ -126,7 +126,7 @@
     <string name="ai_models_add">添加模型</string>
     <string name="ai_models_fetch">从供应商获取</string>
     <string name="ai_settings_thinking">思考</string>
-    <string name="ai_settings_thinking_note">仅对支持思考的模型生效。联网检索规划与 PDF 读取步骤不使用思考和自定义提示词。</string>
+    <string name="ai_settings_thinking_note">仅对支持思考的模型生效。模型不支持工具调用时，读取 PDF 的兼容步骤不使用思考深度和自定义提示词。</string>
     <string name="ai_thinking_default">默认思考深度</string>
     <string name="ai_thinking_format">参数格式</string>
     <string name="ai_thinking_format_note">思考深度通过哪个请求字段发送</string>
@@ -163,9 +163,9 @@
     <string name="ai_provider_name">显示名称</string>
     <string name="ai_provider_name_hint">显示在模型菜单中，如 DeepSeek</string>
     <string name="ai_provider_preset">预设</string>
-    <string name="ai_provider_preset_note">填入名称和接口地址；仍需填写自己的 Key 和模型</string>
+    <string name="ai_provider_preset_note">填入名称和接口地址；仍需填写自己的 API Key 和模型</string>
     <string name="ai_provider_preset_custom">自定义</string>
-    <string name="ai_provider_models_note">聊天模型或生图模型至少添加一个，使用该供应商要求的模型 ID。</string>
+    <string name="ai_provider_models_note">聊天模型或图像模型至少添加一个，使用该供应商要求的模型 ID。</string>
     <string name="ai_provider_delete">删除供应商</string>
     <string name="ai_provider_delete_confirm">删除此供应商？使用它的会话需要重新选择模型。</string>
     <string name="ai_provider_delete_do">删除</string>
@@ -189,8 +189,8 @@
     <string name="ai_tpl_gen_about">点按「生成」后，你的要求和 xtemplate 格式说明会发送给 %1$s · %2$s；结果经检查后加入模板库。</string>
     <string name="ai_tpl_gen_hint">描述想要的模板，例如：一周七列的习惯打卡表</string>
     <string name="ai_tpl_gen_button">生成</string>
-    <string name="ai_tpl_gen_writing">正在生成模板…已收到 %1$d 字</string>
-    <string name="ai_tpl_gen_fixing">正在修正模板（第 %1$d / %2$d 次）…已收到 %3$d 字</string>
+    <string name="ai_tpl_gen_writing">正在生成模板… 已收到 %1$d 个字符</string>
+    <string name="ai_tpl_gen_fixing">正在修正模板（第 %1$d / %2$d 次）… 已收到 %3$d 个字符</string>
     <string name="ai_tpl_gen_checking">正在检查模板…</string>
     <string name="ai_tpl_gen_no_provider">在 AI 设置中添加模型供应商后，即可在应用内生成模板。</string>
     <string name="ai_tpl_gen_open_settings">打开 AI 设置</string>
@@ -206,20 +206,22 @@
     <string name="ai_prompt_cover_paint_leather">一个仿深棕色皮革的封面，带压印边框和金色标题标签。</string>
     <string name="ai_prompt_cover_paint_circles">一个封面：深蓝与青绿半透明圆形相互重叠的生成式图案，加细金色边框和标题标签。</string>
     <string name="ai_settings_image">图像模型</string>
-    <string name="ai_settings_image_note">用于在新建笔记中生成封面图片。从各供应商的生图模型中选择；在供应商设置中添加或获取生图模型。</string>
+    <string name="ai_settings_image_note">用于在新建笔记中生成封面图片。从各供应商的图像模型中选择；在供应商设置中添加或获取图像模型。</string>
     <string name="ai_image_none">不使用</string>
     <string name="ai_image_model_hint">例如 gpt-image-1</string>
-    <string name="ai_models_image">生图模型</string>
+    <string name="ai_models_image">图像模型</string>
     <string name="ai_models_image_note">用于在新建笔记中生成封面图片。需要供应商提供 OpenAI 兼容的图像接口（/images/generations），例如 OpenAI 的 gpt-image。</string>
-    <string name="ai_models_image_empty">还没有生图模型。输入名称添加，或从供应商获取后勾选。</string>
-    <string name="ai_models_image_add">添加生图模型</string>
-    <string name="ai_models_other">其他（可能不能用于聊天）</string>
-    <string name="ai_provider_image_count">生图 %1$d</string>
+    <string name="ai_models_image_empty">还没有图像模型。输入名称添加，或从供应商获取后勾选。</string>
+    <string name="ai_models_image_add">添加图像模型</string>
+    <string name="ai_models_other">其他（可能不支持聊天）</string>
+    <plurals name="ai_provider_image_count">
+        <item quantity="other">%d 个图像模型</item>
+    </plurals>
     <string name="ai_tpl_gen_text_model">文字模型</string>
     <string name="ai_tpl_gen_image_model">图像模型</string>
     <string name="ai_tpl_gen_default">默认（%1$s）</string>
     <string name="ai_tpl_gen_picture_title">生成图片</string>
-    <string name="ai_tpl_gen_image_model_needed">在 AI 设置的供应商中添加生图模型后，即可生成图片。</string>
+    <string name="ai_tpl_gen_image_model_needed">在 AI 设置的供应商中添加图像模型后，即可生成图片。</string>
 
     <!-- 原始报错与配置文件可视化/JSON 编辑器 -->
     <string name="ai_raw_error_show">原始报错</string>
@@ -231,19 +233,19 @@
     <string name="ai_config_import">导入…</string>
     <string name="ai_config_export">导出…</string>
     <string name="ai_config_copy">复制</string>
-    <string name="ai_config_copied">已复制配置 JSON</string>
+    <string name="ai_config_copied">已复制配置</string>
     <string name="ai_config_imported">已导入配置文件</string>
     <string name="ai_config_exported">已导出配置文件</string>
     <string name="ai_config_io_failed">无法读取或写入配置文件</string>
     <string name="ai_config_file_too_large">配置文件过大（最大 2 MB）</string>
     <string name="ai_config_import_title">导入配置文件</string>
     <string name="ai_config_import_note">「合并导入」保留已有供应商和历史会话绑定；「覆盖全部」将替换整套 AI 设置。脱敏或留空的密钥仅在供应商主机一致时沿用本机已保存的密钥。</string>
-    <string name="ai_config_import_merge">合并导入（保留已有）</string>
+    <string name="ai_config_import_merge">合并导入</string>
     <string name="ai_config_import_replace">覆盖全部</string>
     <string name="ai_config_export_title">导出配置文件</string>
     <string name="ai_config_export_note">默认脱敏导出（不含 API Key），更适合分享或保存模板；仅在个人私密备份时选择「包含 API Key」。</string>
-    <string name="ai_config_export_redacted">不含 API Key（推荐）</string>
-    <string name="ai_config_export_with_keys">包含 API Key</string>
+    <string name="ai_config_export_redacted">不含密钥</string>
+    <string name="ai_config_export_with_keys">包含密钥</string>
     <string name="ai_config_json_note">密钥默认脱敏显示为 ***REDACTED***；保持占位符不变会自动沿用本机已保存的密钥。</string>
     <string name="ai_thinking_levels_title">思考深度请求字段</string>
     <string name="ai_thinking_levels_note">每个思考深度发送时合入请求体的 JSON 字段；默认跟随上方参数格式，也可按需增删改。</string>

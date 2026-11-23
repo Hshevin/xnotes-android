@@ -7,5 +7,5 @@
     <string name="number_invalid">请输入范围内的有效页码</string>
     <string name="number_current">绝对 %1$d / %2$d · 正文 %3$s</string>
     <string name="number_hint">正文前：i、ii、iii…</string>
-    <string name="number_use_current">添加该页为起始页</string>
+    <string name="number_use_current">设当前页为正文起始页</string>
 </resources>

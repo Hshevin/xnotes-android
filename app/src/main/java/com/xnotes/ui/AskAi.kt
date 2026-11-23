@@ -325,7 +325,7 @@ private fun AiModelPicker(available: List<String>, chat: List<String>, images: L
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
                 leadingIcon = { Icon(XnotesIcons.search, null, Modifier.size(18.dp)) }, placeholder = { Text(stringResource(R.string.ai_models_filter)) })
             Text(pluralStringResource(R.plurals.ai_models_count, shown.size, shown.size) + " · " +
-                stringResource(R.string.ai_models_saved_count, chat.size, AiProtocol.MAX_MODELS) + " · " + stringResource(R.string.ai_provider_image_count, images.size),
+                stringResource(R.string.ai_models_saved_count, chat.size, AiProtocol.MAX_MODELS) + " · " + pluralStringResource(R.plurals.ai_provider_image_count, images.size, images.size),
                 color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
             // Ticking past the limit is refused here, not trimmed on save.
             if (full) Text(AiText.t(AiMsg.CONFIG_TOO_MANY_MODELS, AiProtocol.MAX_MODELS), color = palette.text.toComposeColor(), fontSize = TextSize.label)
@@ -661,7 +661,7 @@ private fun AiProviderRow(provider: AiProvider, isDefault: Boolean, onClick: () 
             Text(provider.label, color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val images = provider.imageChoices.size
             Text(listOf(host, pluralStringResource(R.plurals.ai_provider_models, count, count),
-                if (images > 0) stringResource(R.string.ai_provider_image_count, images) else "").filter(String::isNotEmpty).joinToString(" · "),
+                if (images > 0) pluralStringResource(R.plurals.ai_provider_image_count, images, images) else "").filter(String::isNotEmpty).joinToString(" · "),
                 color = palette.textDim.toComposeColor(), fontSize = TextSize.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (isDefault) Text(stringResource(R.string.ai_model_default),

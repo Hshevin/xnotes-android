@@ -16,7 +16,7 @@
     <string name="pen_shortcuts_invalid">无法保存：映射中有重复或无效按键，或已超过数量上限。</string>
     <string name="pen_shortcut_near_screen">此映射需要笔靠近屏幕。若需远离屏幕使用遥控按键，请在远处重新录入。</string>
     <string name="pen_record_multiple">检测到多个按键，请一次只录入一个按键。</string>
-    <string name="pen_single_press">单击/按住</string>
+    <string name="pen_single_press">单击 / 按住</string>
     <string name="pen_double_press">双击</string>
     <string name="pen_double_delay">双击间隔：%1$d 毫秒</string>
     <string name="pen_double_delay_help">按键设置了双击动作时，单击切换工具或单击执行的操作会等待这段时间以判断是否双击；按住临时启用仍立即生效。</string>

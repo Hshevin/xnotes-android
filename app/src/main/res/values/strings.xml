@@ -44,7 +44,7 @@
     <string name="toolbar_zoom_lock">Zoom lock</string>
     <string name="toolbar_fullscreen">Full screen</string>
     <string name="toolbar_colours">Colours</string>
-    <string name="toolbar_waypoints">Waypoints</string>
+    <string name="toolbar_waypoints">Saved views</string>
     <string name="toolbar_minimap">Minimap</string>
     <string name="edge_left">Left</string>
     <string name="edge_right">Right</string>
@@ -71,12 +71,12 @@
     <string name="caption_top_speed">Top speed</string>
     <string name="caption_tip_width">Tip width percentage</string>
     <string name="caption_width">Width</string>
-    <string name="caption_scale">Scale</string>
-    <string name="caption_dash">Dash</string>
+    <string name="caption_scale">Scale with zoom</string>
+    <string name="caption_dash">Dash length</string>
     <string name="caption_gap">Gap</string>
     <string name="caption_intensity">Intensity</string>
     <string name="caption_straight_line">Straight line</string>
-    <string name="caption_inverse">Inverse</string>
+    <string name="caption_inverse">Lighten on dark pages</string>
     <string name="caption_stabilization">Stabilization</string>
     <string name="caption_strength">Strength</string>
     <string name="caption_crossover">Crossover</string>
@@ -88,8 +88,8 @@
     <string name="tape_reveal_all">Reveal all</string>
     <string name="tape_cover_all">Cover all</string>
     <string name="title_styles">Styles</string>
-    <string name="all_pages">All Pages</string>
-    <string name="current_page">Current Page</string>
+    <string name="all_pages">All pages</string>
+    <string name="current_page">Current page</string>
     <string name="caption_page_colour">Page colour</string>
     <string name="caption_pattern">Pattern</string>
     <string name="none">None</string>
@@ -142,7 +142,7 @@
     <string name="eraser_stroke">Stroke</string>
     <string name="eraser_area">Area</string>
     <string name="caption_size">Size</string>
-    <string name="caption_switch_back">Switch back</string>
+    <string name="caption_switch_back">Switch back after use</string>
     <string name="caption_erase_markups">Erase PDF text markups</string>
     <string name="caption_scribble_erase">Scribble to erase</string>
     <string name="title_select">Select</string>
@@ -377,7 +377,7 @@
     <string name="err_storage_low">Storage is almost full, so the recording was stopped and placed.</string>
     <string name="audio_off_while_recording">Playback is off while recording.</string>
     <string name="fit_all">Fit all</string>
-    <string name="gl_unavailable">GL unavailable</string>
+    <string name="gl_unavailable">Graphics unavailable</string>
     <string name="canvas_out_of_memory">Out of memory, some ink hidden</string>
 
     <!-- Toolbar customizer -->
@@ -467,7 +467,7 @@
     <string name="templates_built_in">Built-in</string>
     <string name="templates_examples">Examples</string>
     <string name="templates_imported">Imported</string>
-    <string name="templates_imported_help">Kept in your notes folder, so they sync with your notes.</string>
+    <string name="templates_imported_help">Stored in your notes folder, so they travel with your notes.</string>
     <string name="cover_designs">Designs</string>
     <string name="import_template_file">Import template</string>
     <string name="page_from_image">Page template from image</string>
@@ -504,13 +504,13 @@
     <string name="custom_size_range">Each side between %1$s and %2$s mm</string>
     <string name="new_canvas">New canvas</string>
     <string name="about">About</string>
-    <string name="new_note_menu">New Note</string>
-    <string name="new_canvas_menu">New Canvas</string>
+    <string name="new_note_menu">New note</string>
+    <string name="new_canvas_menu">New canvas</string>
     <string name="import_pdf">Import PDF</string>
     <string name="create_new">New</string>
     <string name="choose_folder_hint">Choose a folder to keep and browse your notes in.</string>
     <string name="choose_folder">Choose folder</string>
-    <string name="use_app_storage">Use App Storage</string>
+    <string name="use_app_storage">Use app storage</string>
     <string name="new_folder">New folder</string>
     <string name="paste">Paste</string>
     <string name="clear_clipboard">Clear clipboard</string>
@@ -577,7 +577,7 @@
     <string name="remove_name">Remove name</string>
     <string name="name_this_colour">Name this colour</string>
     <string name="colour_name_placeholder">e.g. Important</string>
-    <string name="new_folder_menu">New Folder</string>
+    <string name="new_folder_menu">New folder</string>
     <string name="finding">Finding…</string>
     <string name="nothing_this_colour">Nothing has this colour.</string>
     <string name="recent_empty">Nothing opened yet. Notes and canvases you open show up here.</string>
@@ -712,7 +712,7 @@
     <string name="crop">Crop</string>
     <string name="group">Group</string>
     <string name="ungroup">Ungroup</string>
-    <string name="err_crop">Couldn’t crop the picture.</string>
+    <string name="err_crop">Couldn’t crop the image.</string>
     <string name="drag_to_reorder">Drag to reorder</string>
     <string name="err_paste_pages">Couldn’t paste the pages.</string>
     <string name="importing_markdown">Importing Markdown…</string>
@@ -828,7 +828,7 @@
     <string name="unlock">Unlock</string>
     <string name="paste_here">Paste here</string>
     <string name="paste_markdown">Paste as Markdown</string>
-    <string name="paste_code">Paste as Code</string>
+    <string name="paste_code">Paste as code</string>
 
     <!-- About -->
     <string name="app_tagline">A handwriting notes and sketching app for Android</string>
@@ -924,7 +924,7 @@
     <string name="caption_paper">Paper</string>
     <string name="paper_theme">Theme</string>
     <string name="default_for_new_canvases">Default for new canvases</string>
-    <string name="title_waypoints">Waypoints</string>
+    <string name="title_waypoints">Saved views</string>
     <string name="no_waypoints">No saved views yet.</string>
     <string name="caption_save_view">Save this view</string>
 

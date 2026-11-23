@@ -56,7 +56,7 @@
     <string name="ai_attachment_preparing">Preparing attachment</string>
     <string name="ai_retry_save">Retry</string>
     <string name="ai_locate">Locate</string>
-    <string name="ai_open_source">Open source</string>
+    <string name="ai_open_source">Open source document</string>
     <string name="ai_loading">Loading…</string>
     <string name="ai_no_matches">No matching chats</string>
     <string name="ai_no_chats">No chats yet</string>
@@ -65,7 +65,7 @@
     <string name="ai_replace_draft_text">Your unsent text and attachments will be replaced by this question.</string>
     <string name="ai_replace">Replace</string>
     <string name="ai_keep_draft">Keep draft</string>
-    <string name="ai_move_to_trash">Move to Trash</string>
+    <string name="ai_move_to_trash">Move to trash</string>
     <string name="ai_delete_chat">Delete “%1$s”</string>
     <string name="ai_trash_section">AI chats</string>
     <string name="ai_trash_row_sub">AI chat · from %1$s</string>
@@ -78,10 +78,10 @@
     <string name="ai_history_loading">AI history is still loading. Try again shortly.</string>
     <string name="ai_screenshot_too_large">Screenshot too large. Select a smaller area.</string>
     <string name="ai_screenshot_failed">Couldn\'t load the screenshot</string>
-    <string name="ai_source_unsaved">Save the note first</string>
+    <string name="ai_source_unsaved">Save the source document first</string>
     <string name="ai_source_lost">The source was moved or replaced. Locate it again.</string>
     <string name="ai_source_wrong">That file isn\'t this chat\'s source</string>
-    <string name="ai_source_locate_failed">Couldn\'t locate the source</string>
+    <string name="ai_source_locate_failed">Couldn’t find the source document</string>
     <string name="ai_settings_row">Provider, models and instructions</string>
     <string name="ai_settings_not_set">Not set up</string>
     <string name="ai_settings_unreadable_short">Settings unreadable</string>
@@ -96,7 +96,7 @@
     <string name="ai_settings_search_key">DeepSeek search API key</string>
     <string name="ai_settings_privacy">Keys stay encrypted on this device and are never exported.</string>
     <string name="ai_settings_clear">Clear settings</string>
-    <string name="ai_settings_clear_confirm">Clear the URL, model and all keys?</string>
+    <string name="ai_settings_clear_confirm">Clear all providers, models, keys and AI settings?</string>
     <string name="ai_settings_clear_do">Clear</string>
     <string name="ai_settings_cleared">Settings cleared</string>
     <string name="ai_settings_unreadable">Settings couldn\'t be read. Enter them again and save.</string>
@@ -128,7 +128,7 @@
     <string name="ai_models_add">Add model</string>
     <string name="ai_models_fetch">Fetch from provider</string>
     <string name="ai_settings_thinking">Thinking</string>
-    <string name="ai_settings_thinking_note">Only affects models that support thinking. Search planning and PDF reading steps never use thinking or your instructions.</string>
+    <string name="ai_settings_thinking_note">Only affects models that support thinking. If a model can’t call tools, the fallback PDF reading step uses neither thinking nor your instructions.</string>
     <string name="ai_thinking_default">Default thinking depth</string>
     <string name="ai_thinking_format">Parameter format</string>
     <string name="ai_thinking_format_note">The request field that carries the thinking level</string>
@@ -218,7 +218,10 @@
     <string name="ai_models_image_empty">No image models yet. Type a name, or fetch the provider’s list and tick them.</string>
     <string name="ai_models_image_add">Add image model</string>
     <string name="ai_models_other">Other (may not chat)</string>
-    <string name="ai_provider_image_count">%1$d image</string>
+    <plurals name="ai_provider_image_count">
+        <item quantity="one">%d image model</item>
+        <item quantity="other">%d image models</item>
+    </plurals>
     <string name="ai_tpl_gen_text_model">Text model</string>
     <string name="ai_tpl_gen_image_model">Image model</string>
     <string name="ai_tpl_gen_default">Default (%1$s)</string>
@@ -242,12 +245,12 @@
     <string name="ai_config_file_too_large">Configuration file is too large (max 2 MB)</string>
     <string name="ai_config_import_title">Import configuration</string>
     <string name="ai_config_import_note">Merge keeps existing providers and chat bindings; Replace overwrites all AI settings. Redacted or blank keys keep saved local keys only when the provider host matches.</string>
-    <string name="ai_config_import_merge">Merge (keep existing)</string>
+    <string name="ai_config_import_merge">Merge</string>
     <string name="ai_config_import_replace">Replace all</string>
     <string name="ai_config_export_title">Export configuration</string>
     <string name="ai_config_export_note">Exporting without API keys is safer for sharing. Choose “Include API keys” only for your own private backup.</string>
-    <string name="ai_config_export_redacted">Without API keys (recommended)</string>
-    <string name="ai_config_export_with_keys">Include API keys</string>
+    <string name="ai_config_export_redacted">Without keys</string>
+    <string name="ai_config_export_with_keys">Include keys</string>
     <string name="ai_config_json_note">Keys are hidden as ***REDACTED*** by default. Leaving a redacted key unchanged preserves the saved key on this device.</string>
     <string name="ai_thinking_levels_title">Thinking level fields</string>
     <string name="ai_thinking_levels_note">JSON fields merged into the request for each thinking level. Leave default to follow the format above.</string>

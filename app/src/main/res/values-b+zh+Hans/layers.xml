@@ -24,6 +24,6 @@
     <string name="layers_preview_failed">缩略图暂不可用</string>
     <string name="layers_preview_mode">缩略图显示</string>
     <string name="layers_preview_none">不显示</string>
-    <string name="layers_preview_content">已有笔记区域</string>
+    <string name="layers_preview_content">已有内容区域</string>
     <string name="layers_preview_page">整页笔记</string>
 </resources>

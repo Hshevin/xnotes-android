@@ -2,7 +2,7 @@
     <string name="workspace_switch">切换工作文件夹</string>
     <string name="workspace_add">添加文件夹…</string>
     <string name="workspace_unavailable">无法访问文件夹，请通过“添加文件夹”重新授权。当前工作文件夹未改变。</string>
-    <string name="workspace_save_failed">工作文件夹保存失败，已保留当前工作文件夹。</string>
+    <string name="workspace_save_failed">无法保存工作文件夹，当前工作文件夹保持不变。</string>
     <string name="folder_tree_expand">展开 %1$s</string>
     <string name="folder_tree_collapse">收起 %1$s</string>
 </resources>

@@ -29,7 +29,7 @@
     <string name="ai_msg_pdf_invalid">Not a valid PDF file</string>
     <string name="ai_msg_pdf_encrypted">Decrypt the PDF before attaching it</string>
     <string name="ai_msg_pdf_no_pages">PDF has no pages</string>
-    <string name="ai_msg_pdf_page_range_limit">Read 1–5 pages at a time</string>
+    <string name="ai_msg_pdf_page_range_limit">Invalid page range; read at most 5 pages at a time</string>
     <string name="ai_msg_pdf_page_text_too_long">Too much text on these pages. Narrow the page range or view the page image.</string>
     <string name="ai_msg_pdf_page_out_of_range">Page number out of range</string>
     <string name="ai_msg_pdf_tool_request_too_long">PDF tool request is too long</string>
@@ -44,14 +44,14 @@
     <string name="ai_msg_pdf_tool_search_range_invalid">Invalid PDF search range</string>
     <string name="ai_msg_pdf_tool_image_limit">Invalid page, or the 4-page image limit was reached</string>
     <string name="ai_msg_pdf_tool_unsupported">Unsupported PDF tool</string>
-    <string name="ai_msg_pdf_tool_budget_exceeded">PDF content exceeds this turn\'s budget. Narrow your question.</string>
-    <string name="ai_msg_endpoint_invalid">Enter an HTTPS endpoint without credentials, query or fragment</string>
+    <string name="ai_msg_pdf_tool_budget_exceeded">Too much PDF content for one answer. Ask a narrower question.</string>
+    <string name="ai_msg_endpoint_invalid">Enter an HTTPS endpoint without a username, password, query (?) or fragment (#)</string>
     <string name="ai_msg_model_required">Enter the name of a model that supports images</string>
     <string name="ai_msg_chat_too_long">Chat is too long. Start a new chat.</string>
-    <string name="ai_msg_search_query_length">Enter a search term of 1–128 characters</string>
+    <string name="ai_msg_search_query_length">Search query must be 1–128 characters</string>
     <string name="ai_msg_search_returned_error">DeepSeek search returned an error</string>
     <string name="ai_msg_pdf_service_unavailable">PDF reading is unavailable</string>
-    <string name="ai_msg_history_damaged">%1$d history or attachment records are damaged. The original files were kept.</string>
+    <string name="ai_msg_history_damaged">%1$d history or attachment records can’t be read. The original files were kept.</string>
     <string name="ai_msg_history_read_failed">Couldn\'t load history</string>
     <string name="ai_msg_history_save_failed">Couldn\'t save or delete history. Try again, and don\'t close the app.</string>
     <string name="ai_msg_draft_screenshot_unreadable">Couldn\'t read the draft screenshot. The original record was kept.</string>
@@ -75,7 +75,7 @@
     <string name="ai_msg_no_text_returned">The model returned no text</string>
     <string name="ai_msg_stopped_by_user">Generation stopped</string>
     <string name="ai_msg_request_failed">Request failed</string>
-    <string name="ai_msg_network_error">Network or response error. Check your settings.</string>
+    <string name="ai_msg_network_error">Network or server error. Check your connection and AI settings.</string>
     <string name="ai_msg_config_max_tokens_invalid">Max output must be between %1$d and %2$d tokens</string>
     <string name="ai_msg_config_instructions_too_long">Custom instructions can\'t exceed %1$d characters</string>
     <string name="ai_msg_config_thinking_invalid">Invalid thinking settings</string>
