@@ -29,6 +29,7 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
     private val templates = mutableMapOf<String, Template>()
     private val pictures = mutableMapOf<Pair<String, String>, ImageData>()
     private val frames = mutableMapOf<Boolean, FlowFrame>()
+    fun invalidateFlow() = frames.clear()
     private fun flow(night: Boolean) = if (doc.flow.isEmpty) null else frames.getOrPut(night) {
         FlowLayout(CgTextMeasurer).apply { autoColor = { if (night) white else black } }.layout(doc.flow,
             doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
@@ -36,19 +37,26 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
     }
     private var pdf: com.xnotes.nativelibs.PdfiumDocument? = null
 
-    fun page(index: Int, edge: Int): UIImage {
+    fun page(index: Int, edge: Int, upper: Boolean? = null): UIImage {
         val page = doc.pages[index]
         val cover = page.paperRect(doc)
         val scale = edge / maxOf(cover.w, cover.h)
         val surface = CgSurfaceFactory.create((cover.w * scale).roundToInt().coerceAtLeast(1), (cover.h * scale).roundToInt().coerceAtLeast(1))
         return try {
             val paper = page.resolvedPageColor(doc, if (dark && page.pdfPage == null) black else white) ?: white
-            surface.fill(paper)
+            surface.fill(if (upper == true) Rgba(0, 0, 0, 0) else paper)
             val raw = surface.renderer()
             val night = NightInk.enabled(dark, paper, page.pdfPage != null)
             val renderer = if (night) NightInkRenderer(raw) else raw
             renderer.scale(scale, scale)
             renderer.translate(-cover.x, -cover.y)
+            val items = if (upper == null) page.visibleItems else {
+                val topIds = page.layers.entries.dropWhile { it.id != page.layers.activeId }.drop(1).map { it.id }.toSet()
+                page.visibleItems.filter { ((it.layerId ?: DrawingLayers.DEFAULT) in topIds) == upper }
+            }
+            if (upper == true) {
+                items.forEach { it.paint(renderer) }; return surface.image()
+            }
             background(page, renderer, cover)
             val pdfIndex = page.pdfPage
             if (pdfIndex != null) {
@@ -67,7 +75,7 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
                     }
                 } finally { original.recycle() }
             } else MarkupPainter.paint(renderer, page.markups, doc.dpi / 72.0)
-            PageLayers.paint(page.visibleItems, {
+            PageLayers.paint(items, {
                 val text = flow(night) ?: return@paint
                 val flowRenderer = if (!night) renderer else object : Renderer by renderer {
                     override fun drawTextRun(text: String, x: Double, baseline: Double, font: FontSpec, color: Rgba) =

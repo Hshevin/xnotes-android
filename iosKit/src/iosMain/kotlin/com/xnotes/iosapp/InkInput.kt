@@ -5,7 +5,6 @@ package com.xnotes.iosapp
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Stroke
-import com.xnotes.core.pal.NightInk
 import com.xnotes.edit.PageSpace
 import com.xnotes.pen.pencil.*
 import kotlinx.cinterop.*
@@ -26,6 +25,8 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
                         private val navigate: (Boolean) -> Unit) : UIView(frame = CGRectZero.readValue()) {
     private var owner: UITouch? = null
     private var ink: InkGesture? = null
+    var layered: LayeredInk? = null
+    private fun refreshInk() { layered?.update(ink); setNeedsDisplay() }
     private var hover: Pt? = null
     private var detached = false
     private val pencilDelegate = object : NSObject(), UIPencilInteractionDelegateProtocol {
@@ -69,12 +70,12 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
         if (pencil != null) navigate(false)
         val batch = actual(next, withEvent)
         val gesture = InkGesture(editor, space, pencil != null && (next.maximumPossibleForce > 0 || traitCollection.forceTouchCapability == UIForceTouchCapabilityAvailable))
-        ink = gesture; gesture.begin(batch.first()); gesture.move(batch.drop(1), predicted(next, withEvent)); setNeedsDisplay()
+        ink = gesture; gesture.begin(batch.first()); gesture.move(batch.drop(1), predicted(next, withEvent)); refreshInk()
     }
 
     override fun touchesMoved(touches: Set<*>, withEvent: UIEvent?) {
         val touch = owner?.takeIf { it in touches } ?: return
-        ink?.move(actual(touch, withEvent), predicted(touch, withEvent)); setNeedsDisplay()
+        ink?.move(actual(touch, withEvent), predicted(touch, withEvent)); refreshInk()
     }
 
     override fun touchesEstimatedPropertiesUpdated(touches: Set<*>) {
@@ -82,7 +83,7 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
         touches.filterIsInstance<UITouch>().filter { it.type == UITouchTypePencil && it.estimatedPropertiesExpectingUpdates and UITouchPropertyForce == 0L }.forEach {
             it.estimationUpdateIndex?.let { index -> ink?.update(index.longLongValue, it.force, it.maximumPossibleForce) }
         }
-        setNeedsDisplay()
+        refreshInk()
     }
 
     override fun touchesEnded(touches: Set<*>, withEvent: UIEvent?) {
@@ -97,6 +98,7 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     private fun finish(last: List<PencilSample>, cancelled: Boolean) {
         val pencil = owner?.type == UITouchTypePencil
         val gesture = ink; ink = null; owner = null
+        layered?.update(null)
         gesture?.finish(last, cancelled)
         if (pencil) navigate(true)
         setNeedsDisplay()
@@ -119,29 +121,12 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     }
 
     private fun ribbon(context: CGContextRef, page: Int, stroke: Stroke) {
-        if (!space.writable(page)) return
-        val color = NightInk.displayColor(stroke.renderColor, space.night(page))
+        if (!space.writable(page) || layered?.handles?.invoke(page) == true) return
         CGContextSaveGState(context)
         space.paper(page)?.let { CGContextClipToRect(context, CGRectMake(it.x, it.y, it.w, it.h)) }
         val offset = space.fromPage(page, Pt.ZERO)
         CGContextTranslateCTM(context, offset.x, offset.y)
-        CGContextSetRGBFillColor(context, color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0)
-        val geometry = stroke.geometry()
-        val path = CGPathCreateMutable() ?: return CGContextRestoreGState(context)
-        try {
-            fun disc(x: Double, y: Double, radius: Double) = CGPathAddEllipseInRect(path, null, CGRectMake(x-radius, y-radius, radius*2, radius*2))
-            if (geometry.hasRails) {
-                CGPathMoveToPoint(path, null, geometry.leftX(0), geometry.leftY(0))
-                for (index in 1 until geometry.pointCount) CGPathAddLineToPoint(path, null, geometry.leftX(index), geometry.leftY(index))
-                for (index in geometry.pointCount-1 downTo 0) CGPathAddLineToPoint(path, null, geometry.rightX(index), geometry.rightY(index))
-                CGPathCloseSubpath(path)
-            }
-            if (geometry.pointCount > 0) {
-                val end = geometry.pointCount-1
-                disc(geometry.cx(0), geometry.cy(0), geometry.hw(0)); disc(geometry.cx(end), geometry.cy(end), geometry.hw(end))
-                CGContextAddPath(context, path); CGContextFillPath(context)
-            }
-        } finally { CGPathRelease(path); CGContextRestoreGState(context) }
+        drawWetStroke(context, stroke, space.night(page)); CGContextRestoreGState(context)
     }
 }
 
