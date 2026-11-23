@@ -57,3 +57,12 @@
 - Android 的 `InteractionController` 先用原始落点确定可写页，再将尺子吸附后的点传入捕获器，即使首点被投到页外也不重选页。颜色、清选区、按住成形、魔棒淡出、前缓冲、入页与简化、速度笔跨段宽度拼接、撤销仍由宿主负责。正常抬笔把整笔记为一步撤销；取消不提交当前尾段，已入页的前段仍可撤销。
 - JDK 21 下，原样运行 `PagedStrokeCaptureTest`：Android JVM 和 iPad Pro 13 英寸（M5）模拟器各 15 项通过。`:shared:testDebugUnitTest` 共 2,595 项、`:shared:iosSimulatorArm64Test` 共 2,391 项通过。共享测试编译时仅用未提交的初始化脚本隔离并行任务的 `LiteStoreTest.kt` 与 `CgTextTest.kt`，未改动测试源文件；此结果不代表完整第三波已验证。
 - `:app:testDebugUnitTest` 全部 1,784 项通过，含新增的三项 Android 宿主事件回归：跨页抬笔一步撤销／重做、取消仅保留已入页段、尺子将首点吸出页外。`:app:compileDebugAndroidTestKotlin` 与 `:app:assembleDebug` 通过。MovinkPad Pro 14／Android 15／Pro Pen 3 笔迹仪器测试及前缓冲显示**待真机回归**；未安装、推送、打包交付或发布。
+
+## W3-C 实现记录
+
+- `shared/src/commonMain/kotlin/com/xnotes/storage/lite/` 提供分页笔记与无限画布的打开、保存、后台恢复和明确丢弃。打开时只解码私有快照，不写原件；严格检查包类型、身份、页编号及 PDF 原件，保留旧笔迹采样。文稿目录以外的路径、符号链接、独立导图、分屏文件、损坏及未来版本的包不作为可写文档打开。未改动的保存不创建暂存文件，也不替换 inode。
+- 编辑后冻结模型；在文稿根目录的同卷隐藏文件使用共享编解码器写出，记录写出字节的 SHA-256，再回读暂存核对摘要、UUID、页序、成员类型与 PDF 原件摘要。发布前再次核对原件的设备号、inode 和完整摘要；iPad 在 `NSFileCoordinator` 授予写访问期间完成末验与原子替换，不跟随已改名的目标。返回成功只确认该次快照，生成快照后发生的编辑保持未保存。Android 应用没有改用此协议。
+- `writeRecovery()` 只由宿主在后台对脏会话调用。正文与记录以同一私有目录原子发布，记录携带相对文稿路径、打开时的实体与摘要、正文摘要；恢复仍用原凭据，不因路径现在可读而取得覆盖权。成功保存清理该会话的记录；失败与冲突保留私有副本；旧恢复、未认领、损坏及未来版本资料不被发现流程删除。`close()` 释放本次解码的工作资源，不隐式保存或丢弃未认领资料。
+- 失败边界：私有正文写成但校验或记录登记失败时，保留未授予覆盖权的原始候选，不替换上一份可恢复记录。若原件和私有副本**都不能写入**，无法返回一个确实存在的本次副本路径：`save()` 抛出 `LiteProtectionException`，保持 dirty，保留先前的恢复资料；宿主应提示并允许重试，不得关闭会话或报告已保护。
+- 双端验证：原 `LiteStoreTest` 10 项未改；新增 `LiteStoreEdgeTest` 13 项，包括画布图片／导图／笔迹、PDF 与批注原字节、原件同字节换 inode、同身份暂存换正文、发布中继续编辑、原件目录改名、冷恢复冲突、双重写入失败及损坏恢复保留。五类 W2-1 金样和 ZIP 布局测试原样通过，未重新生成。JDK 21：`:shared:testDebugUnitTest` 2,603 项，`:shared:iosSimulatorArm64Test`（iPad Pro 13 英寸 M5／iPadOS 27.2 模拟器）2,399 项，`:app:testDebugUnitTest` 1,781 项，均零失败、零跳过；`:app:assembleDebug` 通过。
+- 并行阶段仅在未提交的 `tmp/` Gradle 初始化脚本中隔离 W3-A 的 `CgTextTest.kt`、W3-B 的 `PagedStrokeCaptureTest.kt`；未修改两者，也不代表全波次联测。W3-D 仍需在输入稳定后串行使用同一会话并接入后台回调；「文件」App 并发操作、真实存储压力、后台终止及性能待 iPad 真机验收。未安装应用、推送或交付安装包。
