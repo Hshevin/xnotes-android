@@ -1,18 +1,28 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
 
 package com.xnotes.format
 
 import kotlinx.cinterop.*
 import platform.Foundation.*
 import platform.darwin.NSObject
-import platform.posix.snprintf
 
-internal actual fun fixedDecimal(value: Double, places: Int): String = memScoped {
-    val count = snprintf(null, 0u, "%.${places}f", value)
-    require(count >= 0)
-    val result = allocArray<ByteVar>(count + 1)
-    snprintf(result, (count + 1).convert(), "%.${places}f", value)
-    result.toKString()
+internal actual fun fixedDecimal(value: Double, places: Int): String {
+    if (!value.isFinite()) return value.toString()
+    val literal = kotlin.math.abs(value).toString().lowercase()
+    val significand = literal.substringBefore('e')
+    val point = significand.substringBefore('.').length + literal.substringAfter('e', "0").toInt()
+    val digits = significand.replace(".", "")
+    val cut = point + places
+    val rounded = digits.take(cut.coerceAtLeast(0)).padEnd(cut.coerceAtLeast(0), '0').toCharArray()
+    var carry = (digits.getOrNull(cut) ?: '0') >= '5'
+    for (index in rounded.indices.reversed()) {
+        if (!carry) break
+        carry = rounded[index] == '9'
+        rounded[index] = if (carry) '0' else rounded[index] + 1
+    }
+    val scaled = ((if (carry) "1" else "") + rounded.concatToString()).padStart(places + 1,'0')
+    val sign = if (value.toBits() < 0L) "-" else ""
+    return if (places == 0) sign + scaled else sign + scaled.dropLast(places) + "." + scaled.takeLast(places)
 }
 
 private class TreeReader : NSObject(), NSXMLParserDelegateProtocol {

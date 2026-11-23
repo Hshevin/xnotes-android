@@ -25,7 +25,7 @@ class MigrationJournal(directory: AssetFile) {
         checkActive()
         check(!fs.exists(marker)) { StorageText.t(StorageMsg.MIGRATION_RECOVERY_PENDING) }
         fs.createDirectories(root)
-        fun retain(file: AssetFile, name: String): String {
+        fun retain(file: AssetFile, name: String): Path {
             val path = root / name
             replace(path, checkActive) { output ->
                 val buffer = Buffer()
@@ -39,13 +39,13 @@ class MigrationJournal(directory: AssetFile) {
                 }
                 checkActive()
             }
-            return name
+            return path
         }
         fun hash(file: AssetFile) = BundleMigration.hash(file) { checkActive(); false }
         val original = retain(source, "original.zip")
         val candidate = retain(replacement, "candidate.zip")
-        val oldHash = hash((root / original).asAssetFile())
-        val newHash = hash((root / candidate).asAssetFile())
+        val oldHash = hash(original.asAssetFile())
+        val newHash = hash(candidate.asAssetFile())
         if (expectedCandidateHash != null && expectedCandidateHash != newHash || expectedOriginalHash != null && expectedOriginalHash != oldHash)
             throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         check(hash(source) == oldHash && hash(replacement) == newHash) { StorageText.t(StorageMsg.MIGRATION_VERIFY_FAILED) }

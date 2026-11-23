@@ -1,5 +1,10 @@
 package com.xnotes.format
 
+import com.xnotes.core.pal.*
+import com.xnotes.kio.*
+import okio.*
+import kotlin.test.assertFailsWith
+
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.infinite.InfiniteDocument
@@ -11,14 +16,11 @@ import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.map.MapModel
 import com.xnotes.map.NodeInk
-import java.util.zip.ZipFile
-import org.junit.Assert.*
-import org.junit.Rule
-import org.junit.Test
-import org.junit.rules.TemporaryFolder
+import com.xnotes.core.testkit.*
+import kotlin.test.Test
 
-class MapBundleStorageTest {
-    @get:Rule val temp = TemporaryFolder()
+class MapBundleStorageTest : BundleTestFiles() {
+    private val folder = testDirectory("map-bundle-")
 
     @Test fun speedInkWritesIdenticalStrokeFieldsOnTheCanvasAndInANode() {
         val codec = CanvasCodec(FakeImageCodec(), FakeTextMeasurer())
@@ -31,21 +33,21 @@ class MapBundleStorageTest {
         stroke.group = 3
         stroke.sync = SyncMark(7, 28)
         doc.add(stroke)
-        val tree = MapBundleFixture.state
+        val tree = SharedMapBundleFixture.state
         val root = tree.roots.single()
         doc.map = MapModel(tree.copy(nodes = mapOf(root to tree.nodes.getValue(root).copy(
             ink = NodeInk(100.0, 50.0, listOf(stroke))))))
-        val file = temp.newFile()
-        file.outputStream().use { codec.write(doc, it) }
-        ZipFile(file).use { zip ->
-            fun json(entry: String) = zip.getInputStream(zip.getEntry(entry)).bufferedReader().use { it.readText() }
+        val file = temporaryAsset("bundle-", ".zip", folder)
+        file.fileSink().use { codec.write(doc, it) }
+        bundleDirectory(file).use { zip ->
+            fun json(entry: String) = zip.open(entry).buffer().use { it.readUtf8() }
             val item = json("manifest.json").substringAfter("\"items\":[").removeSuffix("]}")
             val layerField = ""","layer":"${layer.id}"}"""
             assertTrue(item.endsWith(layerField))
             val expected = item.removeSuffix(layerField) + "}"
             assertTrue(json(MapJson.ENTRY).contains("\"strokes\":[$expected]"))
         }
-        val decoded = file.inputStream().use { codec.read(it) }
+        val decoded = file.input().use { codec.read(it) }
         val nodeInk = decoded.map.state.nodes.getValue(root).ink.strokes.single()
         assertEquals((decoded.items.single() as Stroke).samples, nodeInk.samples)
         assertEquals(stroke.sync, nodeInk.sync)
@@ -54,42 +56,42 @@ class MapBundleStorageTest {
     }
 
     @Test fun identityUpgradeIndependentCopyAndPortableExportKeepTheExactMapEntry() {
-        val source = temp.newFile()
-        MapBundleFixture.write(source, identity = null)
-        val original = source.readBytes()
-        val upgrade = BundleMigration.prepare(source, temp.root)
-        assertArrayEquals(original, source.readBytes())
-        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(upgrade.file))
+        val source = temporaryAsset("bundle-", ".zip", folder)
+        SharedMapBundleFixture.write(source, identity = null)
+        val original = source.fileBytes()
+        val upgrade = BundleMigration.prepare(source, folder)
+        assertArrayEquals(original, source.fileBytes())
+        assertArrayEquals(SharedMapBundleFixture.raw, SharedMapBundleFixture.entry(upgrade.file))
         val info = BundleReferenceInfo.inspectStrict(upgrade.file)
         assertEquals(CanvasCodec.FORMAT_WITH_MAP, info.format)
         assertEquals(DocumentKind.CANVAS, info.kind)
-        val copy = BundleMigration.prepareCopy(upgrade.file, temp.root, BundleIdentity().documentId)
+        val copy = BundleMigration.prepareCopy(upgrade.file, folder, BundleIdentity().documentId)
         assertNotEquals(upgrade.identity.documentId, copy.identity.documentId)
-        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(copy.file))
-        val portable = temp.newFile()
-        portable.outputStream().use { BundlePdf.write(copy.file, it, copy.identity, null, false) }
-        assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(portable))
-        assertEquals(copy.identity, BundleIdentity.read(portable))
+        assertArrayEquals(SharedMapBundleFixture.raw, SharedMapBundleFixture.entry(copy.file))
+        val portable = temporaryAsset("bundle-", ".zip", folder)
+        portable.fileSink().use { BundlePdf.write(copy.file, it, copy.identity, null, false) }
+        assertArrayEquals(SharedMapBundleFixture.raw, SharedMapBundleFixture.entry(portable))
+        assertEquals(copy.identity, readBundleIdentity(portable))
     }
 
     @Test fun refusedMapCannotAcquireAnIdentityThroughMigration() {
-        val source = temp.newFile()
-        val valid = String(MapBundleFixture.raw, Charsets.UTF_8)
+        val source = temporaryAsset("bundle-", ".zip", folder)
+        val valid = SharedMapBundleFixture.raw.decodeToString()
         for (bad in listOf(valid.replace("\"version\":1", "\"version\":2"),
                 valid.replace("\"id\":\"r\"", "\"id\":\"r\",\"layer\":\"lost\""))) {
-            MapBundleFixture.write(source, identity = null, map = bad.toByteArray())
-            val before = source.readBytes()
-            assertThrows(XCanvasFormatException::class.java) { BundleMigration.prepare(source, temp.root) }
-            assertArrayEquals(before, source.readBytes())
-            assertEquals(listOf(source), temp.root.listFiles()!!.toList())
+            SharedMapBundleFixture.write(source, identity = null, map = bad.encodeToByteArray())
+            val before = source.fileBytes()
+            assertFailsWith<XCanvasFormatException> { BundleMigration.prepare(source, folder) }
+            assertArrayEquals(before, source.fileBytes())
+            assertEquals(listOf(source), folder.fileNames().map(folder::child))
         }
     }
 
     @Test fun invalidMapsLeaveTheBundleAndOtherReadersAssetsIntact() {
         val codec = CanvasCodec(FakeImageCodec(), FakeTextMeasurer())
-        val assets = temp.newFolder()
-        val other = assets.resolve("other").apply { writeText("owned elsewhere") }
-        val valid = String(MapBundleFixture.raw, Charsets.UTF_8)
+        val assets = testDirectory("assets-")
+        val other = assets.child("other").apply { setText("owned elsewhere") }
+        val valid = SharedMapBundleFixture.raw.decodeToString()
         val cases = listOf(
             valid + " trailing", valid.replace("\"version\":1", "\"version\":1.9"),
             valid.replace("\"id\":\"r\"", "\"id\":\"r\",\"id\":\"s\""),
@@ -98,16 +100,16 @@ class MapBundleStorageTest {
             valid.replace("\"id\":\"r\"", "\"id\":\"r\",\"ink\":{\"w\":5,\"h\":5,\"strokes\":[{}]}"),
         )
         for (json in cases) {
-            val source = temp.newFile()
-            MapBundleFixture.write(source, map = json.toByteArray())
-            val before = source.readBytes()
-            assertThrows(XCanvasFormatException::class.java) { source.inputStream().use { codec.read(it, assets) } }
-            assertArrayEquals(before, source.readBytes())
-            assertEquals(listOf(other), assets.listFiles()!!.toList())
+            val source = temporaryAsset("bundle-", ".zip", folder)
+            SharedMapBundleFixture.write(source, map = json.encodeToByteArray())
+            val before = source.fileBytes()
+            assertFailsWith<XCanvasFormatException> { source.input().use { codec.read(it, assets) } }
+            assertArrayEquals(before, source.fileBytes())
+            assertEquals(listOf(other), assets.fileNames().map(assets::child))
         }
-        val unmarked = temp.newFile()
-        MapBundleFixture.write(unmarked, format = CanvasCodec.FORMAT)
-        assertThrows(XCanvasFormatException::class.java) { unmarked.inputStream().use { codec.read(it, assets) } }
-        assertEquals(listOf(other), assets.listFiles()!!.toList())
+        val unmarked = temporaryAsset("bundle-", ".zip", folder)
+        SharedMapBundleFixture.write(unmarked, format = CanvasCodec.FORMAT)
+        assertFailsWith<XCanvasFormatException> { unmarked.input().use { codec.read(it, assets) } }
+        assertEquals(listOf(other), assets.fileNames().map(assets::child))
     }
 }

@@ -1,12 +1,11 @@
 package com.xnotes.format
 
 internal class TestJsonTree private constructor(private val value: Any?) {
-    fun field(name: String) = (value as Map<*, *>).getValueOrError(name)
+    fun field(name: String) = (value as Map<*, *>)[name] as TestJsonTree
     fun item(index: Int) = (value as List<*>)[index] as TestJsonTree
     fun has(name: String) = (value as Map<*, *>).containsKey(name)
     fun string(name: String) = field(name).value as String
     val size get() = (value as List<*>).size
-    private fun Map<*, *>.getValueOrError(name: String) = get(name) as TestJsonTree
 
     companion object {
         fun parse(text: String): TestJsonTree {

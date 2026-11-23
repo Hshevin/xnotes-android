@@ -1,7 +1,7 @@
 # iPadOS 第二波契约（2026-11-24）
 
 用户要求：按 [iPadOS 移植方案](ipados-migration-plan-2026-11-23.md) 推进 M0–M2，由 gpt-6.2-astra 并行实现，主代理写契约与测试。
-状态：契约与 RED 测试已写，待实现
+状态：W2-1 已通过 Android JVM、ARM64 iOS 模拟器与两端编译验证；其他波次在各自工作树验证。
 本轮边界：只做本地提交；不推送、不打包、不安装到真机、不发布
 
 ## 分工调整
@@ -39,6 +39,29 @@ tmp/w2-legacy/gradlew -p tmp/w2-legacy :app:testDebugUnitTest --tests com.xnotes
 ```
 
 生成器固定文档时间和 UUID，调用旧 `DocumentCodec` / `CanvasCodec` 正常保存与重开，记录解出的 UUID、页序和各未压缩条目 CRC。`inkDigest` 在 ZIP 顺序下读取 `manifest.json`、`map.json`：对每个 `samples` 数组从 `[` 到 `]` 的原 UTF-8 字节按出现顺序连续计算 SHA-256，不经数值解析再打印。`verifyLegacyRoundTrip` 另行通过旧模型快照正常保存，核对条目顺序、压缩方法与 CRC。已用 `a07e803e` 的 JVM 编解码器通过这两项测试并登记五对文件；未来验证仅比较，不覆盖已提交的金样。**无易变条目**：五个包的所有条目内容在原版重存中均稳定；ZIP 物理头时间戳不属于条目内容，无须豁免。
+
+### W2-1 实现边界
+
+- `commonMain` 负责笔记和画布的读写、模板包、SVG/XFDF、图层与导图清单、引用与页编号、不可变快照、原字节升级与复制、PDF 内嵌与外部化、ZIP 尾部拼接和增量 PDF。顺序读取和按中央目录读取保持独立；对比两种条目视图、元信息、指纹和写回结果，不以重编码后的模型代替原始文件。
+- 导图的编辑、布局、命中、投影、剪贴板和来源解析共享；实际 SQLite 登记、通过 Android 编辑器打开来源与回跳留在 `:app`。共享存储负责版本与模型核验、只读页目录、创建许可和迁移日志的落盘与解释。SAF、同文件探测、PDF 资源租约的实际发放、恢复选择、交接凭据的验证和向原件发布仍在 Android 宿主；共享的来源、目录或日志记录均不能授权覆盖原件。
+- Android 继续使用 JDK ZIP/XML 和文件描述符适配；iOS 使用 Okio、zlib 与系统 XML 解析器。对同一金样，两端除内容和笔迹摘要外，还逐项比对重存后的物理条目顺序及 STORED/DEFLATED 方法。另有双端用例覆盖 CRC、数据描述符、ZIP64、尾随字节、半途取消及清理。需要观察借用的 JVM 通道位置、文件系统时间戳、Android 发布与恢复的测试仍保留在相应宿主。
+
+### W2-1 验证结果
+
+JDK 21、Gradle 8.13、AGP 8.12.3、Kotlin 2.2.21、Okio 3.10.2、Xcode 27.2。一次执行下列六项任务，结果为 `BUILD SUCCESSFUL in 4m 59s`：
+
+| 任务 | 结果 |
+| --- | --- |
+| `:shared:testDebugUnitTest` | 2,552 项通过 |
+| `:shared:iosSimulatorArm64Test` | 2,323 项通过 |
+| `:app:testDebugUnitTest` | 1,781 项通过 |
+| `:shared:compileKotlinIosArm64` | iOS 设备目标编译通过，未在设备运行 |
+| `:app:assembleDebug` | Android Debug 验证构建通过，未交付 |
+| `:app:compileDebugAndroidTestKotlin` | 仪器测试编译通过，未在设备运行 |
+
+三份测试报告均为零失败、零错误、零跳过。两端各执行五项原始 `BundleInteropTest` 和一项物理布局比对。按方法名对照，迁移前 `format/`、`map/`、`storage/` 下的 886 个测试方法均出现在本次共享 JVM 或应用 JVM 报告中。
+
+独立工作树未合并 W2-3 / W2-4。运行时临时移开其六个 RED 测试文件（`PencilStrokeAssemblerTest`、`PencilGesturesTest`、`IosStorageLocationsTest`、`CgRendererTest`、`MetalInkTest`、`IosAppManifestTest`），跑完后原样归还并核对与 Git 无差异；没有改动、禁用或提交删除这些测试。上述结论只针对 W2-1，合并后的全波次联测与真机验收仍待进行。
 
 ## W2-3 iPad 应用宿主
 

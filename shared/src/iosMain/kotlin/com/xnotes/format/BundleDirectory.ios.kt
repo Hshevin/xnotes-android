@@ -16,7 +16,17 @@ internal actual fun bundleDirectory(file: AssetFile): BundleDirectory {
         val length = handle.size()
         val span = minOf(length, 65557L).toInt()
         val tail = requireNotNull(handle.bytesAt(length - span, span))
-        val end = (span - 22 downTo 0).firstOrNull { tail.u32(it) == 0x06054b50L && it + 22 + tail.u16(it + 20) == span }
+        val end = (span - 22 downTo 0).firstOrNull { at ->
+            if (tail.u32(at) != 0x06054b50L) return@firstOrNull false
+            val commentEnd = at + 22 + tail.u16(at + 20)
+            if (commentEnd >= span) return@firstOrNull commentEnd == span
+            val physicalEnd = length - span + at
+            val central = tail.u32(at + 16)
+            val centralSize = tail.u32(at + 12)
+            if (tail.u16(at + 10) == 65535 || central == U32 || centralSize == U32)
+                return@firstOrNull handle.bytesAt(physicalEnd - 20,4)?.u32(0) == 0x07064b50L
+            central + centralSize == physicalEnd && centralSize >= 46 && handle.bytesAt(central,4)?.u32(0) == 0x02014b50L
+        }
             ?: throw IllegalArgumentException("Missing ZIP end record")
         require(tail.u16(end + 4) == 0 && tail.u16(end + 6) == 0) { "Multi-disk ZIP is unsupported" }
         var count = tail.u16(end + 10).toLong(); var size = tail.u32(end + 12); var offset = tail.u32(end + 16)
@@ -64,7 +74,7 @@ internal actual fun bundleDirectory(file: AssetFile): BundleDirectory {
         }
         return object : BundleDirectory {
             override val entries = entries
-            override val comment = if (tail.u16(end+20) == 0) null else tail.decodeToString(end+22,tail.size,throwOnInvalidSequence = true)
+            override val comment = if (tail.u16(end+20) == 0) null else tail.decodeToString(end+22,end+22+tail.u16(end+20),throwOnInvalidSequence = true)
             override fun close() = handle.close()
         }
     } catch (error: Throwable) {

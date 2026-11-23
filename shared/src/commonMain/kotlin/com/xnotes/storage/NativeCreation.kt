@@ -10,10 +10,15 @@ class NativeCreationIntent private constructor(private val issuer:Any,val kind:D
     class Stage internal constructor(val locationKey:String,val candidateSha256:String,val recordDigest:String)
     private val gate=CoreLock()
     private var consumed=false
+    private var permitIssued=false
     private var staged:Stage?=null
     internal fun consume(owner:Any) = gate.locked {
         if(owner!==issuer || consumed) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         consumed=true
+    }
+    internal fun claimPermit(owner:Any) = gate.locked {
+        if(owner!==issuer || !consumed || permitIssued) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
+        permitIssued=true
     }
     internal fun recordStage(owner:Any,locationKey:String,candidateSha256:String,recordDigest:String):Stage = gate.locked {
         if(owner!==issuer || !consumed || staged!=null) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
@@ -49,8 +54,10 @@ class NativeCreationPermit private constructor(
         return intent.recordStage(owner,locationKey,candidateSha256,recordDigest)
     }
     companion object {
-        internal fun issue(issuer:Any,intent:NativeCreationIntent,locationKey:String)=
-            NativeCreationPermit(issuer,intent,intent.kind,intent.documentId,locationKey)
+        internal fun issue(issuer:Any,intent:NativeCreationIntent,locationKey:String):NativeCreationPermit {
+            intent.claimPermit(issuer)
+            return NativeCreationPermit(issuer,intent,intent.kind,intent.documentId,locationKey)
+        }
     }
 }
 

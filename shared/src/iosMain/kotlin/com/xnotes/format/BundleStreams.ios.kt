@@ -26,7 +26,7 @@ internal actual fun decodeIdentity(data: BufferedSource): BundleIdentity {
     while (parser.hasNext()) when (parser.nextName()) {
         "version" -> version = if (parser.peek() == JsonPull.Token.STRING) parser.nextString().toInt() else parser.nextInt()
         "documentId" -> documentId = parser.nextString()
-        "pdfResource" -> if (parser.peek() == JsonPull.Token.STRING) pdf = parser.nextString() else parser.skipValue()
+        "pdfResource" -> pdf = if (parser.peek() == JsonPull.Token.STRING) parser.nextString() else { parser.skipValue(); null }
         else -> parser.skipValue()
     }
     parser.endObject()
