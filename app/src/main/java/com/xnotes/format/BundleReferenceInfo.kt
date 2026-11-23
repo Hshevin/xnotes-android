@@ -7,10 +7,10 @@ import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipFile
 
 /** Caller owns an immutable file. Inspects references without decoding ink or PDF. */
-internal class BundleReferenceInfo private constructor(val header:BundleHeader,val orderedPageIds:List<String>,
-                                                      val format:String?,val embeddedPdfHash:String?,val originalPdfHash:String?) {
-    val kind: DocumentKind? = kindOf(format)
-    val pageIds:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(orderedPageIds))
+internal class BundleReferenceInfo private constructor(override val header:BundleHeader,val orderedPageIds:List<String>,
+                                                      val format:String?,val embeddedPdfHash:String?,override val originalPdfHash:String?) : com.xnotes.storage.ReferenceInfo {
+    override val kind: DocumentKind? = kindOf(format)
+    override val pageIds:Set<String> = java.util.Collections.unmodifiableSet(LinkedHashSet(orderedPageIds))
     companion object {
         /** The marker changes when the first map is added or the last map is removed. */
         fun kindOf(format: String?): DocumentKind? = when {

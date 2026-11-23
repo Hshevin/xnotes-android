@@ -130,6 +130,7 @@ import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.FileStamp
 import com.xnotes.core.util.NameTemplate
 import com.xnotes.format.DocumentCodec
+import com.xnotes.format.peek
 import com.xnotes.format.SvgColors
 import com.xnotes.format.XNoteFormatException
 import com.xnotes.platform.AndroidImageCodec

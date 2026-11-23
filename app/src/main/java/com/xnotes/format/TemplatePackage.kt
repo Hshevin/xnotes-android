@@ -50,8 +50,7 @@ object TemplatePackage {
     }
 
     /** Whether [src] is a path an `image` may name: relative, with no `..` segment (SPEC §5.3). */
-    fun validSrc(src: String): Boolean =
-        src.isNotEmpty() && !src.startsWith("/") && src.split('/').none { it == ".." }
+    fun validSrc(src: String): Boolean = validTemplateImagePath(src)
 
     /** Copy picture [src] out of [file] into [dest]; false when it is missing or not allowed. */
     fun extract(file: File, src: String, dest: File): Boolean {

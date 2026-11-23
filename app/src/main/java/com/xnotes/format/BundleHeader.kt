@@ -17,8 +17,8 @@ import java.util.zip.ZipInputStream
 
 /** Metadata only. Absence is a header with null fields; null from the channel API means use fallback. */
 internal class BundleHeader private constructor(
-    val identity:BundleIdentity?,val anchors:AnchorMetadata?,private val rawAnchors:ByteArray?,
-) {
+    override val identity:BundleIdentity?,override val anchors:AnchorMetadata?,private val rawAnchors:ByteArray?,
+) : com.xnotes.storage.ReferenceHeader {
     init {require(anchors==null || identity?.documentId==anchors.documentId) {"Anchor metadata has no matching document identity"}}
     fun anchorBytesFor(target:BundleIdentity):ByteArray? = anchors?.let {
         if(identity!!.documentId==target.documentId) requireNotNull(rawAnchors).copyOf() else AnchorMetadata(target.documentId).bytes()

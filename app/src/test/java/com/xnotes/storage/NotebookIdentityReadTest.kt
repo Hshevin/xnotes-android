@@ -3,6 +3,7 @@ package com.xnotes.storage
 import android.content.ContextWrapper
 import android.net.Uri
 import com.xnotes.format.AnchorMetadata
+import com.xnotes.format.write
 import com.xnotes.format.BundleIdentity
 import java.io.File
 import java.nio.file.Files

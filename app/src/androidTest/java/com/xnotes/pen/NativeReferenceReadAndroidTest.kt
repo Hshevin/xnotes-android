@@ -4,6 +4,7 @@ import android.content.ContextWrapper
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import com.xnotes.format.AnchorMetadata
+import com.xnotes.format.write
 import com.xnotes.format.BundleIdentity
 import com.xnotes.storage.NativeReferenceReader
 import com.xnotes.storage.NotebookStorage

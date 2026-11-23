@@ -5,6 +5,25 @@ plugins {
 
 val emojiSource = layout.projectDirectory.file("src/commonMain/data/emoji.tsv")
 val emojiKotlin = layout.buildDirectory.dir("generated/emoji/kotlin")
+val interopFixtures = layout.projectDirectory.dir("src/commonTest/fixtures/interop")
+val fixtureKotlin = layout.buildDirectory.dir("generated/interop-test/kotlin")
+val generateInteropFixtures by tasks.registering {
+    inputs.dir(interopFixtures)
+    outputs.dir(fixtureKotlin)
+    doLast {
+        val file = fixtureKotlin.get().file("com/xnotes/format/interop/GoldenBytes.kt").asFile
+        file.parentFile.mkdirs()
+        file.writeText(buildString {
+            appendLine("package com.xnotes.format.interop")
+            appendLine("internal val goldenHex = mapOf(")
+            for (fixture in interopFixtures.asFile.listFiles()!!.filter { it.isFile && !it.isHidden }.sortedBy { it.name }) {
+                val hex = fixture.readBytes().joinToString("") { "%02x".format(it) }
+                appendLine("    \"${fixture.name}\" to \"$hex\",")
+            }
+            appendLine(")")
+        })
+    }
+}
 val generateEmojiAliases by tasks.registering {
     inputs.file(emojiSource)
     outputs.dir(emojiKotlin)
@@ -19,7 +38,7 @@ val generateEmojiAliases by tasks.registering {
 
 kotlin {
     compilerOptions {
-        optIn.addAll("kotlin.uuid.ExperimentalUuidApi", "kotlin.concurrent.atomics.ExperimentalAtomicApi")
+        optIn.addAll("kotlin.uuid.ExperimentalUuidApi", "kotlin.time.ExperimentalTime", "kotlin.concurrent.atomics.ExperimentalAtomicApi")
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
     androidTarget {
@@ -30,11 +49,11 @@ kotlin {
 
     sourceSets {
         commonMain { kotlin.srcDir(generateEmojiAliases) }
-        commonTest { kotlin.srcDir("src/commonTestFixtures/kotlin") }
+        commonTest { kotlin.srcDir("src/commonTestFixtures/kotlin"); kotlin.srcDir(generateInteropFixtures) }
         commonMain.dependencies { api(libs.okio) }
         commonTest.dependencies { implementation(kotlin("test")) }
         androidMain.dependencies { implementation(libs.bundles.commonmark) }
-        androidUnitTest.dependencies { implementation(libs.junit) }
+        androidUnitTest.dependencies { implementation(libs.junit); implementation(libs.json) }
     }
 }
 
