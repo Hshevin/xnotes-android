@@ -42,7 +42,7 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
         override fun gestureRecognizer(gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWithGestureRecognizer: UIGestureRecognizer): Boolean =
             setOf(gestureRecognizer, shouldRecognizeSimultaneouslyWithGestureRecognizer) == setOf(panGesture, pinchGesture)
     }
-    private val input = InkInput(editor, object : InkSpace {
+    private val space = object : InkSpace {
         override val origin get() = Pt(view.scrollX, view.scrollY)
         override val zoom get() = view.zoom / (window?.screen?.scale ?: contentScaleFactor)
         override fun paper(page: Int): Rect? = null
@@ -52,7 +52,9 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
         override fun pageAt(content: Pt) = 0
         override fun toPage(page: Int, content: Pt) = content
         override fun fromPage(page: Int, local: Pt) = local
-    }) { enabled -> panGesture.enabled = enabled; pinchGesture.enabled = enabled }
+    }
+    private val input = InkInput(editor, space) { enabled -> panGesture.enabled = enabled; pinchGesture.enabled = enabled }
+    private val textInput = TextSurface(editor, space) { paper.luminance() < 0.5 }
     private val invalidateItems: () -> Unit = ::refreshItems
 
     init {
@@ -67,7 +69,7 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
             override fun remove(item: CanvasItem) { projected.remove(item) }
         }, night = night, layerFor = { id -> id?.takeIf { it in layers } ?: layers.firstOrNull() })
         mapItems = map.items.toList(); refreshItems()
-        addSubview(input)
+        addSubview(input); addSubview(textInput.view)
         addGestureRecognizer(panGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
         addGestureRecognizer(pinchGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
         configure(editor.finger); editor.invalidate = invalidateItems
@@ -75,16 +77,17 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
 
     private fun refreshItems() { items = doc.layers.ordered(doc.items.toList() + mapItems); cache.clear(); setNeedsLayout() }
     fun configure(finger: Boolean) {
-        panGesture.minimumNumberOfTouches = if (finger) 2u else 1u
+        textInput.configure(); panGesture.minimumNumberOfTouches = if (finger || !textInput.view.hidden) 2u else 1u
         panGesture.maximumNumberOfTouches = panGesture.minimumNumberOfTouches
     }
-    fun close() { input.close(); if (editor.invalidate === invalidateItems) editor.invalidate = null }
+    fun close() { textInput.close(); input.close(); if (editor.invalidate === invalidateItems) editor.invalidate = null }
 
     override fun layoutSubviews() {
         super.layoutSubviews()
         val width = bounds.useContents { size.width }; val height = bounds.useContents { size.height }
         if (width <= 0 || height <= 0) return
         input.setFrame(bounds)
+        textInput.view.setFrame(bounds)
         val density = window?.screen?.scale ?: contentScaleFactor
         val first = view.widthPx == 0
         view.widthPx = (width * density).roundToInt(); view.heightPx = (height * density).roundToInt()
@@ -121,6 +124,7 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
     }
 
     private fun redraw() {
+        textInput.view.setNeedsDisplay()
         if (window == null || view.widthPx == 0) return
         try {
             val area = view.visibleContentRect()

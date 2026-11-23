@@ -45,24 +45,39 @@ object CgTextMeasurer : TextMeasurer {
     }
 
     private fun lines(text: String, spec: FontSpec, width: Double, wrap: Boolean, color: Rgba? = null,
+                      carets: ((Int, DoubleArray) -> Unit)? = null,
                       paint: ((CTLineRef, Int) -> Unit)? = null): Int {
         var count = 0
+        var base = 0
         for (paragraph in text.split('\n')) {
-            if (paragraph.isEmpty()) { count++; continue }
+            if (paragraph.isEmpty()) { carets?.invoke(base, doubleArrayOf(width / 2)); base++; count++; continue }
             withSetter(paragraph, spec, color) { setter ->
                 var start = 0L
                 while (start < paragraph.length) {
                     val length = if (wrap) CTTypesetterSuggestLineBreak(setter, start, width.coerceAtLeast(1.0)).coerceAtLeast(1L)
                         else paragraph.length - start
-                    if (paint != null) {
+                    if (paint != null || carets != null) {
                         val line = checkNotNull(CTTypesetterCreateLine(setter, CFRangeMake(start, length)))
-                        try { paint(line, count) } finally { CFRelease(line) }
+                        try {
+                            carets?.let { record ->
+                                val left = (width - CTLineGetTypographicBounds(line, null, null, null)) / 2
+                                record(base + start.toInt(), DoubleArray(length.toInt() + 1) {
+                                    left + CTLineGetOffsetForStringIndex(line, start + it, null)
+                                })
+                            }
+                            paint?.invoke(line, count)
+                        } finally { CFRelease(line) }
                     }
                     count++; start += length
                 }
             }
+            base += paragraph.length + 1
         }
         return count
+    }
+
+    fun labelCaretLines(text: String, font: FontSpec, width: Double): List<Pair<Int, DoubleArray>> = buildList {
+        lines(text, font, width, true, carets = { start, offsets -> add(start to offsets) })
     }
 
     override fun measure(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags) =

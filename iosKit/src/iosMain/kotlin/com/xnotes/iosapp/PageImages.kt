@@ -29,7 +29,8 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
     private val templates = mutableMapOf<String, Template>()
     private val pictures = mutableMapOf<Pair<String, String>, ImageData>()
     private val frames = mutableMapOf<Boolean, FlowFrame>()
-    private fun flow(night: Boolean) = if (doc.flow.isEmpty) null else frames.getOrPut(night) {
+    fun invalidateFlow() = frames.clear()
+    fun flow(night: Boolean) = frames.getOrPut(night) {
         FlowLayout(CgTextMeasurer).apply { autoColor = { if (night) white else black } }.layout(doc.flow,
             doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
             firstPage = if (doc.pages.size > 1 && doc.pages[0].cover) 1 else 0)
@@ -68,7 +69,8 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
                 } finally { original.recycle() }
             } else MarkupPainter.paint(renderer, page.markups, doc.dpi / 72.0)
             PageLayers.paint(page.visibleItems, {
-                val text = flow(night) ?: return@paint
+                if (doc.flow.isEmpty) return@paint
+                val text = flow(night)
                 val flowRenderer = if (!night) renderer else object : Renderer by renderer {
                     override fun drawTextRun(text: String, x: Double, baseline: Double, font: FontSpec, color: Rgba) =
                         renderer.drawTextRun(text, x, baseline, font, NightInk.color(color))

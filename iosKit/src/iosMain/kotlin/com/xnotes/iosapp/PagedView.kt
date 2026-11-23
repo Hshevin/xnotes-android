@@ -21,7 +21,9 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
     private val frames = doc.pages.map { it.paperRect(doc) }
     private var topLeft = Pt.ZERO
     private val input: InkInput
+    private val textInput: TextSurface
     private val invalidatePages: () -> Unit = {
+        painter.invalidateFlow()
         visible.values.forEach { it.removeFromSuperview() }; visible.clear(); setNeedsLayout()
     }
     private val visible = mutableMapOf<Int, UIImageView>()
@@ -44,7 +46,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         delegate = zoomDelegate
         delaysContentTouches = false
         panGestureRecognizer.allowedTouchTypes = fingerTypes; pinchGestureRecognizer?.allowedTouchTypes = fingerTypes
-        input = InkInput(editor, object : InkSpace {
+        val space = object : InkSpace {
             override val origin get() = topLeft
             override val zoom get() = zoomScale
             override fun paper(page: Int) = places[page]
@@ -58,8 +60,12 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
                 val model = doc.pages[page]
                 return NightInk.enabled(dark, model.resolvedPageColor(doc, if (dark) black else white) ?: white, model.pdfPage != null)
             }
-        }) { enabled -> panGestureRecognizer.enabled = enabled; pinchGestureRecognizer?.enabled = enabled }
-        addSubview(input); configure(editor.finger); editor.invalidate = invalidatePages
+        }
+        input = InkInput(editor, space) { enabled -> panGestureRecognizer.enabled = enabled; pinchGestureRecognizer?.enabled = enabled }
+        textInput = TextSurface(editor, space, painter) { index -> doc.pages[index].let { page ->
+            page.pdfPage == null && (page.resolvedPageColor(doc, if (dark) black else white) ?: white).luminance() < 0.5
+        } }
+        addSubview(input); addSubview(textInput.view); configure(editor.finger); editor.invalidate = invalidatePages
     }
 
     override fun layoutSubviews() {
@@ -75,6 +81,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         }
         val viewport = convertRect(bounds, toView = paper).useContents { Rect(origin.x, origin.y, size.width, size.height) }
         topLeft = Pt(viewport.x, viewport.y); input.setFrame(bounds)
+        textInput.view.setFrame(bounds); textInput.view.setNeedsDisplay()
         val indices = places.indices.filter { places[it].intersects(viewport) }.toSet()
         for (index in visible.keys - indices) visible.remove(index)?.removeFromSuperview()
         try {
@@ -88,10 +95,12 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         } catch (_: Exception) { close(); fail() }
     }
 
-    fun configure(finger: Boolean) { panGestureRecognizer.minimumNumberOfTouches = if (finger) 2u else 1u }
+    fun configure(finger: Boolean) {
+        textInput.configure(); panGestureRecognizer.minimumNumberOfTouches = if (finger || !textInput.view.hidden) 2u else 1u
+    }
     fun close() {
         if (closed) return
-        closed = true; delegate = null; input.close(); painter.close()
+        closed = true; delegate = null; textInput.close(); input.close(); painter.close()
         if (editor.invalidate === invalidatePages) editor.invalidate = null
     }
 

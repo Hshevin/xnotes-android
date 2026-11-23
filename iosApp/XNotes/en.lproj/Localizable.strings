@@ -16,6 +16,11 @@
 "pen" = "Pen";
 "highlighter" = "Highlighter";
 "eraser" = "Eraser";
+"text" = "Text";
+"text_editor" = "Document text editor";
+"text_bold" = "Bold";
+"text_italic" = "Italic";
+"text_list" = "List";
 "undo" = "Undo";
 "redo" = "Redo";
 "settings" = "Tool settings";

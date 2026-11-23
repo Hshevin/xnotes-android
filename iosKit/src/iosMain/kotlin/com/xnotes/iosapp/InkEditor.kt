@@ -31,6 +31,8 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     private var pendingBack = false
     private var pendingBackground = false
     var invalidate: (() -> Unit)? = null
+    var textSurface by mutableStateOf<TextSurface?>(null)
+    fun recordText(command: Command) { history.push(command); edited() }
     private var surfaces = 0
     private var released = false
     fun attachSurface() { check(!released); surfaces++ }
@@ -58,9 +60,10 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     }
 
     fun replay(undo: Boolean) {
+        textSurface?.settle()
         if (active || !(if (undo) canUndo else canRedo)) return
         if (undo) history.undo() else history.redo()
-        edited(); invalidate?.invoke()
+        edited(); invalidate?.invoke(); textSurface?.replayed()
     }
 
     private fun edited() {
@@ -71,6 +74,15 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
 
     fun save(back: Boolean = false, background: Boolean = false) {
         if (active) { pendingBack = pendingBack || back; pendingBackground = pendingBackground || background; return }
+        val text = textSurface
+        if (text?.target?.input?.marked != null) {
+            if (!back) { text.withCommittedText { saveStable(false, background) }; return }
+            text.settle()
+        }
+        saveStable(back, background)
+    }
+
+    private fun saveStable(back: Boolean, background: Boolean) {
         pendingBack = false; pendingBackground = false
         val result = try { session.save() } catch (_: Exception) { null }
         val backgroundCopy = if (background && session.dirty && session.writeRecovery()) session.registeredRecoveryCopy else null
