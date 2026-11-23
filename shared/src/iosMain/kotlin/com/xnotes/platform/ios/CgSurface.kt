@@ -10,6 +10,7 @@ import com.xnotes.core.pal.SurfaceFactory
 import kotlin.native.ref.createCleaner
 import kotlinx.cinterop.*
 import platform.CoreGraphics.*
+import platform.UIKit.UIImage
 import platform.posix.memcpy
 
 internal val rgbSpace = checkNotNull(CGColorSpaceCreateWithName(kCGColorSpaceSRGB))
@@ -57,6 +58,13 @@ class CgSurface internal constructor(
 ) : RasterSurface {
     private val backing = OwnedContext(bitmapContext(width, height))
 
+    internal val bytes get() = checkNotNull(CGBitmapContextGetData(backing.ref))
+
+    fun image(): UIImage {
+        val bitmap = checkNotNull(snapshot(false))
+        return try { UIImage.imageWithCGImage(bitmap) } finally { CGImageRelease(bitmap) }
+    }
+
     override fun fill(color: Rgba) {
         val context = backing.ref
         CGContextSetBlendMode(context, CGBlendMode.kCGBlendModeCopy)
@@ -102,4 +110,21 @@ class CgSurface internal constructor(
 object CgSurfaceFactory : SurfaceFactory {
     override fun create(widthPx: Int, heightPx: Int, devicePixelRatio: Double) =
         CgSurface(widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1), devicePixelRatio)
+
+    fun opaqueArgb(pixels: IntArray, width: Int, height: Int, turn: Int = 0): CgSurface {
+        require(width > 0 && height > 0 && width.toLong() * height == pixels.size.toLong() && turn in 0..3)
+        val surface = if (turn % 2 == 0) create(width, height) else create(height, width)
+        val output = surface.bytes.reinterpret<UIntVar>()
+        for (row in 0 until height) for (column in 0 until width) {
+            val pixel = pixels[row * width + column].toUInt()
+            val dest = when (turn) {
+                1 -> column * height + height - row - 1
+                2 -> pixels.lastIndex - row * width - column
+                3 -> (width - column - 1) * height + row
+                else -> row * width + column
+            }
+            output[dest] = 0xff000000u or ((pixel and 255u) shl 16) or (pixel and 0xff00u) or ((pixel shr 16) and 255u)
+        }
+        return surface
+    }
 }

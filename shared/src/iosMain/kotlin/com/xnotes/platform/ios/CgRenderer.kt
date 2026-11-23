@@ -252,8 +252,29 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
         } finally { CGImageRelease(bitmap) }
     }
 
-    override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) = Unit
-    override fun drawMath(latex: String, x: Double, baseline: Double, sizePt: Double, color: Rgba, display: Boolean) = false
+    override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) = withSave {
+        clipRect(rect)
+        val inset = if (flags.alignTop) 0.0 else (rect.h - CgTextMeasurer.measure(text, font, rect.w, flags).h) / 2
+        CgTextMeasurer.draw(cg, text, rect.x, rect.y + inset + CgTextMeasurer.metrics(font).ascent, rect.w, font, color, flags)
+    }
+
+    override fun drawTextTurned(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags, angle: Double) = withSave {
+        translate(rect.centerX, rect.centerY)
+        CGContextRotateCTM(cg, angle)
+        translate(-rect.centerX, -rect.centerY)
+        drawText(text, rect, font, color, flags)
+    }
+
+    override fun drawTextRun(text: String, x: Double, baseline: Double, font: FontSpec, color: Rgba) =
+        CgTextMeasurer.draw(cg, text, x, baseline, 0.0, font, color, TextFlags(wordWrap = false))
+
+    override fun drawMath(latex: String, x: Double, baseline: Double, sizePt: Double, color: Rgba, display: Boolean): Boolean {
+        drawTextRun(latex, x, baseline, FontSpec(sizePt), color)
+        return true
+    }
+
+    override fun drawMathPending(latex: String, sizePt: Double, display: Boolean, box: Rect, color: Rgba) =
+        drawText(latex, box, FontSpec(sizePt), color, TextFlags())
 }
 
 internal inline fun CGContextRef.saved(block: () -> Unit) {
