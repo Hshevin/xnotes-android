@@ -36,10 +36,24 @@ internal class TextKeyboard(private val surface: TextSurface) : UIView(frame = C
     private var touch: UITouch? = null
     private var down = Pt.ZERO
     private var selecting = false
+    private var lastViewport: Pair<Rect, Rect>? = null
     init {
         opaque = false; backgroundColor = UIColor.clearColor; multipleTouchEnabled = true
         addInteraction(menu)
+        val guide = keyboardLayoutGuide
+        guide.followsUndockedKeyboard = true; guide.usesBottomSafeArea = false
+        val probe = UIView().apply { hidden = true; translatesAutoresizingMaskIntoConstraints = false }
+        addSubview(probe)
+        NSLayoutConstraint.activateConstraints(listOf(probe.leadingAnchor.constraintEqualToAnchor(guide.leadingAnchor),
+            probe.trailingAnchor.constraintEqualToAnchor(guide.trailingAnchor), probe.topAnchor.constraintEqualToAnchor(guide.topAnchor),
+            probe.bottomAnchor.constraintEqualToAnchor(guide.bottomAnchor)))
         accessibilityLabel = text("text_editor")
+    }
+    override fun layoutSubviews() {
+        super.layoutSubviews()
+        fun CValue<CGRect>.rect() = useContents { Rect(origin.x, origin.y, size.width, size.height) }
+        val viewport = bounds.rect() to keyboardLayoutGuide.layoutFrame.rect()
+        if (viewport != lastViewport) { lastViewport = viewport; surface.viewportChanged(viewport.second) }
     }
     override fun inputDelegate() = observer?.get()
     override fun setInputDelegate(inputDelegate: UITextInputDelegateProtocol?) { observer = inputDelegate?.let(::WeakReference) }
@@ -221,8 +235,9 @@ internal class TextKeyboard(private val surface: TextSurface) : UIView(frame = C
         val current = touch?.takeIf { it in touches } ?: return
         touch = null
         val point = current.point()
-        val repeated = isFirstResponder() && surface.hit(point) == input?.selection?.end
+        val previous = input?.takeIf { isFirstResponder() }; val oldCaret = previous?.selection?.end
         if (selecting) surface.drag(point) else if (!surface.start(point, true)) return
+        val repeated = previous != null && previous === input && oldCaret == previous.selection.end
         if (current.tapCount >= 2u) input?.let { externalChange(false) { it.selection = wordRangeAt(it.flow, it.selection.end); surface.selectionChanged() } }
         if (selecting || repeated || current.tapCount >= 2u)
             menu.presentEditMenuWithConfiguration(UIEditMenuConfiguration.configurationWithIdentifier(null, CGPointMake(point.x, point.y)))

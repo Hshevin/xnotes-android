@@ -7,10 +7,6 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.infinite.*
 import com.xnotes.core.model.*
 import com.xnotes.core.pal.NightInk
-import com.xnotes.core.pal.NightInkRenderer
-import com.xnotes.core.pal.FillRule
-import com.xnotes.core.pal.Renderer
-import com.xnotes.core.vector.VectorContour
 import com.xnotes.iosapp.ui.theme.Space
 import com.xnotes.map.ui.*
 import com.xnotes.platform.ios.*
@@ -49,6 +45,10 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
         override val origin get() = Pt(view.scrollX, view.scrollY)
         override val density get() = window?.screen?.scale ?: contentScaleFactor
         override val zoom get() = view.zoom / (window?.screen?.scale ?: contentScaleFactor)
+        override fun scrollForCaret(delta: Pt, bottomInset: Double) {
+            if (delta == Pt.ZERO) return
+            view.panByContent(delta.x / zoom, delta.y / zoom); redraw()
+        }
         override fun paper(page: Int): Rect? = null
         override fun night(page: Int) = night
         override fun overlayInk(page: Int) = if (this@CanvasView.paper.luminance() > 0.5) black else white
@@ -109,8 +109,11 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
             CATransaction.commit()
         }
         if (first) {
+            val live = editor.liveCanvasView
             val saved = doc.lastView
-            if (saved != null) view.apply(saved) else {
+            if (live != null) {
+                view.scrollX = live.originX; view.scrollY = live.originY; view.zoom = live.scale
+            } else if (saved != null) view.apply(saved) else {
                 val extent = items.map { it.paintBounds() }.reduceOrNull(Rect::union)
                 if (extent == null) view.centerOn(0.0, 0.0) else {
                     view.fit(extent, minOf(view.widthPx, view.heightPx) * 0.08)
@@ -139,7 +142,10 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
 
     private fun redraw() {
         textInput.view.setNeedsDisplay()
-        if (window == null || view.widthPx == 0) return
+        if (view.widthPx == 0 || editor.invalidate !== invalidateItems) return
+        val viewport = MetalViewport(view.scrollX, view.scrollY, view.zoom)
+        editor.liveCanvasView = viewport
+        if (window == null) return
         if (editor.tool.selectsItems) input.setNeedsDisplay()
         try {
             val area = view.visibleContentRect()
@@ -151,7 +157,7 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
             for (item in stack) if (doc.layers.visible(item)) {
                 parts.addAll(if (item in wet) prepare(item) else cache.getOrPut(item) { prepare(item) })
             }
-            ink.present(metal, paper, MetalViewport(view.scrollX, view.scrollY, view.zoom), parts)
+            ink.present(metal, paper, viewport, parts)
         } catch (_: Exception) { fail() }
     }
 
@@ -165,14 +171,9 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
         val surface = CgSurfaceFactory.create(ceil(box.w * scale).toInt(), ceil(box.h * scale).toInt())
         return try {
             surface.fill(Rgba(0, 0, 0, 0))
-            val raw = surface.renderer()
-            raw.scale(surface.width / box.w, surface.height / box.h); raw.translate(-box.x, -box.y)
-            val renderer = if (night) NightInkRenderer(raw) else raw
-            item.paint(if (night && item is MapPart) object : Renderer by renderer {
-                override fun fillPath(contours: List<VectorContour>, color: Rgba, rule: FillRule) =
-                    raw.fillPath(contours, NightInk.color(color), rule)
-                override fun fillRect(rect: Rect, color: Rgba) = raw.fillRect(rect, NightInk.color(color))
-            } else renderer)
+            val renderer = surface.renderer(nightInk = night)
+            renderer.scale(surface.width / box.w, surface.height / box.h); renderer.translate(-box.x, -box.y)
+            item.paint(renderer)
             listOf(ink.picture(surface, box))
         } finally { surface.recycle() }
     }

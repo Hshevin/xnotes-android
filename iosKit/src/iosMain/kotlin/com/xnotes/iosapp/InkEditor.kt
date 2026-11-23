@@ -11,6 +11,7 @@ import com.xnotes.core.tools.*
 import com.xnotes.edit.PageSpace
 import com.xnotes.edit.PagedStrokeCapture
 import com.xnotes.pen.pencil.*
+import com.xnotes.platform.ios.MetalViewport
 import com.xnotes.storage.lite.*
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSUserDefaults
@@ -31,6 +32,7 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     private var pendingBack = false
     private var pendingBackground = false
     var invalidate: (() -> Unit)? = null
+    var liveCanvasView: MetalViewport? = null
     var selection by mutableStateOf<ItemSelection?>(null)
     val selectionClipboard = SelectionClipboard()
     var textSurface by mutableStateOf<TextSurface?>(null)

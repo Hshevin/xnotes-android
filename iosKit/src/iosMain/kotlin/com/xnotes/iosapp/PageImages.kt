@@ -29,16 +29,36 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
     private val templates = mutableMapOf<String, Template>()
     private val pictures = mutableMapOf<Pair<String, String>, ImageData>()
     private val frames = mutableMapOf<Boolean, FlowFrame>()
+    private val textLayout = FlowLayout(CgTextMeasurer)
+    val slotHeight get() = textLayout.defaultSlotHeight(doc.flow)
+    private var previewPages = emptyList<Page>()
+    val displayPages get() = if (previewPages.isEmpty()) doc.pages else doc.pages + previewPages
     fun invalidateFlow() = frames.clear()
     fun flow(night: Boolean) = frames.getOrPut(night) {
-        FlowLayout(CgTextMeasurer).apply { autoColor = { if (night) white else black } }.layout(doc.flow,
-            doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
-            firstPage = if (doc.pages.size > 1 && doc.pages[0].cover) 1 else 0)
+        val pages = displayPages
+        val (width, height) = doc.blankPageSize(doc.pages.last())
+        textLayout.autoColor = { if (night) white else black }
+        textLayout.layout(doc.flow,
+            pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
+            firstPage = if (pages.size > 1 && pages[0].cover) 1 else 0, addedPage = PageBox(width, height))
+    }
+    fun clearPreviewPages() {
+        if (previewPages.isNotEmpty()) { previewPages = emptyList(); invalidateFlow() }
+    }
+    fun overflowPages(preview: Boolean): List<Page> {
+        clearPreviewPages(); invalidateFlow()
+        val (width, height) = doc.blankPageSize(doc.pages.last())
+        var needed = flow(false).extraPagesNeeded
+        while (needed > 0) {
+            previewPages = previewPages + List(needed) { Page(width, height) }; invalidateFlow()
+            needed = flow(false).extraPagesNeeded
+        }
+        return previewPages.also { if (!preview) clearPreviewPages() }
     }
     private var pdf: com.xnotes.nativelibs.PdfiumDocument? = null
 
     fun page(index: Int, edge: Int, upper: Boolean? = null): UIImage {
-        val page = doc.pages[index]
+        val page = displayPages[index]
         val cover = page.paperRect(doc)
         val scale = edge / maxOf(cover.w, cover.h)
         val surface = CgSurfaceFactory.create((cover.w * scale).roundToInt().coerceAtLeast(1), (cover.h * scale).roundToInt().coerceAtLeast(1))

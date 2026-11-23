@@ -91,7 +91,8 @@ class CgSurface internal constructor(
         }
     }
 
-    override fun renderer(): Renderer = CgRenderer(this, OwnedContext(view().also { it.topLeft(height) }))
+    override fun renderer(): Renderer = renderer(nightInk = false)
+    fun renderer(nightInk: Boolean): Renderer = CgRenderer(this, OwnedContext(view().also { it.topLeft(height) }), nightInk)
 
     internal fun snapshot(copyPixels: Boolean): CGImageRef? {
         if (backing.recycled) return null

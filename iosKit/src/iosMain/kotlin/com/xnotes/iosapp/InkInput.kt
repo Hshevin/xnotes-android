@@ -19,6 +19,7 @@ internal interface InkSpace : PageSpace {
     val density get() = 1.0
     fun paper(page: Int): Rect?
     fun night(page: Int): Boolean
+    fun scrollForCaret(delta: Pt, bottomInset: Double) {}
     fun overlayInk(page: Int) = if (night(page)) white else black
 }
 

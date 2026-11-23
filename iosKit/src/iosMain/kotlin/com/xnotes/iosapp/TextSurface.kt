@@ -8,6 +8,7 @@ import com.xnotes.core.geometry.*
 import com.xnotes.core.model.*
 import com.xnotes.core.text.*
 import com.xnotes.core.tools.Tool
+import com.xnotes.iosapp.ui.theme.Space
 import kotlinx.cinterop.*
 import platform.CoreGraphics.*
 import platform.UIKit.*
@@ -24,6 +25,7 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
     private var italic by mutableStateOf(false)
     private var list by mutableStateOf(false)
     private var editing by mutableStateOf(false)
+    private var keyboardCover: Rect? = null
 
     fun configure() {
         val enabled = editor.tool == Tool.TEXT
@@ -36,7 +38,10 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
     }
     fun finishEditing() {
         view.cancelTracking(); anchor = null
-        if (target != null) { settle(); target = null; editing = false; view.resignFirstResponder(); view.setNeedsDisplay() }
+        if (target != null) {
+            settle(); target = null; editing = false; space.scrollForCaret(Pt.ZERO, 0.0)
+            view.resignFirstResponder(); view.setNeedsDisplay()
+        }
     }
     fun settle() {
         if (target?.input?.marked != null) { target?.input?.unmarkText(); changed() }
@@ -59,7 +64,8 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
         }
     }
     fun changed() {
-        target?.reflectPreview()
+        val current = target
+        if (current is PageText) current.layoutPreview() else current?.reflectPreview()
         editor.invalidate?.invoke()
         selectionChanged()
     }
@@ -69,6 +75,39 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
         bold = style.bold; italic = style.italic
         list = input.flow.paragraphs.getOrNull(input.selection.normalized().start.para)?.list == ListKind.BULLET
         editing = true; view.setNeedsDisplay()
+        ensureCaretVisible()
+    }
+
+    fun viewportChanged(cover: Rect?) { keyboardCover = cover; ensureCaretVisible() }
+
+    private fun ensureCaretVisible() {
+        val current = target ?: return
+        val mark = current.caret(current.input.selection.end)?.takeIf { space.hasPage(it.page) } ?: return
+        val bounds = view.bounds.useContents { Rect(0.0, 0.0, size.width, size.height) }
+        val margin = Space.s24.value.toDouble()
+        if (bounds.w <= 0.0 || bounds.h <= 0.0) return
+        val caret = screen(mark)
+        fun delta(start: Double, end: Double, low: Double, high: Double): Double {
+            if (high <= low) return 0.0
+            val pad = margin.coerceAtMost(((high - low - (end - start)) / 2).coerceAtLeast(0.0))
+            return when {
+                end - start >= high - low || end > high - pad -> end - high + pad
+                start < low + pad -> start - low - pad
+                else -> 0.0
+            }
+        }
+        val dx = delta(caret.left, caret.right, 0.0, bounds.w)
+        val unoccluded = caret.translate(-dx, -delta(caret.top, caret.bottom, 0.0, bounds.h))
+        var top = 0.0; var bottom = bounds.h
+        val cover = keyboardCover
+        val padded = unoccluded.outset(margin)
+        if (cover != null && cover.w > 0 && cover.h > 0 && cover.intersects(bounds) && padded.right >= cover.left &&
+            padded.left <= cover.right && (cover.bottom >= bounds.h || padded.intersects(cover))) {
+            if (cover.top >= caret.h + margin * 2 || cover.bottom >= bounds.h) bottom = cover.top.coerceIn(0.0, bounds.h)
+            else top = cover.bottom.coerceIn(0.0, bounds.h)
+        }
+        val dy = delta(caret.top, caret.bottom, top, bottom)
+        space.scrollForCaret(Pt(dx, dy), bounds.h - bottom)
     }
 
     private fun location(screen: Pt): Pair<Int, Pt>? {
@@ -80,7 +119,7 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
         val (page, point) = location(screen) ?: return null
         return target?.hit(page, point)
     }
-    fun start(screen: Pt, createBox: Boolean): Boolean {
+    fun start(screen: Pt, tap: Boolean): Boolean {
         val (page, point) = location(screen) ?: return false
         if (editor.textSurface !== this || editor.tool != Tool.TEXT || editor.active) return false
         val canvas = editor.session.canvas
@@ -93,16 +132,16 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
                 if (existing !is ShapeItem || !BoxText.matches(existing) || !doc.layers.editable(existing)) return false
                 existing
             } else {
-                if (!createBox || !doc.layers.writable) return false
+                if (!tap || !doc.layers.writable) return false
                 settle()
                 val color = if (!space.night(0) && darkPaper(0)) white else black
                 BoxText.newShape(point, color).also(doc.layers::adopt)
             }
             (target as? BoxText)?.takeIf { it.shape === shape } ?: BoxText(editor, shape)
         } ?: return false
-        view.externalChange(target !== next) {
+        view.externalChange(target !== next || (tap && next is PageText && next.beyondEnd(page, point))) {
             settle(); target = next
-            val pos = next.hit(page, point)
+            val pos = if (tap) next.tap(page, point) else next.hit(page, point)
             next.input.selection = FlowRange.caret(pos); next.input.typingStyle = null
             anchor = pos; selectionChanged()
         }

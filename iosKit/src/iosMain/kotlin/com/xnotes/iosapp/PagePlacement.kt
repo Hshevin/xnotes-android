@@ -2,10 +2,10 @@ package com.xnotes.iosapp
 
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.Page
 import com.xnotes.iosapp.ui.theme.Space
 
-internal class PagePlacement(doc: Document) {
-    val pages = doc.pages.toList()
+internal class PagePlacement(doc: Document, val pages: List<Page> = doc.pages.toList()) {
     val frames = pages.map { it.paperRect(doc) }
     init { require(frames.all { it.w.isFinite() && it.h.isFinite() && it.w > 0 && it.h > 0 }) }
     val gap = Space.s24.value.toDouble()

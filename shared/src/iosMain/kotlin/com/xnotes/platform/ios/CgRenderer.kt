@@ -16,7 +16,8 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.max
 
-internal class CgRenderer(private val surface: CgSurface, private val bitmap: OwnedContext) : Renderer {
+internal class CgRenderer(private val surface: CgSurface, private val bitmap: OwnedContext, private val nightInk: Boolean) : Renderer {
+    override fun inkColor(color: Rgba) = NightInk.displayColor(color, nightInk)
     private val cg get() = bitmap.ref
     private val layers = ArrayDeque<Boolean>()
     private val tangents = DoubleArray(4)
@@ -59,7 +60,7 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
     override fun clear() = CGContextClearRect(cg, CGContextGetClipBoundingBox(cg))
     override fun fillBackground(rect: Rect, color: Rgba) = fillRect(rect, color)
     override fun fillRect(rect: Rect, color: Rgba) {
-        cg.fillColor(color)
+        cg.fillColor(inkColor(color))
         CGContextFillRect(cg, rect.cg())
     }
 
@@ -94,13 +95,13 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
     }
 
     private fun fill(color: Rgba, rule: FillRule = FillRule.NONZERO) {
-        cg.fillColor(color)
+        cg.fillColor(inkColor(color))
         CGContextDrawPath(cg, rule.native())
     }
 
     override fun fillCircle(center: Pt, radius: Double, color: Rgba) = fillEllipse(center, radius, radius, color)
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {
-        cg.fillColor(color)
+        cg.fillColor(inkColor(color))
         CGContextFillEllipseInRect(cg, oval(center, rx, ry))
     }
 
@@ -189,9 +190,9 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
         } else CGContextSetLineDash(cg, 0.0, null, 0u)
         if (pen.glowRadius > 0.0) {
             CGContextReplacePathWithStrokedPath(cg)
-            cg.glowPath(pen.color, FillRule.NONZERO, pen.glowRadius, false, scaleX, scaleY)
+            cg.glowPath(inkColor(pen.color), FillRule.NONZERO, pen.glowRadius, false, scaleX, scaleY)
         } else {
-            val color = pen.color
+            val color = inkColor(pen.color)
             CGContextSetRGBStrokeColor(cg, color.r / 255.0, color.g / 255.0, color.b / 255.0, color.a / 255.0)
             CGContextStrokePath(cg)
         }
@@ -203,13 +204,13 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
         CGContextMoveToPoint(cg, pts[0].toDouble(), pts[1].toDouble())
         for (index in 1 until pts.size / 2) CGContextAddLineToPoint(cg, pts[2 * index].toDouble(), pts[2 * index + 1].toDouble())
         CGContextClosePath(cg)
-        cg.glowPath(color, rule, blurRadius, inner, scaleX, scaleY)
+        cg.glowPath(inkColor(color), rule, blurRadius, inner, scaleX, scaleY)
     }
 
     override fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double, inner: Boolean) {
         CGContextBeginPath(cg)
         CGContextAddEllipseInRect(cg, oval(center, radius, radius))
-        cg.glowPath(color, FillRule.NONZERO, blurRadius, inner, scaleX, scaleY)
+        cg.glowPath(inkColor(color), FillRule.NONZERO, blurRadius, inner, scaleX, scaleY)
     }
 
     override fun drawRaster(raster: RasterSurface, dest: Rect, src: Rect?) =
@@ -255,7 +256,7 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) = withSave {
         clipRect(rect)
         val inset = if (flags.alignTop) 0.0 else (rect.h - CgTextMeasurer.measure(text, font, rect.w, flags).h) / 2
-        CgTextMeasurer.draw(cg, text, rect.x, rect.y + inset + CgTextMeasurer.metrics(font).ascent, rect.w, font, color, flags)
+        CgTextMeasurer.draw(cg, text, rect.x, rect.y + inset + CgTextMeasurer.metrics(font).ascent, rect.w, font, inkColor(color), flags)
     }
 
     override fun drawTextTurned(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags, angle: Double) = withSave {
@@ -266,7 +267,7 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
     }
 
     override fun drawTextRun(text: String, x: Double, baseline: Double, font: FontSpec, color: Rgba) =
-        CgTextMeasurer.draw(cg, text, x, baseline, 0.0, font, color, TextFlags(wordWrap = false))
+        CgTextMeasurer.draw(cg, text, x, baseline, 0.0, font, inkColor(color), TextFlags(wordWrap = false))
 
     override fun drawMath(latex: String, x: Double, baseline: Double, sizePt: Double, color: Rgba, display: Boolean): Boolean {
         drawTextRun(latex, x, baseline, FontSpec(sizePt), color)

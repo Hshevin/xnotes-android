@@ -18,6 +18,7 @@ internal abstract class TextTarget(val flow: TextFlow) {
     val input = FlowTextInput(flow, relay)
     abstract fun committed(command: Command)
     abstract fun hit(page: Int, point: Pt): FlowPos
+    open fun tap(page: Int, point: Pt): FlowPos = hit(page, point)
     abstract fun caret(pos: FlowPos): TextMark?
     abstract fun rects(range: FlowRange): List<TextMark>
     open fun reflectPreview() {}
@@ -27,7 +28,23 @@ internal abstract class TextTarget(val flow: TextFlow) {
 
 internal class PageText(private val editor: InkEditor, private val images: PageImages) : TextTarget(editor.session.note!!.flow) {
     private val frame get() = images.flow(false)
-    override fun committed(command: Command) = editor.recordText(command)
+    override fun committed(command: Command) {
+        val doc = checkNotNull(editor.session.note)
+        val pages = images.overflowPages(false).map { AddPageAuto(doc, it, doc.pages.size).also { add -> add.redo() } }
+        editor.recordText(if (pages.isEmpty()) command else CompositeCommand(listOf(command) + pages))
+    }
+    fun layoutPreview() {
+        if (input.marked != null) images.overflowPages(true) else images.clearPreviewPages()
+    }
+    fun beyondEnd(page: Int, point: Pt) = frame.hitTest(page, point) == FlowHit.BeyondEnd
+    override fun tap(page: Int, point: Pt): FlowPos {
+        if (!beyondEnd(page, point)) return hit(page, point)
+        val slots = frame.emptyLinesToReach(page, point.y, images.slotHeight)
+        if (slots <= 0 && flow.paragraphs.isNotEmpty()) return flow.endPos()
+        val (command, pos) = FlowEditor(flow).appendEmptyLines(maxOf(1, slots))
+        committed(command); editor.invalidate?.invoke()
+        return pos
+    }
     override fun hit(page: Int, point: Pt): FlowPos = when (val hit = frame.hitTest(page, point)) {
         is FlowHit.Caret -> hit.pos
         is FlowHit.Checkbox -> FlowPos(hit.paraIndex, 0)

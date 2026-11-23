@@ -21,17 +21,21 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
     private var placement = PagePlacement(doc)
     private val places get() = placement.places
     private val frames get() = placement.frames
-    private var topLeft = Pt.ZERO
     private val input: InkInput
     private val textInput: TextSurface
     private var wet = emptyMap<Int, List<Stroke>>()
     private var panelFocus: Page? = null
     private val wetViews = mutableMapOf<Int, PageWetImage>()
     private val invalidatePages: () -> Unit = {
-        if (placement.pages != doc.pages) {
+        if (placement.pages != painter.displayPages) {
             val oldWidth = placement.width
-            placement = PagePlacement(doc); sizePaper()
-            if (oldWidth != placement.width) fittedWidth = 0.0
+            placement = PagePlacement(doc, painter.displayPages.toList()); sizePaper()
+            if (oldWidth != placement.width) {
+                if (editor.textSurface?.target is PageText && fittedWidth > 0.0) {
+                    val fit = fittedWidth / placement.width
+                    minimumZoomScale = minOf(fit, zoomScale); maximumZoomScale = maxOf(fit * 8, zoomScale)
+                } else fittedWidth = 0.0
+            }
             if (panelFocus !in doc.pages) panelFocus = null
             if (editor.panels.page !in doc.pages) editor.panels.page = doc.pages.first()
         }
@@ -68,27 +72,36 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         delaysContentTouches = false
         panGestureRecognizer.allowedTouchTypes = fingerTypes; pinchGestureRecognizer?.allowedTouchTypes = fingerTypes
         val space = object : InkSpace {
-            override val origin get() = topLeft
+            override val origin get() = if (fittedWidth == 0.0) Pt.ZERO else
+                convertRect(bounds, toView = paper).useContents { Pt(origin.x, origin.y) }
             override val density get() = window?.screen?.scale ?: contentScaleFactor
             override val zoom get() = zoomScale
+            override fun scrollForCaret(delta: Pt, bottomInset: Double) {
+                if (contentInset.useContents { bottom } != bottomInset) contentInset = UIEdgeInsetsMake(0.0, 0.0, bottomInset, 0.0)
+                if (delta == Pt.ZERO) return
+                val maxX = (contentSize.useContents { width } - bounds.useContents { size.width }).coerceAtLeast(0.0)
+                val maxY = (contentSize.useContents { height } - bounds.useContents { size.height } + bottomInset).coerceAtLeast(0.0)
+                panelFocus = null
+                setContentOffset(contentOffset.useContents { CGPointMake((x + delta.x).coerceIn(0.0, maxX), (y + delta.y).coerceIn(0.0, maxY)) })
+            }
             override fun paper(page: Int) = places[page]
             override fun hasPage(page: Int) = page in places.indices
-            override fun writable(page: Int) = doc.pages[page].layers.writable
+            override fun writable(page: Int) = doc.pages.getOrNull(page)?.layers?.writable == true
             override fun pageAt(content: Pt) = places.indexOfFirst { it.contains(content) }.takeIf { it >= 0 }
             private fun offset(page: Int) = Pt(places[page].x - frames[page].x, places[page].y - frames[page].y)
             override fun toPage(page: Int, content: Pt) = content - offset(page)
             override fun fromPage(page: Int, local: Pt) = local + offset(page)
             override fun night(page: Int): Boolean {
-                val model = doc.pages[page]
+                val model = placement.pages[page]
                 return NightInk.enabled(dark, model.resolvedPageColor(doc, if (dark) black else white) ?: white, model.pdfPage != null)
             }
-            override fun overlayInk(page: Int) = doc.pages[page].let { model ->
+            override fun overlayInk(page: Int) = placement.pages[page].let { model ->
                 val color = model.resolvedPageColor(doc, if (dark) black else white) ?: white
                 if (model.pdfPage != null || color.luminance() > 0.5) black else white
             }
         }
         input = InkInput(editor, space) { enabled -> configure(editor.finger); panGestureRecognizer.enabled = enabled; pinchGestureRecognizer?.enabled = enabled }
-        textInput = TextSurface(editor, space, painter) { index -> doc.pages[index].let { page ->
+        textInput = TextSurface(editor, space, painter) { index -> placement.pages[index].let { page ->
             page.pdfPage == null && (page.resolvedPageColor(doc, if (dark) black else white) ?: white).luminance() < 0.5
         } }
         addSubview(input); addSubview(textInput.view); configure(editor.finger); editor.invalidate = invalidatePages
@@ -109,10 +122,10 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
             zoomScale = if (previous == 0.0) fit else (zoomScale * width / previous).coerceIn(fit, maximumZoomScale)
         }
         val viewport = convertRect(bounds, toView = paper).useContents { Rect(origin.x, origin.y, size.width, size.height) }
-        topLeft = Pt(viewport.x, viewport.y); input.setFrame(bounds)
+        input.setFrame(bounds)
         if (editor.tool.selectsItems) input.setNeedsDisplay()
         textInput.view.setFrame(bounds); textInput.view.setNeedsDisplay()
-        if (!editor.active) editor.panels.page = panelFocus ?: doc.pages[places.indexOfFirst { it.bottom >= viewport.centerY }.let { if (it < 0) places.lastIndex else it }]
+        if (!editor.active) editor.panels.page = panelFocus ?: doc.pages[places.indexOfFirst { it.bottom >= viewport.centerY }.let { if (it in doc.pages.indices) it else doc.pages.lastIndex }]
         val indices = places.indices.filter { places[it].intersects(viewport) }.toSet()
         for (index in (visible.keys - indices) + (wetViews.keys - wet.keys)) {
             visible.remove(index)?.removeFromSuperview(); wetViews.remove(index)
