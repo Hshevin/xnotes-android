@@ -197,6 +197,7 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-10 [Release 98 之后主线审核与修复](process/review-fixes-release98-2026-11-10.md)
 - 2026-11-11 [原生恢复职责拆分](process/architecture-refactor-2026-11-11.md)
 - 2026-11-20 [上游合并与 MovinkPad 适配](process/upstream-merge-2026-11-20.md)
+- 2026-11-23 [iPadOS 移植方案](process/ipados-migration-plan-2026-11-23.md)
 
 ## 已归档（`archive/`）
 
