@@ -42,3 +42,17 @@
 - 模拟器只经 T3 Device 面板操作（`device_open` 返回的 `agent-device`），用完 `device_close`。三个任务共用一台模拟器，先拿到的先用；遇到 `DEVICE_IN_USE` 就先做其他工作，稍后再试，不接管别人的会话。
 - 界面文字进 `Localizable.strings`（英文与简体中文），只用黑白与 `Tokens`，触控区不小于 48 dp。
 - 每个任务在本文末尾追加「W4-x 实现记录」。
+
+## W4-A 实现记录
+
+- 分页笔记和无限画布都可点选、框选、套索；在框内拖动可移动，八个方柄可缩放，顶部圆柄可旋转。选择限于可编辑图层的未锁定条目，不拾取画布导图。选区操作提供删除、复制、粘贴、复制一份；副本向右下各偏移 24 个内容像素，点空白可指定粘贴位置。选择和复制不进历史，每次实际变换、删除、粘贴或复制一份各占一步。
+- `shared/src/commonMain/kotlin/com/xnotes/edit/SelectionEdit.kt` 从起始快照计算每帧，结束后忽略迟到的事件。`iosKit/src/iosMain/kotlin/com/xnotes/iosapp/ItemSelection.kt` 与 `SelectionTransform.kt` 负责命中、跨页交接、连接绑定和画布索引；跨页撤销回到原图层、原叠放位置。取消、多指接管、切工具、清选区、离开或进入后台时，不把预览写进历史或存档。`SelectionOverlay.kt` 按页面底色取黑白标记，PDF 用黑色；画布使用 `OverlayTessellator` 的 1 个设备像素反色衬边。
+- **自动化验证通过**：JDK 21；`:shared:testDebugUnitTest` 2632 项、`:shared:iosSimulatorArm64Test` 2436 项、`:iosKit:iosSimulatorArm64Test` 8 项、`:app:testDebugUnitTest` 1784 项，报告均为零失败。原 `SelectionEditTest` 在 JVM、iOS 各 6 项，未修改；新增 `iosKit/src/iosTest/kotlin/com/xnotes/iosapp/ItemSelectionTest.kt` 4 项覆盖跨页与越界、工具切换、套索变换与剪贴、画布索引与后台保存、连接跟随／删除／绑定恢复。仅在本机用忽略的 `tmp/w4-a/red.gradle` 隔离其他工作树尚未实现的 `FlowTextInputTest.kt`、`PageOpsTest.kt`；没有更改测试或 `app/` 源码。模拟器 `XNotes` scheme 的 `xcodebuild build` 成功，英中两份字符串资源通过 `plutil -lint`。日志：`tmp/w4-a/final-tests.log`、`tmp/w4-a/xcodebuild.log`。
+- **待主代理合并后验收（无分支截图）**：三个分支共用模拟器及 Bundle ID，本记录不以分支安装状态证明界面行为。主代理使用 T3 Device 面板打开合并构建，开启「手指绘画」，在一份分页笔记和一份画布的独立副本上**分别**做以下操作：
+  1. 画两笔分开的笔迹。「选择」点一笔，再从空白处框住两笔；确认单选、多选成员分别正确。截 `tmp/w4-a-merged/note-band.png`、`tmp/w4-a-merged/canvas-band.png`（框、八个方柄与顶部圆柄）。
+  2. 从框中心移动、拖角柄缩放、拖顶部圆柄旋转；每个动作后各撤销、重做一次，核对只有一步。截 `note-transform.png`、`canvas-transform.png` 到同一目录，标明移动方向和旋转结果。
+  3. 点空白清选区，切「套索」绕住一笔并避开另一笔；画布再绕住一个导图节点，确认节点不入选。截 `note-lasso.png`、`canvas-lasso.png`，说明圈入／未圈入的对象。
+  4. 对选区「复制一份」，核对右下偏移并撤销／重做；「复制」后点空白「粘贴」，再「删除」，逐步撤销／重做核对数量。截 `note-copies.png`、`canvas-copies.png`，标明原件、副本和粘贴位置。
+  5. 拖动途中分别加第二指、切工具、返回文档列表；重开后核对笔迹和绑定仍在原位，未新增撤销步。夜间在浅色页／PDF 上检查黑色工具标记，在黑底带白图片的画布上检查跨边界的反色衬边，分别截 `note-contrast.png`、`canvas-contrast.png` 并描述可辨性。上述截图均须来自同一合并构建。
+- **待用户确认**：本波对象剪贴板限定同一打开文档（重新挂载视图不清空）；是否另做跨文档或系统剪贴板互通，需确认资源迁移范围，不影响本波操作。
+- **待真机验收**：iPad Air（M2 及以后）＋ Apple Pencil Pro 的握笔与触控命中、掌触及第二指交接、连续缩放／旋转的显示延迟和混合背景上的手柄可读性。本轮未安装真机、未生成交付包、未推送。

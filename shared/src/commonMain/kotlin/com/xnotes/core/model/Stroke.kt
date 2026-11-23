@@ -1088,3 +1088,10 @@ private class StrokeSnapshot(
     val smoothScale: Double,
     val speedScale: Double,
 ) : GeometrySnapshot
+
+internal fun GeometrySnapshot.sameSelectionGeometry(other: GeometrySnapshot): Boolean =
+    if (this is StrokeSnapshot && other is StrokeSnapshot)
+        ox == other.ox && oy == other.oy && xs.contentEquals(other.xs) && ys.contentEquals(other.ys) &&
+            ps.contentEquals(other.ps) && ts.contentEquals(other.ts) && fs.contentEquals(other.fs) &&
+            config == other.config && cuts == other.cuts && smoothScale == other.smoothScale && speedScale == other.speedScale
+    else this == other

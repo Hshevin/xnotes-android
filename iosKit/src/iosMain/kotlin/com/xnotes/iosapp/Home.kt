@@ -198,10 +198,11 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
                 if (model.canLeaveProtected) Action("leave_protected", nameStyle, enabled = !model.active) { model.leaveProtected() }
             }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
-                for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER))
-                    Action(tool.id, nameStyle, chosen = tool == model.tool, enabled = !model.active) { model.select(tool) }
+                for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO))
+                    Action(tool.id, nameStyle, chosen = tool == model.tool, enabled = !model.active || model.selection?.tracking == true) { model.select(tool) }
                 Action("undo", nameStyle, enabled = !model.active && model.canUndo) { model.replay(true) }
                 Action("redo", nameStyle, enabled = !model.active && model.canRedo) { model.replay(false) }
+                SelectionActions(model, nameStyle)
             }
             if (model.settings) Row(Modifier.horizontalScroll(rememberScrollState())) {
                 Action("finger_drawing", nameStyle, chosen = model.finger, enabled = !model.active) { model.toggleFinger() }
@@ -235,7 +236,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
 }
 
 @Composable
-private fun Action(label: String, style: TextStyle, chosen: Boolean? = null, enabled: Boolean = true, onPress: () -> Unit) {
+internal fun Action(label: String, style: TextStyle, chosen: Boolean? = null, enabled: Boolean = true, onPress: () -> Unit) {
     val inverse = if (style.color == Color.Black) Color.White else Color.Black
     Box(Modifier.then(if (chosen == true) Modifier.background(style.color) else Modifier)
         .semantics { if (chosen != null) selected = chosen }.clickable(enabled = enabled, role = Role.Button, onClick = onPress).sizeIn(minWidth = MinTouchTarget, minHeight = MinTouchTarget)

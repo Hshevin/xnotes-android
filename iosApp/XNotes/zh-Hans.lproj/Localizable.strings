@@ -36,3 +36,9 @@
 "open_future" = "需要更新版本的 XNotes 才能打开此文件。";
 "open_corrupt" = "文件损坏或无法读取所需资源，原文件未改动。";
 "render_failed" = "无法显示文档内容。";
+"select" = "选择";
+"lasso" = "套索";
+"selection_delete" = "删除";
+"selection_copy" = "复制";
+"selection_paste" = "粘贴";
+"selection_duplicate" = "复制一份";

@@ -31,18 +31,27 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     private var pendingBack = false
     private var pendingBackground = false
     var invalidate: (() -> Unit)? = null
+    var selection by mutableStateOf<ItemSelection?>(null)
+    val selectionClipboard = SelectionClipboard()
     private var surfaces = 0
     private var released = false
     fun attachSurface() { check(!released); surfaces++ }
     fun releaseSurface() { surfaces--; if (surfaces == 0 && released) session.close() }
-    fun releaseOwner() { released = true; if (surfaces == 0) session.close() }
+    fun releaseOwner() { selection?.clear(); released = true; if (surfaces == 0) session.close() }
 
-    fun select(next: Tool) { if (!active) { gestures.manualSelect(next.id); tool = next } }
+    fun select(next: Tool) {
+        if (next != tool) selection?.clear()
+        if (!active) { gestures.manualSelect(next.id); tool = next }
+    }
     fun toggleFinger() { if (!active) { finger = !finger; NSUserDefaults.standardUserDefaults.setBool(finger, "fingerDrawing") } }
     fun toggleArea() { if (!active) { area = !area; NSUserDefaults.standardUserDefaults.setBool(area, "areaEraser") } }
-    fun gesture(event: PencilGesture, action: PencilPreferredAction) = apply(gestures.onGesture(event, action, strokeActive = active))
+    fun gesture(event: PencilGesture, action: PencilPreferredAction) {
+        selection?.cancel(); apply(gestures.onGesture(event, action, strokeActive = active))
+    }
     private fun apply(outcome: PencilOutcome) {
-        tool = Tool.fromId(outcome.tool) ?: tool
+        val next = Tool.fromId(outcome.tool) ?: tool
+        if (tool != next) selection?.clear()
+        tool = next
         if (PencilGestures.SHOW_TOOL_PALETTE in outcome.commands) settings = !settings
     }
 
@@ -59,6 +68,7 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
 
     fun replay(undo: Boolean) {
         if (active || !(if (undo) canUndo else canRedo)) return
+        selection?.clear()
         if (undo) history.undo() else history.redo()
         edited(); invalidate?.invoke()
     }
@@ -70,6 +80,7 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     }
 
     fun save(back: Boolean = false, background: Boolean = false) {
+        if (back || background) selection?.cancel()
         if (active) { pendingBack = pendingBack || back; pendingBackground = pendingBackground || background; return }
         pendingBack = false; pendingBackground = false
         val result = try { session.save() } catch (_: Exception) { null }

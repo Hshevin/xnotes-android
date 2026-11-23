@@ -16,6 +16,12 @@
 "pen" = "Pen";
 "highlighter" = "Highlighter";
 "eraser" = "Eraser";
+"select" = "Select";
+"lasso" = "Lasso";
+"selection_delete" = "Delete";
+"selection_copy" = "Copy";
+"selection_paste" = "Paste";
+"selection_duplicate" = "Duplicate";
 "undo" = "Undo";
 "redo" = "Redo";
 "settings" = "Tool settings";

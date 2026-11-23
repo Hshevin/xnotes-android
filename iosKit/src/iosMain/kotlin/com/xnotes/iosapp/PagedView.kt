@@ -46,6 +46,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         panGestureRecognizer.allowedTouchTypes = fingerTypes; pinchGestureRecognizer?.allowedTouchTypes = fingerTypes
         input = InkInput(editor, object : InkSpace {
             override val origin get() = topLeft
+            override val density get() = window?.screen?.scale ?: contentScaleFactor
             override val zoom get() = zoomScale
             override fun paper(page: Int) = places[page]
             override fun hasPage(page: Int) = page in places.indices
@@ -58,7 +59,11 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
                 val model = doc.pages[page]
                 return NightInk.enabled(dark, model.resolvedPageColor(doc, if (dark) black else white) ?: white, model.pdfPage != null)
             }
-        }) { enabled -> panGestureRecognizer.enabled = enabled; pinchGestureRecognizer?.enabled = enabled }
+            override fun overlayInk(page: Int) = doc.pages[page].let { model ->
+                val color = model.resolvedPageColor(doc, if (dark) black else white) ?: white
+                if (model.pdfPage != null || color.luminance() > 0.5) black else white
+            }
+        }) { enabled -> configure(editor.finger); panGestureRecognizer.enabled = enabled; pinchGestureRecognizer?.enabled = enabled }
         addSubview(input); configure(editor.finger); editor.invalidate = invalidatePages
     }
 
@@ -75,6 +80,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         }
         val viewport = convertRect(bounds, toView = paper).useContents { Rect(origin.x, origin.y, size.width, size.height) }
         topLeft = Pt(viewport.x, viewport.y); input.setFrame(bounds)
+        if (editor.tool.selectsItems) input.setNeedsDisplay()
         val indices = places.indices.filter { places[it].intersects(viewport) }.toSet()
         for (index in visible.keys - indices) visible.remove(index)?.removeFromSuperview()
         try {
@@ -88,7 +94,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         } catch (_: Exception) { close(); fail() }
     }
 
-    fun configure(finger: Boolean) { panGestureRecognizer.minimumNumberOfTouches = if (finger) 2u else 1u }
+    fun configure(finger: Boolean) { panGestureRecognizer.minimumNumberOfTouches = if (finger || editor.selection?.tracking == true) 2u else 1u }
     fun close() {
         if (closed) return
         closed = true; delegate = null; input.close(); painter.close()

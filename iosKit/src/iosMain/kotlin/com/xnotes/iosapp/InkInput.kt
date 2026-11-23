@@ -6,6 +6,7 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.pal.NightInk
+import com.xnotes.core.tools.Tool
 import com.xnotes.edit.PageSpace
 import com.xnotes.pen.pencil.*
 import kotlinx.cinterop.*
@@ -16,8 +17,10 @@ import platform.darwin.NSObject
 
 internal interface InkSpace : PageSpace {
     val origin: Pt
+    val density get() = 1.0
     fun paper(page: Int): Rect?
     fun night(page: Int): Boolean
+    fun overlayInk(page: Int) = if (night(page)) white else black
 }
 
 internal val fingerTypes = listOf(UITouchTypeDirect)
@@ -28,6 +31,8 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     private var ink: InkGesture? = null
     private var hover: Pt? = null
     private var detached = false
+    private val selection = ItemSelection(editor, space, ::setNeedsDisplay)
+    private var selecting = false
     private val pencilDelegate = object : NSObject(), UIPencilInteractionDelegateProtocol {
         override fun pencilInteraction(interaction: UIPencilInteraction, didReceiveTap: UIPencilInteractionTap) {
             editor.gesture(PencilGesture.DOUBLE_TAP, preferred(UIPencilInteraction.preferredTapAction))
@@ -39,6 +44,7 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     }
 
     init {
+        editor.selection = selection
         opaque = false; backgroundColor = UIColor.clearColor; multipleTouchEnabled = true
         addInteraction(UIPencilInteraction().apply { delegate = pencilDelegate })
         addGestureRecognizer(UIHoverGestureRecognizer(this, NSSelectorFromString("hovering:")).apply {
@@ -58,22 +64,36 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     private fun predicted(touch: UITouch, event: UIEvent?) = event?.predictedTouchesForTouch(touch)?.filterIsInstance<UITouch>().orEmpty().map(::sample)
 
     override fun touchesBegan(touches: Set<*>, withEvent: UIEvent?) {
-        if (detached || owner?.type == UITouchTypePencil) return
+        if (detached || (owner?.type == UITouchTypePencil && !selecting)) return
         val candidates = touches.filterIsInstance<UITouch>()
         val pencil = candidates.firstOrNull { it.type == UITouchTypePencil }
         val fingers = withEvent?.touchesForView(this)?.filterIsInstance<UITouch>().orEmpty().count { it.type == UITouchTypeDirect }
+        if (fingers >= 2 && editor.tool.selectsItems) {
+            if (selecting) finish(emptyList(), true)
+            return
+        }
+        if (selecting && owner?.type == UITouchTypePencil) return
         if (owner != null && (pencil != null || fingers > 1)) finish(emptyList(), true)
         val next = pencil ?: candidates.singleOrNull { it.type == UITouchTypeDirect && fingers == 1 && editor.finger } ?: return
         if (owner != null || editor.active) return
         owner = next; hover = null
-        if (pencil != null) navigate(false)
         val batch = actual(next, withEvent)
+        if (editor.tool.selectsItems) {
+            selecting = true; selection.begin(batch.first().point); navigate(true); setNeedsDisplay(); return
+        }
+        if (pencil != null) navigate(false)
         val gesture = InkGesture(editor, space, pencil != null && (next.maximumPossibleForce > 0 || traitCollection.forceTouchCapability == UIForceTouchCapabilityAvailable))
         ink = gesture; gesture.begin(batch.first()); gesture.move(batch.drop(1), predicted(next, withEvent)); setNeedsDisplay()
     }
 
     override fun touchesMoved(touches: Set<*>, withEvent: UIEvent?) {
         val touch = owner?.takeIf { it in touches } ?: return
+        if (selecting) {
+            val batch = actual(touch, withEvent)
+            if (editor.tool == Tool.LASSO && selection.ring.isNotEmpty()) batch.forEach { selection.move(it.point) }
+            else selection.move(batch.last().point)
+            return
+        }
         ink?.move(actual(touch, withEvent), predicted(touch, withEvent)); setNeedsDisplay()
     }
 
@@ -97,12 +117,24 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     private fun finish(last: List<PencilSample>, cancelled: Boolean) {
         val pencil = owner?.type == UITouchTypePencil
         val gesture = ink; ink = null; owner = null
+        if (selecting) {
+            selecting = false
+            if (cancelled || last.isEmpty()) selection.cancel() else {
+                if (editor.tool == Tool.LASSO && selection.ring.isNotEmpty()) last.dropLast(1).forEach { selection.move(it.point) }
+                selection.finish(last.last().point)
+            }
+        }
         gesture?.finish(last, cancelled)
         if (pencil) navigate(true)
         setNeedsDisplay()
     }
 
-    fun close() { detached = true; finish(emptyList(), true) }
+    private val PencilSample.point get() = Pt(x, y)
+
+    fun close() {
+        detached = true; finish(emptyList(), true)
+        if (editor.selection === selection) editor.selection = null
+    }
 
     override fun drawRect(rect: CValue<CGRect>) {
         val context = UIGraphicsGetCurrentContext() ?: return
@@ -111,10 +143,14 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
             CGContextSetLineWidth(context, 3.0); CGContextSetStrokeColorWithColor(context, UIColor.whiteColor.CGColor); CGContextStrokeEllipseInRect(context, ring)
             CGContextSetLineWidth(context, 1.0); CGContextSetStrokeColorWithColor(context, UIColor.blackColor.CGColor); CGContextStrokeEllipseInRect(context, ring)
         }
-        val gesture = ink ?: return
+        if (ink == null && !editor.tool.selectsItems) return
         CGContextSaveGState(context)
         CGContextScaleCTM(context, space.zoom, space.zoom); CGContextTranslateCTM(context, -space.origin.x, -space.origin.y)
-        gesture.preview { page, stroke -> ribbon(context, page, stroke) }
+        if (editor.tool.selectsItems) {
+            val viewport = bounds.useContents { Rect(space.origin.x, space.origin.y, size.width / space.zoom, size.height / space.zoom) }
+            selection.paint(context, space, editor.tool, viewport, editor.session.note?.pages?.size ?: 0)
+        }
+        ink?.preview { page, stroke -> ribbon(context, page, stroke) }
         CGContextRestoreGState(context)
     }
 

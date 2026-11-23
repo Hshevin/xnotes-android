@@ -44,15 +44,17 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
     }
     private val input = InkInput(editor, object : InkSpace {
         override val origin get() = Pt(view.scrollX, view.scrollY)
+        override val density get() = window?.screen?.scale ?: contentScaleFactor
         override val zoom get() = view.zoom / (window?.screen?.scale ?: contentScaleFactor)
         override fun paper(page: Int): Rect? = null
         override fun night(page: Int) = night
+        override fun overlayInk(page: Int) = if (this@CanvasView.paper.luminance() > 0.5) black else white
         override fun hasPage(page: Int) = page == 0
         override fun writable(page: Int) = doc.layers.writable
         override fun pageAt(content: Pt) = 0
         override fun toPage(page: Int, content: Pt) = content
         override fun fromPage(page: Int, local: Pt) = local
-    }) { enabled -> panGesture.enabled = enabled; pinchGesture.enabled = enabled }
+    }) { enabled -> configure(editor.finger); panGesture.enabled = enabled; pinchGesture.enabled = enabled }
     private val invalidateItems: () -> Unit = ::refreshItems
 
     init {
@@ -75,8 +77,8 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
 
     private fun refreshItems() { items = doc.layers.ordered(doc.items.toList() + mapItems); cache.clear(); setNeedsLayout() }
     fun configure(finger: Boolean) {
-        panGesture.minimumNumberOfTouches = if (finger) 2u else 1u
-        panGesture.maximumNumberOfTouches = panGesture.minimumNumberOfTouches
+        panGesture.minimumNumberOfTouches = if (finger || editor.selection?.tracking == true) 2u else 1u
+        panGesture.maximumNumberOfTouches = 2u
     }
     fun close() { input.close(); if (editor.invalidate === invalidateItems) editor.invalidate = null }
 
@@ -122,6 +124,7 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
 
     private fun redraw() {
         if (window == null || view.widthPx == 0) return
+        if (editor.tool.selectsItems) input.setNeedsDisplay()
         try {
             val area = view.visibleContentRect()
             val parts = mutableListOf<MetalPart>()
