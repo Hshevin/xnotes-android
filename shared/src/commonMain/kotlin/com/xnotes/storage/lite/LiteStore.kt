@@ -55,6 +55,13 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
         require(generateSequence(fs.canonicalize(privateDir)) { it.parent }.none { it == docs })
     }
 
+    fun create(directory: Path, baseName: String, kind: LiteKind): LiteOpen = opening {
+        require(directory == documents || inDocuments(directory))
+        openWithAssets { assets ->
+            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, assets, ::inDocuments, ::hash)
+        }
+    }
+
     fun open(path: Path): LiteOpen = opening {
         val kind = LiteKind.of(path) ?: return@opening LiteOpen.Refused(LiteRefusal.UNSUPPORTED_KIND)
         if (!inDocuments(path)) return@opening LiteOpen.Refused(LiteRefusal.UNSUPPORTED_KIND)

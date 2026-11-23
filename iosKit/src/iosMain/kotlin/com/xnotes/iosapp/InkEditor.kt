@@ -35,6 +35,11 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     val selectionClipboard = SelectionClipboard()
     var textSurface by mutableStateOf<TextSurface?>(null)
     fun recordText(command: Command) { history.push(command); edited() }
+    val panels = DocumentPanels(this)
+    fun recordPanelEdit(command: Command?) {
+        check(!active)
+        command?.let(history::push); edited(); invalidate?.invoke()
+    }
     private var surfaces = 0
     private var released = false
     fun attachSurface() { check(!released); surfaces++ }
@@ -141,6 +146,9 @@ internal class InkGesture(private val editor: InkEditor, private val space: Page
 
     fun move(actual: List<PencilSample>, predicted: List<PencilSample>) = accept(feed.move(actual, predicted))
     fun update(index: Long, force: Double, maxForce: Double) = accept(feed.update(index, force, maxForce))
+
+    fun needsLayerComposition(handles: (Int) -> Boolean) = capture.active && (capture.page?.let(handles) == true ||
+        retired.any { handles(it.page) } || feed.wetTail().any { space.pageAt(Pt(it.x, it.y))?.let(handles) == true })
 
     fun preview(draw: (Int, Stroke) -> Unit) {
         retired.forEach { draw(it.page, it.stroke) }

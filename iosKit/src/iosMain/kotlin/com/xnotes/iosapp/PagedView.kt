@@ -4,9 +4,10 @@ package com.xnotes.iosapp
 
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.model.Page
 import com.xnotes.core.model.resolvedPageColor
+import com.xnotes.core.model.Stroke
 import com.xnotes.core.pal.NightInk
-import com.xnotes.iosapp.ui.theme.Space
 import kotlinx.cinterop.*
 import platform.CoreGraphics.*
 import platform.UIKit.*
@@ -17,32 +18,52 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
     private val doc = checkNotNull(editor.session.note)
     private val painter = PageImages(doc, dark)
     private val paper = UIView()
-    private val places: List<Rect>
-    private val frames = doc.pages.map { it.paperRect(doc) }
+    private var placement = PagePlacement(doc)
+    private val places get() = placement.places
+    private val frames get() = placement.frames
     private var topLeft = Pt.ZERO
     private val input: InkInput
     private val textInput: TextSurface
+    private var wet = emptyMap<Int, List<Stroke>>()
+    private var panelFocus: Page? = null
+    private val wetViews = mutableMapOf<Int, PageWetImage>()
     private val invalidatePages: () -> Unit = {
+        if (placement.pages != doc.pages) {
+            val oldWidth = placement.width
+            placement = PagePlacement(doc); sizePaper()
+            if (oldWidth != placement.width) fittedWidth = 0.0
+            if (panelFocus !in doc.pages) panelFocus = null
+            if (editor.panels.page !in doc.pages) editor.panels.page = doc.pages.first()
+        }
         painter.invalidateFlow()
-        visible.values.forEach { it.removeFromSuperview() }; visible.clear(); setNeedsLayout()
+        visible.values.forEach { it.removeFromSuperview() }; visible.clear(); wetViews.clear(); setNeedsLayout()
     }
     private val visible = mutableMapOf<Int, UIImageView>()
-    private val widest: Double
+    private fun sizePaper() {
+        val width = placement.width; val height = placement.height
+        paper.setBounds(CGRectMake(0.0, 0.0, width, height))
+        paper.center = CGPointMake(width * zoomScale / 2, height * zoomScale / 2)
+        setContentSize(CGSizeMake(width * zoomScale, height * zoomScale))
+    }
+    private val jump: (Page) -> Unit = { page ->
+        panelFocus = page
+        layoutIfNeeded()
+        places.getOrNull(doc.pages.indexOf(page))?.let { rect ->
+            val maxY = contentSize.useContents { height } - bounds.useContents { size.height }
+            setContentOffset(CGPointMake(contentOffset.useContents { x }, ((rect.y - placement.gap) * zoomScale).coerceIn(0.0, maxY.coerceAtLeast(0.0))))
+        }
+    }
     private var fittedWidth = 0.0
     private var closed = false
     private val zoomDelegate = object : NSObject(), UIScrollViewDelegateProtocol {
         override fun viewForZoomingInScrollView(scrollView: UIScrollView): UIView = paper
+        override fun scrollViewWillBeginDragging(scrollView: UIScrollView) { panelFocus = null }
+        override fun scrollViewWillBeginZooming(scrollView: UIScrollView, withView: UIView?) { panelFocus = null }
     }
 
     init {
         backgroundColor = if (dark) UIColor.darkGrayColor else UIColor.lightGrayColor
-        require(frames.all { it.w.isFinite() && it.h.isFinite() && it.w > 0 && it.h > 0 })
-        widest = frames.maxOf { it.w }
-        var top = 0.0
-        val gap = Space.s16.value.toDouble()
-        places = frames.map { page -> Rect((widest - page.w) / 2, top, page.w, page.h).also { top += page.h + gap } }
-        paper.setFrame(CGRectMake(0.0, 0.0, widest, top - gap))
-        addSubview(paper); setContentSize(CGSizeMake(widest, top - gap))
+        sizePaper(); addSubview(paper); editor.panels.scrollTo = jump
         delegate = zoomDelegate
         delaysContentTouches = false
         panGestureRecognizer.allowedTouchTypes = fingerTypes; pinchGestureRecognizer?.allowedTouchTypes = fingerTypes
@@ -71,6 +92,9 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
             page.pdfPage == null && (page.resolvedPageColor(doc, if (dark) black else white) ?: white).luminance() < 0.5
         } }
         addSubview(input); addSubview(textInput.view); configure(editor.finger); editor.invalidate = invalidatePages
+        input.layered = LayeredInk({ index -> doc.pages[index].layers.let { it.entries.size > 1 && it.writable } }) { next ->
+            wet = next; setNeedsLayout()
+        }
     }
 
     override fun layoutSubviews() {
@@ -80,7 +104,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         if (width <= 0) return
         if (fittedWidth != width) {
             val previous = fittedWidth; fittedWidth = width
-            val fit = width / widest
+            val fit = width / placement.width
             minimumZoomScale = fit; maximumZoomScale = fit * 8
             zoomScale = if (previous == 0.0) fit else (zoomScale * width / previous).coerceIn(fit, maximumZoomScale)
         }
@@ -88,14 +112,28 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
         topLeft = Pt(viewport.x, viewport.y); input.setFrame(bounds)
         if (editor.tool.selectsItems) input.setNeedsDisplay()
         textInput.view.setFrame(bounds); textInput.view.setNeedsDisplay()
+        if (!editor.active) editor.panels.page = panelFocus ?: doc.pages[places.indexOfFirst { it.bottom >= viewport.centerY }.let { if (it < 0) places.lastIndex else it }]
         val indices = places.indices.filter { places[it].intersects(viewport) }.toSet()
-        for (index in visible.keys - indices) visible.remove(index)?.removeFromSuperview()
+        for (index in (visible.keys - indices) + (wetViews.keys - wet.keys)) {
+            visible.remove(index)?.removeFromSuperview(); wetViews.remove(index)
+        }
         try {
-            for (index in indices) if (index !in visible) {
+            for (index in indices) {
+                val strokes = wet[index]; val overlay = wetViews[index]
+                if (index in visible && (strokes == null || overlay != null)) {
+                    if (strokes != null && overlay != null) { overlay.strokes = strokes; overlay.setNeedsDisplay() }; continue
+                }
                 val page = places[index]
                 val edge = (maxOf(page.w, page.h) * minimumZoomScale * (window?.screen?.scale ?: 1.0)).roundToInt().coerceIn(1, 2560)
-                val image = UIImageView(image = painter.page(index, edge))
+                visible.remove(index)?.removeFromSuperview()
+                val image = UIImageView(image = painter.page(index, edge, if (strokes != null) false else null))
                 image.setFrame(CGRectMake(page.x, page.y, page.w, page.h))
+                if (strokes != null) {
+                    val model = doc.pages[index]; val paperColor = model.resolvedPageColor(doc, if (dark) black else white) ?: white
+                    val layer = PageWetImage(image.bounds, frames[index], NightInk.enabled(dark, paperColor, model.pdfPage != null), painter.page(index, edge, true))
+                    layer.contentScaleFactor = edge / maxOf(page.w, page.h); layer.strokes = strokes
+                    image.addSubview(layer); wetViews[index] = layer
+                }
                 paper.addSubview(image); visible[index] = image
             }
         } catch (_: Exception) { close(); fail() }
@@ -107,6 +145,7 @@ internal class PagedView(private val editor: InkEditor, private val dark: Boolea
     fun close() {
         if (closed) return
         closed = true; delegate = null; textInput.close(); input.close(); painter.close()
+        if (editor.panels.scrollTo === jump) editor.panels.scrollTo = null
         if (editor.invalidate === invalidatePages) editor.invalidate = null
     }
 

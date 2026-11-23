@@ -76,17 +76,18 @@ private fun DocumentsHome() {
     } }
     var folders by remember { mutableStateOf(emptyList<Path>()) }
     var selected by remember { mutableStateOf<Path?>(null) }
+    val created = remember { CreatedDocument() }
     var recovery by remember { mutableStateOf<LiteRecovery?>(null) }
     var discardFailed by remember { mutableStateOf(false) }
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(Unit) {
         val center = NSNotificationCenter.defaultCenter
         val token = center.addObserverForName(UISceneDidActivateNotification, null, NSOperationQueue.mainQueue) { revision++ }
-        onDispose { center.removeObserver(token) }
+        onDispose { center.removeObserver(token); created.close() }
     }
     val current = folders.lastOrNull()
     selected?.let { path ->
-        key(path, recovery) { Viewer(path, recovery, dark, background, nameStyle, detailStyle) { selected = null; recovery = null; revision++ } }
+        key(path, recovery) { Viewer(path, recovery, created, dark, background, nameStyle, detailStyle) { selected = null; recovery = null; revision++ } }
         return
     }
     val listing by key(current) {
@@ -109,6 +110,9 @@ private fun DocumentsHome() {
             Action("refresh", nameStyle) { revision++ }
         }
         Spacer(Modifier.height(Space.s16))
+        key(current) { CreateDocuments(store, current ?: IosStorageLocations.documents, nameStyle) {
+            if (selected != null || folders.lastOrNull() != current) false else { created.adopt(it); selected = it.session.path; true }
+        } }
         when (val state = listing) {
             Listing.Loading -> BasicText(text("loading"), style = detailStyle)
             Listing.Failed -> BasicText(text("list_failed"), style = detailStyle)
@@ -154,14 +158,14 @@ private fun DocumentsHome() {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, background: Color, nameStyle: TextStyle, detailStyle: TextStyle, back: () -> Unit) {
+private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument, dark: Boolean, background: Color, nameStyle: TextStyle, detailStyle: TextStyle, back: () -> Unit) {
     var result by remember { mutableStateOf<LiteOpen?>(null) }
     var renderFailed by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<InkEditor?>(null) }
     LaunchedEffect(path, recovery) {
-        var owned: LiteOpen? = null
+        var owned: LiteOpen? = created.take(path)
         try {
-            withContext(Dispatchers.Default) { owned = if (recovery != null) store.restore(recovery) else store.open(path) }
+            if (owned == null) withContext(Dispatchers.Default) { owned = if (recovery != null) store.restore(recovery) else store.open(path) }
             result = owned
             editor = (owned as? LiteOpen.Opened)?.let { InkEditor(it.session, back) }
             awaitCancellation()
@@ -204,6 +208,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
                 Action("redo", nameStyle, enabled = !model.active && model.canRedo) { model.replay(false) }
                 SelectionActions(model, nameStyle)
                 if (model.tool == Tool.TEXT) model.textSurface?.formatButtons(nameStyle)
+                PanelActions(model, nameStyle)
             }
             if (model.settings) Row(Modifier.horizontalScroll(rememberScrollState())) {
                 Action("finger_drawing", nameStyle, chosen = model.finger, enabled = !model.active) { model.toggleFinger() }
@@ -211,6 +216,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
             }
         }
         if (model != null && !renderFailed) key(dark, model) {
+            PanelHost(model, dark, nameStyle) {
             UIKitView(factory = {
                 try {
                     val surface: UIView = if (model.session.canvas != null) CanvasView(model, dark) { renderFailed = true }
@@ -223,6 +229,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
                     is CanvasView -> { view.close(); model.releaseSurface() }
                     is PagedView -> { view.close(); model.releaseSurface() }
                 } })
+            }
         } else {
             val message = when ((opened as? LiteOpen.Refused)?.reason) {
                 LiteRefusal.NOT_FOUND -> "open_missing"

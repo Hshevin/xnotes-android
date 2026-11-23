@@ -11,8 +11,7 @@ import com.xnotes.core.pal.NightInkRenderer
 import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.vector.VectorContour
-import com.xnotes.map.MapLayout
-import com.xnotes.map.NodeMetrics
+import com.xnotes.iosapp.ui.theme.Space
 import com.xnotes.map.ui.*
 import com.xnotes.platform.ios.*
 import kotlinx.cinterop.*
@@ -31,10 +30,14 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
     private val view = CanvasViewport()
     private val paper = doc.background.paperColor ?: if (dark) black else white
     private val night = NightInk.enabled(dark, paper)
-    private val projected = mutableMapOf<CanvasItem, List<MeshPart>>()
-    private val mapItems: List<CanvasItem>
-    private var items = emptyList<CanvasItem>()
     private val cache = mutableMapOf<CanvasItem, List<MetalPart>>()
+    private val maps = PanelMapScene(wantsMeshes = true) { cache.remove(it) }
+    private val geometry = object : InfiniteDocument.Listener {
+        override fun onItemChanged(item: CanvasItem) { cache.remove(item) }
+        override fun onItemRemoved(item: CanvasItem) { cache.remove(item) }
+    }
+    private var items = emptyList<CanvasItem>()
+    private var wet = emptyList<Stroke>()
     private var focus = Pt(0.0, 0.0)
     private val panGesture = UIPanGestureRecognizer(this, NSSelectorFromString("pan:"))
     private val pinchGesture = UIPinchGestureRecognizer(this, NSSelectorFromString("pinch:"))
@@ -61,29 +64,33 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
 
     init {
         ink.attach(metal); layer.addSublayer(metal)
-        val titles = MapTitles(CgTextMeasurer)
-        val metrics = NodeMetrics(titles)
-        val map = MapProjection(titles, CgTextMeasurer, metrics)
-        val state = doc.map.state
-        val layers = doc.layers.entries.map { it.id }
-        map.update(state, MapLayout.compute(state, doc.map.collapsed, metrics), object : MapSceneSink {
-            override fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect) { projected[item] = parts }
-            override fun remove(item: CanvasItem) { projected.remove(item) }
-        }, night = night, layerFor = { id -> id?.takeIf { it in layers } ?: layers.firstOrNull() })
-        mapItems = map.items.toList(); refreshItems()
+        doc.listener = geometry; refreshItems()
         addSubview(input); addSubview(textInput.view)
         addGestureRecognizer(panGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
         addGestureRecognizer(pinchGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
         configure(editor.finger); editor.invalidate = invalidateItems
+        input.layered = LayeredInk({ doc.layers.writable && (doc.layers.entries.size > 1 || doc.map.state.nodes.isNotEmpty()) }) { next ->
+            wet = next[0].orEmpty().onEach { it.layerId = doc.layers.activeId }; redraw()
+        }
     }
 
-    private fun refreshItems() { items = doc.layers.ordered(doc.items.toList() + mapItems); cache.clear(); setNeedsLayout() }
+    private fun refreshItems() {
+        val mapItems = maps.update(doc.map.state, doc.map.collapsed, doc.layers.entries.map { it.id }, night)
+        items = doc.layers.stacked(doc.items + mapItems); setNeedsLayout()
+    }
     fun configure(finger: Boolean) {
         textInput.configure()
         panGesture.minimumNumberOfTouches = if (finger || !textInput.view.hidden || editor.selection?.tracking == true) 2u else 1u
         panGesture.maximumNumberOfTouches = 2u
+        updateSidebarCover()
     }
-    fun close() { textInput.close(); input.close(); if (editor.invalidate === invalidateItems) editor.invalidate = null }
+    private fun updateSidebarCover() {
+        view.insetRight = if (editor.panels.shown == Panel.LAYERS) Space.sidebar.value * (window?.screen?.scale ?: contentScaleFactor) else 0.0
+    }
+    fun close() {
+        textInput.close(); input.close(); if (doc.listener === geometry) doc.listener = null
+        if (editor.invalidate === invalidateItems) editor.invalidate = null
+    }
 
     override fun layoutSubviews() {
         super.layoutSubviews()
@@ -92,11 +99,15 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
         input.setFrame(bounds)
         textInput.view.setFrame(bounds)
         val density = window?.screen?.scale ?: contentScaleFactor
+        updateSidebarCover()
         val first = view.widthPx == 0
-        view.widthPx = (width * density).roundToInt(); view.heightPx = (height * density).roundToInt()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        metal.frame = bounds; metal.drawableSize = CGSizeMake(view.widthPx.toDouble(), view.heightPx.toDouble())
-        CATransaction.commit()
+        val nextWidth = (width * density).roundToInt(); val nextHeight = (height * density).roundToInt()
+        if (view.widthPx != nextWidth || view.heightPx != nextHeight) {
+            view.widthPx = nextWidth; view.heightPx = nextHeight
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            metal.frame = bounds; metal.drawableSize = CGSizeMake(nextWidth.toDouble(), nextHeight.toDouble())
+            CATransaction.commit()
+        }
         if (first) {
             val saved = doc.lastView
             if (saved != null) view.apply(saved) else {
@@ -136,13 +147,16 @@ internal class CanvasView(private val editor: InkEditor, dark: Boolean, private 
             grid(area)?.let(parts::add)
             val visible = items.filter { it.paintBounds().intersects(area) }
             cache.keys.retainAll(visible.toSet())
-            for (item in visible) parts.addAll(cache.getOrPut(item) { prepare(item) })
+            val stack = if (wet.isEmpty()) visible else doc.layers.stacked(visible.filterNot { it is MapPart } + wet + visible.filterIsInstance<MapPart>())
+            for (item in stack) if (doc.layers.visible(item)) {
+                parts.addAll(if (item in wet) prepare(item) else cache.getOrPut(item) { prepare(item) })
+            }
             ink.present(metal, paper, MetalViewport(view.scrollX, view.scrollY, view.zoom), parts)
         } catch (_: Exception) { fail() }
     }
 
     private fun prepare(item: CanvasItem): List<MetalPart> {
-        val parts = projected[item] ?: ItemMesher.mesh(item)?.parts
+        val parts = maps.meshes[item] ?: ItemMesher.mesh(item)?.parts
         if (parts != null && (item as? Labelled)?.label == null && parts.all { it.pass == InkPass.OPAQUE }) {
             return parts.map { part -> MetalMesh(part.mesh, part.color, night) }
         }
