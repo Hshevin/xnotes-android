@@ -1,8 +1,8 @@
 # iPadOS 第四波契约（2026-11-24）
 
 用户要求：M2 之后继续下一轮，先做选择与套索、文字编辑、图层与页面管理；只做本地提交，不推送、不安装、不合并到 `master`；遇到新的设计分歧停下等用户决定。见 [iPadOS 移植方案](ipados-migration-plan-2026-11-23.md)「下一轮决定」。
-状态：契约与 RED 测试已写，待实现
-本轮边界：只做本地提交；不推送、不打包、不安装到真机、不发布
+状态：三支已整合，JVM 与 iOS 模拟器自动化测试、Android Debug 和 Xcode 模拟器构建已通过；合并版界面与真机待验收
+本轮边界：只做本地提交与构建验证；不制作交付包、不安装应用、不推送、不发布
 
 ## 本波取舍（主代理决定，可在用户醒后调整）
 
@@ -88,3 +88,10 @@
 **待用户确认**：无新增设计问题。旧包启用页链接仍须走既有的显式升级流程。
 
 **待真机验收**：在 iPad Air（M2 及以后）＋ Apple Pencil Pro 上，验多层遮挡下的实时湿墨和最终笔迹一致性、压感与延迟，以及在 Metal 画布缩放/开合侧栏时是否闪屏或掉帧。模拟器不能证明这些结果。
+
+## W4 整合记录
+
+- 以 W4-A `b3825e83` 为基线，依次合入 W4-B `04ec73ae`、W4-C `280de9ca`。分页与画布共用六种工具；保留选择标记、`UITextInput`、按层湿墨、灰色桌面、侧栏遮挡量与首页新建。画布文本框仍用无边框矩形及 `ShapeLabel`。三支实现记录逐字保留，英文和简体中文字符串无丢失。
+- 页或层命令先定稿组字、解除旧键盘目标、回滚选区并清除旧粘贴位置，再捕获命令和修改模型；随后刷新页位置、正文布局和画布条目。撤销／重做结构命令同样解除旧输入目标。手动切换工具先取消旧指针事务；Pencil 笔画中的按键切换仍等正常抬笔，取消笔画不执行。
+- `iosKit/src/iosTest/kotlin/com/xnotes/iosapp/EditorIntegrationTest.kt` 新增 5 项：组字中删页与旧键盘范围隔离；移动封面与撤销后的正文光标页；移动文本框途中删层、撤销后的几何与索引；图层隐藏／锁定／重排与组字的历史顺序；取消笔／荧光笔／橡皮后忽略迟到事件。未更改或排除原契约测试。
+- 验证：JDK 21.0.13.1；指定的 Gradle 全量命令成功。按 XML 汇总，shared JVM 2654、shared iOS 2458、nativelibs iOS 6、iosKit iOS 18、app JVM 1784，均为零失败、零错误、零跳过。`:app:assembleDebug` 通过，Xcode 27.2 的 `XNotes` scheme 对 `generic/platform=iOS Simulator` 构建成功；日志在 `tmp/w4-integration/gradle.log`、`tmp/w4-integration/gradle-final.log`、`tmp/w4-integration/xcode.log`。未改 `app/` 源码；未安装或操作模拟器界面。界面验收与截图留给主代理，Apple Pencil、实际组字候选与 GPU 显示仍需单独验收。

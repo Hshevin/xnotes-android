@@ -203,7 +203,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
             }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.TEXT))
-                    Action(tool.id, nameStyle, chosen = tool == model.tool, enabled = !model.active || model.selection?.tracking == true) { model.select(tool) }
+                    Action(tool.id, nameStyle, chosen = tool == model.tool) { model.select(tool) }
                 Action("undo", nameStyle, enabled = !model.active && model.canUndo) { model.replay(true) }
                 Action("redo", nameStyle, enabled = !model.active && model.canRedo) { model.replay(false) }
                 SelectionActions(model, nameStyle)

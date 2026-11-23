@@ -86,7 +86,7 @@ private fun PagePanel(editor: InkEditor, dark: Boolean, style: TextStyle) {
     val revision = editor.revision
     val rows = remember(doc, revision) { doc.pages.toList() }
     val page = panels.page?.takeIf(rows::contains) ?: rows.first()
-    val enabled = !editor.active
+    val enabled = editor.canChangePanel
     var deleting by remember(page, revision) { mutableStateOf(false) }
     BasicText(text("pages") + " · ${rows.indexOf(page) + 1}/${rows.size}", style = style)
     Row {
@@ -107,7 +107,7 @@ private fun PagePanel(editor: InkEditor, dark: Boolean, style: TextStyle) {
 private fun LayerPanel(editor: InkEditor, style: TextStyle) {
     val panels = editor.panels; editor.revision
     val layers = panels.layers; val rows = layers.entries.asReversed(); val active = rows.first { it.id == layers.activeId }
-    val enabled = !editor.active
+    val enabled = editor.canChangePanel
     var rename by remember(active.id) { mutableStateOf<String?>(null) }
     var deleting by remember(active.id) { mutableStateOf(false) }
     val layerName = { id: String -> val at = layers.entries.indexOfFirst { it.id == id }; layers.entries[at].name.ifBlank { text("layer_label") + " ${at + 1}" } }

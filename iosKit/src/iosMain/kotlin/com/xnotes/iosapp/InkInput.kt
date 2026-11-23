@@ -65,7 +65,7 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
     private fun predicted(touch: UITouch, event: UIEvent?) = event?.predictedTouchesForTouch(touch)?.filterIsInstance<UITouch>().orEmpty().map(::sample)
 
     override fun touchesBegan(touches: Set<*>, withEvent: UIEvent?) {
-        if (detached || (owner?.type == UITouchTypePencil && !selecting)) return
+        if (detached || editor.tool == Tool.TEXT || (owner?.type == UITouchTypePencil && !selecting)) return
         val candidates = touches.filterIsInstance<UITouch>()
         val pencil = candidates.firstOrNull { it.type == UITouchTypePencil }
         val fingers = withEvent?.touchesForView(this)?.filterIsInstance<UITouch>().orEmpty().count { it.type == UITouchTypeDirect }
@@ -80,11 +80,11 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
         owner = next; hover = null
         val batch = actual(next, withEvent)
         if (editor.tool.selectsItems) {
-            selecting = true; selection.begin(batch.first().point); navigate(true); setNeedsDisplay(); return
+            selecting = true; selection.begin(batch.first().point, ::cancelPointer); navigate(true); setNeedsDisplay(); return
         }
         if (pencil != null) navigate(false)
         val gesture = InkGesture(editor, space, pencil != null && (next.maximumPossibleForce > 0 || traitCollection.forceTouchCapability == UIForceTouchCapabilityAvailable))
-        ink = gesture; gesture.begin(batch.first()); gesture.move(batch.drop(1), predicted(next, withEvent)); refreshInk()
+        ink = gesture; gesture.begin(batch.first(), ::cancelPointer); gesture.move(batch.drop(1), predicted(next, withEvent)); refreshInk()
     }
 
     override fun touchesMoved(touches: Set<*>, withEvent: UIEvent?) {
@@ -127,11 +127,12 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
         }
         layered?.update(null)
         gesture?.finish(last, cancelled)
-        if (pencil) navigate(true)
+        if (pencil && !detached) navigate(true)
         setNeedsDisplay()
     }
 
     private val PencilSample.point get() = Pt(x, y)
+    private fun cancelPointer() = finish(emptyList(), true)
 
     fun close() {
         detached = true; finish(emptyList(), true)

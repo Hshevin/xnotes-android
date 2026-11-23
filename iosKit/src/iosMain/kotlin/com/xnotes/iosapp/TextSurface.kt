@@ -16,9 +16,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
-                           images: PageImages? = null, private val darkPaper: (Int) -> Boolean) {
+                           private val images: PageImages? = null, private val darkPaper: (Int) -> Boolean) {
     val view = TextKeyboard(this)
-    private val pageText = images?.let { PageText(editor, it) }
     var target: TextTarget? = null; private set
     private var anchor: FlowPos? = null
     private var bold by mutableStateOf(false)
@@ -32,8 +31,12 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
         if (!enabled) close() else editor.textSurface = this
     }
     fun close() {
-        if (target != null) { settle(); target = null; editing = false; anchor = null; view.resignFirstResponder() }
+        finishEditing(); view.hidden = true
         if (editor.textSurface === this) editor.textSurface = null
+    }
+    fun finishEditing() {
+        view.cancelTracking(); anchor = null
+        if (target != null) { settle(); target = null; editing = false; view.resignFirstResponder(); view.setNeedsDisplay() }
     }
     fun settle() {
         if (target?.input?.marked != null) { target?.input?.unmarkText(); changed() }
@@ -79,9 +82,9 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
     }
     fun start(screen: Pt, createBox: Boolean): Boolean {
         val (page, point) = location(screen) ?: return false
-        if (editor.tool != Tool.TEXT || editor.active) return false
+        if (editor.textSurface !== this || editor.tool != Tool.TEXT || editor.active) return false
         val canvas = editor.session.canvas
-        val next = pageText ?: canvas?.let { doc ->
+        val next = images?.let { target as? PageText ?: PageText(editor, it) } ?: canvas?.let { doc ->
             val existing = doc.layers.ordered(doc.items).asReversed().firstOrNull {
                 if (it is ShapeItem && BoxText.matches(it)) it.box.contains(it.toLocal(point)) || it.labelContains(point)
                 else it.contains(point)
@@ -158,7 +161,7 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
     }
 
     @Composable fun formatButtons(style: TextStyle) {
-        if (pageText == null) return
+        if (images == null) return
         Action("text_bold", style, bold, editing) { format("bold") }
         Action("text_italic", style, italic, editing) { format("italic") }
         Action("text_list", style, list, editing) { format("list") }

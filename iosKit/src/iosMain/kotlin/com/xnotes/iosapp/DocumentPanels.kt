@@ -1,7 +1,6 @@
 package com.xnotes.iosapp
 
 import androidx.compose.runtime.*
-import com.xnotes.core.history.Command
 import com.xnotes.core.history.CompositeCommand
 import com.xnotes.core.history.EditLayers
 import com.xnotes.core.model.*
@@ -23,52 +22,50 @@ internal class DocumentPanels(private val editor: InkEditor) {
     val layers get() = page?.layers ?: checkNotNull(canvas).layers
 
     fun focus(target: Page) {
-        if (editor.active || doc?.pages?.contains(target) != true) return
-        page = target; scrollTo?.invoke(target)
+        if (doc?.pages?.contains(target) != true || !editor.preparePanelChange()) return
+        showPage(target)
     }
+
+    private fun showPage(target: Page) { page = target; scrollTo?.invoke(target) }
 
     fun add(copy: Boolean) {
         val note = doc ?: return
         val index = note.pages.indexOf(page)
-        if (editor.active || index < 0) return
-        editor.recordPanelEdit(if (copy) PageOps.duplicate(note, index, CgTextMeasurer) else PageOps.addAfter(note, index))
-        focus(note.pages[index + 1])
+        if (index < 0) return
+        val added = editor.editPanel { if (copy) PageOps.duplicate(note, index, CgTextMeasurer) else PageOps.addAfter(note, index) }
+        if (added) showPage(note.pages[index + 1])
     }
 
     fun deletePage(target: Page) {
         val note = doc ?: return
         val index = note.pages.indexOf(target)
-        if (editor.active || index < 0 || note.pages.size == 1) return
-        editor.recordPanelEdit(PageOps.delete(note, index))
-        focus(note.pages[index.coerceAtMost(note.pages.lastIndex)])
+        if (index < 0 || note.pages.size == 1) return
+        if (editor.editPanel { PageOps.delete(note, index) }) showPage(note.pages[index.coerceAtMost(note.pages.lastIndex)])
     }
 
     fun movePage(from: Page, to: Page) {
         val note = doc ?: return
-        if (editor.active || from === to || from !in note.pages || to !in note.pages) return
-        editor.recordPanelEdit(PageOps.move(note, note.pages.indexOf(from), note.pages.indexOf(to)))
-        focus(from)
+        if (from === to || from !in note.pages || to !in note.pages) return
+        if (editor.editPanel { PageOps.move(note, note.pages.indexOf(from), note.pages.indexOf(to)) }) showPage(from)
     }
 
     fun selectLayer(id: String) {
-        if (editor.active || layers.activeId == id) return
-        layers.select(id); editor.recordPanelEdit(null)
+        if (layers.activeId == id) return
+        editor.editPanel { layers.select(id); null }
     }
 
     fun edit(change: () -> Unit) {
-        if (editor.active) return
         val target = page
-        val command: Command = if (target != null) {
-            if (doc?.pages?.contains(target) != true) return
-            EditLayers.capture(target.layers, target.items, change)
-        } else {
-            val model = checkNotNull(canvas)
-            val before = model.map.state
-            val layersEdit = EditLayers.capture(model.layers, { model.items }, model::replaceAll, change)
-            val after = model.map.state
-            if (before === after) layersEdit else CompositeCommand(listOf(layersEdit, MapStateCommand(model.map, before, after)))
+        if (target != null && doc?.pages?.contains(target) != true) return
+        editor.editPanel {
+            if (target != null) EditLayers.capture(target.layers, target.items, change) else {
+                val model = checkNotNull(canvas)
+                val before = model.map.state
+                val layersEdit = EditLayers.capture(model.layers, { model.items }, model::replaceAll, change)
+                val after = model.map.state
+                if (before === after) layersEdit else CompositeCommand(listOf(layersEdit, MapStateCommand(model.map, before, after)))
+            }
         }
-        editor.recordPanelEdit(command)
     }
 
     fun deleteLayer(id: String) {

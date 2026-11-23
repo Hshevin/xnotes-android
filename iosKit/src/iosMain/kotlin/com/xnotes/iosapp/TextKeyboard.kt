@@ -204,6 +204,7 @@ internal class TextKeyboard(private val surface: TextSurface) : UIView(frame = C
     }
 
     private fun UITouch.point() = locationInView(this@TextKeyboard).useContents { Pt(x, y) }
+    fun cancelTracking() { touch = null; selecting = false }
     override fun touchesBegan(touches: Set<*>, withEvent: UIEvent?) {
         menu.dismissMenu()
         if (touch != null || touches.size != 1) { touch = null; return }

@@ -49,12 +49,12 @@ internal class ItemSelection(private val editor: InkEditor, private val space: I
         redraw()
     }
 
-    fun clear() { cancel(); select(emptyList()) }
+    fun clear() { cancel(); destination = null; select(emptyList()) }
 
-    fun begin(at: Pt) {
+    fun begin(at: Pt, abort: () -> Unit = ::cancel) {
         if (editor.active || tracking) return
         if (members.any { (page, item) -> !space.hasPage(page) || item !in editable(page) }) clear()
-        editor.begin(); down = at; moved = false
+        editor.begin(abort); down = at; moved = false
         val chrome = frame
         val target = MinTouchTarget.value / (2 * space.zoom)
         val insideCore = chrome?.let { it.contains(at) && it.center.distanceTo(at) <= target / 2 } == true

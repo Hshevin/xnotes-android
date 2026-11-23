@@ -36,46 +36,64 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     var textSurface by mutableStateOf<TextSurface?>(null)
     fun recordText(command: Command) { history.push(command); edited() }
     val panels = DocumentPanels(this)
-    fun recordPanelEdit(command: Command?) {
-        check(!active)
-        command?.let(history::push); edited(); invalidate?.invoke()
+    val canChangePanel get() = !active || selection?.tracking == true
+    private var cancelPointer: (() -> Unit)? = null
+    private class PanelCommand(command: Command) : Command by command
+
+    fun preparePanelChange(): Boolean {
+        if (!canChangePanel) return false
+        textSurface?.finishEditing()
+        if (selection?.tracking == true) cancelPointer?.invoke()
+        selection?.clear()
+        return !active
+    }
+
+    fun editPanel(edit: () -> Command?): Boolean {
+        if (!preparePanelChange()) return false
+        edit()?.let { history.push(PanelCommand(it)) }; edited(); invalidate?.invoke()
+        return true
     }
     private var surfaces = 0
     private var released = false
     fun attachSurface() { check(!released); surfaces++ }
     fun releaseSurface() { surfaces--; if (surfaces == 0 && released) session.close() }
-    fun releaseOwner() { selection?.clear(); released = true; if (surfaces == 0) session.close() }
+    fun releaseOwner() { cancelPointer?.invoke(); selection?.clear(); textSurface?.close(); released = true; if (surfaces == 0) session.close() }
 
     fun select(next: Tool) {
-        if (next != tool) selection?.clear()
+        if (next != tool) { cancelPointer?.invoke(); if (!active) leaveTool() }
         if (!active) { gestures.manualSelect(next.id); tool = next }
     }
+    private fun leaveTool() { selection?.clear(); textSurface?.close() }
     fun toggleFinger() { if (!active) { finger = !finger; NSUserDefaults.standardUserDefaults.setBool(finger, "fingerDrawing") } }
     fun toggleArea() { if (!active) { area = !area; NSUserDefaults.standardUserDefaults.setBool(area, "areaEraser") } }
     fun gesture(event: PencilGesture, action: PencilPreferredAction) {
-        selection?.cancel(); apply(gestures.onGesture(event, action, strokeActive = active))
+        if (selection?.tracking == true) cancelPointer?.invoke()
+        apply(gestures.onGesture(event, action, strokeActive = active))
     }
     private fun apply(outcome: PencilOutcome) {
         val next = Tool.fromId(outcome.tool) ?: tool
-        if (tool != next) selection?.clear()
+        if (tool != next) leaveTool()
         tool = next
         if (PencilGestures.SHOW_TOOL_PALETTE in outcome.commands) settings = !settings
     }
 
-    fun begin() { check(!active); active = true; revision++ }
+    fun begin(cancel: (() -> Unit)? = null) { check(!active); cancelPointer = cancel; active = true; revision++ }
     fun end(command: Command?, cancelled: Boolean) {
         if (command != null) {
             if (cancelled) command.undo() else { history.push(command); edited() }
             invalidate?.invoke()
         }
-        active = false
+        cancelPointer = null; active = false
+        if (cancelled) revision++
         apply(gestures.onStrokeEnd(cancelled))
         if (pendingBack || pendingBackground) save(pendingBack, pendingBackground)
     }
 
     fun replay(undo: Boolean) {
+        if (selection?.tracking == true) cancelPointer?.invoke()
         textSurface?.settle()
         if (active || !(if (undo) canUndo else canRedo)) return
+        if ((if (undo) history.nextUndo else history.nextRedo) is PanelCommand) textSurface?.finishEditing()
         selection?.clear()
         if (undo) history.undo() else history.redo()
         edited(); invalidate?.invoke(); textSurface?.replayed()
@@ -88,7 +106,7 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     }
 
     fun save(back: Boolean = false, background: Boolean = false) {
-        if (back || background) selection?.cancel()
+        if ((back || background) && selection?.tracking == true) cancelPointer?.invoke()
         if (active) { pendingBack = pendingBack || back; pendingBackground = pendingBackground || background; return }
         val text = textSurface
         if (text?.target?.input?.marked != null) {
@@ -131,26 +149,28 @@ internal class InkGesture(private val editor: InkEditor, private val space: Page
         else -> it
     } }
     private val feed = PencilFeed(pressure)
+    private var finished = false
     private val capture = PagedStrokeCapture(space)
     private val retired = mutableListOf<PagedStrokeCapture.Segment>()
     private val canvasEraser = if (tool == Tool.ERASER) session.canvas?.let(::EraseSession) else null
     private val pagedEraser = if (tool == Tool.ERASER) session.note?.let(::PageEraser) else null
 
-    fun begin(sample: PencilSample) {
-        editor.begin()
+    fun begin(sample: PencilSample, cancel: () -> Unit = { finish(emptyList(), true) }) {
+        editor.begin(cancel)
         val first = feed.begin(sample)
         val point = Pt(first.x, first.y)
         if (tool == Tool.ERASER) { if (erase(point)) editor.invalidate?.invoke() }
         else capture.begin(point, first.pressure, tool, config, first.timeMs, space.zoom)
     }
 
-    fun move(actual: List<PencilSample>, predicted: List<PencilSample>) = accept(feed.move(actual, predicted))
-    fun update(index: Long, force: Double, maxForce: Double) = accept(feed.update(index, force, maxForce))
+    fun move(actual: List<PencilSample>, predicted: List<PencilSample>) { if (!finished) accept(feed.move(actual, predicted)) }
+    fun update(index: Long, force: Double, maxForce: Double) { if (!finished) accept(feed.update(index, force, maxForce)) }
 
     fun needsLayerComposition(handles: (Int) -> Boolean) = capture.active && (capture.page?.let(handles) == true ||
         retired.any { handles(it.page) } || feed.wetTail().any { space.pageAt(Pt(it.x, it.y))?.let(handles) == true })
 
     fun preview(draw: (Int, Stroke) -> Unit) {
+        if (finished) return
         retired.forEach { draw(it.page, it.stroke) }
         val live = capture.live ?: return
         val page = checkNotNull(capture.page)
@@ -183,6 +203,8 @@ internal class InkGesture(private val editor: InkEditor, private val space: Page
     }
 
     fun finish(last: List<PencilSample>, cancelled: Boolean) {
+        if (finished) return
+        finished = true
         val command = if (cancelled) {
             feed.cancel(); capture.cancel(); null
         } else {
