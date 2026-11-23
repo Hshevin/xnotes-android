@@ -23,3 +23,4 @@ rootProject.name = "xnotes"
 include(":app")
 include(":nativelibs")
 include(":shared")
+include(":iosKit")

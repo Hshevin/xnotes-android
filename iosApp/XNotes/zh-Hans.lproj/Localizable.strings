@@ -1,0 +1,15 @@
+"app_name" = "XNotes";
+"documents" = "文稿";
+"refresh" = "刷新";
+"back" = "返回";
+"loading" = "正在读取文稿…";
+"list_failed" = "无法读取此文件夹。请轻点「刷新」重试。";
+"empty_title" = "还没有笔记或文件夹";
+"empty_hint" = "在「文件」App 中，将笔记或画布添加到「我的 iPad」→「XNotes」。";
+"kind_folder" = "文件夹";
+"kind_note" = "分页笔记";
+"kind_canvas" = "无限画布";
+"kind_split" = "分屏工作区";
+"kind_map" = "旧版思维导图";
+"kind_pdf" = "PDF";
+"unknown_time" = "修改时间不可用";

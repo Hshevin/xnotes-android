@@ -46,3 +46,11 @@
 - 不得削弱、跳过或删除测试；做不到的测试停下说明原因。主代理写的契约测试中如有明显笔误，在报告中指出，不得自行改变断言含义。
 - 每个任务都要跑 `:app:testDebugUnitTest` 与 `:app:assembleDebug`，确认 Android 不受影响。
 - 不安装设备、不打包交付、不推送、不改 Git 配置。本地提交，提交信息末尾附 `Co-Authored-By: gpt-6.2-astra <noreply@openai.com>`。
+
+## W2-3 实现记录
+
+- `:iosKit` 仅在两个 iOS ARM64 目标使用 Compose Multiplatform 1.9.3，依赖 `:shared`、`:nativelibs`，生成静态框架 `XNotesKit`。Kotlin 保持 2.2.21；未改变 Android 依赖。`iosApp/XNotes` 的 Swift 场景入口为每个窗口创建独立的 Compose 首页；列表读取元数据，不打开笔记，支持进入文件夹、返回与刷新。
+- `:shared` 的 `com.xnotes.pen.pencil` 负责采样、预测、估计压力修正和手势排队，iOS 提供 `UITouch` 的坐标转换入口；`com.xnotes.storage.ios` 管理文稿、私有、不备份、缓存和同卷暂存目录。尚未接入画布；压感、悬停、双击、捏压与实际延迟待真机验收。
+- 构建：在仓库根目录运行 `xcodebuild -project iosApp/XNotes.xcodeproj -scheme XNotes -destination 'generic/platform=iOS Simulator' build`，或在 Xcode 打开该工程，选择 XNotes 和任一 iPadOS 18+ ARM64 iPad 模拟器后运行。构建阶段选择 JDK 21（非标准安装可指定 `XNOTES_JDK_21`）；无需重新生成 Xcode 工程。Xcode 27.2 模拟器构建与 `:iosKit:linkDebugFrameworkIosArm64` 均通过；未安装真机。
+- 契约验证：Pencil 两类测试各平台均为 23 项；Android JVM 另有清单 5 项，iOS 模拟器另有目录 5 项和列表 1 项。Android `:app:testDebugUnitTest` 2,425 项通过，`:app:assembleDebug` 通过，无 APK 交付。仅在本地临时 Gradle 初始化脚本中隔离并行任务尚处 RED 的 `BundleInteropTest`、`CgRendererTest`、`MetalInkTest`；未移动或改写其源码，以上结果不代表第二波全部转绿。
+- 在 iPad Pro 13 英寸（M5）／iPadOS 27.2 模拟器安装并启动 `com.xnotes.ipad`，刷新后确认文件夹、分页笔记和无限画布均显示中文类型与修改时间。截图 `tmp/w2-3-ipad-home.png`（空目录）、`tmp/w2-3-ipad-documents.png`（样例列表）仅留在本地工作树。

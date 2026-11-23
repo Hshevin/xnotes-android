@@ -48,3 +48,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest>().configureEach {
+    providers.gradleProperty("iosTestDevice").orNull?.let { device.set(it) }
+}

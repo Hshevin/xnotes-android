@@ -1,0 +1,15 @@
+"app_name" = "XNotes";
+"documents" = "Documents";
+"refresh" = "Refresh";
+"back" = "Back";
+"loading" = "Loading documents…";
+"list_failed" = "This folder could not be read. Tap Refresh to try again.";
+"empty_title" = "No notes or folders yet";
+"empty_hint" = "In Files, add a notebook or canvas to On My iPad → XNotes.";
+"kind_folder" = "Folder";
+"kind_note" = "Notebook";
+"kind_canvas" = "Canvas";
+"kind_split" = "Split workspace";
+"kind_map" = "Legacy mind map";
+"kind_pdf" = "PDF";
+"unknown_time" = "Modification date unavailable";
