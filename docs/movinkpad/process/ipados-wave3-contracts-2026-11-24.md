@@ -50,3 +50,10 @@
 
 - 见 [第二波契约](ipados-wave2-contracts-2026-11-24.md)「共同规则」与 AGENTS.md「iPadOS」一节：JDK 21；iOS 测试先打开模拟器，再带 `-PiosTestDevice`；改动编解码须通过互通金样测试；不得削弱、跳过、删除测试；并行任务尚未实现的 RED 测试只能在本地临时隔离，不得提交隔离；不安装真机、不推送、不打包交付。
 - 每个任务在本文末尾追加「W3-x 实现记录」（中文，仓库相对路径）。
+
+## W3-B 实现记录
+
+- `shared/src/commonMain/kotlin/com/xnotes/edit/PagedStrokeCapture.kt` 从 `73f664f0` 的分页控制器抽出首点、落笔缩放、直线荧光笔贴轴、屏幕间距抽稀、稳定器与笔尖，以及跨页分段。`PageSpace` 提供当前页布局与坐标变换；跨页时把上一段末点按原压力、原相对时间转入新页坐标，页缝中不换页。
+- Android 的 `InteractionController` 先用原始落点确定可写页，再将尺子吸附后的点传入捕获器，即使首点被投到页外也不重选页。颜色、清选区、按住成形、魔棒淡出、前缓冲、入页与简化、速度笔跨段宽度拼接、撤销仍由宿主负责。正常抬笔把整笔记为一步撤销；取消不提交当前尾段，已入页的前段仍可撤销。
+- JDK 21 下，原样运行 `PagedStrokeCaptureTest`：Android JVM 和 iPad Pro 13 英寸（M5）模拟器各 15 项通过。`:shared:testDebugUnitTest` 共 2,595 项、`:shared:iosSimulatorArm64Test` 共 2,391 项通过。共享测试编译时仅用未提交的初始化脚本隔离并行任务的 `LiteStoreTest.kt` 与 `CgTextTest.kt`，未改动测试源文件；此结果不代表完整第三波已验证。
+- `:app:testDebugUnitTest` 全部 1,784 项通过，含新增的三项 Android 宿主事件回归：跨页抬笔一步撤销／重做、取消仅保留已入页段、尺子将首点吸出页外。`:app:compileDebugAndroidTestKotlin` 与 `:app:assembleDebug` 通过。MovinkPad Pro 14／Android 15／Pro Pen 3 笔迹仪器测试及前缓冲显示**待真机回归**；未安装、推送、打包交付或发布。

@@ -74,9 +74,7 @@ import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.pdf.MarkupPainter
 import com.xnotes.core.stroke.RecognizedShape
 import com.xnotes.core.stroke.Scribble
-import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.ShapeRecognizer
-import com.xnotes.core.stroke.Stabilizer
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
@@ -86,6 +84,8 @@ import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
+import com.xnotes.edit.PageSpace
+import com.xnotes.edit.PagedStrokeCapture
 import com.xnotes.ui.theme.Palette
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -281,26 +281,22 @@ class InteractionController(
     private var mode = PointerMode.IDLE
 
     // DRAW
-    private var liveStrokeField: Stroke? = null
+    private val strokeCapture = PagedStrokeCapture(object : PageSpace {
+        override val zoom get() = state.zoom
+        override fun pageAt(content: Pt) = state.pageIndexAtContent(content)
+        override fun toPage(page: Int, content: Pt) = state.toPageSpace(page, content)
+        override fun fromPage(page: Int, local: Pt) = state.fromPageSpace(page, local)
+        override fun hasPage(page: Int) = page in state.pageRects.indices
+        override fun writable(page: Int) = state.document.pages[page].layers.writable
+    })
 
-    /**
-     * The stroke under the pen. Clearing it is how every abort path in here ends, so that is where
-     * the front buffer is told to give its pixels back; a stroke that reached [fileStroke] has
-     * already handed them over and is not disturbed.
-     */
-    private var liveStroke: Stroke?
-        get() = liveStrokeField
-        set(value) {
-            liveStrokeField = value
-            if (value == null) frontInk?.abandon()
-        }
-    private var strokePageIndex: Int? = null
+    private val liveStroke get() = strokeCapture.live
+    private val strokePageIndex get() = strokeCapture.page
 
-    /** Event time of the live stroke's first sample; later samples store `eventTime − this` (the speed pen reads it). */
-    private var strokeStartTimeMs = 0L
-
-    /** The live stroke's stabilization, or null while its pen draws the nib as is. */
-    private var steadier: Stabilizer? = null
+    private fun abandonStroke() {
+        strokeCapture.cancel()
+        frontInk?.abandon()
+    }
 
     private var drawingPointerId = -1
     private var drawingIsStylus = false
@@ -1269,8 +1265,7 @@ class InteractionController(
     // --- DRAW ---
 
     private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool, timeMs: Long, downViewport: Pt) {
-        val pageIndex = state.pageIndexAtContent(content) ?: return
-        if (!state.document.pages[pageIndex].layers.writable) return
+        val pageIndex = strokeCapture.writablePageAt(content) ?: return
         // Reaching here with a live selection means the press landed off it (on it the stylus would
         // have grabbed it): dismiss it. A bare tap that only dismissed is dropped in endDraw.
         strokeDismissedSelection = hasSelection
@@ -1278,33 +1273,10 @@ class InteractionController(
         // Capture content-px → dp scale now, so the speed pen judges gesture speed in
         // zoom- and density-independent dp regardless of how the stroke is later viewed.
         val speedScale = state.zoom / state.devicePxPerDp
-        val cfg0 = configFor(drawTool)
-        // SCALE off: normalise the stroke to its 100%-zoom size by dividing the spatial
-        // dimensions by the draw-time zoom, so it draws at a constant on-screen thickness
-        // whatever zoom you are at. Baked into the snapshot, so it is ordinary ink afterwards.
+        val config = configFor(drawTool)
         // A pen with a colour override always draws in its own colour; otherwise it follows the
         // toolbar's active ink colour.
-        val drawColor = cfg0.colorOverride ?: inkColor
-        val cfg = if (cfg0.scale) {
-            cfg0.copy(rgba = drawColor)
-        } else {
-            val z = state.zoom
-            cfg0.copy(
-                rgba = drawColor,
-                baseWidth = cfg0.baseWidth / z,
-                dashLength = cfg0.dashLength / z,
-                dashGap = cfg0.dashGap / z,
-                scale = true,
-            )
-        }
-        val straight = drawTool == Tool.HIGHLIGHTER && cfg.straightLine
-        val stroke = Stroke(
-            drawTool, cfg, speedScale = speedScale, straight = straight,
-            smoothScale = smoothScaleFor(state.zoom),
-        )
-        // Live until pen-up, so lift-time rules (the calligraphy dot swell) can't fire mid-draw.
-        stroke.finished = false
-        strokeStartTimeMs = timeMs
+        val ink = config.copy(rgba = config.colorOverride ?: inkColor)
         // Pen back down: re-solidify the held batch, so a long stroke can't outlive the previous fade.
         if (wandMode && drawTool.isStroke) {
             stopFade()
@@ -1317,15 +1289,10 @@ class InteractionController(
         snapCurrentEdge = null
         snapPenViewport = null
         val down = state.viewportToContent(magnetize(downViewport))
-        val first = state.toPageSpace(pageIndex, down)
-        stroke.addSample(Sample(first.x, first.y, pressure)) // first sample: t = 0
-        steadier = Stabilizer.forStroke(cfg.stabilize && !straight, cfg.stabilizeTrail, cfg.stabilizeCrossover, speedScale)
-        steadier?.start(down.x, down.y, 0.0)
-        liveStroke = stroke
-        strokePageIndex = pageIndex
+        val stroke = strokeCapture.beginOnPage(pageIndex, down, pressure, drawTool, ink, timeMs, speedScale)
         mode = PointerMode.DRAW
         // Hold-to-shape: solid ink pens only, never on the ruler or under the wand (its ink is ephemeral).
-        dwellEligible = detectShapes && drawTool.isStroke && drawTool != Tool.HIGHLIGHTER && !straight &&
+        dwellEligible = detectShapes && drawTool.isStroke && drawTool != Tool.HIGHLIGHTER && !stroke.straight &&
             !snapEngaged && !wandMode
         if (dwellEligible) {
             dwellAnchor = downViewport
@@ -1356,7 +1323,6 @@ class InteractionController(
     }
 
     private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, timeMs: Long, force: Boolean) {
-        val stroke = liveStroke ?: return
         val pi = strokePageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val vp = magnetize(Pt(vx, vy))
@@ -1365,52 +1331,14 @@ class InteractionController(
             cancelDwell()
             dwellEligible = false
         }
-        val nib = state.viewportToContent(vp)
-        var t = (timeMs - strokeStartTimeMs).toDouble()
-        // A steadied stroke takes the point the filter has reached and draws on to the nib as a
-        // tip; the lift lands the nib itself, at the tip's time, so lifting changes nothing.
-        val steady = steadier?.takeIf { !stroke.straight }
-        val content = when {
-            steady == null -> nib
-            force -> {
-                if (steady.moved) t = steady.tipTime
-                nib
-            }
-            else -> {
-                steady.step(nib.x, nib.y, t)
-                Pt(steady.x, steady.y)
-            }
-        }
-        // The pen has walked onto another page: carry the stroke over rather than let it slide
-        // under the paper. A straight line is one segment by definition and never hands over.
-        if (!stroke.straight) {
-            val onPage = state.pageIndexAtContent(content)
-            if (onPage != null && onPage != pi) {
-                handOverStroke(stroke, pi, onPage, content, pressure, t)
-                if (steady != null && !force) showTip(nib, pressure, steady.tipTime)
-                return
-            }
-        }
-        val local = state.toPageSpace(pi, content)
-        if (stroke.straight) {
-            // Straight-line mode: the stroke is always pen-down → current point, so the moving
-            // endpoint just tracks the pointer (decimation/spacing gates don't apply). Near an axis
-            // it snaps flat like a dragged line, unless the ruler is already steering the angle.
-            val start = stroke.samples.firstOrNull()
-            val end = if (start != null && !ruler.visible) ResizeMath.snapAxis(Pt(start.x, start.y), local) else local
-            stroke.setStraightEnd(Sample(end.x, end.y, pressure.coerceIn(0.0, 1.0), t))
+        val handover = strokeCapture.move(state.viewportToContent(vp), pressure, timeMs, force, ruler.visible)
+        if (handover != null) {
+            cancelDwell()
+            dwellEligible = false
+            retireCrossedSegment(handover.retired, handover.fromPage)
+            requestRender()
             return
         }
-        val last = stroke.samples.lastOrNull()
-        // Decimate by on-screen spacing, not content spacing: the gate is MIN_SAMPLE_DIST
-        // viewport px (content px ÷ zoom), capped so it never coarsens past the old 1-content-px
-        // floor when zoomed out. A fixed content-px gate discarded ever-finer detail the more you
-        // zoomed in, so strokes drawn while zoomed faceted into ~zoom-px chords.
-        val gate = (MIN_SAMPLE_DIST / state.zoom).coerceAtMost(MIN_SAMPLE_DIST)
-        if (force || last == null || Pt(last.x, last.y).manhattanTo(local) >= gate) {
-            stroke.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
-        }
-        if (steady != null && !force) showTip(nib, pressure, steady.tipTime)
         // Real movement restarts the hold-to-snap clock; staying within the slop lets it mature,
         // so the snap fires only once the pen has actually come to rest. (Sub-slop jitter is ignored
         // even when a sample is decimated out above, so a trembling-but-still pen still triggers.)
@@ -1420,58 +1348,9 @@ class InteractionController(
         }
     }
 
-    /** Draw the live stroke on to the nib at [content], where its steadied samples have not reached yet. */
-    private fun showTip(content: Pt, pressure: Double, t: Double) {
-        val stroke = liveStroke ?: return
-        val pi = strokePageIndex ?: return
-        val local = state.toPageSpace(pi, content)
-        stroke.setTip(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
-    }
-
-    /**
-     * Hand the stroke under the pen from one page to the next, so a line drawn across a page
-     * boundary keeps going instead of disappearing under the paper.
-     *
-     * The part already drawn is retired onto the page it belongs to, and a fresh segment picks up
-     * on the new one carrying the last point across: that bridging sample lands outside the new
-     * page and is clipped there, so the ribbon meets the paper's edge rather than starting a
-     * blunt millimetre inside it. Everything the crossing files is one undo step (see [endDraw]).
-     */
-    private fun handOverStroke(
-        stroke: Stroke,
-        fromPage: Int,
-        toPage: Int,
-        content: Pt,
-        pressure: Double,
-        t: Double,
-    ) {
-        // A stroke long enough to reach the next page is a line, not a held shape.
-        cancelDwell()
-        dwellEligible = false
-        val last = stroke.samples.lastOrNull()
-        retireCrossedSegment(stroke, fromPage)
-        val next = Stroke(
-            stroke.tool,
-            stroke.config,
-            speedScale = stroke.speedScale,
-            smoothScale = stroke.smoothScale,
-        )
-        next.finished = false
-        if (last != null) {
-            val bridge = state.toPageSpace(toPage, state.fromPageSpace(fromPage, Pt(last.x, last.y)))
-            next.addSample(Sample(bridge.x, bridge.y, last.pressure, last.t))
-        }
-        val local = state.toPageSpace(toPage, content)
-        next.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
-        liveStroke = next
-        strokePageIndex = toPage
-        requestRender()
-    }
-
     /** Put a crossed-off segment where it belongs: ephemeral ink waits for its fade, ordinary ink
      *  joins the page it was drawn on and holds its command back for the one composite undo. */
     private fun retireCrossedSegment(stroke: Stroke, pageIndex: Int) {
-        stroke.finished = true
         val fading = wandMode && stroke.tool.isStroke
         crossedPieces.add(Triple(stroke, pageIndex, fading))
         if (fading) {
@@ -1529,12 +1408,9 @@ class InteractionController(
         )
         // A mid-stroke snap already committed a shape and cleared liveStroke, so this block is
         // skipped and the freehand stroke is intentionally not also committed.
-        val stroke = liveStroke
-        val pi = strokePageIndex
-        if (stroke != null && pi != null && !stroke.isEmpty) {
-            // The pen is up: rebuild with lift-time rules on (a dot-sized calligraphy stroke
-            // takes the nib's broad face) before the stroke is committed or held for fading.
-            stroke.finished = true
+        val last = strokeCapture.finish().lastOrNull()
+        if (last != null && !last.stroke.isEmpty) {
+            val (stroke, pi) = last
             stitchCrossedSpeedWidths(stroke)
             when {
                 // A bare tap whose only job was to dismiss the selection: drop the dot it would leave.
@@ -1558,8 +1434,7 @@ class InteractionController(
         // still have filed segments that need their undo step.
         pushStrokeEdit(null)
         strokeDismissedSelection = false
-        liveStroke = null
-        strokePageIndex = null
+        frontInk?.abandon()
         snapEngaged = false
         snapRunStartEdge = null
         snapCurrentEdge = null
@@ -1637,7 +1512,7 @@ class InteractionController(
         state.document.dirty = true
         // The stroke was never added to the page, so clearing liveStroke makes the live ink preview
         // vanish the instant it snaps; the eventual pen-up in endDraw then commits nothing.
-        liveStroke = null
+        abandonStroke()
         dwellEligible = false
         cancelDwell()
         // Auto-select the new shape so it can be resized right away. The menu only shows once the
@@ -3677,8 +3552,7 @@ class InteractionController(
         dismissPressAt = null
         // Abort the in-progress gesture (keep eraser removals); commit any text edit.
         commitTextEdit()
-        liveStroke = null
-        strokePageIndex = null
+        abandonStroke()
         pendingShape = null
         shapePageIndex = null
         dropTapeDraft()
@@ -4592,8 +4466,7 @@ class InteractionController(
         insertSpace.discardForDocumentChange()
         pdfText?.clear() // invalidate asynchronous presses as well as their visible selection
         crossedSegments.clear() // they belong to the outgoing document, whose history is gone
-        liveStroke = null
-        strokePageIndex = null
+        abandonStroke()
         drawingPointerId = -1
         crossedPieces.clear()
         dwellEligible = false
@@ -4700,8 +4573,7 @@ class InteractionController(
     // --- PINCH ---
 
     private fun beginPinch(e: MotionEvent) {
-        liveStroke = null
-        strokePageIndex = null
+        abandonStroke()
         dropTapeDraft()
         cancelDwell() // a second finger turns the gesture into a zoom; don't snap a shape mid-pinch
         dwellEligible = false
@@ -4846,8 +4718,7 @@ class InteractionController(
         looseBefore = null
         endFollow()
         pushStrokeEdit(null) // a cancelled crossing still left segments on the pages behind it
-        liveStroke = null
-        strokePageIndex = null
+        abandonStroke()
         snapEngaged = false
         snapRunStartEdge = null
         snapCurrentEdge = null
@@ -5283,7 +5154,7 @@ class InteractionController(
     }
 
     companion object {
-        const val MIN_SAMPLE_DIST = 1.0
+        const val MIN_SAMPLE_DIST = PagedStrokeCapture.MIN_SAMPLE_DIST
 
         /** Content px a duplicate lands from its original, so the copy is visibly a copy. */
         const val DUPLICATE_NUDGE = 24.0
@@ -5296,8 +5167,7 @@ class InteractionController(
          *  the smoothing hides the digitizer's jitter, which is a fixed size on screen, so writing
          *  small at high zoom must not be smoothed as if it were written large. Capped at 1 so
          *  zooming out cannot smear content detail the page will keep. */
-        fun smoothScaleFor(zoom: Double): Double =
-            if (zoom.isFinite() && zoom > 0.0) (1.0 / zoom).coerceAtMost(1.0) else 1.0
+        fun smoothScaleFor(zoom: Double): Double = PagedStrokeCapture.smoothScaleFor(zoom)
 
         const val MOVE_EPS = 0.01
 
