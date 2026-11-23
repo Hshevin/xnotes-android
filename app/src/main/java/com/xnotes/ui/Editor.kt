@@ -12872,9 +12872,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             NativeRestoreHint(model.identity.documentId,model.path,DocumentKind.NOTE)
         }
     }
-    private fun matchesRestoreIdentity(hint:NativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean =
-        hint.documentId==documentId && hint.kind==kind &&
-            (if(hint.path==null || path==null) hint.path==path else documentKey(hint.path)==documentKey(path))
+    private fun matchesRestoreIdentity(hint:NativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean {
+        val original=hint.path
+        return hint.documentId==documentId && hint.kind==kind &&
+            (if(original==null || path==null) original==path else documentKey(original)==documentKey(path))
+    }
     internal fun matchesNativeRestoreHint(hint:NativeRestoreHint):Boolean {
         val actual=nativeRestoreHint() ?: return false
         return matchesRestoreIdentity(hint,actual.documentId,actual.path,actual.kind)
