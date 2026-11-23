@@ -33,10 +33,10 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * Save simplification (docs/movinkpad/save-slim-2026-11-22.md).
+ * Save simplification (docs/movinkpad/storage/save-slim-2026-11-22.md).
  *
  * Only a file save encodes a document. A saved (clean, workspace-bound) document keeps no recovery
- * working copy at all: the pause record reopens it from its file (docs/movinkpad/pause-only-recovery-2026-11-23.md).
+ * working copy at all: the pause record reopens it from its file (docs/movinkpad/storage/pause-only-recovery-2026-11-23.md).
  * Otherwise the working copy is reused (same model and revision), deferred to a pending bound file
  * save, or encoded. A checkpoint overtaken by newer state retries silently; only
  * an actual write failure reports "Could not update the recovery session".

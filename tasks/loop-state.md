@@ -2,7 +2,7 @@
 
 ## 当前入口（2026-11-11）
 
-当前执行计划见[剩余交付与验收](../docs/movinkpad/mind-map-next-plan-2026-11-11.md)，需求仍保留原14组，整体未完成。当前代码基线为主线 `9b56b520`：R0冷恢复已合入，后续完整窗格视图和原生恢复职责拆分也已完成源码/主机验证；详见[结构修复证据](../docs/movinkpad/architecture-refactor-2026-11-11.md)。平台/目标设备仍待验。
+当前执行计划见[剩余交付与验收](../docs/movinkpad/archive/mind-map-next-plan-2026-11-11.md)，需求仍保留原14组，整体未完成。当前代码基线为主线 `9b56b520`：R0冷恢复已合入，后续完整窗格视图和原生恢复职责拆分也已完成源码/主机验证；详见[结构修复证据](../docs/movinkpad/process/architecture-refactor-2026-11-11.md)。平台/目标设备仍待验。
 
 本次仅审查和修改计划，不启动持续开发。下一功能片建议R3a精确来源定位/重授权；实施时以当次用户指令和AGENTS权限为准，不继承下面旧记录的一次性授权或工作树路径。
 
@@ -13,7 +13,7 @@
 目标：完整思维导图原14组保留，overall complete=false；本次剩余计划＋全部当前进展本地合并已完成，持续开发保持paused。用户明确要求同步主分支后继续；不因阶段完成缩减原14组。
 工作树：当前聊天附加的 mind-map-cold-restore/xnotes；分支 codex/mind-map-cold-restore。已同步本地master9cecd51b，保留已验证的布局记录组件39812473/7dc75587及其文档8c8a4c84。此前草稿快照3520e964仍保留；构建/cache独立于其他工作树。历史同步与验证见阶段记录，机器路径仅保存在忽略的tmp运行记录中。
 授权：同步主分支并继续已有实现、相关编译／测试、文档及本地提交；不推送、不改Git配置、不打包APK、安装或发布。用户最新明确要求“先停一下，我检查一下你的工作”，已暂停；之后须按用户继续指令恢复。
-需求：docs/movinkpad/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
+需求：docs/movinkpad/archive/mind-map-requirements-current.md，原14组范围不缩减；页面级UUID、旧笔迹/PDF原字节、保存失败保留已写版本等规则不变。
 
 ## 当前阶段：S3a0 最后呈现协议与存储（verified，已本地提交）
 
@@ -21,7 +21,7 @@
 39唯一JVM全绿，Android9方法SOURCE已编译未执行。独审闭合ASCII escape、成功
 move后written事实与末IO后current三Required；1300完整输入SHA和raw XML/runner/init
 独立审计一致。证据tmp/cold-marker-green-*及verified-summary.json，主题记录
- docs/movinkpad/mixed-cold-restore-2026-11-10.md。全部已知构建终态。
+ docs/movinkpad/storage/mixed-cold-restore-2026-11-10.md。全部已知构建终态。
 
 最新本地主线9cecd51b已同步；主/单元/Android测试源码编译及14项相关测试通过，
 布局记录7文件SHA未变，39组件证据复用。所有已知作业终态。
@@ -54,7 +54,7 @@ S1完整本地提交a07fe380607d7c3b1cf7ee5174f8e65ffc29b5fa后干净继续。�
 
 ## 已验证阶段：typed mixed 安排文件与存储（verified，已本地提交）
 
-上轮为progress：原生分屏替换已verified并提交d706ebd1。本轮按明确要求新树继续，整体目标不变。阶段计划 docs/movinkpad/mixed-split-persistence-2026-11-10.md 的S1已独审PASS：先统一v1/2与typed v3纯数据解析，以及私有新文件create-new发布；recent仅只读，不接Main/Editor/正文/cold。S2接实际两正文保存/原子打开前门，S3接cold工作副本与sticky未核源保护，均仍未完成。不能把Hint、缓存dirty=false或读取当前原件SHA当缓存正文的基线。
+上轮为progress：原生分屏替换已verified并提交d706ebd1。本轮按明确要求新树继续，整体目标不变。阶段计划 docs/movinkpad/archive/mixed-split-persistence-2026-11-10.md 的S1已独审PASS：先统一v1/2与typed v3纯数据解析，以及私有新文件create-new发布；recent仅只读，不接Main/Editor/正文/cold。S2接实际两正文保存/原子打开前门，S3接cold工作副本与sticky未核源保护，均仍未完成。不能把Hint、缓存dirty=false或读取当前原件SHA当缓存正文的基线。
 
 S1已实现，production仅两新文件，Main/Editor/正文/恢复生产行为未改。11301新API scaffold RED26/14fail，不冒称旧UI真实缺陷；97062首绿32+AndroidSOURCE，11794仅修测试nullable warning后13全绿。独审发现Android lenient词法引号绕过depth32；25045原scanner仅暴露预检方法、真实RED1/1fail（首payload失败，未跑后两个）。改严格字符串escape/literal边界与词法后，24013最终3整suite33唯一0fail/error/skip（codec15/store13/legacy5）+AndroidSOURCE实际compile通过，1253项KT/Java/XML与5构建配置前后及当前SHA同；最终整套覆盖旧轮，不叠用例。独立源审Required闭合、rawXML/库存/runner/init/命令审计PASS，tmp/mixed-persistence-final-review.json；原始prefix red/final/recheck/boundary-red/guard-final均保留。Android新增5方法仅源码编译，Android私有FS/系统/SAF/PDFium/Surface/GPU/目标设备未跑，JVM FS硬链接/并发/故障注入已真跑。
 
@@ -62,7 +62,7 @@ runner tmp/run-mixed-persistence-check.py 与 build-mixed-persistence.gradle，�
 
 ## 已验证阶段：原生分屏替换导图工作区（verified，已本地提交）
 
-上轮为progress：Map＋NOTE双选已verified并提交327463b9，当前阶段以该干净HEAD继续。新阶段 docs/movinkpad/native-split-replacement-2026-11-10.md 已实现并独审PASS：应用内saved Native .xsplit／recent／显式NOTE2，从mixed／单图／MapHome／parked／普通Native及Home统一双候选、mandatory全旧Map退休证明、Native末IO与同Main双采用；失败保原工作区，启动Missing恢复未改。retained集合／samecanonical共享／actual槽映射／HOLD与原key接收者、active录音拒绝及旧播放退休、纯会话／视口／布局成功持久化均接线。所有作者已冻结、已知作业终态，无用户待答。
+上轮为progress：Map＋NOTE双选已verified并提交327463b9，当前阶段以该干净HEAD继续。新阶段 docs/movinkpad/archive/native-split-replacement-2026-11-10.md 已实现并独审PASS：应用内saved Native .xsplit／recent／显式NOTE2，从mixed／单图／MapHome／parked／普通Native及Home统一双候选、mandatory全旧Map退休证明、Native末IO与同Main双采用；失败保原工作区，启动Missing恢复未改。retained集合／samecanonical共享／actual槽映射／HOLD与原key接收者、active录音拒绝及旧播放退休、纯会话／视口／布局成功持久化均接线。所有作者已冻结、已知作业终态，无用户待答。
 
 2563是真旧frontdoor RED1/1fail(坏second竟成功)，1176 scoped输入同SHA。33343相关41套298全PASS+Android SOURCEcompile，1248输入同。实现审3Required及Root fresh-shared keepPeer缺口，94778真实5case4fail精确命中；selection怀疑因reset后段完整而按误报闭合且稳定case PASS，production未为它改。25112最后9整suite85全过+AndroidSOURCE，1248前后及当前SHA同；用85替换旧同9套80，最终41套303唯一0fail/error/skip。独立rawXML／完整库存／SHA审计PASS，三套资源12keys一致双中文正文同。证据tmp/native-split-verified-summary.json、-final-inputs-verified.json与各red/related/boundary-red/final原始XML/log/inputs；runtime tmp/native-split-replacement-runtime.json。构建/cache为/private/tmp/xnotes-mind-map-native-split-replacement-build及-cache，未与其他tree/variant混用。
 
@@ -72,7 +72,7 @@ runner tmp/run-mixed-persistence-check.py 与 build-mixed-persistence.gradle，�
 
 ## 已验证阶段：Map＋NOTE 双文件打开（verified，已本地提交）
 
-计划与阶段记录 docs/movinkpad/map-pair-open-2026-11-10.md。本轮按用户要求新树续作，迁移78份上一阶段最新证据逐文件SHA同、旧树仍干净；先前独审通过后实现。真实首页双选及槽内Home的Map＋NOTE两顺序、fresh/retained/shared Native、Map真实actor/visited新root、HOLD/Key原代次/实际View焦点交接已接；候选不先改模型/布局，Map初始/实际load/最终SHA及恢复/身份域核实，Native同源重读及final域票跨Map IO。正常退出owner已成功blur/save不回滚，retained只自然等。原14组范围和overall complete=false保留。
+计划与阶段记录 docs/movinkpad/archive/map-pair-open-2026-11-10.md。本轮按用户要求新树续作，迁移78份上一阶段最新证据逐文件SHA同、旧树仍干净；先前独审通过后实现。真实首页双选及槽内Home的Map＋NOTE两顺序、fresh/retained/shared Native、Map真实actor/visited新root、HOLD/Key原代次/实际View焦点交接已接；候选不先改模型/布局，Map初始/实际load/最终SHA及恢复/身份域核实，Native同源重读及final域票跨Map IO。正常退出owner已成功blur/save不回滚，retained只自然等。原14组范围和overall complete=false保留。
 
 13810初RED8/5，分selector真实旧policy与Native/Map新接口stub。23348 foreign checkpoint、81576 loaded A→B→A、65470 原件ID的Map登记污染、4728 Map/NOTE共UUID实际双adopt，各1真实缺陷RED，原始XML与日志保留。9429相关38套270项269过，唯一A夹具异步newNote误捕旧模型，改同步actual replaceDocument且不削ABA断言；production未随夹具变，AndroidSOURCE绿，1242输入同。32954最后7整suite59全过+AndroidSOURCE绿，1242前后及当前SHA同；用59整suite替换旧57，38套272唯一0fail/error/skip，不能叠重跑；tmp/map-pair-verified-summary.json、-final-inputs-verified.json及各prefix原始log/results/inputs。三套资源10keys一致、双中文逐值同。
 
@@ -102,7 +102,7 @@ d0132a90 clean 起步；本阶段在原 source-target 树实现，按用户新�
 
 有效证据按case键合并：原240只替换2个失败method，再加3项＝31套243唯一case，0失败／错误／跳过。27748→33832仅2个测试文件改变；33832→90621仅新增leaf测试；production／Android／resources／build未变，1218最终输入集合与SHA逐项一致。tmp/map-source-verified-summary.json、tmp/map-source-final-inputs-verified.json及各prefix-results／inputs／log；资源4键三套一致，两中文逐值相同。独立实现审核Required已闭合，最后迁移／新增3项／原始XML及输入链独立复核通过，无剩余Required；实现与测试本地提交 b67ba73d／ab0d5ba5／3e3d7d10／48053e78／a100e494／c68668b1，文档提交随后见HEAD；无运行构建。
 
-正式记录 docs/movinkpad/map-source-navigation-2026-11-10.md；README／AGENTS已同步。下一步检查真正导图双窗格的宿主、焦点、租约与保存接口，写可验收的小阶段计划并独审后实施。完整14组保持active／overall complete=false，Canvas侧反向引用、精确权限／移动／回收站／重复身份恢复、完整引用备份、主要预览／页缩略、同级插入／边缘平移仍保留。真实Android／DocumentsUI／SAF／Activity重建杀进程／PDFium像素／MovinkPad Pro14 Android15 ProPen3／Surface／GPU／性能未运行；无APK／安装／推送／合并／发布。
+正式记录 docs/movinkpad/archive/map-source-navigation-2026-11-10.md；README／AGENTS已同步。下一步检查真正导图双窗格的宿主、焦点、租约与保存接口，写可验收的小阶段计划并独审后实施。完整14组保持active／overall complete=false，Canvas侧反向引用、精确权限／移动／回收站／重复身份恢复、完整引用备份、主要预览／页缩略、同级插入／边缘平移仍保留。真实Android／DocumentsUI／SAF／Activity重建杀进程／PDFium像素／MovinkPad Pro14 Android15 ProPen3／Surface／GPU／性能未运行；无APK／安装／推送／合并／发布。
 
 ## 最近已验证阶段：来源范围调整与更换（verified，已本地提交）
 
@@ -299,7 +299,7 @@ MapWorkspaceOwner由actual Main ViewModelProvider取得，跨config保同Entry/l
 
 基线9691a442干净。本片verified（源码／主机与Android源码编译），整体active/complete=false。已本地提交：510d0abd（严格页来源基线与Editor消费者）、576a35eb（共享MapSession/lease/typed导入保存）、a9fb4573（真实当前页入口/UI/31新增主机/2Android场景/文档）。本恢复点为后续docs-only检查点；不需重复最终测试。
 
-真实用户路径：PDF/分页笔记页缩略图菜单→原实际pane/owner/Document/Page请求→严格源准备或明确旧页启用/实际重开→选择已有/新图→已有概念或Newbranch/free引用→一次history→精确文件保存/失败只重试→保阅读/显式查看图。新doc docs/movinkpad/mind-map-current-page-reference-2026-11-09.md，README/AGENTS/plan/todo同步；不代表region/来源往返/Map双窗格/反向引用/网络已完成。
+真实用户路径：PDF/分页笔记页缩略图菜单→原实际pane/owner/Document/Page请求→严格源准备或明确旧页启用/实际重开→选择已有/新图→已有概念或Newbranch/free引用→一次history→精确文件保存/失败只重试→保阅读/显式查看图。新doc docs/movinkpad/archive/mind-map-current-page-reference-2026-11-09.md，README/AGENTS/plan/todo同步；不代表region/来源往返/Map双窗格/反向引用/网络已完成。
 
 最终95689终态0：343套件3726项，失败/错误/跳过均0，Android测试源码编译绿；tmp/current-page-to-map-final-full.log及同名-summary.json。全部生产/测试在full前冻结，后仅docs/提交。相关42894终态0：33套326项（源12/目标12/Root7均绿）与Androidcompile，tmp/current-page-to-map-native-map-related.log及-summary.json。新增PageToMapEditingHostTest2已登记，仅编译未运行。无运行Gradle/exec作业。
 
@@ -339,7 +339,7 @@ EMPTY只用于已证明纸面外region；显式刷新可接受无新PNG的空结
 
 独立计划/代码审核已闭合，无剩余确定必修。行为红证据：49427页hint回写、84657规范锁半文件/取消、36181失败后source lifetime、53706真实EMPTY（36181误filter未跑EMPTY，不计其红）、27663冷态lines/fallback。37003 API缺失预期红；69564首相关248中247绿，唯一Root double反例被JSON规范化，改raw literal后格式绿。相关日志在tmp/source-preview-*.log。最终全量包含所有修复，不以旧3664结果冒新验证。
 
-正式记录 docs/movinkpad/mind-map-source-preview-2026-11-09.md，README/AGENTS已同步v3与当前边界。当前未打包/安装/推送/合并/发布；无运行Gradle/exec作业。真实SAF/DocumentsUI/Android仪器/PDFium成功绘制及rooms/crop/大PDF性能/MovinkPad Pro14 Android15 ProPen3/掌触/GPU/双窗格未执行。
+正式记录 docs/movinkpad/archive/mind-map-source-preview-2026-11-09.md，README/AGENTS已同步v3与当前边界。当前未打包/安装/推送/合并/发布；无运行Gradle/exec作业。真实SAF/DocumentsUI/Android仪器/PDFium成功绘制及rooms/crop/大PDF性能/MovinkPad Pro14 Android15 ProPen3/掌触/GPU/双窗格未执行。
 
 下一步按原计划继续：当前文档添加页面/region来源→来源定位/轮廓/返回与窗格交接→反向引用→文件局部/筛选/全库网络，strict区分真实内容引用/手工关联/可选同图出现；不由多来源概念自动推断文件互相依赖。主画布主要来源大图、未确认引用草稿预览、选页目录缩略图、纸面内空区域检测、范围/失效恢复、无中心关系画布、同级插入、边缘自动平移等需求保留。
 
@@ -419,8 +419,8 @@ Map本机checkpoint失败保source conflict的新实际回归已写，生产修�
 新增1项Canvas迟到请求归属回归。源码Required及最终证据独审PASS，无残留必修。
 Root只补docs/README/tasks，不再改源码。此前Map/Last/Readonly/Canvas/Maplocal
 组件已分批本地提交，余Main/Editor完整接线＋宿主回归准备本地提交并合入master。
-精确持续计划 docs/movinkpad/mind-map-next-plan-2026-11-10.md，合并/验收记录
- docs/movinkpad/mind-map-cold-progress-merge-2026-11-10.md；原14组未完成，后续仍暂停。
+精确持续计划 docs/movinkpad/archive/mind-map-next-plan-2026-11-10.md，合并/验收记录
+ docs/movinkpad/archive/mind-map-cold-progress-merge-2026-11-10.md；原14组未完成，后续仍暂停。
 当前无构建作业；未APK／安装／推送／发布，真实Android／SAF／杀进程／GPU／目标设备未验。
 
 ## 最新交接点：计划与全部进展已合入本地主线（2026-11-10）
@@ -430,6 +430,6 @@ master本地合并0c1682c7（父9cecd51b／e9a48daa）；源码f3890bbb及全部
 编译，源码／最终证据独审PASS。合并后仅补README/docs/tasks，app源码和1350
 验证输入未变。保留开发分支／工作树；无构建作业、无残留必修、无待用户回答。
 用户本次要求的计划与合并已完成，原14组整体仍未完成，后续开发保持paused。
-下一工作按 docs/movinkpad/mind-map-next-plan-2026-11-10.md 的R1以后及R0
+下一工作按 docs/movinkpad/archive/mind-map-next-plan-2026-11-10.md 的R1以后及R0
 更广入口／实际平台验收继续；先读当前README／AGENTS／本断点，不重复旧阶段。
 本次不APK／安装／推送／发布；仪器／SAF／真实杀进程／Surface／GPU／MovinkPad未验。

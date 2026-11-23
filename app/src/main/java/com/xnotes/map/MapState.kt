@@ -6,7 +6,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Stroke
 
 /*
- * Mind map v2 data contract (docs/movinkpad/mind-map-v2-design-2026-11-21.md).
+ * Mind map v2 data contract (docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md).
  *
  * Everything in this file is immutable and compared by value, so a [MapState] can be kept whole as
  * an undo snapshot and two states can be compared in tests. The only exception is [Stroke], which is

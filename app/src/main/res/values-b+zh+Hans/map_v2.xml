@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mind map v2 on the canvas (docs/movinkpad/mind-map-v2-design-2026-11-21.md). -->
+<!-- Mind map v2 on the canvas (docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md). -->
 <resources>
     <string name="tool_map">导图</string>
     <string name="map2_edit_text">编辑文字</string>

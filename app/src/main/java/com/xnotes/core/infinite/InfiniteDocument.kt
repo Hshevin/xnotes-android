@@ -68,7 +68,7 @@ class InfiniteDocument(
     private val mapDirty = com.xnotes.map.MapModel.Listener { this.dirty = true }
 
     /**
-     * The canvas's mind maps (docs/movinkpad/mind-map-v2-design-2026-11-21.md). Every change to it,
+     * The canvas's mind maps (docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md). Every change to it,
      * content or collapse, marks the document dirty. Replaced wholesale only when a file is read.
      */
     var map: com.xnotes.map.MapModel = com.xnotes.map.MapModel().also { it.addListener(mapDirty) }

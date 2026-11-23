@@ -77,7 +77,7 @@
 
 - 仅黑白：纸面、面板、菜单为纯白 #FFFFFF / 纯黑 #000000，夜间反转，普通控件选中态完全反转；思维导图节点选中保留节点底色与内容颜色，以外圈轮廓标示，单选/多选一致，不整块反色。允许中性灰阶（R = G = B）表现层级（次要文字、分隔线、填充、背景）；不用彩色强调色、渐变或装饰阴影。笔迹颜色与 PDF 属于内容，不受主题约束。
 - 页面上的工具标记（选框、套索、手柄、光标、参考线、文本框边框）须与页面形成对比，而非跟随主题：读取 `CanvasState.palette` / `TextEditHost.overlayPalette`，夜间模式下在 PDF 或浅色页面上改用黑色。无限画布同一视图混有黑纸与白图片，因此 `OverlayTessellator` 在每个标记下垫 1 px 反色描边；其深色取 (1, 1, 1)，因为夜间笔迹会把精确的 (0, 0, 0) 重绘为白色。
-- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui-monochrome-tokens-2026-11-03.md`。Release 98 已在 MovinkPad Pro 14 / Android 15 通过日夜间真机视觉验收，见 `docs/movinkpad/device-acceptance-release98-2026-11-08.md`。
+- 界面字号与间距只取自 `ui/theme/Tokens.kt`（`TextSize`、`Space`），控件触控区不小于 48 dp（`MinTouchTarget`）；需要新值时在此新增 token，不写字面量。详见 `docs/movinkpad/ui/ui-monochrome-tokens-2026-11-03.md`。Release 98 已在 MovinkPad Pro 14 / Android 15 通过日夜间真机视觉验收，见 `docs/movinkpad/releases/device-acceptance-release98-2026-11-08.md`。
 - 用户可见文字放入字符串资源：英文在 `values/`，相同的简体中文在 `values-b+zh+Hans/` 与 `values-zh-rCN/`。AI 界面文字在 `ai.xml`；`ai/` 后端消息经 `AiText.t(AiMsg…)` 与 `ai_messages.xml`；`storage/` 消息经 `StorageText.t(StorageMsg…)` 与 `storage_messages.xml`。持久化键（AI 轮次状态、默认会话标题）与面向模型的提示词保持不变，仅在显示时翻译。
 - 功能名称统一为「AI」，截图入口、浮窗和设置不再使用「问 AI」。
 
@@ -90,32 +90,32 @@
 
 ## 文档打开与分屏
 
-- 无限画布用于画画与草稿，独立打开，不进入分屏；含画布的旧分屏文件在替换工作区前拒绝，上次会话只恢复主窗格自身。见 `docs/movinkpad/canvas-sketch-only-2026-11-07.md`。
+- 无限画布用于画画与草稿，独立打开，不进入分屏；含画布的旧分屏文件在替换工作区前拒绝，上次会话只恢复主窗格自身。见 `docs/movinkpad/editor/canvas-sketch-only-2026-11-07.md`。
 - 主菜单打开普通文档进入单文档模式；窗格首页只替换该窗格。仅显式打开或恢复分屏才进入双窗格；关闭文档先回该窗格首页，再关闭首页才移除窗格。
-- 替换前等待已接受的保存和输入事务，最终重新核实拥有者、模型、版本、来源和相关窗格；自己保存改变来源后须重读。打开失败保留原工作区，旧回调不得修改新模型。不得为打开文件强制提交或取消笔画、选择或样式预览。见 `docs/movinkpad/reference-verified-open-2026-11-08.md`、`docs/movinkpad/reference-open-after-save-2026-11-09.md`。
-- 更换模型只丢弃旧草稿、预览和异步请求，不把旧手势补交到新模型；旧事务由原拥有者收尾。见 `docs/movinkpad/reference-stable-capture-2026-11-09.md`。
+- 替换前等待已接受的保存和输入事务，最终重新核实拥有者、模型、版本、来源和相关窗格；自己保存改变来源后须重读。打开失败保留原工作区，旧回调不得修改新模型。不得为打开文件强制提交或取消笔画、选择或样式预览。见 `docs/movinkpad/storage/reference-verified-open-2026-11-08.md`、`docs/movinkpad/storage/reference-open-after-save-2026-11-09.md`。
+- 更换模型只丢弃旧草稿、预览和异步请求，不把旧手势补交到新模型；旧事务由原拥有者收尾。见 `docs/movinkpad/storage/reference-stable-capture-2026-11-09.md`。
 - 文件树仅为已确认存在子文件夹的节点显示展开箭头；共享文档关闭拥有者时保留另一侧首页的位置。文件新建、重命名、移动、删除经 `Editor.notifyTreeChanged()` 通知工作区全部窗格重新列出。
 - 按窗格创建的对象（`Editor` 及其副窗格）不得在永不取消的作用域里启动常驻收集器；观察共享状态用 Compose `collectAsState` 或直接读取 `StateFlow.value`，否则释放的副窗格和重建的 Activity 会被协程一直持有。
-- 分页和画布跨宿主重挂分别使用 `Editor.surfacesForAttach()`、`InfiniteEditor.surfacesForAttach()`：先归还暂存笔迹、断开旧回调并完成旧绘制器脱离，再替换绘制表面；保留文档、视口、撤销和用户前缓冲设置。不得以工具栏稳定代替重挂保护。见 `docs/movinkpad/split-wet-ink-2026-11-04.md`、`docs/movinkpad/canvas-split-black-2026-11-07.md`；显示及 GPU 结论须真机验证。
+- 分页和画布跨宿主重挂分别使用 `Editor.surfacesForAttach()`、`InfiniteEditor.surfacesForAttach()`：先归还暂存笔迹、断开旧回调并完成旧绘制器脱离，再替换绘制表面；保留文档、视口、撤销和用户前缓冲设置。不得以工具栏稳定代替重挂保护。见 `docs/movinkpad/rendering/split-wet-ink-2026-11-04.md`、`docs/movinkpad/rendering/canvas-split-black-2026-11-07.md`；显示及 GPU 结论须真机验证。
 
-- 新画布首帧上屏前保留菜单并隔离输入，保持宿主结构稳定；首次绘制与旧窗口回调不能错认新一代打开。见 `docs/movinkpad/canvas-open-flash-2026-11-08.md`。
+- 新画布首帧上屏前保留菜单并隔离输入，保持宿主结构稳定；首次绘制与旧窗口回调不能错认新一代打开。见 `docs/movinkpad/rendering/canvas-open-flash-2026-11-08.md`。
 
 ## 存储、PDF 与迁移
 
 - 笔记本地离线保存，无账号、同步或应用后端；修改须持久化，存储、导入、删除和迁移须验证失败与恢复路径。
-- 编码前由实际拥有者等待旧任务及输入稳定，再捕获不可变正文与身份、图层、胶合关系；笔迹只固定原采样前缀，不重编码。只改视图时不捕获正文，复用须有同一模型与正文版本的成功证明。见 `docs/movinkpad/reference-owner-capture-2026-11-09.md`。
-- 恢复记录（布局与工作副本）只在应用进入后台时写一次：编辑、停笔、自动保存和离开文档都不做检查点，离开文档只写 Home 凭据；已保存的工作区文档标记从原文件重开、不保留副本正文；文件保存失败时立即写受保护副本。不得为恢复记录拖慢进出文档。见 `docs/movinkpad/pause-only-recovery-2026-11-23.md`。
-- 工作会话的正文、来源和保存交接凭据须原子配对；来源描述不授覆盖权限。仅本次实际发布及核验成功的回执可确认保存，不得用旧回执证明新尝试；禁止接入半套协议或绕过交接写原件。损坏、未来版本和未认领恢复资料保留。接口细节见 `docs/movinkpad/reference-native-handoff-2026-11-08.md`。
-- 保存已写入文件而后续失败时，“放弃修改”保留已写版本，仅放弃之后的新修改；部分写入未核实前保留恢复资料，不冒充成功。见 `docs/movinkpad/reference-discard-written-2026-11-08.md`。
-- 文档 UUID 与资源指纹分开；身份缺失或重复须显式恢复，不能按文件名猜测。页面引用契约按文档身份单调保留，丢失位置不撤销；保存同时核实位置、身份、类型、页契约和原 PDF。契约失败不得降级成普通覆盖。不同提供方的文档位置仅在同时打开的只读普通文件描述符具有相同设备号与 inode 时合并；保留工作目录 URI，旧位置的 UUID 预期不授予写权限。登记表未知版本拒绝打开并保留信息，见 `docs/movinkpad/reference-registry-version-policy-2026-11-10.md`。
-- 新建、首次保存、明确另存、导入、提取和合并使用受控发布流程，不直接写系统选择器返回的通用流；仅可读且确认的新空目标可发布。请求固定原拥有者和候选，迟到修改保留未保存状态；失败不得删除来源不明的返回目标。独立副本使用新身份，共享导出保持身份。见 `docs/movinkpad/reference-save-as-page-copy-2026-11-09.md`。
-- 引用以页面为单位：分页笔记/PDF 保存永久页编号，画布只引用文档，不给对象编号。删页后显示已删除、不改指；复制取得新页编号。页身份独立于渲染和胶合编号，由拥有者在快照前准备；已有文件启用走原字节升级，不能由写入器补活模型身份。见 `docs/movinkpad/reference-page-level-2026-11-07.md`。
+- 编码前由实际拥有者等待旧任务及输入稳定，再捕获不可变正文与身份、图层、胶合关系；笔迹只固定原采样前缀，不重编码。只改视图时不捕获正文，复用须有同一模型与正文版本的成功证明。见 `docs/movinkpad/storage/reference-owner-capture-2026-11-09.md`。
+- 恢复记录（布局与工作副本）只在应用进入后台时写一次：编辑、停笔、自动保存和离开文档都不做检查点，离开文档只写 Home 凭据；已保存的工作区文档标记从原文件重开、不保留副本正文；文件保存失败时立即写受保护副本。不得为恢复记录拖慢进出文档。见 `docs/movinkpad/storage/pause-only-recovery-2026-11-23.md`。
+- 工作会话的正文、来源和保存交接凭据须原子配对；来源描述不授覆盖权限。仅本次实际发布及核验成功的回执可确认保存，不得用旧回执证明新尝试；禁止接入半套协议或绕过交接写原件。损坏、未来版本和未认领恢复资料保留。接口细节见 `docs/movinkpad/storage/reference-native-handoff-2026-11-08.md`。
+- 保存已写入文件而后续失败时，“放弃修改”保留已写版本，仅放弃之后的新修改；部分写入未核实前保留恢复资料，不冒充成功。见 `docs/movinkpad/storage/reference-discard-written-2026-11-08.md`。
+- 文档 UUID 与资源指纹分开；身份缺失或重复须显式恢复，不能按文件名猜测。页面引用契约按文档身份单调保留，丢失位置不撤销；保存同时核实位置、身份、类型、页契约和原 PDF。契约失败不得降级成普通覆盖。不同提供方的文档位置仅在同时打开的只读普通文件描述符具有相同设备号与 inode 时合并；保留工作目录 URI，旧位置的 UUID 预期不授予写权限。登记表未知版本拒绝打开并保留信息，见 `docs/movinkpad/storage/reference-registry-version-policy-2026-11-10.md`。
+- 新建、首次保存、明确另存、导入、提取和合并使用受控发布流程，不直接写系统选择器返回的通用流；仅可读且确认的新空目标可发布。请求固定原拥有者和候选，迟到修改保留未保存状态；失败不得删除来源不明的返回目标。独立副本使用新身份，共享导出保持身份。见 `docs/movinkpad/storage/reference-save-as-page-copy-2026-11-09.md`。
+- 引用以页面为单位：分页笔记/PDF 保存永久页编号，画布只引用文档，不给对象编号。删页后显示已删除、不改指；复制取得新页编号。页身份独立于渲染和胶合编号，由拥有者在快照前准备；已有文件启用走原字节升级，不能由写入器补活模型身份。见 `docs/movinkpad/storage/reference-page-level-2026-11-07.md`。
 - 导入、格式升级、整包复制与恢复保留原笔迹及 PDF 负载字节，先暂存、校验再发布；不得借元数据升级重新编码笔迹。仅笔迹副本使用独立入口，不覆盖原件；略去坏对象须告知数量，不能保留指向略去对象的连线。
-- 恢复预览不授原件写权限，关闭前等待读取、渲染和复制完成再释放资产及租约；缺失、已清除、损坏分别处理。保存副本使用原包，不从可变预览模型重编码；写后失败保留同一候选，重启后须明确选择原目标继续。见 `docs/movinkpad/reference-recovery-preview-2026-11-09.md`。
-- 旧 NOTE 工作副本按实际模型保留来源保护，可继续编辑及保存本地副本；记忆路径和 `dirty=false` 不授原件覆盖权，独立另存成功采用新身份前保护不消失。恢复末验覆盖同拥有者后发命令和 Native intent；仅实际 Absent 可旧格式读写清，失败保资料。见 `docs/movinkpad/mixed-cold-restore-2026-11-10.md`。
+- 恢复预览不授原件写权限，关闭前等待读取、渲染和复制完成再释放资产及租约；缺失、已清除、损坏分别处理。保存副本使用原包，不从可变预览模型重编码；写后失败保留同一候选，重启后须明确选择原目标继续。见 `docs/movinkpad/storage/reference-recovery-preview-2026-11-09.md`。
+- 旧 NOTE 工作副本按实际模型保留来源保护，可继续编辑及保存本地副本；记忆路径和 `dirty=false` 不授原件覆盖权，独立另存成功采用新身份前保护不消失。恢复末验覆盖同拥有者后发命令和 Native intent；仅实际 Absent 可旧格式读写清，失败保资料。见 `docs/movinkpad/storage/mixed-cold-restore-2026-11-10.md`。
 - 录音的延迟恢复、转换及撤销回调固定实际文档与采用身份，失效不作用新模型。原音频与日志保留至实际成功正文含对应编号及已登记音频摘要；放置、视图保存或旧回执不确认交付。曾加入的录音重启后缺失须明确处理，不自动重放撤销内容；未知、冲突及孤立资料保留并可操作。见同主题记录。
-- 原 PDF 不可变：保持 `DocumentKind.PDF_DOCUMENTS_ENABLED = false`，PDF 通过导入成为批注笔记。内部笔记引用私有共享原件，导出生成含 PDF 的便携包；旧包迁移保留其他条目原字节。受管资源仅按引用、活跃租约与延迟回收清理，任何临时清理跳过 `PdfResources.isOwned`。内部笔记或预览不构成完整备份，须经应用导出。见 `docs/movinkpad/pdf-single-copy-2026-11-05.md`。
-- PDF 原件缺失时，只能重新关联 SHA-256 一致的原 PDF 或内嵌旧包，不能换底稿；也可保存不写原文件的仅笔迹副本。见 `docs/movinkpad/pdf-relink-2026-11-05.md`。
+- 原 PDF 不可变：保持 `DocumentKind.PDF_DOCUMENTS_ENABLED = false`，PDF 通过导入成为批注笔记。内部笔记引用私有共享原件，导出生成含 PDF 的便携包；旧包迁移保留其他条目原字节。受管资源仅按引用、活跃租约与延迟回收清理，任何临时清理跳过 `PdfResources.isOwned`。内部笔记或预览不构成完整备份，须经应用导出。见 `docs/movinkpad/storage/pdf-single-copy-2026-11-05.md`。
+- PDF 原件缺失时，只能重新关联 SHA-256 一致的原 PDF 或内嵌旧包，不能换底稿；也可保存不写原文件的仅笔迹副本。见 `docs/movinkpad/storage/pdf-relink-2026-11-05.md`。
 
 ## 图层
 
@@ -125,11 +125,11 @@
 - 缩略图只画单层内容，不混入纸张或 PDF；隐藏层保留预览。“不显示”时不计算边界或位图。异步渲染只读几何快照，翻页、关闭或版本变化取消旧任务，缓存不写入笔记格式。
 
 - 无限画布图层显隐只过滤绘制，隐藏层几何驻留；顺序使用包含隐藏层的 `DrawingLayers.stacked`。图层编辑、撤销重做与叠放变化经 `InfiniteEditor.syncScene` 在同一批次按差异更新，不重置场景；仅打开/替换文档整体重建。`replaceAll` 不得修改条目几何，几何编辑走 `onItemChanged`。
-- 无限画布的图层侧栏叠在画布上，不改变画布或湿墨表面尺寸；宽度经 `setSidebarCover` 合入视口内边距，不重新居中。见 `docs/movinkpad/canvas-flicker-fix-2026-11-08.md`。
+- 无限画布的图层侧栏叠在画布上，不改变画布或湿墨表面尺寸；宽度经 `setSidebarCover` 合入视口内边距，不重新居中。见 `docs/movinkpad/rendering/canvas-flicker-fix-2026-11-08.md`。
 
 ## 思维导图
 
-导图是无限画布里的功能（`com.xnotes.map`），没有单独的导图文件类型。设计与已确认决定见 `docs/movinkpad/mind-map-v2-design-2026-11-21.md`。
+导图是无限画布里的功能（`com.xnotes.map`），没有单独的导图文件类型。设计与已确认决定见 `docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md`。
 
 - 数据：`MapState` 不可变，只有树根左上角与子节点偏移是权威位置，其余由 `MapLayout` 派生；节点手写存为节点局部坐标，移动和重新布局不重编码笔迹、压力和时间。导图存入画布包独立条目，只给含导图的画布提高格式版本，旧版应用拒绝打开并保留文件。
 - 渲染：导图不进画布对象列表；`MapProjection` 按 id 投影为稳定的绘制记录，只重画变化部分，同一份片段供 GL 网格与 CPU 绘制（缩略图、预览、截图）。z 序按树所在图层排在该层普通对象之上。夜间白色填充画为 (1, 1, 1)。
@@ -139,7 +139,7 @@
 - 分工：导图前端界面与测试由主代理编写；改动导图数据的后端逻辑写成接口与测试，交由 gpt-6.2-astra 实现，并请其复核测试。
 - 旧版导图（独立 `.xmap`）、混合 `.xsplit` v3、文件关系网络、原 PDF 原件库与反向引用已删除。用户磁盘上的旧文件不删除、不迁移、不改写：首页照常列出并可管理，打开时提示不再支持；原生 NOTE＋NOTE `.xsplit` v1／v2 照常打开。涉及已删除功能的持久状态读取时忽略并回到首页。
 
-旧导图时期的实施细节与原主题链接归档于 `docs/movinkpad/agent-contract-details-2026-11-10.md`（历史记录）；实施进度写入任务记录，不写入本文件。
+旧导图时期的实施细节与原主题链接归档于 `docs/movinkpad/process/agent-contract-details-2026-11-10.md`（历史记录）；实施进度写入任务记录，不写入本文件。
 
 ## AI
 
@@ -152,11 +152,11 @@
 ### 供应商与设置
 
 - 多供应商（参照 DeepSeek Harness）：每个供应商有永久、不显示的内部 ID，会话与默认值按「供应商 ID + 模型」引用，不要改成按名称或 URL 引用。旧单供应商配置迁移为固定 ID `default`，保存时顶层字段仍写默认供应商以便降级读取。
-- 供应商被删除的会话不得回退到其他供应商发送，须显示「选择模型」并拒绝发送。仅支持 OpenAI Chat Completions。详见 `docs/movinkpad/ai-providers-2026-11-05.md`。
+- 供应商被删除的会话不得回退到其他供应商发送，须显示「选择模型」并拒绝发送。仅支持 OpenAI Chat Completions。详见 `docs/movinkpad/ai/ai-providers-2026-11-05.md`。
 - 自定义提示词与思考深度只用于回答请求（回答中的联网与 PDF 工具调用同样使用会话设置）；仅在不支持工具调用时退回的 PDF JSON 读取步骤使用 `AiConfig.forTools()`。会话内的模型 / 深度选择存于会话记录，缺省跟随默认。
 - 上限（如 200 个模型）在添加时拒绝并提示，保存时校验失败，不得静默截断。
-- 思考字段被拒自动降级：请求被 400 / 422 拒绝且供应商原因提到本次的思考字段时，去掉该字段重发一次，并在本次运行内记住该地址 + 模型 + 档位；该轮须标注已按模型默认回答，不静默降级。详见 `docs/movinkpad/ai-thinking-fallback-2026-11-07.md`。
-- 输出上限字段按主机区分：OpenAI 官方 `api.openai.com` 发 `max_completion_tokens`（其推理模型拒绝 `max_tokens`），其他兼容接口仍发 `max_tokens`。请求失败时附上供应商错误体中的 `error.message`（单行、限长、遮蔽 API Key），非 JSON 错误页不显示。详见 `docs/movinkpad/ai-openai-http400-2026-11-07.md`。
+- 思考字段被拒自动降级：请求被 400 / 422 拒绝且供应商原因提到本次的思考字段时，去掉该字段重发一次，并在本次运行内记住该地址 + 模型 + 档位；该轮须标注已按模型默认回答，不静默降级。详见 `docs/movinkpad/ai/ai-thinking-fallback-2026-11-07.md`。
+- 输出上限字段按主机区分：OpenAI 官方 `api.openai.com` 发 `max_completion_tokens`（其推理模型拒绝 `max_tokens`），其他兼容接口仍发 `max_tokens`。请求失败时附上供应商错误体中的 `error.message`（单行、限长、遮蔽 API Key），非 JSON 错误页不显示。详见 `docs/movinkpad/ai/ai-openai-http400-2026-11-07.md`。
 
 ### 联网搜索
 
@@ -170,7 +170,7 @@
 - 会话任务由应用级 `AiSessions` 管理：关闭界面、切换页面、新建会话不取消生成，只有显式停止或确认删除才取消。生成状态与回答写入原会话，删除后的迟到回调不得复活记录。
 - 生成进度显示真实阶段文字，不编造百分比。
 - 流式正文读取原始 JSON 类型，只接受 String；禁止用 `optString` 强制转换 `content`。
-- 回答中的公式参照 DSH 规则：`AiMath.normalize` 只在 AI 显示路径按 remark-math 区分公式与金额，不改笔记解析；未闭合或无法排版的公式显示源码，带自身颜色的公式不排版。详见 `docs/movinkpad/ai-math-2026-11-06.md`。
+- 回答中的公式参照 DSH 规则：`AiMath.normalize` 只在 AI 显示路径按 remark-math 区分公式与金额，不改笔记解析；未闭合或无法排版的公式显示源码，带自身颜色的公式不排版。详见 `docs/movinkpad/ai/ai-math-2026-11-06.md`。
 - 历史只保存在本地 `noBackupFilesDir`。原子写入失败保留已有文件；损坏记录保留并提示。进程重启后把生成中的记录标为中断，不冒充完成。
 - 删除即移到回收站（记录带 `trashedAt` 留在磁盘，与历史分开），可恢复或永久删除，保留天数沿用笔记回收站；回收站关闭（0 天）时直接永久删除。不提供撤销倒计时。
 
@@ -180,18 +180,20 @@
 - 提交的草稿在问题保存后才清除，不擦掉更新的输入。
 - 尚无任何对话轮次且未在发送时，关闭窗口或点「新会话」即清空提示词、截图、附件及其导入任务，不留下空白历史会话；不能以提示词是否为空来判断。清空后拒绝旧文件选择器与附件导入的迟到结果。已有对话则保留草稿与附件。
 - PDF 附件：只为显式选择的 PDF 在 `noBackupFilesDir` 下建快照；模型读取限于当前会话的附件 ID，不开放任意文件系统访问。原 PDF 保持不变。
-- PDF 读取参照 DSH `read` / `read_image`：回答模型通过原生工具 `pdf_read` / `pdf_search` / `pdf_view_page` 按需读取，与联网工具同一循环；参数错误与超预算作为工具结果交还模型，不中断回答；页图在该轮工具结果后以一条用户消息附上；带页图的请求被拒时去掉页图、告知模型改读文字并继续，不让整轮失败。接口拒绝工具（400 / 422）时才退回旧 JSON 读取循环。详见 `docs/movinkpad/ai-pdf-native-tools-2026-11-06.md`。
+- PDF 读取参照 DSH `read` / `read_image`：回答模型通过原生工具 `pdf_read` / `pdf_search` / `pdf_view_page` 按需读取，与联网工具同一循环；参数错误与超预算作为工具结果交还模型，不中断回答；页图在该轮工具结果后以一条用户消息附上；带页图的请求被拒时去掉页图、告知模型改读文字并继续，不让整轮失败。接口拒绝工具（400 / 422）时才退回旧 JSON 读取循环。详见 `docs/movinkpad/ai/ai-pdf-native-tools-2026-11-06.md`。
 - PDF、分页笔记与无限画布的截图操作都须支持 AI。真实供应商与目标设备验证与 JVM 测试分开记录。
-- 新建笔记「用 AI 生成」优先在应用内生成：仅在点「生成」后把要求与内置 `templates/AI.md` 发送给表单所选（缺省为 AI 设置默认）的供应商与模型（不带聊天自定义提示词；表单选择不改默认值），结果须经 `AiTemplateGen.check`（可读取、类型一致、图片节点符合模式、无被丢弃节点）后才入库；不通过时带原因让模型修正，有次数上限。有可用的生图模型（供应商的 `imageModels`，默认图像模型 `imageProvider` / `imageModel` 须为其所列之一，OpenAI 兼容 `/images/generations`）时，封面可由文字模型写含恰好一个 `images/cover.png` 的模板与画面描述，检查通过后才调用图像模型一次并打包入库；只读取 base64 图片数据、不跟随返回 URL，图像请求用图像供应商自己的密钥。不内嵌 Python。用户照片封面仍走「用图片制作封面模板」或「使用其他 AI 助手」。详见 `docs/movinkpad/ai-template-generation-2026-11-07.md`。
+- 新建笔记「用 AI 生成」优先在应用内生成：仅在点「生成」后把要求与内置 `templates/AI.md` 发送给表单所选（缺省为 AI 设置默认）的供应商与模型（不带聊天自定义提示词；表单选择不改默认值），结果须经 `AiTemplateGen.check`（可读取、类型一致、图片节点符合模式、无被丢弃节点）后才入库；不通过时带原因让模型修正，有次数上限。有可用的生图模型（供应商的 `imageModels`，默认图像模型 `imageProvider` / `imageModel` 须为其所列之一，OpenAI 兼容 `/images/generations`）时，封面可由文字模型写含恰好一个 `images/cover.png` 的模板与画面描述，检查通过后才调用图像模型一次并打包入库；只读取 base64 图片数据、不跟随返回 URL，图像请求用图像供应商自己的密钥。不内嵌 Python。用户照片封面仍走「用图片制作封面模板」或「使用其他 AI 助手」。详见 `docs/movinkpad/ai/ai-template-generation-2026-11-07.md`。
 - 供应商分聊天模型与生图模型两张列表，可手动填写或「从供应商获取」后按名称分段勾选（`AiModelKinds` 仅为推测）；仅有生图模型的供应商不成为默认聊天供应商、不出现在聊天模型菜单。
 
 ## 文档维护
 
 - 持续任务以用户可操作的完整流程交付；已有能力直接复用，只补当前流程必要的底层缺口。规划与独立复核集中阶段边界和实质风险，未变化且已闭合的部分不重复审核，已有有效验证不为安心反复重跑。进度先说明新增操作、仍缺功能与仅待真机项目，不以测试数量代替功能完成度。
 - 每完成一个功能阶段、修复一组问题或准备交付时，按需同步本文件与 `README.md`，不积压到最终交付；无变化时不为更新而改写。
-- 本文件记录长期规则；`README.md` 面向用户（功能、安装、使用、构建 / 测试入口，区分正式版与测试版）；版本、开发历史和验收证据放在 `docs/movinkpad/`。一次性授权记入 `docs/movinkpad/authorization-history.md`。
-- 已有的 `docs/movinkpad/` 历史记录作为当时证据保留，不为统一风格而改写。提交的文档与任务记录不写本机绝对路径（`/Users/...`），用仓库相对路径、`<仓库根>`、`<工作树 名>/xnotes` 或 `$ANDROID_HOME` 代替。
-- 新的 `docs/movinkpad/` 记录以下面三项开头，正文自由书写：
+- 本文件记录长期规则；`MOVINKPAD.md` 是适配概览（与上游关系、目标、文档入口）；版本、开发历史和验收证据放在 `docs/movinkpad/`。一次性授权记入 `docs/movinkpad/authorization-history.md`。
+- `README.md` 写给用户读，和上游仓库一样简洁：一句介绍、功能列表（每项一行）、下载安装、从源码构建、许可。不写开发进度、验证细节、测试版警示或记录链接清单；这些写进 `docs/movinkpad/`。
+- `docs/movinkpad/` 按主题分文件夹（`releases/`、`test-builds/`、`editor/`、`pen/`、`mind-map/`、`ai/`、`storage/`、`rendering/`、`ui/`、`process/`，已删除功能的记录放 `archive/` 并在开头标注已归档），根目录只留索引 `README.md`、`project-brief.md`、`development-history.md`、`authorization-history.md`。新增、移动记录时同步更新索引；移动文件须同时改写所有引用它的链接。
+- 历史记录的事实内容保留不改，格式按本规范统一。提交的文档与任务记录不写本机绝对路径（`/Users/...`），用仓库相对路径、`<仓库根>`、`<工作树 名>/xnotes` 或 `$ANDROID_HOME` 代替。
+- 每篇记录命名为 `主题-YYYY-MM-DD.md`，以下面三项开头（原文未记下的项写「未记录」），正文用 `##` 起分节，列表用 `-`，段落不硬换行：
 
   ```markdown
   # 标题（YYYY-MM-DD）

@@ -1,4 +1,4 @@
-当前导图接续计划（2026-11-11）：[剩余阶段与验收](../docs/movinkpad/mind-map-next-plan-2026-11-11.md)。下文早期计划保留历史语境，当前状态以该计划与[工作断点](loop-state.md)为准；未完成项不因合并而标完成。
+当前导图接续计划（2026-11-11）：[剩余阶段与验收](../docs/movinkpad/archive/mind-map-next-plan-2026-11-11.md)。下文早期计划保留历史语境，当前状态以该计划与[工作断点](loop-state.md)为准；未完成项不因合并而标完成。
 
 2026-11-10 续作工作树codex/mind-map-original-network：原文网络整合及完整卡片/Reader往返已实现，302项相关主机测试及Android源码编译通过；独立证据复核通过。下一来源范围调整/换源，原完整14组不缩减；仅实现/验证/文档/本地提交。见docs/movinkpad/original-pdf-network-2026-11-10.md。
 
@@ -10,22 +10,22 @@
 
 # 大型 PDF 独立标注与工具光标计划
 
-2026-11-09 D1局部网络源码已接真实Sidebar入口／双成员跳图／Main纯停车／返回网络：364套3854项主机通过，Android测试源码编译通过，平台与目标设备未运行。完整D筛选／全库／展开／显式手工关联／加入关系画布等保留，整体未完成。规格与证据见`docs/movinkpad/file-local-network-2026-11-09.md`。
+2026-11-09 D1局部网络源码已接真实Sidebar入口／双成员跳图／Main纯停车／返回网络：364套3854项主机通过，Android测试源码编译通过，平台与目标设备未运行。完整D筛选／全库／展开／显式手工关联／加入关系画布等保留，整体未完成。规格与证据见`docs/movinkpad/archive/file-local-network-2026-11-09.md`。
 
-2026-11-09 来源侧反向引用阶段已完成：真实笔记／PDF SidePanel、只读有界库发现、live覆盖、精确打开与临时展开、单条移除／重试及位置拒写保护；357套3812项全量主机、Android源码编译及独审通过，平台未运行。见`docs/movinkpad/mind-map-backlinks-2026-11-09.md`。接着当前文件局部关系网络，再过滤／全库／逐层展开及加入手工关系画布；Canvas、真正双窗格、精确恢复与原剩余交互不取消。
+2026-11-09 来源侧反向引用阶段已完成：真实笔记／PDF SidePanel、只读有界库发现、live覆盖、精确打开与临时展开、单条移除／重试及位置拒写保护；357套3812项全量主机、Android源码编译及独审通过，平台未运行。见`docs/movinkpad/archive/mind-map-backlinks-2026-11-09.md`。接着当前文件局部关系网络，再过滤／全库／逐层展开及加入手工关系画布；Canvas、真正双窗格、精确恢复与原剩余交互不取消。
 
-2026-11-09 R3实际PAGE消费者与出口保护已完成：导图内整文件/文字页目录、明确启用/续写、原票与最终源校验；typed新建/分叉/提取/合并及C1/撤销/取消保护。337套3664主机+Android源码编译通过，见`docs/movinkpad/mind-map-page-source-flow-2026-11-09.md`。下步来源预览/状态刷新/当前页入口与跳转返回，随后反向引用和文件网络；完整原需求及设备边界保留。
+2026-11-09 R3实际PAGE消费者与出口保护已完成：导图内整文件/文字页目录、明确启用/续写、原票与最终源校验；typed新建/分叉/提取/合并及C1/撤销/取消保护。337套3664主机+Android源码编译通过，见`docs/movinkpad/archive/mind-map-page-source-flow-2026-11-09.md`。下步来源预览/状态刷新/当前页入口与跳转返回，随后反向引用和文件网络；完整原需求及设备边界保留。
 
-2026-11-09 R3第二片已完成：实际存盘文件副本、导图空目标创建及原字节页启用Storage/显式恢复；334套3640项主机和Android测试源码编译通过，见`docs/movinkpad/reference-stored-copy-and-page-activation-2026-11-09.md`。页来源界面/引用闭环仍未完成；下一步保护createNoteFile与分叉/合并，再接实际页面来源选择。
+2026-11-09 R3第二片已完成：实际存盘文件副本、导图空目标创建及原字节页启用Storage/显式恢复；334套3640项主机和Android测试源码编译通过，见`docs/movinkpad/storage/reference-stored-copy-and-page-activation-2026-11-09.md`。页来源界面/引用闭环仍未完成；下一步保护createNoteFile与分叉/合并，再接实际页面来源选择。
 
-2026-11-09 R3有限出口第一片已完成：实际分页另存与原字节启用验证器，331套3618项主机及Android测试源码编译通过；见`docs/movinkpad/reference-save-as-page-copy-2026-11-09.md`。页面Storage启用／PAGE界面尚未接通；继续剩余复制／新建／分叉出口后实接，不重复全native4前置。
+2026-11-09 R3有限出口第一片已完成：实际分页另存与原字节启用验证器，331套3618项主机及Android测试源码编译通过；见`docs/movinkpad/storage/reference-save-as-page-copy-2026-11-09.md`。页面Storage启用／PAGE界面尚未接通；继续剩余复制／新建／分叉出口后实接，不重复全native4前置。
 
-2026-11-09 R2恢复预览消费者已接通真实Backstage窗格入口、历史预览、独立副本、typed继续与重启显式重选目标；完整328套3599项主机及Android测试源码编译通过，实际仪器/SAF/目标设备未运行。下一产品路径改按现有NativeSaveContract与单调登记先补直接输出/副本/新建/分叉保护，再接原字节页启用与真实PAGE来源，不以全量native4未使用API作为硬前置；详见 `docs/movinkpad/reference-page-ui-first-2026-11-09.md`。保存恢复安全、来源往返/反向引用/网络及剩余交互继续保留。
+2026-11-09 R2恢复预览消费者已接通真实Backstage窗格入口、历史预览、独立副本、typed继续与重启显式重选目标；完整328套3599项主机及Android测试源码编译通过，实际仪器/SAF/目标设备未运行。下一产品路径改按现有NativeSaveContract与单调登记先补直接输出/副本/新建/分叉保护，再接原字节页启用与真实PAGE来源，不以全量native4未使用API作为硬前置；详见 `docs/movinkpad/storage/reference-page-ui-first-2026-11-09.md`。保存恢复安全、来源往返/反向引用/网络及剩余交互继续保留。
 
-2026-11-09 导图A2续作：节点选择/框选、子树并集移动、批量删除与自由主题对齐已实现，2b0d1fdc/5cd2552e已本地提交，318套件3552项主机及Android测试源码编译通过，规格与独立审核要求见 `docs/movinkpad/mind-map-node-selection-2026-11-09.md`。来源生产保存交接、页面来源和往返、反向引用与文件网络仍按既有依赖继续，未因交互切片取消。当前只编译/测试/本地提交，不打包或安装。
+2026-11-09 导图A2续作：节点选择/框选、子树并集移动、批量删除与自由主题对齐已实现，2b0d1fdc/5cd2552e已本地提交，318套件3552项主机及Android测试源码编译通过，规格与独立审核要求见 `docs/movinkpad/archive/mind-map-node-selection-2026-11-09.md`。来源生产保存交接、页面来源和往返、反向引用与文件网络仍按既有依赖继续，未因交互切片取消。当前只编译/测试/本地提交，不打包或安装。
 
 
-> 2026-10-30 实施更新：用户要求改为基于 XNotes，原型位于本仓库根目录，不再新建 `notes/` 模块。第一版先实现 T16 所涉三键自定义映射和黑白调色板；软件自动化验证与真机验收分开记录，见 `docs/movinkpad/xnotes-first-version.md`。其余大型 PDF、完整工具光标及性能任务继续保留，尚未验收。
+> 2026-10-30 实施更新：用户要求改为基于 XNotes，原型位于本仓库根目录，不再新建 `notes/` 模块。第一版先实现 T16 所涉三键自定义映射和黑白调色板；软件自动化验证与真机验收分开记录，见 `docs/movinkpad/pen/xnotes-first-version-2026-10-30.md`。其余大型 PDF、完整工具光标及性能任务继续保留，尚未验收。
 
 日期：2026-10-30。状态：待用户审阅的规划草案，未实现；本次只修改规划文档。
 
@@ -307,7 +307,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
 - [官方 PDF Viewer 指南](https://developer.android.com/develop/ui/views/layout/pdf/implement-pdf-viewer)：按可见页渲染与渐进页尺寸加载思路；使用前核对 API／SDK extension。
 - [Stylus 高级输入](https://developer.android.com/develop/ui/views/touch-and-input/stylus-input/advanced-stylus-features)：悬停、压力、方向、取消输入。
 - [自定义文本编辑器的 stylus 指针接口](https://developer.android.com/develop/ui/views/touch-and-input/stylus-input/custom-text-editors)：onResolvePointerIcon 的官方说明；它是接口参考，不代表需要把 PDF 页做成文本编辑器。
-- [本项目真实输入证据](../docs/movinkpad/pen-input-analysis-2026-10-30.md)。
+- [本项目真实输入证据](../docs/movinkpad/pen/pen-input-analysis-2026-10-30.md)。
 
 审阅时可调整但不妨碍当前规划的项目：笔尖图标还是轮廓作为默认；三侧键用途；是否首发就要求通用 PDF 导出；是否需要第一版就支持分段擦除／文字框／OCR；通常遇到的最大单书页数与大小。用户已明确的主要场景是千页扫描书，不再将文件类型作为待确认项。
 
@@ -316,11 +316,11 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
 
 用户已授权实现并本机打包独立安装的测试版，真机确认后再决定正式发布。
 PDF 笔记、普通笔记、无限画布可混合并排；同一 PDF／分页笔记可拆成两个独立阅读位置，共享内容与撤销。当前复用 XNotes 上游文档格式与分屏，不把旧的大型 PDF 重构规划视为完成。
-方案、交互与验收记录：[双窗格测试版](../docs/movinkpad/split-preview-2026-11-02.md)。
+方案、交互与验收记录：[双窗格测试版](../docs/movinkpad/test-builds/split-preview-2026-11-02.md)。
 
 ## 2026-11-03 稳定文档身份与共享资源（进行中）
 
-用户已授权实现，不打包/安装/提交/推送。分阶段详细设计及证据见 `docs/movinkpad/document-registry-2026-11-03.md`。
+用户已授权实现，不打包/安装/提交/推送。分阶段详细设计及证据见 `docs/movinkpad/storage/document-registry-2026-11-03.md`。
 
 1. 兼容元数据层：新增独立 ZIP 元数据条目；旧格式迁移不经过笔画模型重新编码，核对所有原条目字节。新建/复制/快照 ID 语义明确。
 2. 文档和资源 SQLite 登记：文档 UUID 与资源版本分离，唯一位置/哈希索引、重复 ID 冲突显式化、事务引用与租约。
@@ -333,11 +333,11 @@ PDF 笔记、普通笔记、无限画布可混合并排；同一 PDF／分页笔
 
 用户要求新工作树、原生 Kotlin、文本／手绘节点、独立文件格式，不要求 XMind 格式兼容。工作树 `mind-map/xnotes`，本地分支 `codex/mind-map`，基于 `47256b5a`；不影响主工作树，不打包／安装／推送／合并。
 
-先完成不可变树模型、可撤销操作与变尺寸布局，再实现 `.xmap` 严格编解码及原子恢复日志，随后接原生画布／手绘节点编辑和文件浏览器入口。共享 Android 事件契约在 Robolectric 上执行并编译到仪器测试；原生图形渲染测试检查黑白画布、缩略图和 PDF。详细规格、验收证据和剩余边界见 `docs/movinkpad/mind-map-2026-11-06.md`。
+先完成不可变树模型、可撤销操作与变尺寸布局，再实现 `.xmap` 严格编解码及原子恢复日志，随后接原生画布／手绘节点编辑和文件浏览器入口。共享 Android 事件契约在 Robolectric 上执行并编译到仪器测试；原生图形渲染测试检查黑白画布、缩略图和 PDF。详细规格、验收证据和剩余边界见 `docs/movinkpad/archive/mind-map-2026-11-06.md`。
 
 ## 思维导图与文件关系网络扩展（2026-11-06）
 
-完整落地规格与 A1/A2 → B1/B2 → C1/C2 → D 依赖顺序见 `docs/movinkpad/graph-network-2026-11-06.md`。优先原生复用，先森林／多来源／普通线的兼容模型和操作闭环，再持久页／对象身份、引用创建、导航／反向引用和文件网络；后续阶段持续保留，不按本轮容量裁掉需求。
+完整落地规格与 A1/A2 → B1/B2 → C1/C2 → D 依赖顺序见 `docs/movinkpad/archive/graph-network-2026-11-06.md`。优先原生复用，先森林／多来源／普通线的兼容模型和操作闭环，再持久页／对象身份、引用创建、导航／反向引用和文件网络；后续阶段持续保留，不按本轮容量裁掉需求。
 
 ### B1b 原位文本源码阶段：复用现有文本覆盖层
 
@@ -371,7 +371,7 @@ strict读取路径明确限制单token最多1,048,576个字符、JSON嵌套256�
 
 B2a 最终计划审核已完成，全部建议接受。补充同一快照约束：先复制原件到独立暂存文件并核对快照 SHA-256 与预先取得的来源摘要相同，所有格式短扫、结构扫描、字符复制及 ZIP 校验只打开这份快照，防止跨遍 A→B→A 对应错位。最终发布仍核对原件摘要。UTF-8 decoder 与 encoder 均使用 REPORT，持续一个 Reader/Writer 跨所有字符块，禁止每块单独编码；计数使用 Long 且只计已消费 UTF-16 单元。新增 1 字符短读与代理对跨缓冲测试。
 
-B2a 实现复核修订：前置ZIP摘要即按名称限流，manifest 512MiB、anchors和BundleIdentity条目各4096字节，同时检查声明／实际解压字节；不能先完整摘要再限流。重复键去重另外限制单键1024字符、活动递归链8192键／262144字符，单对象仍最多4096键，退出兄弟对象释放预算。均有主机回归。实现与测试细节见 docs/movinkpad/reference-anchors-2026-11-07.md；本阶段仍不接文档打开／SAF。
+B2a 实现复核修订：前置ZIP摘要即按名称限流，manifest 512MiB、anchors和BundleIdentity条目各4096字节，同时检查声明／实际解压字节；不能先完整摘要再限流。重复键去重另外限制单键1024字符、活动递归链8192键／262144字符，单对象仍最多4096键，退出兄弟对象释放预算。均有主机回归。实现与测试细节见 docs/movinkpad/storage/reference-anchors-2026-11-07.md；本阶段仍不接文档打开／SAF。
 
 ### B2b1 已实施：持久身份的模型／编解码／快照契约（2026-11-07）
 
@@ -428,7 +428,7 @@ B2b2a1实施约定：BundleHeader的File/Channel两个入口共用4096解压/64K
 
 ### 2026-11-08 按新渲染基线恢复
 
-用户已恢复并授权同步 master54f05b0f。采用主线已回迁的快照、完整场景批次、解码来源身份和 View/湿墨层替换接口，不移入原重构分支完整Session体系。导图继续原生Canvas/共享笔迹几何/TextEditHost。实施顺序 R0～R5、接口边界与验收见 docs/movinkpad/mind-map-rendering-resume-2026-11-08.md。
+用户已恢复并授权同步 master54f05b0f。采用主线已回迁的快照、完整场景批次、解码来源身份和 View/湿墨层替换接口，不移入原重构分支完整Session体系。导图继续原生Canvas/共享笔迹几何/TextEditHost。实施顺序 R0～R5、接口边界与验收见 docs/movinkpad/archive/mind-map-rendering-resume-2026-11-08.md。
 页面级决定覆盖原B2b1对象身份和B2b2a1“整包副本保留成员ID”的计划；另存/导出副本应生成新页面UUID。B2c取消，其余功能和安全要求保留。
 
 R1a模型/codec/原字节升级已通过2971项主机与Android源码编译。抢救计数与页面身份独立；坏层对象过滤发生于pending全数插入之后，Glue限定最终成员。R1c先收紧.xmap范围避免保留对象级产品接口；R1b整包副本新页面UUID、R2安全激活仍未完成，完整来源闭环继续。
@@ -528,7 +528,7 @@ Main singleTask直接启动会先清掉上层图Activity，native湿墨on-top Su
 
 ### 来源打开、定位和返回已验证（2026-11-09）
 
-本阶段接具体来源入口、严格NOTE/PDF FILE/PAGE打开、actual owner原槽保留与其余文档原保存保护、真实attach/稳定preDraw定位、fresh DOWN取消pending跳转、同Entry相机/选集/来源条返回。范围变化/删除undo/重载旧票不复活，来源备注IME和失效成员收尾不污染相机；embedded PDF v1保包装/原字节、secondary单文档恢复无phantom primary。351套3771项全量与Android测试源码编译、独立复核通过；无APK，实际平台与目标设备未运行。详见 `docs/movinkpad/mind-map-source-navigation-2026-11-09.md`。
+本阶段接具体来源入口、严格NOTE/PDF FILE/PAGE打开、actual owner原槽保留与其余文档原保存保护、真实attach/稳定preDraw定位、fresh DOWN取消pending跳转、同Entry相机/选集/来源条返回。范围变化/删除undo/重载旧票不复活，来源备注IME和失效成员收尾不污染相机；embedded PDF v1保包装/原字节、secondary单文档恢复无phantom primary。351套3771项全量与Android测试源码编译、独立复核通过；无APK，实际平台与目标设备未运行。详见 `docs/movinkpad/archive/mind-map-source-navigation-2026-11-09.md`。
 
 下一阶段优先从现有文件/页面查看真实反向引用并定位图中具体来源条目，复用MapDocuments唯一actor及现有窗口/保存保护；不手工维护双向关系。随后局部及筛选/全库文件网络，严格区分内容引用、用户关联、可选同图出现，不因概念多来源推导文件彼此依赖。真正图双窗格、Canvas/xmap来源打开、区域/画布创建入口及范围调整、精确失效与权限/身份恢复、复制/完整备份、无中心/同级插入/边缘平移与真机验收仍保留；整体未完成。
 

@@ -703,7 +703,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Only text needs a measurer to clone, and the canvas has none; this satisfies the signature. */
     private val textMeasurer = com.xnotes.platform.AndroidTextMeasurer()
 
-    // --- mind maps (docs/movinkpad/mind-map-v2-design-2026-11-21.md) ---
+    // --- mind maps (docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md) ---
 
     private val mapTitles = com.xnotes.map.ui.MapTitles(textMeasurer)
     private val mapMetrics = com.xnotes.map.NodeMetrics(mapTitles)

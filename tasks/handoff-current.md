@@ -8,7 +8,7 @@
 
 当前主线树 `<仓库根>`，分支 `master`。来源为c97f58f9、主线原ef6ffa29；保留原开发分支。冷恢复草稿仍在 `<工作树 mind-map-cold-restore>/xnotes`，未经验证未合入；10文件SHA未改。后续恢复开发前须先核对主线整合后的接口，不能沿旧基线假设覆盖主线修复。
 
-先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
+先读本文件、AGENTS.md、MOVINKPAD.md、README.md、docs/movinkpad/project-brief.md 和 docs/movinkpad/archive/mind-map-requirements-current.md。完整14组范围不缩减。页面级永久 UUID、Canvas 文档 UUID、不恢复对象编号、原笔迹/PDF字节保护和失败保留已写版本不变。
 
 ## 当前新增能力
 
@@ -18,14 +18,14 @@ D2d1 已交所选文件加入可保存关系画布并返回网络。D2d2 现从�
 
 ## 本次合并验证
 
-480套4567有效唯一JVM用例通过；全量执行后只修改一个等待夹具，并用整套12复验替换原结果。1293输入与最终源码匹配，主／Android仪器源码编译通过，平台实际未跑。详见 docs/movinkpad/mind-map-progress-merge-2026-11-10.md。
+480套4567有效唯一JVM用例通过；全量执行后只修改一个等待夹具，并用整套12复验替换原结果。1293输入与最终源码匹配，主／Android仪器源码编译通过，平台实际未跑。详见 docs/movinkpad/archive/mind-map-progress-merge-2026-11-10.md。
 
 ## 较早阶段验证（历史）
 
 45869：生产/Android源码编译过，root新unit夹具Unit.join误写导致未执行测试；已修。
 72986：153项152过，1新回收站夹具缺登记；补真实登记后保TRASHED断言。
 93077：108项107过，1新增真实冲突Host发现conflict未纳snapshotFlow；已修观察并加旧票拒绝断言。
-4017：终态0，81受影响定向全过。逐suite替换保未变有效证据后合并159项，0失败/错误/跳过；Android源码编译过；1063最终输入SHA全同。独立审核及必要修复复核通过。证据：tmp/file-relations-verified-summary.json、-conflict-inputs.json与同名前轮日志/summary。正式记录 docs/movinkpad/file-relation-exploration-2026-11-10.md。
+4017：终态0，81受影响定向全过。逐suite替换保未变有效证据后合并159项，0失败/错误/跳过；Android源码编译过；1063最终输入SHA全同。独立审核及必要修复复核通过。证据：tmp/file-relations-verified-summary.json、-conflict-inputs.json与同名前轮日志/summary。正式记录 docs/movinkpad/archive/file-relation-exploration-2026-11-10.md。
 
 未运行：真实 Android／DocumentsUI／SAF、配置重建/杀进程、MovinkPad Pro 14/Android 15/Pro Pen 3、掌触/Surface/GPU/性能。未打包或安装。
 
@@ -41,7 +41,7 @@ D2d1 已交所选文件加入可保存关系画布并返回网络。D2d2 现从�
 
 已接实际选区／截图→固定世界 Rect 的 CANVAS_REGION→已有／新图和概念→保存重开／PNG 裁切→实际挂载定位／返回。含 v5 及旧 raw 拒绝、完整来源观察、显式严格原位保存、未保存画布的 typed 新 UUID 副本与同模型安全采用、晚到 C1 dirty、同候选续完及旧选择器隔离。FILE＋region 仍拒绝，源对象不编号、不跟随。独审发现的误入 NOTE 另存及 pending 定位卸载重放已修。
 
-78922为251中250过、Android源码编译过、1112输入SHA全同；唯一Main轮询夹具超时仅修测试线程，81852单项复验过，逐case替换有效合并251项全绿、0失败/错误/跳过。独立实现／夹具／证据复核通过。详见 docs/movinkpad/canvas-region-sources-2026-11-10.md；tmp/canvas-region-verified-summary.json 与 -recheck-inputs.json。无运行构建。真实平台／设备仍未运行。
+78922为251中250过、Android源码编译过、1112输入SHA全同；唯一Main轮询夹具超时仅修测试线程，81852单项复验过，逐case替换有效合并251项全绿、0失败/错误/跳过。独立实现／夹具／证据复核通过。详见 docs/movinkpad/archive/canvas-region-sources-2026-11-10.md；tmp/canvas-region-verified-summary.json 与 -recheck-inputs.json。无运行构建。真实平台／设备仍未运行。
 
 ## 分页区域阶段
 

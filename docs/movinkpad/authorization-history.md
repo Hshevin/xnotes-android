@@ -73,10 +73,9 @@
 
 用户要求「新建工作树，先做出第一版」，明确使用原生 Kotlin、独立文件格式，功能参考 XMind，但不需要 XMind 格式兼容。建立独立工作树 `mind-map/xnotes` 与本地分支 `codex/mind-map`，基于 `47256b5a`；相关验证通过后依长期规则自动本地提交。本轮没有打包 APK、安装、推送、合并或发布授权。
 
-
 ## 2026-11-06 思维导图与文件关系网络扩展
 
-用户授权在当前工作树检查、规格化并持续实现上述功能、运行验证、更新文档及本地提交；明确不授权 APK 打包、设备安装、推送、合并其他功能分支或 Release。当前分支 codex/mind-map，原有改动检查为空。本轮落地多来源／普通关系与自由节点的增量，完整阶段及未完成项保存在 graph-network-2026-11-06.md；不宣称整体完成。
+用户授权在当前工作树检查、规格化并持续实现上述功能、运行验证、更新文档及本地提交；明确不授权 APK 打包、设备安装、推送、合并其他功能分支或 Release。当前分支 codex/mind-map，原有改动检查为空。本轮落地多来源／普通关系与自由节点的增量，完整阶段及未完成项保存在 archive/graph-network-2026-11-06.md；不宣称整体完成。
 
 - 用户于 2026-11-06 要求合并到主分支：将 `worktree-ai-markdown-latex`（`e49b612e`，AI 回答 LaTeX 公式排版）与 `worktree-ai-pdf-native-tools`（`d716ef7e`，AI 读取 PDF 改为原生工具调用）以 `--no-ff` 合入本地 `master`，保留两条原分支。合并后全部 JVM 单元测试（2720 项）通过、仪器测试可编译。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release。
 - 用户于 2026-11-07 要求合并到主分支：将 `worktree-ai-openai-400`（`48c7729c`，OpenAI 官方接口改发 `max_completion_tokens`、失败提示附供应商原因）以 `--no-ff` 合入本地 `master`，保留原分支。该分支基于合并前的 `master`，合并结果与已通过全部 JVM 单元测试（2724 项）的分支代码一致。仅本地合并，不包含推送、打包 APK、安装或 GitHub Release；真实 OpenAI 密钥复测待用户执行。
@@ -107,18 +106,18 @@
 
 ## 2026-11-07 第一批渲染诊断回迁
 
-- 用户要求「先整理第一批诊断和 Surface 捕获的回迁补丁，保留主线现有的 View／湿墨层替换保护，仔细审查后再合并，暂时不要打包测试」。本次授权在独立回迁分支整理该批补丁、完成静态审查后合入本地 master；保留原渲染分支与回迁分支。不编译、运行测试、打包、安装、推送或发布，不将历史测试结果视为适配后的验证。基线、实际范围与审查结论见 [回迁记录](render-diagnostics-backport-2026-11-07.md)。
+- 用户要求「先整理第一批诊断和 Surface 捕获的回迁补丁，保留主线现有的 View／湿墨层替换保护，仔细审查后再合并，暂时不要打包测试」。本次授权在独立回迁分支整理该批补丁、完成静态审查后合入本地 master；保留原渲染分支与回迁分支。不编译、运行测试、打包、安装、推送或发布，不将历史测试结果视为适配后的验证。基线、实际范围与审查结论见 [回迁记录](rendering/render-diagnostics-backport-2026-11-07.md)。
 - 已执行：`codex/render-diagnostics-backport` 的诊断 `b500aa1a`、捕获 `217531ee` 及文档 `db16f8df` 经独立静态复核后，通过 `276349a1` 以 `--no-ff` 合入本地 master；合并前为 `986781e5`、工作树干净，合并无冲突，app 源码与已审分支相同。未执行编译、测试、打包、安装或推送，未删除任何分支。
 
 ## 2026-11-07 第二批稳定布局回迁
 
-- 用户在第二批稳定工具栏／窗格布局方案后要求「可以做测试，你继续推进合并」。本轮授权整理该批回迁、独立审查、编译和测试，并在相关验证通过后合入本地 master；保留原分支。不推送或发布，测试 APK 生成／模拟器安装按本轮具体确认执行。范围、环境与实际结果见 [第二批记录](stable-pane-layout-backport-2026-11-07.md)。
+- 用户在第二批稳定工具栏／窗格布局方案后要求「可以做测试，你继续推进合并」。本轮授权整理该批回迁、独立审查、编译和测试，并在相关验证通过后合入本地 master；保留原分支。不推送或发布，测试 APK 生成／模拟器安装按本轮具体确认执行。范围、环境与实际结果见 [第二批记录](rendering/stable-pane-layout-backport-2026-11-07.md)。
 - 用户随后明确选择「本轮只用编译和 JVM 结果合并，窗口测试另行安排」。据此以已通过的生产／仪器源码编译、2779 项 JVM 测试及独立静态审查作为本批本地合并依据；10 项新增窗口测试仅保存源码、未运行。本轮不生成 APK、不安装或运行模拟器，不推送或发布。
 - 已执行：`codex/stable-pane-layout-backport`（`b3063ee2`、`c949a778`、`4d43edf3`）通过 `076ba353` 以 `--no-ff` 合入本地 master，原主线 `b9beeb77` 的诊断审查／任务记录原样保留；合并无冲突，应用／测试源码和构建配置与已验证回迁分支一致。保留原渲染及回迁分支；窗口测试与目标 GPU 验收待安排，未打包、安装、推送或发布。
 
 ## 2026-11-07 第三批光晕缓存回迁
 
-- 用户要求「继续整理下一批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `8fb67676` 的光晕缓存 context／缓冲重建失效处理，授权整理、独立审查、源码编译、JVM 测试及本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。范围与实际结果见 [第三批记录](halo-cache-backport-2026-11-07.md)。
+- 用户要求「继续整理下一批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `8fb67676` 的光晕缓存 context／缓冲重建失效处理，授权整理、独立审查、源码编译、JVM 测试及本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。范围与实际结果见 [第三批记录](rendering/halo-cache-backport-2026-11-07.md)。
 - 已执行：`codex/halo-cache-backport` 的 `5c662654`、`b25ca951` 同步最新主线后，通过 `798bb008` 以 `--no-ff` 合入本地 master，合并前为 `eed318ac`。生产与仪器源码编译通过、248 套件 2784 项 JVM 全部通过，主线 View／湿墨层保护未变；保留原渲染及三条回迁分支，EGL／窗口和真机 GPU 未验。本轮未打包、安装、推送或发布，不继承下方另一任务的推送授权。
 
 ## 2026-11-07 主分支推送（供服务器手动编译）
@@ -133,17 +132,17 @@
 
 ## 2026-11-07 第四批渲染快照回迁
 
-- 用户要求继续下一批，保留主线 View／湿墨层替换保护，独立审查并通过编译和 JVM 测试后合并，窗口测试另行安排。本轮选取历史 `d292cc2b` 的图片绘制／录音关联快照及必要通知，授权源码编译、JVM 测试及本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。不继承其他任务的交付或推送授权。范围与实际结果见 [第四批记录](render-snapshot-backport-2026-11-07.md)。
+- 用户要求继续下一批，保留主线 View／湿墨层替换保护，独立审查并通过编译和 JVM 测试后合并，窗口测试另行安排。本轮选取历史 `d292cc2b` 的图片绘制／录音关联快照及必要通知，授权源码编译、JVM 测试及本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。不继承其他任务的交付或推送授权。范围与实际结果见 [第四批记录](rendering/render-snapshot-backport-2026-11-07.md)。
 - 已执行：`codex/render-snapshot-backport`（`e53e458e`、`5cf679ef`、`6d93cf42`）通过 `2f960218` 合入本地 master，合并前为 `af42ec49`、工作树干净，无冲突；独立审查无必修，生产及仪器源码编译、251 套件 2799 项 JVM 全通过。合并后源码／构建配置与验证分支一致，主线保护及窗口测试待确认记录保留。保留所有分支，本轮未打包、安装、运行 EGL／窗口仪器、推送或发布。
 
 ## 2026-11-07 第五批完整场景批次回迁
 
-- 用户要求「继续整理第五批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `1e80c6f5` 的完整场景批次发布及 SVG 提交后调度，授权源码编译、JVM 测试和本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。不继承其他任务的交付或推送授权。范围与实际结果见 [第五批记录](scene-batch-backport-2026-11-07.md)。
+- 用户要求「继续整理第五批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `1e80c6f5` 的完整场景批次发布及 SVG 提交后调度，授权源码编译、JVM 测试和本地合并；保留原分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布。不继承其他任务的交付或推送授权。范围与实际结果见 [第五批记录](rendering/scene-batch-backport-2026-11-07.md)。
 - 已执行：`codex/scene-batch-backport`（`996cb46e`、`f9eda215`、`99988c8e`）通过 `cb8d1e61` 合入本地 master，合并前为 `175785ce`、工作树干净，无冲突；两路独立审查无阻断，生产及仪器源码编译、253 套件 2817 项 JVM 全通过。合并后源码／构建配置与验证分支一致，主线替换保护保留。仅关闭 S-5 的源码读取问题，真实 SVG 异步、EGL／窗口及目标 GPU 未运行；保留全部分支，本轮未打包、安装、推送或发布。
 
 ## 2026-11-07 第六批图片解码回迁
 
-- 用户要求「继续整理第六批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `e697a84a` 的 decoder 子片及主线必要接线，授权源码编译、JVM 测试和本地合并；保留所有分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布，不继承其他任务的授权。范围与实际结果见 [第六批记录](image-decode-backport-2026-11-07.md)。
+- 用户要求「继续整理第六批回迁补丁，保留主线的 View／湿墨层替换保护，仔细审查并通过编译和 JVM 测试后再合并，窗口测试另行安排」。本轮选取历史 `e697a84a` 的 decoder 子片及主线必要接线，授权源码编译、JVM 测试和本地合并；保留所有分支，不运行 EGL／窗口仪器，不打包、安装、推送或发布，不继承其他任务的授权。范围与实际结果见 [第六批记录](rendering/image-decode-backport-2026-11-07.md)。
 - 已执行：`codex/image-decode-backport`（`74df5c86`、`6b13d461`、`9db07cb1`、`a643947c`）通过 `705bfa49` 合入本地 master，合并前为 `2a525106`、工作树干净，无冲突；两路独立审查及新增 CPU 回归复核无阻断，生产／仪器源码编译、256 套件 2836 项 JVM 全通过。合并后源码／构建配置与验证分支一致，主线替换保护及前五批保持。实际编辑器重挂、EGL／窗口与目标 GPU 未运行；保留所有分支，本轮未打包、安装、推送或发布。
 
 ## 2026-11-07 渲染回迁审查修复合并与推送
@@ -167,13 +166,13 @@
 ## 2026-11-08 导图分支同步新渲染基线
 
 - 用户恢复导图与文件关系网络开发，并明确选择「授权同步该 master 基线」：只将 master54f05b0f 同步至 codex/mind-map，含主线已有 AI/画布更新；保留原分支，不向主线合并。四处冲突保留两侧功能，独立复核与源码编译/2964项JVM通过。Android仪器及真机未运行。
-- 此授权不包含打包、安装、推送或发布；不顺延为合并其他功能分支的授权。实际接口和验证见 mind-map-rendering-resume-2026-11-08.md。
+- 此授权不包含打包、安装、推送或发布；不顺延为合并其他功能分支的授权。实际接口和验证见 archive/mind-map-rendering-resume-2026-11-08.md。
 
 ## 2026-11-10 导图两轮审核修复与本地合并
 
 - 用户通过本轮任务明确授权：先在 `codex/mind-map` 引入 `27f5a8e8`、`2f51718f` 的审核记录，逐项修复 A1–A10、B1–B6，运行测试并本地提交；再把本地 `master` 同步到导图分支，保留主线画布修复，验证后用 `--no-ff` 合并到本地 `master`。
 - 保留 `codex/mind-map` 与 `worktree-mind-map-review`，保留已有修改。不授权推送、新建远端分支、修改 Git 配置、打包 APK、安装设备或发布 Release；其他历史授权不顺延。
-- 实际修复、性能数据、合并与平台验收边界见 [逐项修复记录](mind-map-merge-fixes-2026-11-10.md)。
+- 实际修复、性能数据、合并与平台验收边界见 [逐项修复记录](archive/mind-map-merge-fixes-2026-11-10.md)。
 
 - 本轮已执行：主线同步 `e1c23614`、本地 master 合并 `7044e1b2`；395 套件 3990 项 JVM 全通过、Android 仪器源码编译通过。仅文档补齐实际结果，未打包、安装、推送或发布，原分支保留。
 
@@ -196,7 +195,7 @@
 ## 2026-11-10 已提交导图进展本地合并
 
 - 用户明确要求「先把目前进展合并到主分支」。将已提交至 `c97f58f9` 的续作进展，以 `--no-ff` 合入本地 `master`（合并前 `ef6ffa29`）；保留两侧后续修复、原分支和工作树。未提交冷恢复草稿保持原样、不合入，持续开发仍暂停。
-- 本轮只含合并所需兼容修复、相关验证与本地提交。有效验证为480套4567唯一JVM用例全过（完整运行后仅整套替换已修等待夹具的12例），主代码和Android仪器源码编译通过；Android实际仪器和真机未运行。详见 [合并记录](mind-map-progress-merge-2026-11-10.md)。不包含推送、新建远端分支、修改Git配置、打包APK、设备安装或Release；历史授权不顺延。
+- 本轮只含合并所需兼容修复、相关验证与本地提交。有效验证为480套4567唯一JVM用例全过（完整运行后仅整套替换已修等待夹具的12例），主代码和Android仪器源码编译通过；Android实际仪器和真机未运行。详见 [合并记录](archive/mind-map-progress-merge-2026-11-10.md)。不包含推送、新建远端分支、修改Git配置、打包APK、设备安装或Release；历史授权不顺延。
 
 - 用户再次要求拉取更新并打包独立测试 APK，不覆盖正式版，自动推送打包日志。本轮快进至 `fdc1f0fe`，交付 `com.xnotes.movinkpad.branchtest.master` / versionCode 5，沿用原签名；已有 test4 更新为 test5，正式版独立。仅本地交付 APK，推送本轮文档与日志，不上传 APK、不发布 GitHub Release、不安装用户设备。
 
@@ -208,7 +207,7 @@
 ## 2026-11-10 Release 98 之后审核修复本地合并
 
 - 用户先要求审核本地 `master` 在 Release 98 之后的新提交，再要求用 Opus 子代理负责翻译与文档整理并修复审核发现的问题，最后明确要求「合并进主分支」。审核与修复在工作树分支 `worktree-review-fixes-release98`（基线 `8d12bacf`）完成并本地提交 `e402ae3f`、`91deaa64`，以 `--no-ff` 合入本地 `master` 为 `ea2a56a7`；分支与工作树保留。
-- 本轮验证为 481 套件 4574 项 JVM 单元测试全过、Android 测试源码编译通过；模拟器与目标设备未运行。详见 [审核与修复记录](review-fixes-release98-2026-11-10.md)。不包含推送、新建远端分支、修改 Git 配置、打包 APK、设备安装或 Release；历史授权不顺延。
+- 本轮验证为 481 套件 4574 项 JVM 单元测试全过、Android 测试源码编译通过；模拟器与目标设备未运行。详见 [审核与修复记录](process/review-fixes-release98-2026-11-10.md)。不包含推送、新建远端分支、修改 Git 配置、打包 APK、设备安装或 Release；历史授权不顺延。
 
 ## 2026-11-10 最新本地主线再次同步
 
@@ -219,12 +218,12 @@
 
 - 用户明确要求「接下来还有哪些工作，你把计划写好，然后把这些全部合并进主分支」。本次授权整理原14组的剩余工作计划，把当前开发分支已提交和未提交的本轮相关进展，在必要修复、相关验证和合并前审核后全部合入本地 `master`；保留开发分支与工作树。
 - 这不是要求在合并前完成全部后续功能，也不把计划项写成已实现。本次仅进行合并所需收尾，不扩展为 APK、安装、推送、新建远端分支、修改 Git 配置或 Release。原先暂停不阻止本次明确授权的计划与合并工作；完整后续开发是否继续仍以之后用户要求为准。
-- 已执行：本地主线由 `9cecd51b` 以 `--no-ff` 合入开发分支 `e9a48daa`，合并提交 `0c1682c7a8076c0a3261bf26e60907d748f529dd`，源码集成 `f3890bbb` 及其前置进展全部纳入。最终507套4750唯一主机用例全过，主／unit／Android测试源码实际编译及独立源码／证据审通过。保留开发分支与工作树；未打包、安装、推送或发布。详见[本次记录](mind-map-cold-progress-merge-2026-11-10.md)与[剩余计划](mind-map-next-plan-2026-11-10.md)。
+- 已执行：本地主线由 `9cecd51b` 以 `--no-ff` 合入开发分支 `e9a48daa`，合并提交 `0c1682c7a8076c0a3261bf26e60907d748f529dd`，源码集成 `f3890bbb` 及其前置进展全部纳入。最终507套4750唯一主机用例全过，主／unit／Android测试源码实际编译及独立源码／证据审通过。保留开发分支与工作树；未打包、安装、推送或发布。详见[本次记录](archive/mind-map-cold-progress-merge-2026-11-10.md)与[剩余计划](archive/mind-map-next-plan-2026-11-10.md)。
 
 ## 2026-11-11：当前主线推送授权
 
 - 用户明确要求「先推送远端」。本次将当前本地 `master`（功能与计划基线 `860f7614`，含此前已合入的导图进展、冷恢复及结构修复）和本条授权记录推送至 `origin/master`；推送前读取远端最新状态，使用普通快进推送，保留现有历史。
-- 此次仅授权推送当前主线，不包含APK打包、设备安装或Release。验证沿用已记录的源码/主机结果；Android运行时及MovinkPad真机仍待验，详见[当前计划](mind-map-next-plan-2026-11-11.md)和[结构修复验证](architecture-refactor-2026-11-11.md)。
+- 此次仅授权推送当前主线，不包含APK打包、设备安装或Release。验证沿用已记录的源码/主机结果；Android运行时及MovinkPad真机仍待验，详见[当前计划](archive/mind-map-next-plan-2026-11-11.md)和[结构修复验证](process/architecture-refactor-2026-11-11.md)。
 
 ## 2026-11-11 主线独立测试包与日志推送
 
@@ -233,20 +232,20 @@
 ## 2026-11-11 导图入口与文件身份修复推送
 
 - 用户明确要求「直接推送到远端」。本次授权将本地 `master` 的修复提交 `0d6e3765` 及本条授权记录普通快进推送至 `origin/master`，保留远端历史。
-- 主体修复 4,783 项 JVM 回归通过，审查补充 14 项定向回归通过，Android 测试源码编译通过；实际 Android 运行与目标设备待验。详见[修复记录](presentation-file-identity-fix-2026-11-11.md)。本次不打包、安装或发布 Release。
+- 主体修复 4,783 项 JVM 回归通过，审查补充 14 项定向回归通过，Android 测试源码编译通过；实际 Android 运行与目标设备待验。详见[修复记录](archive/presentation-file-identity-fix-2026-11-11.md)。本次不打包、安装或发布 Release。
 
 ## 2026-11-11 主线 test7 快速打包与日志推送
 
-- 用户明确要求拉取更新、快速打包独立测试 APK、不覆盖正式版并自动推送打包日志。本轮源码 `e4739bd6`，包名 `com.xnotes.movinkpad.branchtest.master` / code 7；仅本地 APK、推送记录与日志，不发布 Release、不安装用户设备。保留原有本地修改，验证范围与未执行项见 [test7 记录](master-test7-2026-11-11.md)。
+- 用户明确要求拉取更新、快速打包独立测试 APK、不覆盖正式版并自动推送打包日志。本轮源码 `e4739bd6`，包名 `com.xnotes.movinkpad.branchtest.master` / code 7；仅本地 APK、推送记录与日志，不发布 Release、不安装用户设备。保留原有本地修改，验证范围与未执行项见 [test7 记录](test-builds/master-test7-2026-11-11.md)。
 
 ## 2026-11-11 test7 模拟器实际流程测试
 
-- 用户提供 `XNotes-master-e4739bd6-test7-arm64.apk`，明确要求进行模拟器测试，重点检查思维导图。本次在本机 API 32 ARM64 模拟器安装该原始 APK 并创建测试数据；未安装真机、未重新打包、未推送、未发布。测试记录和关键截图本地提交，见[实际流程测试](master-test7-map-emulator-2026-11-11.md)。
+- 用户提供 `XNotes-master-e4739bd6-test7-arm64.apk`，明确要求进行模拟器测试，重点检查思维导图。本次在本机 API 32 ARM64 模拟器安装该原始 APK 并创建测试数据；未安装真机、未重新打包、未推送、未发布。测试记录和关键截图本地提交，见[实际流程测试](test-builds/master-test7-map-emulator-2026-11-11.md)。
 
 ## 2026-11-11 导图并行修复与本地合并
 
 - 用户要求 Claude Opus 5.5 多代理各用独立 worktree 修复，由主代理编写测试、最终审查并合并。三个工作树按生命周期、手写界面、混合保存分工，保留原分支；本次只本地合并到 master，不推送。
-- 用户随后明确「不要本地打包apk」。尚未产生 APK 的 assemble 已停止，后续仅执行源码编译、JVM 测试和 Android 测试源码编译，不生成/安装新 APK、不发布。修复后的模拟器与真机验收未执行，见[修复记录](mind-map-usability-repair-2026-11-11.md)。
+- 用户随后明确「不要本地打包apk」。尚未产生 APK 的 assemble 已停止，后续仅执行源码编译、JVM 测试和 Android 测试源码编译，不生成/安装新 APK、不发布。修复后的模拟器与真机验收未执行，见[修复记录](archive/mind-map-usability-repair-2026-11-11.md)。
 
 ## 2026-11-11 导图可用性修复推送
 
@@ -255,7 +254,7 @@
 
 ## 2026-11-11 test8 快速打包与日志推送
 
-- 用户明确要求拉取更新、快速打包独立测试版并自动推送日志；本轮源码 `6eb71cf9`，code 8，不覆盖正式版，不发布 Release，不安装用户设备。见 [记录](master-test8-2026-11-11.md)。
+- 用户明确要求拉取更新、快速打包独立测试版并自动推送日志；本轮源码 `6eb71cf9`，code 8，不覆盖正式版，不发布 Release，不安装用户设备。见 [记录](test-builds/master-test8-2026-11-11.md)。
 
 ## 2026-11-11 test8 模拟器验证与后续修复
 
@@ -270,30 +269,30 @@
 
 ## 2026-11-11 test9 打包与日志推送
 
-- 用户要求拉取更新、打包独立测试 APK 并自动推送日志。源码 `d15fa5c0`，code 9；不覆盖正式版，不发布 Release，不安装用户设备，保留本地修改。见 [记录](master-test9-2026-11-11.md)。
+- 用户要求拉取更新、打包独立测试 APK 并自动推送日志。源码 `d15fa5c0`，code 9；不覆盖正式版，不发布 Release，不安装用户设备，保留本地修改。见 [记录](test-builds/master-test9-2026-11-11.md)。
 
 ## 2026-11-12 导图停靠与交互改进推送
 
 - 用户明确要求「推送远端」，授权将导图停靠面板、手绘工具、节点拖动与就近返回改进 `360f1a38` 及本条记录推送至 `origin/master`。
-- 推送前读取远端，合并仅含 test9 打包文档与日志的 `c85eaac5`，保留双方提交历史；功能源码不变，复用[交互改进验证](mind-map-dock-interaction-2026-11-11.md)，不重复运行已通过的测试。
+- 推送前读取远端，合并仅含 test9 打包文档与日志的 `c85eaac5`，保留双方提交历史；功能源码不变，复用[交互改进验证](archive/mind-map-dock-interaction-2026-11-11.md)，不重复运行已通过的测试。
 - 本次仅合并远端文档并普通推送，不打包 APK、不安装、不发布 Release；Android 实际运行与 MovinkPad 真机验收仍待完成。
 
 ## 2026-11-12 test10 打包与日志推送
 
-- 用户要求拉取更新、打包独立测试 APK 并自动推送日志。源码 `e1892977`，code 10；不覆盖正式版，不发布 Release，不安装用户设备，保留本地修改。见 [记录](master-test10-2026-11-12.md)。
+- 用户要求拉取更新、打包独立测试 APK 并自动推送日志。源码 `e1892977`，code 10；不覆盖正式版，不发布 Release，不安装用户设备，保留本地修改。见 [记录](test-builds/master-test10-2026-11-12.md)。
 
 ## 2026-11-20 上游合并与 test11 打包
 
-- 用户要求合并上游 XNotes 新提交（可用 GPT 子代理处理具体改动）；上游 PDF 写回功能按用户选择「合并代码但不启用」。合并提交 `4a0f3b19` 已本地快进至 `master`，未推送。见 [合并记录](upstream-merge-2026-11-20.md)。
-- 用户要求为合并结果打包测试 APK，并提供原调试签名密钥。源码 `4a0f3b19`，code 11；不覆盖正式版，不安装、不推送、不发布 Release。见 [记录](master-test11-2026-11-20.md)。
+- 用户要求合并上游 XNotes 新提交（可用 GPT 子代理处理具体改动）；上游 PDF 写回功能按用户选择「合并代码但不启用」。合并提交 `4a0f3b19` 已本地快进至 `master`，未推送。见 [合并记录](process/upstream-merge-2026-11-20.md)。
+- 用户要求为合并结果打包测试 APK，并提供原调试签名密钥。源码 `4a0f3b19`，code 11；不覆盖正式版，不安装、不推送、不发布 Release。见 [记录](test-builds/master-test11-2026-11-20.md)。
 
 ## 2026-11-21 test12 打包与设备安装
 
-- 用户连接 MovinkPad 要求调试当前应用，随后回复「测试」选择打包当前 `master` 并上机测试。源码 `33386908`，code 12；仅覆盖安装 `com.xnotes.movinkpad.branchtest.master`，不动正式版，不推送、不发布 Release。见 [记录](master-test12-2026-11-21.md)。
+- 用户连接 MovinkPad 要求调试当前应用，随后回复「测试」选择打包当前 `master` 并上机测试。源码 `33386908`，code 12；仅覆盖安装 `com.xnotes.movinkpad.branchtest.master`，不动正式版，不推送、不发布 Release。见 [记录](test-builds/master-test12-2026-11-21.md)。
 
 ## 2026-11-22 导图 v2 test1 打包与设备安装
 
-- 用户要求「打包到连接的movinkpad上，进行一下真机测试」。源码 `32d6dc53`（`mindmap-v2`），新测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 1，全新安装到连接的 MovinkPad；不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test1-2026-11-22.md)。
+- 用户要求「打包到连接的movinkpad上，进行一下真机测试」。源码 `32d6dc53`（`mindmap-v2`），新测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 1，全新安装到连接的 MovinkPad；不动正式版和其他测试包，不推送、不发布 Release。见 [记录](test-builds/mindmapv2-test1-2026-11-22.md)。
 
 ## 2026-11-22 导图 v2 分支推送
 
@@ -305,11 +304,11 @@
 
 ## 2026-11-22 导图 v2 test2 打包与设备安装
 
-- 用户连接 MovinkPad 后要求「开始调试吧，我连上了」。源码 `c448605d`（`master`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 2，覆盖安装 test1；经用户同意在设备 `Download/XNotes-mapv2-test` 新建测试文件夹存放测试画布与笔记。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test2-2026-11-22.md)。
+- 用户连接 MovinkPad 后要求「开始调试吧，我连上了」。源码 `c448605d`（`master`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 2，覆盖安装 test1；经用户同意在设备 `Download/XNotes-mapv2-test` 新建测试文件夹存放测试画布与笔记。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](test-builds/mindmapv2-test2-2026-11-22.md)。
 
 ## 2026-11-22 导图 v2 test3 打包、设备安装与仪器测试
 
-- 用户要求「来吧，开始调试，你知道要测试哪些功能吧」，即复验 test2 发现 2、3、5 的修复。源码 `3b347dbd`（`mindmap-v2`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 3，`adb install -r` 覆盖 test2；另安装同包测试 APK（`.mindmapv2.test`）并以 `am instrument` 运行单个存储仪器测试，不卸载应用、不清数据。测试文件放在 `Download/XNotes-mapv2-test`，另新建 `Download/XNotes-mapv2-alt` 用于重现。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](mindmapv2-test3-2026-11-22.md)。
+- 用户要求「来吧，开始调试，你知道要测试哪些功能吧」，即复验 test2 发现 2、3、5 的修复。源码 `3b347dbd`（`mindmap-v2`），测试包 `com.xnotes.movinkpad.branchtest.mindmapv2` code 3，`adb install -r` 覆盖 test2；另安装同包测试 APK（`.mindmapv2.test`）并以 `am instrument` 运行单个存储仪器测试，不卸载应用、不清数据。测试文件放在 `Download/XNotes-mapv2-test`，另新建 `Download/XNotes-mapv2-alt` 用于重现。不动正式版和其他测试包，不推送、不发布 Release。见 [记录](test-builds/mindmapv2-test3-2026-11-22.md)。
 
 ## 2026-11-22 导图 v2 修复合入主线
 
@@ -319,23 +318,23 @@
 
 - 用户要求「真机测试」并确认打包安装 `master test13`：基于 `6667ae01` 构建 `com.xnotes.movinkpad.branchtest.master` code 13（`0.9.10-test-master-13`）并覆盖安装至已连接的 MovinkPad Pro 14（`Wacom DTHA140`）；不动正式版，不推送、不发布 Release。
 - 用户基于真机反馈要求调整收起悬浮窗顶部 AI 图标高亮、推理强度单行胶囊滑条及 DeepSeek/Qwen 默认仅开关档位，随后要求「打包并安装到平板上」：基于 `bb4fd8cc` 构建 `com.xnotes.movinkpad.branchtest.master` code 14（`0.9.10-test-master-14`）并覆盖安装至 MovinkPad Pro 14；不动正式版，不推送、不发布 Release。
-- 用户随后确认「合并到主分支并打包到正式版吧，我觉得现在这样可以用了」：改动已在本地 `master`，将 `versionCode` 递增至 99（`2591a0ae`），本地构建正式覆盖更新 APK `build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk`（`com.xnotes.movinkpad` / `0.9.10` / code 99，沿用历史签名、R8 与资源压缩、关闭 debuggable），全量 Release JVM 测试 4,271 项通过。仅本地交付与提交记录，不推送、不安装正式版到设备、不发布 GitHub Release。见 [Release 99 记录](release99-2026-11-22.md)。
+- 用户随后确认「合并到主分支并打包到正式版吧，我觉得现在这样可以用了」：改动已在本地 `master`，将 `versionCode` 递增至 99（`2591a0ae`），本地构建正式覆盖更新 APK `build/xnotes/XNotes-0.9.10-movinkpad-release99-arm64.apk`（`com.xnotes.movinkpad` / `0.9.10` / code 99，沿用历史签名、R8 与资源压缩、关闭 debuggable），全量 Release JVM 测试 4,271 项通过。仅本地交付与提交记录，不推送、不安装正式版到设备、不发布 GitHub Release。见 [Release 99 记录](releases/release99-2026-11-22.md)。
 - 用户随后明确要求「安装正式版到平板」：已通过 `adb -s 6el21u1000425 install -r` 将 `XNotes-0.9.10-movinkpad-release99-arm64.apk` 安装到已连接的 MovinkPad Pro 14（`Wacom DTHA140` / Android 15），并确认设备已安装 `com.xnotes.movinkpad` `0.9.10` / `versionCode=99`。不推送、不发布 GitHub Release。
 
 ## 2026-11-23 保存简化合入主线并推送
 
-- 用户要求「合并到主分支并把所有改动推送远端」：将 `save-slim`（`a0f6beb6` 测试与约定、`143ea62f` 实现：文件保存是唯一完整编码，恢复备份复用、复制已核实的干净文件或等待已绑定保存；被超越的检查点静默重试，仅实际写入失败提示）以非快进合并入 `master`。合并时 `master` 未前移，合并树与已验证分支相同：全量 JVM `testDebugUnitTest` 通过，收尾修改后定向回归 127 项通过；仪器测试仅编译，真机未验证。同时提交此前未提交的 test13／test14 构建日志（已替换本机路径为 `<仓库根>`、清理行尾空白）。推送 `origin/master`（含此前尚未推送的本地提交）；保留本地 `save-slim` 分支，不新建远端分支，不打包、安装或发布 Release。见 [记录](save-slim-2026-11-22.md)。
+- 用户要求「合并到主分支并把所有改动推送远端」：将 `save-slim`（`a0f6beb6` 测试与约定、`143ea62f` 实现：文件保存是唯一完整编码，恢复备份复用、复制已核实的干净文件或等待已绑定保存；被超越的检查点静默重试，仅实际写入失败提示）以非快进合并入 `master`。合并时 `master` 未前移，合并树与已验证分支相同：全量 JVM `testDebugUnitTest` 通过，收尾修改后定向回归 127 项通过；仪器测试仅编译，真机未验证。同时提交此前未提交的 test13／test14 构建日志（已替换本机路径为 `<仓库根>`、清理行尾空白）。推送 `origin/master`（含此前尚未推送的本地提交）；保留本地 `save-slim` 分支，不新建远端分支，不打包、安装或发布 Release。见 [记录](storage/save-slim-2026-11-22.md)。
 
 ## 2026-11-23 正式版 Release 100 打包与安装
 
-- 用户要求「打包一个正式版我体验一下」，随后「直接安装到机器上」：基于 `e3fbca08`（`0.9.11` / code 100，含保存简化）构建正式 ARM64 APK，Release JVM 4,307 项通过，验签与历史证书一致，`adb -s 6el21u1000425 install -r` 覆盖安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。见 [Release 100 记录](release100-2026-11-23.md)。
+- 用户要求「打包一个正式版我体验一下」，随后「直接安装到机器上」：基于 `e3fbca08`（`0.9.11` / code 100，含保存简化）构建正式 ARM64 APK，Release JVM 4,307 项通过，验签与历史证书一致，`adb -s 6el21u1000425 install -r` 覆盖安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。见 [Release 100 记录](releases/release100-2026-11-23.md)。
 
 ## 2026-11-23 恢复记录简化合入主线与 Release 101 打包
 
-- 用户选择选项 1「合并到 master 并打包正式版」：将 `pause-only-recovery`（`dcc81887` 测试与约定、`4e040bbe` 实现）以非快进合并入本地 `master`（`7106cf06`），版本提高至 `0.9.12` / code 101（`e6b67ecd`），构建正式 ARM64 APK，Release JVM 4,303 项通过。安装命令被权限检查拦截，未安装，待用户明确要求。不推送、不发布 GitHub Release。见 [Release 101 记录](release101-2026-11-23.md)。
+- 用户选择选项 1「合并到 master 并打包正式版」：将 `pause-only-recovery`（`dcc81887` 测试与约定、`4e040bbe` 实现）以非快进合并入本地 `master`（`7106cf06`），版本提高至 `0.9.12` / code 101（`e6b67ecd`），构建正式 ARM64 APK，Release JVM 4,303 项通过。安装命令被权限检查拦截，未安装，待用户明确要求。不推送、不发布 GitHub Release。见 [Release 101 记录](releases/release101-2026-11-23.md)。
 - 用户随后要求「安装」：已通过 `adb -s 6el21u1000425 install -r` 将 Release 101 覆盖安装到 MovinkPad Pro 14，设备确认 `com.xnotes.movinkpad` `0.9.12` / `versionCode=101`。不推送、不发布 GitHub Release。
 
 ## 2026-11-23 发布 0.9.9beta
 
-- 用户要求「推送到远端并发布 release，不要写这是 release101，以后 release 都只写 0.9.8 这样的版本号，这一点写进项目文档；把这次发布写成 0.9.9beta」：versionName 改为 `0.9.9beta`（versionCode 102），重新构建并核验 APK，AGENTS.md 增加版本号命名规则，README 改为指向本次发布；推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta`（附 APK 与 SHA256SUMS.txt）。未安装到设备。见 [发布记录](release-0.9.9beta-2026-11-23.md)。
+- 用户要求「推送到远端并发布 release，不要写这是 release101，以后 release 都只写 0.9.8 这样的版本号，这一点写进项目文档；把这次发布写成 0.9.9beta」：versionName 改为 `0.9.9beta`（versionCode 102），重新构建并核验 APK，AGENTS.md 增加版本号命名规则，README 改为指向本次发布；推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta`（附 APK 与 SHA256SUMS.txt）。未安装到设备。见 [发布记录](releases/release-0.9.9beta-2026-11-23.md)。
 - 用户随后要求安装包文件名去掉「movinkpad」：发布附件改为 `XNotes-0.9.9beta-arm64.apk`（字节不变）并更新 SHA256SUMS.txt 与发布说明；AGENTS.md 的文件名规则同步。包名不变。

@@ -25,7 +25,7 @@ import java.util.zip.ZipFile
 
 /**
  * The `map.json` entry of a canvas bundle that holds mind maps (phase 2 of
- * docs/movinkpad/mind-map-v2-design-2026-11-21.md).
+ * docs/movinkpad/mind-map/mind-map-v2-design-2026-11-21.md).
  *
  * ## Where it goes
  *

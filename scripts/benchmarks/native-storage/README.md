@@ -1,6 +1,6 @@
 用户要求：用大于 50 MB 的真实原生笔记，对比保存、打开和持锁时长，先测量再优化。
 
-状态：本目录保存可重复运行的主机基准配方；原始数据与结论见 `docs/movinkpad/mind-map-merge-fixes-2026-11-10.md`。
+状态：本目录保存可重复运行的主机基准配方；原始数据与结论见 `docs/movinkpad/archive/mind-map-merge-fixes-2026-11-10.md`。
 
 本轮边界：JDK 21 / Robolectric / 本机文件支持的外部 ContentProvider。只测存储与解码，不测渲染；真实 SAF、Android 与 MovinkPad 性能待测。
 
