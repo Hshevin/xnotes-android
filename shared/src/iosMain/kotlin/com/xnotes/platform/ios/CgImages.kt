@@ -6,6 +6,8 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FillRule
+import com.xnotes.core.pal.ImageCodec
+import com.xnotes.core.pal.ImageSize
 import kotlinx.cinterop.*
 import platform.CoreFoundation.*
 import platform.CoreGraphics.*
@@ -19,6 +21,22 @@ import kotlin.math.min
 
 private const val MAX_EDGE = 4096
 private val blurContext by lazy { CIContext.contextWithOptions(null) }
+
+object CgImageCodec : ImageCodec {
+    override fun probeFile(path: String): ImageSize? {
+        val url = checkNotNull(CFBridgingRetain(NSURL.fileURLWithPath(path)))
+        val source = try { CGImageSourceCreateWithURL(url.reinterpret(), null) } finally { CFRelease(url) } ?: return null
+        val props = try { CGImageSourceCopyPropertiesAtIndex(source, 0u, null) } finally { CFRelease(source) } ?: return null
+        return try { memScoped {
+            fun size(key: CFStringRef?): Int {
+                val number = CFDictionaryGetValue(props, key) ?: return 0
+                val value = alloc<IntVar>()
+                return if (CFNumberGetValue(number.reinterpret(), kCFNumberIntType, value.ptr)) value.value else 0
+            }
+            ImageSize(size(kCGImagePropertyPixelWidth), size(kCGImagePropertyPixelHeight)).takeIf { it.width > 0 && it.height > 0 }
+        } } finally { CFRelease(props) }
+    }
+}
 
 internal fun decodeImage(image: ImageData, width: Double, height: Double): CGImageRef? {
     if (image.width <= 0 || image.height <= 0) return null

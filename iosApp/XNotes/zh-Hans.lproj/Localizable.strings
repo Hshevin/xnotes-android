@@ -13,3 +13,10 @@
 "kind_map" = "旧版思维导图";
 "kind_pdf" = "PDF";
 "unknown_time" = "修改时间不可用";
+"read_only" = "只读";
+"open_missing" = "此文件已不在原位置。";
+"open_legacy_map" = "不再支持旧版独立思维导图，原文件未改动。";
+"open_unsupported" = "此查看器只支持分页笔记和无限画布。";
+"open_future" = "需要更新版本的 XNotes 才能打开此文件。";
+"open_corrupt" = "文件损坏或无法读取所需资源，原文件未改动。";
+"render_failed" = "无法显示文档内容，原文件未改动。";

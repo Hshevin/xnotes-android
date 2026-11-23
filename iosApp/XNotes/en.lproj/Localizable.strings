@@ -13,3 +13,10 @@
 "kind_map" = "Legacy mind map";
 "kind_pdf" = "PDF";
 "unknown_time" = "Modification date unavailable";
+"read_only" = "Read only";
+"open_missing" = "This file is no longer here.";
+"open_legacy_map" = "Standalone mind maps are no longer supported. Your file has not been changed.";
+"open_unsupported" = "This viewer opens notebooks and canvases only.";
+"open_future" = "This file requires a newer version of XNotes.";
+"open_corrupt" = "The notebook or one of its resources could not be read. Your file has not been changed.";
+"render_failed" = "This content could not be displayed. Your file has not been changed.";

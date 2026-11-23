@@ -4,18 +4,23 @@ package com.xnotes.platform.ios
 
 import com.xnotes.core.infinite.CanvasProjection
 import com.xnotes.core.infinite.MeshData
+import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Rgba
 import kotlinx.cinterop.*
 import platform.Foundation.NSError
 import platform.Metal.*
+import platform.QuartzCore.CAMetalLayer
 
 data class MetalViewport(val originX: Double, val originY: Double, val scale: Double)
-data class MetalMesh(val mesh: MeshData, val color: Rgba)
+sealed interface MetalPart
+data class MetalMesh(val mesh: MeshData, val color: Rgba, val nightInk: Boolean = false) : MetalPart
+class MetalPicture internal constructor(internal val texture: MTLTextureProtocol, val bounds: Rect) : MetalPart
 
 class MetalInk private constructor(
     private val device: MTLDeviceProtocol,
     private val queue: MTLCommandQueueProtocol,
     private val pipeline: MTLRenderPipelineStateProtocol,
+    private val pictures: MTLRenderPipelineStateProtocol,
     private val samples: ULong,
 ) {
     companion object {
@@ -43,21 +48,68 @@ class MetalInk private constructor(
                 val pipeline = checkNotNull(device.newRenderPipelineStateWithDescriptor(desc, error.ptr)) {
                     "Metal pipeline creation failed: ${error.value?.localizedDescription}"
                 }
-                MetalInk(device, checkNotNull(device.newCommandQueue()), pipeline, samples)
+                desc.vertexFunction = checkNotNull(library.newFunctionWithName("pictureVertex"))
+                desc.fragmentFunction = checkNotNull(library.newFunctionWithName("pictureFragment"))
+                val pictures = checkNotNull(device.newRenderPipelineStateWithDescriptor(desc, error.ptr))
+                MetalInk(device, checkNotNull(device.newCommandQueue()), pipeline, pictures, samples)
             }
         }
     }
 
-    fun renderOffscreen(width: Int, height: Int, background: Rgba, viewport: MetalViewport, meshes: List<MetalMesh>): IntArray = autoreleasepool {
+    fun renderOffscreen(width: Int, height: Int, background: Rgba, viewport: MetalViewport, meshes: List<MetalPart>): IntArray = autoreleasepool {
         require(width > 0 && height > 0 && width.toLong() * height <= Int.MAX_VALUE)
         require(viewport.originX.isFinite() && viewport.originY.isFinite() && viewport.scale.isFinite() && viewport.scale > 0.0)
         val desc = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(MTLPixelFormatBGRA8Unorm, width.toULong(), height.toULong(), false)
         desc.usage = MTLTextureUsageRenderTarget
         desc.storageMode = MTLStorageModeShared
         val output = checkNotNull(device.newTextureWithDescriptor(desc))
+        val command = encodeFrame(output, background, viewport, meshes)
+        command.commit()
+        command.waitUntilCompleted()
+        check(command.status == MTLCommandBufferStatusCompleted) { "Metal render failed: ${command.error?.localizedDescription}" }
+        val pixels = IntArray(width * height)
+        pixels.usePinned {
+            output.getBytes(it.addressOf(0), width.toULong() * 4u, MTLRegionMake2D(0u, 0u, width.toULong(), height.toULong()), 0u)
+        }
+        for (index in pixels.indices) {
+            val argb = pixels[index]
+            val alpha = argb ushr 24
+            if (alpha != 255) pixels[index] = (alpha shl 24) or (straight((argb ushr 16) and 255, alpha) shl 16) or
+                (straight((argb ushr 8) and 255, alpha) shl 8) or straight(argb and 255, alpha)
+        }
+        pixels
+    }
+
+    fun attach(layer: CAMetalLayer) {
+        layer.device = device as objcnames.protocols.MTLDeviceProtocol
+        layer.pixelFormat = MTLPixelFormatBGRA8Unorm
+    }
+
+    fun present(layer: CAMetalLayer, background: Rgba, viewport: MetalViewport, parts: List<MetalPart>) = autoreleasepool {
+        val drawable = layer.nextDrawable() ?: return@autoreleasepool
+        val command = encodeFrame(drawable.texture as MTLTextureProtocol, background, viewport, parts)
+        command.presentDrawable(drawable)
+        command.commit()
+    }
+
+    fun picture(surface: CgSurface, bounds: Rect): MetalPicture {
+        val width = surface.width.toULong(); val height = surface.height.toULong()
+        val desc = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(MTLPixelFormatRGBA8Unorm, width, height, false)
+        desc.usage = MTLTextureUsageShaderRead
+        desc.storageMode = MTLStorageModeShared
+        val texture = checkNotNull(device.newTextureWithDescriptor(desc))
+        texture.replaceRegion(MTLRegionMake2D(0u, 0u, width, height), 0u, surface.bytes, width * 4u)
+        return MetalPicture(texture, bounds)
+    }
+
+    private fun encodeFrame(output: MTLTextureProtocol, background: Rgba, viewport: MetalViewport,
+                            parts: List<MetalPart>): MTLCommandBufferProtocol {
+        val width = output.width; val height = output.height
         val pass = MTLRenderPassDescriptor()
         pass.colorAttachments.objectAtIndexedSubscript(0u).apply {
             if (samples > 1u) {
+                val desc = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(MTLPixelFormatBGRA8Unorm, width, height, false)
+                desc.usage = MTLTextureUsageRenderTarget
                 desc.textureType = MTLTextureType2DMultisample
                 desc.sampleCount = samples
                 desc.storageMode = MTLStorageModePrivate
@@ -75,25 +127,24 @@ class MetalInk private constructor(
         val command = checkNotNull(queue.commandBuffer())
         val encoder = checkNotNull(command.renderCommandEncoderWithDescriptor(pass))
         try {
-            encoder.setRenderPipelineState(pipeline)
             val uniforms = floatArrayOf(viewport.scale.toFloat(), CanvasProjection.MIN_HALF_WIDTH_PX.toFloat(), width.toFloat(), height.toFloat())
             uniforms.usePinned { encoder.setVertexBytes(it.addressOf(0), 16u, 1u) }
-            for (mesh in meshes) if (!mesh.mesh.isEmpty) encode(encoder, mesh, viewport)
+            for (part in parts) when (part) {
+                is MetalMesh -> if (!part.mesh.isEmpty) {
+                    encoder.setRenderPipelineState(pipeline)
+                    encode(encoder, part, viewport)
+                }
+                is MetalPicture -> {
+                    encoder.setRenderPipelineState(pictures)
+                    val box = part.bounds
+                    val rect = floatArrayOf((box.x - viewport.originX).toFloat(), (box.y - viewport.originY).toFloat(), box.w.toFloat(), box.h.toFloat())
+                    rect.usePinned { encoder.setVertexBytes(it.addressOf(0), 16u, 0u) }
+                    encoder.setFragmentTexture(part.texture, 0u)
+                    encoder.drawPrimitives(MTLPrimitiveTypeTriangleStrip, 0u, 4u)
+                }
+            }
         } finally { encoder.endEncoding() }
-        command.commit()
-        command.waitUntilCompleted()
-        check(command.status == MTLCommandBufferStatusCompleted) { "Metal render failed: ${command.error?.localizedDescription}" }
-        val pixels = IntArray(width * height)
-        pixels.usePinned {
-            output.getBytes(it.addressOf(0), width.toULong() * 4u, MTLRegionMake2D(0u, 0u, width.toULong(), height.toULong()), 0u)
-        }
-        for (index in pixels.indices) {
-            val argb = pixels[index]
-            val alpha = argb ushr 24
-            if (alpha != 255) pixels[index] = (alpha shl 24) or (straight((argb ushr 16) and 255, alpha) shl 16) or
-                (straight((argb ushr 8) and 255, alpha) shl 8) or straight(argb and 255, alpha)
-        }
-        pixels
+        return command
     }
 
     private fun encode(encoder: MTLRenderCommandEncoderProtocol, entry: MetalMesh, viewport: MetalViewport) {
@@ -110,7 +161,8 @@ class MetalInk private constructor(
             vertices[at + 1] = (mesh.positions[2 * index + 1] - viewport.originY).toFloat()
             vertices[at + 2] = mesh.offsets[2 * index].toFloat()
             vertices[at + 3] = mesh.offsets[2 * index + 1].toFloat()
-            val argb = colors?.get(index) ?: base
+            val stored = colors?.get(index) ?: base
+            val argb = if (entry.nightInk && (stored and 0xffffff) == 0) stored or 0xffffff else stored
             vertices[at + 4] = ((argb ushr 16) and 255) / 255f
             vertices[at + 5] = ((argb ushr 8) and 255) / 255f
             vertices[at + 6] = (argb and 255) / 255f
@@ -142,4 +194,15 @@ vertex Varying inkVertex(uint id [[vertex_id]], const device Vertex *vertices [[
     return {float4(2 * point.x / view.z - 1, 1 - 2 * point.y / view.w, 0, 1), ink.color};
 }
 fragment float4 inkFragment(Varying ink [[stage_in]]) { return ink.color; }
+struct PictureVertex { float4 position [[position]]; float2 uv; };
+vertex PictureVertex pictureVertex(uint id [[vertex_id]], constant float4 &box [[buffer(0)]], constant float4 &view [[buffer(1)]]) {
+    float2 uv = float2(id & 1, id >> 1);
+    float2 point = (box.xy + uv * box.zw) * view.x;
+    return {float4(2 * point.x / view.z - 1, 1 - 2 * point.y / view.w, 0, 1), uv};
+}
+fragment float4 pictureFragment(PictureVertex vertexIn [[stage_in]], texture2d<float> image [[texture(0)]]) {
+    constexpr sampler filter(coord::normalized, address::clamp_to_edge, filter::linear);
+    float4 p = image.sample(filter, vertexIn.uv);
+    return float4(p.rgb / max(p.a, 0.00001f), p.a);
+}
 """

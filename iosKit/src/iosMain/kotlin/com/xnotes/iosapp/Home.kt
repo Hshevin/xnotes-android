@@ -18,6 +18,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.ComposeUIViewController
+import androidx.compose.ui.viewinterop.UIKitInteropInteractionMode
+import androidx.compose.ui.viewinterop.UIKitInteropProperties
+import androidx.compose.ui.viewinterop.UIKitView
+import androidx.compose.ui.ExperimentalComposeUiApi
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.iosapp.ui.theme.MinTouchTarget
 import com.xnotes.iosapp.ui.theme.Space
@@ -26,12 +30,14 @@ import com.xnotes.storage.ios.IosDocumentEntry
 import com.xnotes.storage.ios.IosStorageLocations
 import com.xnotes.storage.ios.listIosDocuments
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.withContext
 import okio.IOException
 import okio.Path
 import platform.Foundation.*
 import platform.UIKit.UISceneDidActivateNotification
 import platform.UIKit.UIViewController
+import platform.UIKit.UIView
 
 fun rootViewController(): UIViewController = ComposeUIViewController { DocumentsHome() }
 
@@ -57,6 +63,7 @@ private fun DocumentsHome() {
         timeStyle = NSDateFormatterShortStyle
     } }
     var folders by remember { mutableStateOf(emptyList<Path>()) }
+    var selected by remember { mutableStateOf<Path?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     DisposableEffect(Unit) {
         val center = NSNotificationCenter.defaultCenter
@@ -64,6 +71,10 @@ private fun DocumentsHome() {
         onDispose { center.removeObserver(token) }
     }
     val current = folders.lastOrNull()
+    selected?.let { path ->
+        key(path) { Viewer(path, dark, background, nameStyle, detailStyle) { selected = null } }
+        return
+    }
     val listing by key(current) {
         produceState<Listing>(Listing.Loading, revision) {
             value = withContext(Dispatchers.Default) {
@@ -93,8 +104,9 @@ private fun DocumentsHome() {
                 BasicText(text("empty_hint"), style = detailStyle)
             } else LazyColumn {
                 items(state.entries, key = { it.path.toString() }) { entry ->
-                    val folderLink = if (entry.isFolder) Modifier.clickable(role = Role.Button) { folders = folders + entry.path } else Modifier
-                    Row(Modifier.fillMaxWidth().then(folderLink).heightIn(min = MinTouchTarget).padding(vertical = Space.s12),
+                    Row(Modifier.fillMaxWidth().clickable(role = Role.Button) {
+                        if (entry.isFolder) folders = folders + entry.path else selected = entry.path
+                    }.heightIn(min = MinTouchTarget).padding(vertical = Space.s12),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s16)) {
                         Column(Modifier.weight(1f)) {
                             BasicText(entry.path.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = nameStyle)
@@ -112,6 +124,49 @@ private fun DocumentsHome() {
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Viewer(path: Path, dark: Boolean, background: Color, nameStyle: TextStyle, detailStyle: TextStyle, back: () -> Unit) {
+    var result by remember { mutableStateOf<LiteOpen?>(null) }
+    var renderFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(path) {
+        var owned: LiteOpen? = null
+        try {
+            withContext(Dispatchers.Default) { owned = ReadOnlyLiteStore.open(path) }
+            result = owned
+            awaitCancellation()
+        } finally { (owned as? LiteOpen.Opened)?.session?.close() }
+    }
+    Column(Modifier.fillMaxSize().background(background).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.s12), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+            Action("back", nameStyle, back)
+            BasicText(path.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = nameStyle)
+            BasicText(text("read_only"), style = detailStyle)
+        }
+        val opened = result
+        if (opened is LiteOpen.Opened && !renderFailed) key(dark, opened.session) {
+            UIKitView(factory = {
+                try {
+                    val session = opened.session
+                    session.canvas?.let { CanvasView(it, dark) { renderFailed = true } }
+                        ?: PagedView(session, dark) { renderFailed = true }
+                } catch (_: Exception) { renderFailed = true; UIView() }
+            }, modifier = Modifier.fillMaxSize(), properties = UIKitInteropProperties(interactionMode = UIKitInteropInteractionMode.NonCooperative),
+                onRelease = { (it as? PagedView)?.close() })
+        } else {
+            val message = when ((opened as? LiteOpen.Refused)?.reason) {
+                LiteRefusal.NOT_FOUND -> "open_missing"
+                LiteRefusal.UNSUPPORTED_KIND -> if (DocumentKind.ofName(path.name) == DocumentKind.MIND_MAP) "open_legacy_map" else "open_unsupported"
+                LiteRefusal.FUTURE_VERSION -> "open_future"
+                LiteRefusal.CORRUPT -> "open_corrupt"
+                null -> if (renderFailed) "render_failed" else "loading"
+            }
+            BasicText(text(message), Modifier.padding(Space.s24), style = detailStyle)
         }
     }
 }
