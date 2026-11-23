@@ -54,3 +54,11 @@
 - 构建：在仓库根目录运行 `xcodebuild -project iosApp/XNotes.xcodeproj -scheme XNotes -destination 'generic/platform=iOS Simulator' build`，或在 Xcode 打开该工程，选择 XNotes 和任一 iPadOS 18+ ARM64 iPad 模拟器后运行。构建阶段选择 JDK 21（非标准安装可指定 `XNOTES_JDK_21`）；无需重新生成 Xcode 工程。Xcode 27.2 模拟器构建与 `:iosKit:linkDebugFrameworkIosArm64` 均通过；未安装真机。
 - 契约验证：Pencil 两类测试各平台均为 23 项；Android JVM 另有清单 5 项，iOS 模拟器另有目录 5 项和列表 1 项。Android `:app:testDebugUnitTest` 2,425 项通过，`:app:assembleDebug` 通过，无 APK 交付。仅在本地临时 Gradle 初始化脚本中隔离并行任务尚处 RED 的 `BundleInteropTest`、`CgRendererTest`、`MetalInkTest`；未移动或改写其源码，以上结果不代表第二波全部转绿。
 - 在 iPad Pro 13 英寸（M5）／iPadOS 27.2 模拟器安装并启动 `com.xnotes.ipad`，刷新后确认文件夹、分页笔记和无限画布均显示中文类型与修改时间。截图 `tmp/w2-3-ipad-home.png`（空目录）、`tmp/w2-3-ipad-documents.png`（样例列表）仅留在本地工作树。
+
+## W2-4 实现记录
+
+- `shared/src/iosMain/kotlin/com/xnotes/platform/ios/`：`CgSurface` 用左上原点的 sRGB 位图，各绘制器共享像素、独立保存变换与裁剪。支持非零／奇偶填充、三次曲线、多边形裁剪、固定像素宽虚线、整组透明度与正片叠底／滤色、一次填充的变径圆头笔迹、位图裁切／自拷贝，以及经 ImageIO 缩采样的图片旋转、翻转与裁切。Core Image 高斯光晕不保证与 Android 的 Skia 模糊逐像素相同；没有移植 AndroidSVG 的可见切片和图片缓存。
+- `MetalInk` 在运行时编译 MSL，按提交顺序将索引三角形绘入离屏纹理，支持逐顶点颜色和透明混合，返回非预乘 ARGB。不同于 Android 的常驻分块缓冲，此入口每次上传前在双精度下减去视口原点；着色器按笔宽偏移将不足半像素的半宽推至阈值并同比降低 alpha，零偏移的填充不变。
+- 复现：先启动有 Metal 的模拟器，再运行 `./gradlew :shared:iosSimulatorArm64Test -PiosTestDevice=<模拟器-UDID>`。Kotlin 默认的 standalone 模式实测取不到 Metal 设备，原 4 项 Metal 契约均失败；改用已启动模拟器的图形服务后原样通过，没有添加跳过或 CPU 替身。并行实现尚未合入时，本地临时 Gradle 初始化脚本只从本次编译排除 `BundleInteropTest`、`PencilStrokeAssemblerTest`、`PencilGesturesTest`、`IosStorageLocationsTest`；`IosAppManifestTest` 属于未运行的共享 Android 单测目标。五个文件均未移动、修改或删除，未提交任何排除规则。
+- 验证：Xcode 27.2／iOS 27.2 ARM64 模拟器上，原 CoreGraphics 12 项、Metal 4 项和新增边界 8 项全部通过；连同既有共享核心共 1,693 项，失败／跳过均为 0。`:shared:compileKotlinIosArm64`（设备目标只编译）、`:app:testDebugUnitTest`（2,425 项，失败／跳过均为 0）、`:app:assembleDebug` 通过。未安装、推送或交付包。
+- 第三波待接：文字布局、旋转文字和基线文本片段（`drawText`、`drawTextTurned`、`drawTextRun`），公式及占位（`drawMath`、`drawMathPending`），屏幕 `CAMetalLayer`、湿墨和交互预览。模拟器离屏像素结果不代表 iPad GPU 显示或 Apple Pencil 延迟验收。

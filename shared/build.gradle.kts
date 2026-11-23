@@ -38,6 +38,11 @@ kotlin {
     }
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest>().configureEach {
+    standalone.set(false)
+    providers.gradleProperty("iosTestDevice").orNull?.let { device.set(it) }
+}
+
 android {
     namespace = "com.xnotes.shared"
     compileSdk = 36
@@ -49,6 +54,3 @@ android {
     }
 }
 
-tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest>().configureEach {
-    providers.gradleProperty("iosTestDevice").orNull?.let { device.set(it) }
-}
