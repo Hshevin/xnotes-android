@@ -7,7 +7,8 @@ import com.xnotes.kio.KFiles
 import com.xnotes.kio.Uuids
 import okio.*
 
-internal data class BundleEntry(val name: String, val data: BufferedSource, val method: Int) {
+internal data class EntrySizes(val size: Long, val packed: Long, val crc: Long)
+internal class BundleEntry(val name: String, val data: BufferedSource, val method: Int, val size: Long, val finish: () -> EntrySizes) {
     val isDirectory get() = name.endsWith('/')
 }
 
@@ -15,10 +16,11 @@ internal interface BundleReader : Closeable { fun next(): BundleEntry? }
 internal interface BundleWriter : Closeable {
     fun deflated(name: String, write: (Sink) -> Unit)
     fun stored(name: String, file: AssetFile, checkActive: () -> Unit)
+    fun entry(name: String, time: Long?, storedSize: Long?, crc: Long, write: (Sink) -> Unit)
 }
 
 internal expect fun bundleReader(source: Source): BundleReader
-internal expect fun bundleWriter(sink: Sink): BundleWriter
+internal expect fun bundleWriter(sink: Sink, level: Int = 1, comment: String? = null): BundleWriter
 internal expect fun encodeIdentity(identity: BundleIdentity): ByteArray
 internal expect fun decodeIdentity(data: BufferedSource): BundleIdentity
 internal expect fun jsonChars(source: Source, strict: Boolean = false): JsonChars

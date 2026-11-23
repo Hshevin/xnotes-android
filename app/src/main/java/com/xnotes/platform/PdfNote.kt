@@ -11,6 +11,9 @@ import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.XnotesPdf
+import com.xnotes.format.inspect
+import com.xnotes.format.embedded
+import com.xnotes.format.stamp
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream

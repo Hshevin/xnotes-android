@@ -2,6 +2,10 @@ package com.xnotes.format
 
 import okio.*
 
+actual abstract class PdfStreamAdapters actual constructor()
+
+actual abstract class SnapshotInputAdapters actual constructor()
+
 actual abstract class CanvasStreamAdapters actual constructor()
 actual abstract class DocumentStreamAdapters actual constructor()
 
@@ -32,19 +36,28 @@ internal actual fun decodeIdentity(data: BufferedSource): BundleIdentity {
 
 internal actual fun jsonChars(source: Source, strict: Boolean): JsonChars {
     val input = source.buffer()
-    return JsonChars { chars ->
-        if (input.exhausted()) -1 else {
-            val bytes = input.readByteArray(minOf(chars.size.toLong() - 4, input.buffer.size)).toMutableList()
-            var lead = bytes.lastIndex
-            while (lead >= 0 && (bytes[lead].toInt() and 0xc0) == 0x80) lead--
-            if (lead >= 0) {
-                val first = bytes[lead].toInt() and 255
-                val width = when (first) { in 0xc2..0xdf -> 2; in 0xe0..0xef -> 3; in 0xf0..0xf4 -> 4; else -> 1 }
-                while (bytes.size - lead < width && input.request(1) && (input.buffer[0].toInt() and 0xc0) == 0x80) bytes.add(input.readByte())
+    return object : JsonChars {
+        private val bytes = ByteArray(8192 + 3)
+        private var text = ""
+        private var position = 0
+        override fun read(buffer: CharArray): Int {
+            if (buffer.isEmpty()) return 0
+            if (position == text.length) {
+                var size = input.read(bytes, 0, bytes.size - 3)
+                if (size < 0) return -1
+                var lead = size - 1
+                while (lead >= 0 && (bytes[lead].toInt() and 0xc0) == 0x80) lead--
+                if (lead >= 0) {
+                    val width = when (bytes[lead].toInt() and 255) { in 0xc2..0xdf -> 2; in 0xe0..0xef -> 3; in 0xf0..0xf4 -> 4; else -> 1 }
+                    while (size - lead < width && input.request(1) && (input.buffer[0].toInt() and 0xc0) == 0x80) bytes[size++] = input.readByte()
+                }
+                text = bytes.decodeToString(0, size, throwOnInvalidSequence = strict)
+                position = 0
             }
-            val text = bytes.toByteArray().decodeToString(throwOnInvalidSequence = strict)
-            text.toCharArray(chars)
-            text.length
+            val count = minOf(buffer.size, text.length - position)
+            text.toCharArray(buffer, 0, position, position + count)
+            position += count
+            return count
         }
     }
 }

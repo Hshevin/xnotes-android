@@ -32,7 +32,7 @@ class PageBundleCopyTest {
     private fun assertIndependentCopy(source:File,copy:File) {
         val header=BundleHeader.read(copy)
         assertNotEquals(owner,header.identity!!.documentId)
-        assertEquals(header.identity.documentId,header.anchors!!.documentId)
+        assertEquals(header.identity!!.documentId,header.anchors!!.documentId)
         val manifest=entry(copy,"manifest.json");val pages=JSONObject(String(manifest)).getJSONArray("pages")
         val fresh=(0 until pages.length()).map {pages.getJSONObject(it).getString("reference_id")}
         assertEquals(2,fresh.toSet().size);assertTrue(fresh.none {it==p1 || it==p2})

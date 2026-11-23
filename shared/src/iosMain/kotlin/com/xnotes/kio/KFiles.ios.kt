@@ -16,6 +16,10 @@ actual object KFiles {
 
 private fun failure(code: Int = errno) = KioException(strerror(code)?.toKString() ?: "POSIX error $code")
 
+internal actual fun atomicReplace(source: Path, target: Path) {
+    if (rename(source.toString(), target.toString()) != 0) throw failure()
+}
+
 actual fun fileIdentity(path: Path): FileIdentity? = memScoped {
     val info = alloc<stat>()
     if (stat(path.toString(), info.ptr) == 0) FileIdentity(info.st_dev.toLong(), info.st_ino.toLong())

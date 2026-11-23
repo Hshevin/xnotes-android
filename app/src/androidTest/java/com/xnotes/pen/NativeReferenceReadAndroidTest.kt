@@ -1,5 +1,6 @@
 package com.xnotes.pen
 
+import com.xnotes.storage.read
 import android.content.ContextWrapper
 import android.net.Uri
 import android.os.ParcelFileDescriptor

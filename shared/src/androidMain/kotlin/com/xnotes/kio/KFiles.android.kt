@@ -15,6 +15,10 @@ actual object KFiles {
     actual fun tempDirectory(): Path = FileSystem.SYSTEM_TEMPORARY_DIRECTORY
 }
 
+internal actual fun atomicReplace(source: Path, target: Path) {
+    Files.move(source.toNioPath(), target.toNioPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+}
+
 actual fun fileIdentity(path: Path): FileIdentity? {
     if (System.getProperty("java.vm.name") == "Dalvik") {
         return try {

@@ -10,6 +10,18 @@ import com.xnotes.core.model.Document
 import com.xnotes.core.infinite.InfiniteDocument
 import okio.*
 
+actual abstract class PdfStreamAdapters actual constructor() {
+    fun write(source:File,out:OutputStream,identity:BundleIdentity,pdf:File?,external:Boolean,cancelled:()->Boolean={false}) =
+        BundlePdf.write(source,out.sink(),identity,pdf,external,cancelled)
+    fun write(snapshot:BundleSnapshot,out:OutputStream,identity:BundleIdentity,pdf:File?,external:Boolean,cancelled:()->Boolean={false}) =
+        BundlePdf.write(snapshot,out.sink(),identity,pdf,external,cancelled)
+}
+
+actual abstract class SnapshotInputAdapters actual constructor() {
+    fun fromInput(input: InputStream, directory: File? = null, cancelled: () -> Boolean = { false }) =
+        BundleSnapshot.fromInput(input.source(), directory, cancelled)
+}
+
 internal actual fun encodeIdentity(identity: BundleIdentity) = identity.bytes()
 internal actual fun decodeIdentity(data: BufferedSource) = BundleIdentity.read(data.inputStream())
 
@@ -17,12 +29,19 @@ internal actual fun bundleReader(source: Source): BundleReader = object : Bundle
     val zip = ZipInputStream(source.buffer().inputStream())
     override fun next(): BundleEntry? = zip.nextEntry?.let { entry ->
         val data = object : ForwardingSource(zip.source()) { override fun close() = Unit }.buffer()
-        BundleEntry(entry.name, data, entry.method)
+        BundleEntry(entry.name, data, entry.method, entry.size) { zip.closeEntry(); EntrySizes(entry.size, entry.compressedSize, entry.crc) }
     }
     override fun close() = zip.close()
 }
 
 internal class AndroidBundleWriter(private val zip: ZipOutputStream) : BundleWriter {
+    override fun entry(name: String, time: Long?, storedSize: Long?, crc: Long, write: (Sink) -> Unit) {
+        zip.putNextEntry(ZipEntry(name).apply {
+            time?.let { this.time = it }
+            if (storedSize != null) { method = ZipEntry.STORED; size = storedSize; this.crc = crc }
+        })
+        write(zip.sink()); zip.closeEntry()
+    }
     override fun deflated(name: String, write: (Sink) -> Unit) {
         zip.putNextEntry(ZipEntry(name))
         write(zip.sink())
@@ -44,7 +63,7 @@ internal class AndroidBundleWriter(private val zip: ZipOutputStream) : BundleWri
     override fun close() = zip.close()
 }
 
-internal actual fun bundleWriter(sink: Sink): BundleWriter = AndroidBundleWriter(ZipOutputStream(sink.buffer().outputStream()).apply { setLevel(1) })
+internal actual fun bundleWriter(sink: Sink, level: Int, comment: String?): BundleWriter = AndroidBundleWriter(ZipOutputStream(sink.buffer().outputStream()).apply { setLevel(level); comment?.let(::setComment) })
 internal actual fun jsonChars(source: Source, strict: Boolean): JsonChars {
     val stream = source.buffer().inputStream()
     val reader = if (strict) java.io.InputStreamReader(stream, Charsets.UTF_8.newDecoder()) else stream.reader()

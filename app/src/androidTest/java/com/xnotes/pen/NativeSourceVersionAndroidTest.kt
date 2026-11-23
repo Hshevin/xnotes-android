@@ -1,5 +1,6 @@
 package com.xnotes.pen
 
+import com.xnotes.storage.admitOriginalPdf
 import android.content.ContextWrapper
 import android.provider.DocumentsContract
 import com.xnotes.core.util.DocumentKind

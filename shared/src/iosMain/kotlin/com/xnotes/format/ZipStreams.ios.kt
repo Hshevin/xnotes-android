@@ -9,6 +9,10 @@ import com.xnotes.kio.KFiles
 import kotlinx.cinterop.*
 import okio.*
 import platform.zlib.*
+import platform.posix.localtime_r
+import platform.posix.time
+import platform.posix.time_tVar
+import platform.posix.tm
 
 private const val LOCAL = 0x04034b50
 private const val CENTRAL = 0x02014b50
@@ -17,6 +21,15 @@ private const val END = 0x06054b50
 private const val UINT = 0xffffffffL
 private fun BufferedSource.short() = readShortLe().toInt() and 65535
 private fun BufferedSource.word() = readIntLe().toLong() and UINT
+
+private fun dosTimestamp(): Int = memScoped {
+    val seconds = alloc<time_tVar>()
+    time(seconds.ptr)
+    val local = alloc<tm>()
+    if (localtime_r(seconds.ptr, local.ptr) == null || local.tm_year < 80) return@memScoped 0x00210000
+    ((local.tm_year - 80) shl 25) or ((local.tm_mon + 1) shl 21) or (local.tm_mday shl 16) or
+        (local.tm_hour shl 11) or (local.tm_min shl 5) or (local.tm_sec shr 1)
+}
 
 private class ZipPayload(val input: BufferedSource, val method: Int, val length: Long, val descriptor: Boolean) : Source {
     val crc = Crc32()
@@ -46,7 +59,7 @@ private class ZipPayload(val input: BufferedSource, val method: Int, val length:
         } else {
             var produced: Int
             do {
-                if (!input.request(1)) throw EOFException("Truncated deflated ZIP entry")
+                if ((descriptor || packed < length) && !input.request(1)) throw EOFException("Truncated deflated ZIP entry")
                 val available = minOf(encoded.size.toLong(), input.buffer.size, if (descriptor) Long.MAX_VALUE else length - packed).toInt()
                 require(available >= 0)
                 input.peek().readFully(encoded, 0, available)
@@ -121,12 +134,13 @@ internal actual fun bundleReader(source: Source): BundleReader = object : Bundle
         val entry = ZipPayload(input, method, packed, descriptor)
         payload = entry; body = entry.buffer()
         val nonClosing = object : Source by body!! { override fun close() = Unit }
-        return BundleEntry(name, nonClosing.buffer(), method)
+        return BundleEntry(name, nonClosing.buffer(), method, if (descriptor) -1 else unpacked) { finish(); EntrySizes(unpacked, packed, crc) }
     }
     override fun close() { try { payload?.close() } finally { input.close() } }
 }
 
-private class ZipOutput(sink: Sink) : BundleWriter {
+private class ZipOutput(sink: Sink, val level: Int, comment: String?) : BundleWriter {
+    private val comment = comment.orEmpty().encodeToByteArray().also { require(it.size <= 65535) }
     private val output = sink.buffer()
     private val directory = Buffer()
     private val names = HashSet<String>()
@@ -134,18 +148,18 @@ private class ZipOutput(sink: Sink) : BundleWriter {
     private val scratch = ByteArray(65536)
     private fun emit(buffer: Buffer) { offset += buffer.size; output.writeAll(buffer) }
 
-    private fun header(name: String, method: Int, crc: Long, size: Long): Long {
+    private fun header(name: String, method: Int, crc: Long, size: Long, stamp: Int): Long {
         require(names.add(name)) { "Duplicate ZIP entry: $name" }
         val bytes = name.encodeToByteArray(); require(bytes.size <= 65535)
         val start = offset
         val extra = Buffer()
         if (size >= UINT) extra.writeShortLe(1).writeShortLe(16).writeLongLe(size).writeLongLe(size)
         emit(Buffer().writeIntLe(LOCAL).writeShortLe(if (size >= UINT) 45 else 20).writeShortLe(if (method == 8) 0x808 else 0x800)
-            .writeShortLe(method).writeIntLe(0x00210000).writeIntLe(crc.toInt()).writeIntLe(minOf(UINT,size).toInt())
+            .writeShortLe(method).writeIntLe(stamp).writeIntLe(crc.toInt()).writeIntLe(minOf(UINT,size).toInt())
             .writeIntLe(minOf(UINT,size).toInt()).writeShortLe(bytes.size).writeShortLe(extra.size.toInt()).write(bytes).apply { writeAll(extra) })
         return start
     }
-    private fun record(name: String, method: Int, start: Long, crc: Long, size: Long, packed: Long) {
+    private fun record(name: String, method: Int, start: Long, crc: Long, size: Long, packed: Long, stamp: Int) {
         val fields = Buffer()
         if (size >= UINT) fields.writeLongLe(size)
         if (packed >= UINT) fields.writeLongLe(packed)
@@ -154,18 +168,34 @@ private class ZipOutput(sink: Sink) : BundleWriter {
         if (fields.size > 0) { extra.writeShortLe(1).writeShortLe(fields.size.toInt()); extra.writeAll(fields) }
         val bytes = name.encodeToByteArray(); val version = if (extra.size > 0) 45 else 20
         directory.writeIntLe(CENTRAL).writeShortLe(version).writeShortLe(version).writeShortLe(if (method == 8) 0x808 else 0x800)
-            .writeShortLe(method).writeIntLe(0x00210000).writeIntLe(crc.toInt()).writeIntLe(minOf(UINT,packed).toInt())
+            .writeShortLe(method).writeIntLe(stamp).writeIntLe(crc.toInt()).writeIntLe(minOf(UINT,packed).toInt())
             .writeIntLe(minOf(UINT,size).toInt()).writeShortLe(bytes.size).writeShortLe(extra.size.toInt()).writeShortLe(0)
             .writeShortLe(0).writeShortLe(0).writeIntLe(0).writeIntLe(minOf(start,UINT).toInt()).write(bytes).writeAll(extra)
     }
-    override fun deflated(name: String, write: (Sink) -> Unit) {
-        val start = header(name, 8, 0, 0); val dataStart = offset
+    override fun deflated(name: String, write: (Sink) -> Unit) = entry(name,null,null,0,write)
+    override fun entry(name: String, time: Long?, storedSize: Long?, crc: Long, write: (Sink) -> Unit) {
+        val stamp = time?.toInt() ?: dosTimestamp()
+        if (storedSize != null) {
+            val start = header(name,0,crc,storedSize,stamp); val sum = Crc32(); var size = 0L
+            write(object : Sink by output {
+                override fun write(source: Buffer, byteCount: Long) {
+                    var left=byteCount
+                    while (left>0) {
+                        val count=minOf(scratch.size.toLong(),left).toInt(); source.readFully(scratch,0,count)
+                        sum.update(scratch,0,count); output.write(scratch,0,count); size+=count; left-=count
+                    }
+                }
+            })
+            require(size==storedSize && sum.value==crc) { "Stored ZIP entry changed" }
+            offset+=size; record(name,0,start,crc,size,size,stamp); return
+        }
+        val start = header(name, 8, 0, 0, stamp); val dataStart = offset
         val crc = Crc32(); var size = 0L
         val counting = object : Sink by output {
             override fun close() = Unit
             override fun write(source: Buffer, byteCount: Long) { offset += byteCount; output.write(source,byteCount) }
         }
-        DeflaterSink(counting, Deflater(1,true)).use { compressed ->
+        DeflaterSink(counting, Deflater(level,true)).use { compressed ->
             write(object : Sink by compressed {
                 override fun write(source: Buffer, byteCount: Long) {
                     val view = source.peek(); var left = byteCount
@@ -178,7 +208,7 @@ private class ZipOutput(sink: Sink) : BundleWriter {
         emit(Buffer().writeIntLe(DESCRIPTOR).writeIntLe(crc.value.toInt()).apply {
             if (size >= UINT || packed >= UINT) { writeLongLe(packed);writeLongLe(size) } else { writeIntLe(packed.toInt());writeIntLe(size.toInt()) }
         })
-        record(name, 8, start, crc.value, size, packed)
+        record(name, 8, start, crc.value, size, packed, stamp)
     }
     override fun stored(name: String, file: AssetFile, checkActive: () -> Unit) {
         val path = file.assetPath()
@@ -189,9 +219,9 @@ private class ZipOutput(sink: Sink) : BundleWriter {
             }
             return size to crc.value
         }
-        val (size,crc) = copy(null); val start = header(name,0,crc,size)
-        check(copy(output) == size to crc) { "ZIP asset changed during save" }
-        offset += size; record(name,0,start,crc,size,size)
+        val (size,crc) = copy(null); val stamp = dosTimestamp(); val start = header(name,0,crc,size,stamp)
+        check(copy(output) == (size to crc)) { "ZIP asset changed during save" }
+        offset += size; record(name,0,start,crc,size,size,stamp)
     }
     override fun close() {
         try {
@@ -202,7 +232,7 @@ private class ZipOutput(sink: Sink) : BundleWriter {
                     .writeLongLe(count).writeLongLe(count).writeLongLe(length).writeLongLe(start).writeIntLe(0x07064b50).writeIntLe(0).writeLongLe(end).writeIntLe(1))
             }
             emit(Buffer().writeIntLe(END).writeIntLe(0).writeShortLe(minOf(count,65535L).toInt()).writeShortLe(minOf(count,65535L).toInt())
-                .writeIntLe(minOf(length,UINT).toInt()).writeIntLe(minOf(start,UINT).toInt()).writeShortLe(0))
+                .writeIntLe(minOf(length,UINT).toInt()).writeIntLe(minOf(start,UINT).toInt()).writeShortLe(comment.size).write(comment))
         } finally { output.close() }
     }
 }
@@ -211,4 +241,13 @@ private fun BufferedSource.readFully(bytes: ByteArray, offset: Int, length: Int)
     var done = 0
     while (done < length) { val count = read(bytes, offset+done, length-done); if (count == -1) throw EOFException(); done += count }
 }
-internal actual fun bundleWriter(sink: Sink): BundleWriter = ZipOutput(sink)
+internal actual fun bundleWriter(sink: Sink, level: Int, comment: String?): BundleWriter = ZipOutput(sink,level,comment)
+
+internal actual fun inflateMetadata(bytes: ByteArray, size: Long): ByteArray {
+    val payload = ZipPayload(Buffer().write(bytes), 8, bytes.size.toLong(), false)
+    return payload.buffer().use { input ->
+        val output = requireNotNull(readAtMost(input, size.toInt())) { "Bundle metadata decompression limit exceeded" }
+        require(output.size.toLong() == size && payload.packed == bytes.size.toLong()) { "Metadata compressed length mismatch" }
+        output
+    }
+}

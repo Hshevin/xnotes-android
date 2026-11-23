@@ -631,6 +631,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
 
     /** [peek] for a canvas that only comes as a stream. */
+    fun peek(file: com.xnotes.kio.PositionedFile): CanvasPeek? = runCatching { ZipTail.readEntry(file, "manifest.json", ::peekManifest) }.getOrNull()
+
     fun peek(input: Source): CanvasPeek? = runCatching {
         bundleReader(input).use { archive ->
             var entry = archive.next()

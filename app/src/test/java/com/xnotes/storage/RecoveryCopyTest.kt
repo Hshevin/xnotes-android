@@ -94,13 +94,13 @@ class RecoveryCopyTest {
                 assertEquals(f.native.uri,saved.uri);assertEquals("Independent copy",saved.name);assertEquals(1,f.native.writes)
                 val actual=BundleReferenceInfo.inspectStrict(f.native.current)
                 assertNotEquals(owner,actual.header.identity!!.documentId)
-                f.storage.openSource(f.native.alias,kind).use {source->assertEquals(actual.header.identity.documentId,source.version.documentId)}
+                f.storage.openSource(f.native.alias,kind).use {source->assertEquals(actual.header.identity!!.documentId,source.version.documentId)}
                 if(kind==DocumentKind.NOTE) {
                     val raw=entry(f.native.current,"manifest.json");val pages=JSONObject(String(raw,Charsets.UTF_8)).getJSONArray("pages")
                     val ids=(0 until pages.length()).map {pages.getJSONObject(it).getString("reference_id")}
                     assertEquals(2,ids.toSet().size);assertTrue(ids.none {it==p1 || it==p2})
                     assertArrayEquals(b.pattern.replace("@FIRST@",ids[0]).replace("@SECOND@",ids[1]).toByteArray(Charsets.UTF_8),raw)
-                    assertEquals(actual.header.identity.documentId,actual.header.anchors!!.documentId)
+                    assertEquals(actual.header.identity!!.documentId,actual.header.anchors!!.documentId)
                     assertArrayEquals(pdf,entry(f.native.current,BundlePdf.ENTRY));assertNull(prepared.note!!.path)
                     assertFalse(prepared.note!!.dirty);assertEquals(listOf(p2,p1),prepared.note!!.pages.map {it.referenceIdentity.id})
                 } else {

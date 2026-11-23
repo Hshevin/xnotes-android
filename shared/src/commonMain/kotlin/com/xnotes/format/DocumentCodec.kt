@@ -1056,6 +1056,8 @@ class DocumentCodec(
 
 
     /** [peek] for a note that only comes as a stream: reads through to the manifest, skipping what comes before it. */
+    fun peek(file: com.xnotes.kio.PositionedFile): NotePeek? = runCatching { ZipTail.readEntry(file, "manifest.json", ::peekManifest) }.getOrNull()
+
     fun peek(input: Source): NotePeek? = runCatching {
         bundleReader(input).use { archive ->
             var entry = archive.next()
