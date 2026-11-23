@@ -16,6 +16,11 @@
 "pen" = "笔";
 "highlighter" = "荧光笔";
 "eraser" = "橡皮";
+"text" = "文字";
+"text_editor" = "文档文字编辑器";
+"text_bold" = "加粗";
+"text_italic" = "斜体";
+"text_list" = "列表";
 "undo" = "撤销";
 "redo" = "重做";
 "settings" = "工具设置";

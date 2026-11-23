@@ -56,3 +56,13 @@
   5. 拖动途中分别加第二指、切工具、返回文档列表；重开后核对笔迹和绑定仍在原位，未新增撤销步。夜间在浅色页／PDF 上检查黑色工具标记，在黑底带白图片的画布上检查跨边界的反色衬边，分别截 `note-contrast.png`、`canvas-contrast.png` 并描述可辨性。上述截图均须来自同一合并构建。
 - **待用户确认**：本波对象剪贴板限定同一打开文档（重新挂载视图不清空）；是否另做跨文档或系统剪贴板互通，需确认资源迁移范围，不影响本波操作。
 - **待真机验收**：iPad Air（M2 及以后）＋ Apple Pencil Pro 的握笔与触控命中、掌触及第二指交接、连续缩放／旋转的显示延迟和混合背景上的手柄可读性。本轮未安装真机、未生成交付包、未推送。
+
+## W4-B 实现记录
+
+- `shared/src/commonMain/kotlin/com/xnotes/edit/FlowTextInput.kt` 把 UTF-16 位置、选区、分段和删字映射到 `FlowEditor`。组字时正文显示候选，反复修改不产生历史；定稿后一步撤销，取消空候选恢复原选区和段落样式。非离开式保存、后台保存只捕获已定稿的正文，不把拼音预览写入原件。
+- `iosKit/src/iosMain/kotlin/com/xnotes/iosapp/TextKeyboard.kt` 将 `UITextInput` 的位置、范围、marked text、候选替换、系统编辑菜单与硬件按键接入同一输入状态；`TextSurface.kt` 与 `TextTarget.kt` 提供点按放置、拖动选字、光标、选区和组字下划线。分页使用实际 `FlowFrame`；分页正文支持加粗、斜体、项目符号列表。工具标记取纸色的对比色（PDF 用黑色）；混合内容画布标记另垫一个物理像素的反色描边。
+- **画布格式决定（已与主代理确认）**：`.xcanvas` 不序列化裸 `TextItem`。沿用 `app/src/main/java/com/xnotes/ui/InfiniteEditor.kt` 的 `insertTextBox`：画布模型和文件都是零宽透明边线、无填充的 `ShapeKind.RECTANGLE`，文字和字体由其 `ShapeLabel` 承载；`TextItem` 仅用于 iPad 编辑几何和字体。既有 Android 文本框也能命中；不新增条目类型、格式版本或 Android 改动。空白点击是草稿，首次输入才成为可撤销的对象；删除最后一个字会移除框，撤销恢复原框。画布框沿用纯文本，不提供分页正文的行内格式按钮。
+- **自动回归**：原样的 `FlowTextInputTest.kt` 覆盖契约；`shared/src/commonTest/kotlin/com/xnotes/edit/FlowCompositionSelectionTest.kt` 增测逆向跨段选区、粗斜体、捕获失败后的组字恢复及组合字符删除；`iosKit/src/iosTest/kotlin/com/xnotes/iosapp/TextKeyboardTest.kt` 直接调用 UIKit 输入协议，验证分页格式、删除和跨段替换，画布候选、撤销、对象身份隔离，以及通过 `CanvasCodec` 重读后与 Android 新建框逐项比对几何、描边、填充、标签文字和字体。未改 `app/`、原样测试或互通金样。
+- **验证结果**：JDK 21，执行 `./gradlew -I tmp/w4b.gradle :shared:testDebugUnitTest :shared:iosSimulatorArm64Test :iosKit:iosSimulatorArm64Test :app:testDebugUnitTest -PiosTestDevice=3A53F8F7-6847-446E-81A4-174A76DBFB48`：四组分别为 2637、2441、6、1784 项，均无失败、错误或跳过。两端各跑原样 `FlowTextInputTest` 9 项；仅本地初始化脚本隔离未合入的 `SelectionEditTest.kt` 和 `PageOpsTest.kt`，不提交该脚本。`xcodebuild -project iosApp/XNotes.xcodeproj -scheme XNotes -destination 'platform=iOS Simulator,id=3A53F8F7-6847-446E-81A4-174A76DBFB48' -derivedDataPath tmp/derived build` 成功。
+- **待主代理合并后验收**（本工作树无 UI 截图）：① 打开分页笔记，选「文字」，点正文输入英文、换行并退格；切简体拼音键盘输入 `zhong`、观察组字下划线并选「中」。② 拖选正文，分别切换加粗、斜体、项目符号列表，逐次撤销、重做；验证全选、复制、剪切、粘贴及硬键盘方向键、Shift 扩选。③ 切换浅色页、PDF 和深纸检查光标、选区与下划线；在深色画布上的白图旁检查反色描边。④ 在画布空白处点按，输入中英文；切工具后再点原框插字，撤销、重做，确认没有多建框。⑤ 两种文档分别返回首页、重开，确认正文格式、段落、框的位置与文字均保存；把分页组字或选区、画布编辑与重开结果截图放到 `tmp/` 并附说明。设备没有拼音输入源时另记，不用协议测试冒充实际选候选。
+- **待用户确认**：无新增设计分歧。**待真机验收**：iPad Air（M2 及以后）+ Apple Pencil Pro 的点按与拖选、软键盘候选和外接键盘快捷键、实际画面可读性及长文输入延迟。未安装真机、未推送、未制作交付包。

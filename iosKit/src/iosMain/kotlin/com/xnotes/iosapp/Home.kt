@@ -198,11 +198,12 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, dark: Boolean, backgroun
                 if (model.canLeaveProtected) Action("leave_protected", nameStyle, enabled = !model.active) { model.leaveProtected() }
             }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
-                for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO))
+                for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.TEXT))
                     Action(tool.id, nameStyle, chosen = tool == model.tool, enabled = !model.active || model.selection?.tracking == true) { model.select(tool) }
                 Action("undo", nameStyle, enabled = !model.active && model.canUndo) { model.replay(true) }
                 Action("redo", nameStyle, enabled = !model.active && model.canRedo) { model.replay(false) }
                 SelectionActions(model, nameStyle)
+                if (model.tool == Tool.TEXT) model.textSurface?.formatButtons(nameStyle)
             }
             if (model.settings) Row(Modifier.horizontalScroll(rememberScrollState())) {
                 Action("finger_drawing", nameStyle, chosen = model.finger, enabled = !model.active) { model.toggleFinger() }
