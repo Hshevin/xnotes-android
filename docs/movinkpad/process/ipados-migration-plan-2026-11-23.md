@@ -18,6 +18,13 @@
 - 签名：只有免费 Apple ID。真机安装每 7 天失效，没有 TestFlight 与 iCloud 容器；真机安装仍需用户每次明确要求。
 - 默认值（用户未另行指定）：最低 iPadOS 18；应用名「XNotes」；Bundle ID `com.xnotes.ipad`。
 
+## 下一轮决定（2026-11-24 用户确认）
+
+- M2（W3-D）合入并通过联测后，继续下一轮，不必等待。只做本地提交，不推送、不安装、不合并到 `master`；遇到新的设计分歧时停下等用户决定。
+- 下一轮功能：选择与套索、文字编辑、图层与页面管理。
+- iPad 的 PDF 导出用 CoreGraphics PDF 上下文，复用现有绘制器；读屏用的标签结构暂不做。
+- SVG 与 Markdown 导入以后再定，下一轮不涉及。
+
 ## 现状评估
 
 - `core/` 198 个文件，没有 Android import，已有 `core/pal` 平台抽象（Renderer、Text、TextMeasurer、ImageCodec、RasterSurface）；其中 22 个文件使用 `java.*`。
