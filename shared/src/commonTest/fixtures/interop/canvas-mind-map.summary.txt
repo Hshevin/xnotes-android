@@ -1,0 +1,8 @@
+crc:manifest.json=2748937886
+crc:map.json=19946159
+crc:xnotes-identity.json=103315273
+documentId=12633c19-8823-481a-b949-000000000005
+entries=3
+inkDigest=6c4ded02047f238bdf20a363e5190538d0f7b2896d586460d411f0742fbdca52
+kind=canvas
+pageIds=

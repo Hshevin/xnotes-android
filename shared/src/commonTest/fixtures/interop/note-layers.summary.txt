@@ -1,0 +1,8 @@
+crc:manifest.json=2707253074
+crc:xnotes-anchors.json=1686912322
+crc:xnotes-identity.json=617784251
+documentId=12633c19-8823-481a-b949-000000000003
+entries=3
+inkDigest=f25f8aafbb9a00a4133042f054c96a0cbcf966f93b08044e8e4ddbfdaf86ab72
+kind=note
+pageIds=12633c19-8823-481a-b949-000000000300

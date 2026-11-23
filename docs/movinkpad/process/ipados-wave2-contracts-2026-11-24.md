@@ -25,6 +25,21 @@
   - `VOLATILE_ENTRIES`：保存时理应变化的条目（如修改时间），最多两个，在本文中逐项说明原因。
 - 测试：`shared/src/commonTest/kotlin/com/xnotes/format/interop/BundleInteropTest.kt`，在 JVM 与 iosSimulatorArm64 上都要通过。`expect fun interopFixtureNames()` / `interopFixture(name)` 由实现者在两端测试源集里补 actual。
 
+### W2-1 金样来源与复现
+
+`tools/interop/AndroidBundleGoldens.kt` 是历史 Android JVM 测试生成器，不参加当前编解码器的构建。在仓库根目录，设置 `JAVA_HOME` 为 JDK 21 后，对两个**空目录**执行：
+
+```sh
+mkdir -p tmp/w2-legacy tmp/legacy-fixtures
+git archive a07e803e -- app gradle gradlew build.gradle.kts settings.gradle.kts gradle.properties | tar -x -C tmp/w2-legacy
+cp tools/interop/AndroidBundleGoldens.kt tmp/w2-legacy/app/src/test/java/com/xnotes/format/
+export XNOTES_GOLDEN_DIR="$PWD/tmp/legacy-fixtures"
+tmp/w2-legacy/gradlew -p tmp/w2-legacy :app:testDebugUnitTest --tests com.xnotes.format.AndroidBundleGoldens.generate
+tmp/w2-legacy/gradlew -p tmp/w2-legacy :app:testDebugUnitTest --tests com.xnotes.format.AndroidBundleGoldens.verifyLegacyRoundTrip
+```
+
+生成器固定文档时间和 UUID，调用旧 `DocumentCodec` / `CanvasCodec` 正常保存与重开，记录解出的 UUID、页序和各未压缩条目 CRC。`inkDigest` 在 ZIP 顺序下读取 `manifest.json`、`map.json`：对每个 `samples` 数组从 `[` 到 `]` 的原 UTF-8 字节按出现顺序连续计算 SHA-256，不经数值解析再打印。`verifyLegacyRoundTrip` 另行通过旧模型快照正常保存，核对条目顺序、压缩方法与 CRC。已用 `a07e803e` 的 JVM 编解码器通过这两项测试并登记五对文件；未来验证仅比较，不覆盖已提交的金样。**无易变条目**：五个包的所有条目内容在原版重存中均稳定；ZIP 物理头时间戳不属于条目内容，无须豁免。
+
 ## W2-3 iPad 应用宿主
 
 - 新建 KMP 模块 `:iosKit`（仅 iosArm64、iosSimulatorArm64），依赖 `:shared` 与 `:nativelibs`，导出静态框架 `XNotesKit`，并在这里引入 Compose Multiplatform。不得在 `:shared` 的 Android 目标或 `:app` 引入 Compose Multiplatform，也不升级 Android 侧依赖。若 Compose Multiplatform 与 Kotlin 2.2.21 不兼容，停下报告。
