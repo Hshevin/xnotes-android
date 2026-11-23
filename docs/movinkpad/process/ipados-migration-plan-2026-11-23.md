@@ -60,6 +60,8 @@
 
 ### 第二波（W1-A 合入后，可并行；契约由主代理在第一波进行期间写好）
 
+已调整为三路并行，详见 [第二波契约](ipados-wave2-contracts-2026-11-24.md)。下列为最初划分。
+
 - **W2-1**：`format/` 进入 `commonMain`，跨平台金样互通测试。
 - **W2-2**：`storage/`、`map/` 纯逻辑进入 `commonMain`；iOS 的原子发布、文件身份、目录列举 actual。
 - **W2-3**：`iosApp/` 工程、Compose Multiplatform 宿主与文稿目录；Pencil 输入适配（纯逻辑在 `commonMain`，契约测试由主代理编写）。
