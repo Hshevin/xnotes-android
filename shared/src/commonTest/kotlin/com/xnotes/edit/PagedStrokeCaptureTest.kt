@@ -54,7 +54,7 @@ class PagedStrokeCaptureTest {
         val s = assertNotNull(c.live).samples.single()
         assertEquals(10.0, s.x)
         assertEquals(10.0, s.y)
-        assertEquals(0.4, s.pressure)
+        assertEquals(0.4f.toDouble(), s.pressure) // samples store pressure as Float
         assertEquals(0.0, s.t)
         assertFalse(c.live!!.finished, "a live stroke is unfinished until pen-up")
     }
@@ -171,10 +171,10 @@ class PagedStrokeCaptureTest {
         val (bridge, landed) = next.samples
         assertEquals(50.0, bridge.x, 1e-9)
         assertEquals(95.0 - 120.0, bridge.y, 1e-9) // the last point, in page 1's space
-        assertEquals(0.6, bridge.pressure)
+        assertEquals(0.6f.toDouble(), bridge.pressure)
         assertEquals(10.0, bridge.t)
         assertEquals(5.0, landed.y, 1e-9)
-        assertEquals(0.7, landed.pressure)
+        assertEquals(0.7f.toDouble(), landed.pressure)
 
         val segments = c.finish()
         assertEquals(listOf(0, 1), segments.map { it.page })
