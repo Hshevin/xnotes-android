@@ -127,3 +127,22 @@ cp "$FIXTURES"/*.xnote "$FIXTURES"/*.xcanvas "$CASE/"
 - `canvas-ink-image`：网格背景、笔画、1 × 1 图片与直线连接线显示；夜间网格与连接线反色，笔迹颜色不变。
 - `canvas-mind-map`：根节点「枝」带圆角外框，节点内手写笔画显示在标题下方。
 - 结论：五类文件均能打开并按内容显示，日夜间符合黑白规则。金样内容极少，只能证明解码与绘制通路；版面细节（页边、页间距）与 Android 的逐像素对照以及真机 GPU 显示仍待在 iPad 真机上核对。
+
+## W3-D 实现记录
+
+- 分页笔记和无限画布可用笔、荧光笔、整笔或局部橡皮编辑。默认一指导航，开启「手指绘画」后一指书写、双指导航。笔输入优先，双击与捏压跟随系统偏好，排队至正常抬笔，取消则丢弃。原本只读的首页打开器已替换为 `LiteStore`；工具栏、设置、保存结果与恢复操作均有中英文黑白界面。
+- `shared/src/commonMain/kotlin/com/xnotes/pen/pencil/PencilFeed.kt` 分离正式与预览采样：首点立即放行，其后估计压力最多等待 40 ms，保持原顺序；预测只画不存。`iosKit` 的 `InkInput` 将 UIKit 采样转换到文档坐标，`InkGesture` 对接 `PagedStrokeCapture`。跨页笔迹到抬笔才一起入页、一步撤销；无限画布使用一个无边界的内容坐标系。分页复用 `EraseRule`、笔迹切割和历史命令；画布复用 `EraseSession`。
+- 返回首页、场景进入后台、停笔 3 秒均经当前 `LiteSession` 保存；落笔期间延后至结束。后台保存后仍脏则写恢复记录。冲突不覆盖原件，提示受保护正文的位置；仅确认已登记本次副本时可关闭并保留。若连副本都写不出，留在编辑器提示重试。首页可恢复或放弃，未登记候选不会冒充可恢复副本。
+- 模拟器：iPad Pro 13 英寸（M5）/ iPadOS 27.2。通过 T3 Device 面板在互通金样的独立副本上操作。截图保存在本工作树已忽略的 `tmp/w3-d-acceptance/`，不随仓库提交：
+
+| 截图 | 观察结果 |
+| --- | --- |
+| `01-finger-setting.png`、`02-page-pen.png` | 「手指绘画」开启后反色选中；分页笔记上出现新黑色笔迹。 |
+| `03-page-cross.png`、`04-page-undo.png`、`05-page-redo.png` | 灰色荧光笔越过两页间隙；一次撤销同时移除两侧笔迹，一次重做同时恢复。 |
+| `06-page-reopened.png` | 回首页重开后第一笔仍在。另核对落盘正文：第一页多一条钢笔及一段荧光笔，第二页多另一段荧光笔。 |
+| `07-canvas-two-strokes.png`、`08-canvas-erase.png`、`09-canvas-reopened.png` | 网格画布上新增黑色笔迹与灰色荧光笔；局部擦除使灰线断开，重开后黑线和两截灰线仍在。 |
+| `10-conflict.png`、`11-recovery-home.png`、`12-restored.png` | 用同字节、不同文件实体替换独立测试原件后保存被拒，显示副本位置；关闭后首页出现「恢复／放弃」，恢复后看得到未保存的笔迹。再放弃恢复记录，原件摘要仍与金样相同。 |
+
+- 自动化：原 `PencilFeedTest` 在共享 JVM 与 iOS 各 8 项，未修改。另在 `iosKit/src/iosTest/kotlin/com/xnotes/iosapp/InkEditorTest.kt` 覆盖跨页湿墨预测和排队手势取消、返回及后台等待抬笔并整笔撤销、取消擦除不写入原件，以及后台冲突只报告本次已登记副本。此测试需要已启动模拟器的文件协调服务，使用非 standalone 模式。
+- 完整回归（JDK 21）：`:shared:testDebugUnitTest` 2626 项、`:shared:iosSimulatorArm64Test` 2430 项、`:nativelibs:iosSimulatorArm64Test` 6 项、`:app:testDebugUnitTest` 1784 项、`:iosKit:iosSimulatorArm64Test` 4 项，合计 6850 项，零失败、零跳过。`:app:assembleDebug` 与 Xcode `XNotes` 模拟器 Debug 构建均通过。最终构建再次实测：停笔触发冲突提示，列出本次 `body.xnote` 的沙盒相对路径；首页恢复和放弃均正常，已还原测试开关并释放模拟器。
+- **待真机验收**：iPad Air（M2 及以后）配 Apple Pencil Pro 的压感与跟手延迟、悬停光标、双击与捏压、防掌触、后台被系统终止后的恢复，以及目标 GPU 显示与长文档性能。模拟器手指操作不是 Pencil 验收。选择、文本编辑、图层面板、导图编辑、AI、录音及分屏不在本波；未安装真机、未推送、未制作交付包、未发布。

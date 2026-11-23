@@ -20,19 +20,40 @@ import platform.CoreGraphics.*
 import platform.Foundation.NSSelectorFromString
 import platform.QuartzCore.*
 import platform.UIKit.*
+import platform.darwin.NSObject
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-internal class CanvasView(private val doc: InfiniteDocument, dark: Boolean, private val fail: () -> Unit) : UIView(frame = CGRectZero.readValue()) {
+internal class CanvasView(private val editor: InkEditor, dark: Boolean, private val fail: () -> Unit) : UIView(frame = CGRectZero.readValue()) {
+    private val doc = checkNotNull(editor.session.canvas)
     private val metal = CAMetalLayer()
     private val ink = checkNotNull(MetalInk.createOrNull())
     private val view = CanvasViewport()
     private val paper = doc.background.paperColor ?: if (dark) black else white
     private val night = NightInk.enabled(dark, paper)
     private val projected = mutableMapOf<CanvasItem, List<MeshPart>>()
-    private val items: List<CanvasItem>
+    private val mapItems: List<CanvasItem>
+    private var items = emptyList<CanvasItem>()
     private val cache = mutableMapOf<CanvasItem, List<MetalPart>>()
     private var focus = Pt(0.0, 0.0)
+    private val panGesture = UIPanGestureRecognizer(this, NSSelectorFromString("pan:"))
+    private val pinchGesture = UIPinchGestureRecognizer(this, NSSelectorFromString("pinch:"))
+    private val navigationDelegate = object : NSObject(), UIGestureRecognizerDelegateProtocol {
+        override fun gestureRecognizer(gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWithGestureRecognizer: UIGestureRecognizer): Boolean =
+            setOf(gestureRecognizer, shouldRecognizeSimultaneouslyWithGestureRecognizer) == setOf(panGesture, pinchGesture)
+    }
+    private val input = InkInput(editor, object : InkSpace {
+        override val origin get() = Pt(view.scrollX, view.scrollY)
+        override val zoom get() = view.zoom / (window?.screen?.scale ?: contentScaleFactor)
+        override fun paper(page: Int): Rect? = null
+        override fun night(page: Int) = night
+        override fun hasPage(page: Int) = page == 0
+        override fun writable(page: Int) = doc.layers.writable
+        override fun pageAt(content: Pt) = 0
+        override fun toPage(page: Int, content: Pt) = content
+        override fun fromPage(page: Int, local: Pt) = local
+    }) { enabled -> panGesture.enabled = enabled; pinchGesture.enabled = enabled }
+    private val invalidateItems: () -> Unit = ::refreshItems
 
     init {
         ink.attach(metal); layer.addSublayer(metal)
@@ -45,15 +66,25 @@ internal class CanvasView(private val doc: InfiniteDocument, dark: Boolean, priv
             override fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect) { projected[item] = parts }
             override fun remove(item: CanvasItem) { projected.remove(item) }
         }, night = night, layerFor = { id -> id?.takeIf { it in layers } ?: layers.firstOrNull() })
-        items = doc.layers.ordered(doc.items.toList() + map.items)
-        addGestureRecognizer(UIPanGestureRecognizer(this, NSSelectorFromString("pan:")).apply { maximumNumberOfTouches = 1u })
-        addGestureRecognizer(UIPinchGestureRecognizer(this, NSSelectorFromString("pinch:")))
+        mapItems = map.items.toList(); refreshItems()
+        addSubview(input)
+        addGestureRecognizer(panGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
+        addGestureRecognizer(pinchGesture.apply { allowedTouchTypes = fingerTypes; delegate = navigationDelegate })
+        configure(editor.finger); editor.invalidate = invalidateItems
     }
+
+    private fun refreshItems() { items = doc.layers.ordered(doc.items.toList() + mapItems); cache.clear(); setNeedsLayout() }
+    fun configure(finger: Boolean) {
+        panGesture.minimumNumberOfTouches = if (finger) 2u else 1u
+        panGesture.maximumNumberOfTouches = panGesture.minimumNumberOfTouches
+    }
+    fun close() { input.close(); if (editor.invalidate === invalidateItems) editor.invalidate = null }
 
     override fun layoutSubviews() {
         super.layoutSubviews()
         val width = bounds.useContents { size.width }; val height = bounds.useContents { size.height }
         if (width <= 0 || height <= 0) return
+        input.setFrame(bounds)
         val density = window?.screen?.scale ?: contentScaleFactor
         val first = view.widthPx == 0
         view.widthPx = (width * density).roundToInt(); view.heightPx = (height * density).roundToInt()
@@ -75,7 +106,8 @@ internal class CanvasView(private val doc: InfiniteDocument, dark: Boolean, priv
 
     @ObjCAction fun pan(sender: UIPanGestureRecognizer) {
         val density = window?.screen?.scale ?: return
-        sender.translationInView(this).useContents { view.panByViewport(x * density, y * density) }
+        if (pinchGesture.state != UIGestureRecognizerStateBegan && pinchGesture.state != UIGestureRecognizerStateChanged)
+            sender.translationInView(this).useContents { view.panByViewport(x * density, y * density) }
         sender.setTranslation(CGPointZero.readValue(), this); redraw()
     }
 

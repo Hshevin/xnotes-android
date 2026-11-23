@@ -18,4 +18,10 @@ kotlin {
         implementation(project(":nativelibs"))
         implementation(compose.foundation)
     }
+    sourceSets.commonTest.dependencies { implementation(kotlin("test")) }
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest>().configureEach {
+    standalone.set(false)
+    providers.gradleProperty("iosTestDevice").orNull?.let { device.set(it) }
 }
