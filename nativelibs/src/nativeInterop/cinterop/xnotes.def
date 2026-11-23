@@ -1,0 +1,5 @@
+package = com.xnotes.nativelibs.interop
+headers = xnotes_native.h
+headerFilter = xnotes_native.h
+staticLibraries = libxnotespdf.a libxnotests.a
+linkerOpts = -lc++ -framework CoreFoundation -framework CoreGraphics

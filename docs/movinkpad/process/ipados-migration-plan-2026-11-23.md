@@ -92,6 +92,13 @@
 - 门面 `com.xnotes.nativelibs.TreeSitter`：`languages(): Set<String>` 至少含现有全部语法；`parseSExpression(language, source): String?` 返回根节点 S 表达式。
 - 保留上游与第三方许可证声明。
 
+### W1-B 本机构建
+
+- 在 Apple Silicon Mac 上使用 Xcode 的 iOS SDK、CMake ≥ 3.22、Ninja 和 Python 3。运行 `bash tools/ios-native-build.sh iphoneos` 或 `bash tools/ios-native-build.sh iphonesimulator`，分别在 `nativelibs/build/native/<SDK>/` 生成 `libxnotespdf.a` 和 `libxnotests.a`，最低 iPadOS 18。可用第二个参数指定输出目录。
+- 脚本从 Android 的固定修订清单读取 ARM64 与跨平台源码，改用 Apple SDK、PDFium Apple 后端和该平台的 ARM64 zlib 配置；语法源码和入口表来自 `CMakeLists.txt` 与 `ts_jni.c`。Android 裁剪时省略的同修订上游文件随 `nativelibs/src/native/upstream/` 入库。原生库编译不下载任何源码；输出目录的 `THIRD_PARTY.txt` 汇集原仓库版本和许可证声明，分发二进制时随附。
+- 准备好 JDK 21、Gradle 8.13 与 Kotlin/Native 2.2.21 工具链和依赖缓存后，运行 `./gradlew --offline :nativelibs:iosSimulatorArm64Test :nativelibs:compileKotlinIosArm64`；Gradle 按目标调用上述脚本，静态库嵌入 cinterop KLIB。可传 `-PiosTestDevice=<模拟器 UDID>` 指定 iOS 18 或更高版本的模拟器。
+- 本机 Xcode 27.2 验证：模拟器 4 项原始契约与 2 项边界测试全部通过；设备目标测试程序链接、Android `:app:assembleDebug` 通过。模拟器两份静态库在独立输出目录从头构建后逐字节一致。未在真实 iPad 上运行。
+
 ## 风险与待定
 
 - Compose Multiplatform 与现有 Compose BOM、Kotlin 2.2.21 的版本对齐由 W1-A 核实；冲突时先报告，不升级 Android 侧依赖。
