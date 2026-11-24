@@ -19,3 +19,10 @@ internal object Space {
 }
 
 internal val MinTouchTarget = 48.dp
+
+internal object ToolbarSize {
+    val button = 52.dp
+    val circle = 38.dp
+    val icon = 22.dp
+    val maxFilename = 160.dp
+}

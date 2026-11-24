@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.Dp
 import com.xnotes.core.model.Page
 import com.xnotes.iosapp.ui.theme.MinTouchTarget
 import com.xnotes.iosapp.ui.theme.Space
+import com.xnotes.iosapp.ui.theme.ToolbarPalette
 import com.xnotes.storage.lite.*
 import kotlinx.coroutines.*
 import okio.Path
@@ -55,11 +56,15 @@ internal fun CreateDocuments(store: LiteStore, directory: Path, style: TextStyle
 }
 
 @Composable
-internal fun PanelActions(editor: InkEditor, style: TextStyle) {
+internal fun PanelActions(editor: InkEditor, palette: ToolbarPalette) {
     for (panel in Panel.entries) {
         if (panel == Panel.PAGES && editor.session.note == null) continue
         val shown = editor.panels.shown == panel
-        Action(if (panel == Panel.PAGES) "pages" else "layers", style, chosen = shown, enabled = !editor.active) {
+        val button = when (panel) {
+            Panel.PAGES -> ToolbarButton.PAGES
+            Panel.LAYERS -> ToolbarButton.LAYERS
+        }
+        ToolbarIcon(button, palette, chosen = shown, enabled = !editor.active) {
             editor.panels.shown = if (shown) null else panel
         }
     }

@@ -3,12 +3,12 @@
 package com.xnotes.iosapp
 
 import androidx.compose.runtime.*
-import androidx.compose.ui.text.TextStyle
 import com.xnotes.core.geometry.*
 import com.xnotes.core.model.*
 import com.xnotes.core.text.*
 import com.xnotes.core.tools.Tool
 import com.xnotes.iosapp.ui.theme.Space
+import com.xnotes.iosapp.ui.theme.ToolbarPalette
 import kotlinx.cinterop.*
 import platform.CoreGraphics.*
 import platform.UIKit.*
@@ -199,11 +199,11 @@ internal class TextSurface(val editor: InkEditor, private val space: InkSpace,
         current.input.marked?.let { current.rects(it).forEach { mark -> paint(mark, 2) } }
     }
 
-    @Composable fun formatButtons(style: TextStyle) {
+    @Composable fun formatButtons(palette: ToolbarPalette) {
         if (images == null) return
-        Action("text_bold", style, bold, editing) { format("bold") }
-        Action("text_italic", style, italic, editing) { format("italic") }
-        Action("text_list", style, list, editing) { format("list") }
+        ToolbarIcon(ToolbarButton.BOLD, palette, chosen = bold, enabled = editing) { format("bold") }
+        ToolbarIcon(ToolbarButton.ITALIC, palette, chosen = italic, enabled = editing) { format("italic") }
+        ToolbarIcon(ToolbarButton.LIST, palette, chosen = list, enabled = editing) { format("list") }
     }
     internal fun format(kind: String) {
         val current = target as? PageText ?: return

@@ -27,7 +27,6 @@ import androidx.compose.ui.viewinterop.UIKitInteropProperties
 import androidx.compose.ui.viewinterop.UIKitView
 import androidx.compose.ui.ExperimentalComposeUiApi
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.core.tools.Tool
 import com.xnotes.kio.KFiles
 import com.xnotes.platform.ios.CgImageCodec
 import com.xnotes.platform.ios.CgTextMeasurer
@@ -189,26 +188,12 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
         }
     }
     Column(Modifier.fillMaxSize().background(background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.s12), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
-            Action("back", nameStyle) { if (model == null) back() else model.save(back = true) }
-            BasicText(path.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = nameStyle)
-            if (model != null) Action("settings", nameStyle, chosen = model.settings, enabled = !model.active) { model.settings = !model.settings }
-        }
+        EditorToolbar(path.name, model, dark, nameStyle) { if (model == null) back() else model.save(back = true) }
         val opened = result
         if (model != null) {
             model.warning?.let { message ->
                 BasicText(message, Modifier.padding(horizontal = Space.s12), style = detailStyle)
                 if (model.canLeaveProtected) Action("leave_protected", nameStyle, enabled = !model.active) { model.leaveProtected() }
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                for (tool in listOf(Tool.PEN, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.TEXT))
-                    Action(tool.id, nameStyle, chosen = tool == model.tool) { model.select(tool) }
-                Action("undo", nameStyle, enabled = !model.active && model.canUndo) { model.replay(true) }
-                Action("redo", nameStyle, enabled = !model.active && model.canRedo) { model.replay(false) }
-                SelectionActions(model, nameStyle)
-                if (model.tool == Tool.TEXT) model.textSurface?.formatButtons(nameStyle)
-                PanelActions(model, nameStyle)
             }
             if (model.settings) Row(Modifier.horizontalScroll(rememberScrollState())) {
                 Action("finger_drawing", nameStyle, chosen = model.finger, enabled = !model.active) { model.toggleFinger() }
