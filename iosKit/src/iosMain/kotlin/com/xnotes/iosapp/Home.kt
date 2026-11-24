@@ -3,8 +3,6 @@ package com.xnotes.iosapp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -172,6 +170,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
     }
     val model = editor
     if (model != null) {
+        SideEffect { model.dark = dark }
         val controller = LocalUIViewController.current
         DisposableEffect(model, controller) {
             val center = NSNotificationCenter.defaultCenter
@@ -194,10 +193,6 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
             model.warning?.let { message ->
                 BasicText(message, Modifier.padding(horizontal = Space.s12), style = detailStyle)
                 if (model.canLeaveProtected) Action("leave_protected", nameStyle, enabled = !model.active) { model.leaveProtected() }
-            }
-            if (model.settings) Row(Modifier.horizontalScroll(rememberScrollState())) {
-                Action("finger_drawing", nameStyle, chosen = model.finger, enabled = !model.active) { model.toggleFinger() }
-                Action("area_eraser", nameStyle, chosen = model.area, enabled = !model.active) { model.toggleArea() }
             }
         }
         if (model != null && !renderFailed) key(dark, model) {

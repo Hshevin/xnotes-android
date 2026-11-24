@@ -24,6 +24,7 @@ class ToolbarIconTest {
             "pen" to StrokeIcons.regular, "highlighter" to StrokeIcons.highlighter, "eraser" to XnotesIcons.eraser,
             "select" to XnotesIcons.select, "lasso" to XnotesIcons.lasso, "text" to XnotesIcons.text,
             "undo" to XnotesIcons.undo, "redo" to XnotesIcons.redo, "selection_delete" to XnotesIcons.trash,
+            "selection_cut" to XnotesIcons.cut,
             "selection_copy" to XnotesIcons.copy, "selection_paste" to XnotesIcons.paste,
             "selection_duplicate" to XnotesIcons.duplicate, "text_bold" to XnotesIcons.bold,
             "text_italic" to XnotesIcons.italic, "text_list" to XnotesIcons.listBullet, "settings" to XnotesIcons.sliders,

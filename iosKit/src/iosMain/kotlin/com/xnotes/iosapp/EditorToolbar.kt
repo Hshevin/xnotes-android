@@ -44,6 +44,7 @@ internal enum class ToolbarButton(val labelKey: String, val icon: ImageVector, v
     UNDO("undo", XnotesIcons.undo),
     REDO("redo", XnotesIcons.redo),
     DELETE("selection_delete", XnotesIcons.trash),
+    CUT("selection_cut", XnotesIcons.cut),
     COPY("selection_copy", XnotesIcons.copy),
     PASTE("selection_paste", XnotesIcons.paste),
     DUPLICATE("selection_duplicate", XnotesIcons.duplicate),
@@ -68,18 +69,12 @@ internal fun EditorToolbar(filename: String, editor: InkEditor?, dark: Boolean, 
         if (editor != null) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 PanelActions(editor, palette)
-                for (button in ToolbarButton.entries) {
-                    val tool = button.tool ?: continue
-                    ToolbarIcon(button, palette, chosen = tool == editor.tool) { editor.select(tool) }
-                }
+                for (button in ToolbarButton.entries) if (button.tool != null) ToolButton(editor, button, palette)
+                if (editor.tool == Tool.TEXT) editor.textSurface?.formatButtons(palette) else InkSwatches(editor, palette)
                 ToolbarIcon(ToolbarButton.UNDO, palette, enabled = !editor.active && editor.canUndo) { editor.replay(true) }
                 ToolbarIcon(ToolbarButton.REDO, palette, enabled = !editor.active && editor.canRedo) { editor.replay(false) }
-                SelectionActions(editor, palette)
-                if (editor.tool == Tool.TEXT) editor.textSurface?.formatButtons(palette)
             }
-            ToolbarIcon(ToolbarButton.SETTINGS, palette, chosen = editor.settings, enabled = !editor.active) {
-                editor.settings = !editor.settings
-            }
+            SettingsButton(editor, palette)
         }
     }
 }

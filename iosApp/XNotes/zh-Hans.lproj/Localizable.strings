@@ -46,9 +46,14 @@
 "text_list" = "列表";
 "undo" = "撤销";
 "redo" = "重做";
-"settings" = "工具设置";
-"finger_drawing" = "手指绘画";
-"area_eraser" = "局部擦除";
+"settings" = "设置";
+"finger_drawing" = "用手指绘画";
+"eraser_stroke" = "整笔擦除";
+"eraser_area" = "局部擦除";
+"eraser_size" = "大小";
+"tool_width" = "笔画宽度";
+"ink_color" = "颜色";
+"selection_cut" = "剪切";
 "pending_recovery" = "有未保存的修改：";
 "restore" = "恢复";
 "discard" = "放弃";

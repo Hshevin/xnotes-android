@@ -134,4 +134,29 @@ class ItemSelectionTest {
         selection.delete(); assertFalse(shape in doc.items); assertNull(connector.start.target); assertEquals(newPort, connector.start.at)
         editor.replay(true); assertSame(shape, connector.start.target); assertEquals(order, doc.items)
     }
+
+    @Test fun floatingBarFollowsTheSelectionAndCutCopiesThenDeletes() {
+        setup(false)
+        assertEquals(emptyList(), selectionMenuButtons(members = false, canPaste = false))
+        assertEquals(listOf(ToolbarButton.PASTE), selectionMenuButtons(members = false, canPaste = true))
+        assertEquals(listOf(ToolbarButton.DELETE, ToolbarButton.CUT, ToolbarButton.COPY, ToolbarButton.DUPLICATE), selectionMenuButtons(members = true, canPaste = true))
+        val page = editor.session.note!!.pages[0]
+        enclose(); selection.place()
+        val frame = selection.frame!!
+        val anchor = selection.anchor!!
+        val grip = ResizeMath.obbRotateGrip(frame, OverlayTessellator.GRIP_ARM_PX)
+        assertEquals(grip.y, anchor.y, 1e-9, "the bar clears the rotate grip")
+        assertTrue(anchor.x <= frame.center.x - frame.halfW && anchor.x + anchor.w >= frame.center.x + frame.halfW)
+        selection.begin(frame.center); selection.place(); assertNull(selection.anchor, "hidden while dragging")
+        selection.cancel(); selection.place(); assertEquals(anchor, selection.anchor)
+
+        val item = page.items.single()
+        selection.cut()
+        assertTrue(page.items.isEmpty()); assertTrue(selection.members.isEmpty()); assertTrue(editor.canUndo)
+        tap(Pt(300.0, 400.0)); selection.place()
+        assertTrue(selection.canPaste); assertEquals(Rect(300.0, 400.0, 0.0, 0.0), selection.anchor)
+        selection.insert(false)
+        val pasted = page.items.single(); assertNotSame(item, pasted); assertEquals(item.bounds().w, pasted.bounds().w, 1e-9)
+        editor.replay(true); editor.replay(true); assertSame(item, page.items.single())
+    }
 }

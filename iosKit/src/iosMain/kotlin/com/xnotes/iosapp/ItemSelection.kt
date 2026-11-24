@@ -32,6 +32,19 @@ internal class ItemSelection(private val editor: InkEditor, private val space: I
     private var destination by mutableStateOf<Pt?>(null)
     private var clipboard by editor.selectionClipboard::items
     val canPaste get() = clipboard.isNotEmpty() && destination?.let(space::pageAt)?.let(space::writable) == true
+    /** Where the floating bar points, in view points: the frame and its grip, or the paste spot; null while a drag is under way. */
+    var anchor by mutableStateOf<Rect?>(null); private set
+
+    fun place() {
+        val chrome = frame
+        val content = when {
+            tracking -> null
+            chrome != null -> Rect.bounding(chrome.corners() + ResizeMath.obbRotateGrip(chrome, OverlayTessellator.GRIP_ARM_PX / (space.zoom * space.density)))
+            else -> destination?.let { Rect(it.x, it.y, 0.0, 0.0) }
+        }
+        val next = content?.let { Rect((it.x - space.origin.x) * space.zoom, (it.y - space.origin.y) * space.zoom, it.w * space.zoom, it.h * space.zoom) }
+        if (next != anchor) anchor = next
+    }
 
     private fun items(page: Int) = canvas?.items ?: note!!.pages[page].items
     private fun editable(page: Int) = canvas?.editableItems ?: note!!.pages[page].editableItems
@@ -205,6 +218,8 @@ internal class ItemSelection(private val editor: InkEditor, private val space: I
         }
         return commands.oneEdit()
     }
+
+    fun cut() { copy(); delete() }
 
     fun copy() {
         if (editor.active || !validMembers()) return

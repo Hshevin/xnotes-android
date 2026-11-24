@@ -29,9 +29,14 @@
 "text_list" = "List";
 "undo" = "Undo";
 "redo" = "Redo";
-"settings" = "Tool settings";
-"finger_drawing" = "Finger drawing";
-"area_eraser" = "Erase portions of strokes";
+"settings" = "Settings";
+"finger_drawing" = "Draw with finger";
+"eraser_stroke" = "Whole strokes";
+"eraser_area" = "Parts of strokes";
+"eraser_size" = "Size";
+"tool_width" = "Width";
+"ink_color" = "Ink colour";
+"selection_cut" = "Cut";
 "pending_recovery" = "Unsaved changes:";
 "restore" = "Restore";
 "discard" = "Discard";

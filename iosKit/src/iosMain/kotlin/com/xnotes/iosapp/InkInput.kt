@@ -147,6 +147,7 @@ internal class InkInput(private val editor: InkEditor, private val space: InkSpa
             CGContextSetLineWidth(context, 3.0); CGContextSetStrokeColorWithColor(context, UIColor.whiteColor.CGColor); CGContextStrokeEllipseInRect(context, ring)
             CGContextSetLineWidth(context, 1.0); CGContextSetStrokeColorWithColor(context, UIColor.blackColor.CGColor); CGContextStrokeEllipseInRect(context, ring)
         }
+        if (editor.tool.selectsItems) selection.place()
         if (ink == null && !editor.tool.selectsItems) return
         CGContextSaveGState(context)
         CGContextScaleCTM(context, space.zoom, space.zoom); CGContextTranslateCTM(context, -space.origin.x, -space.origin.y)

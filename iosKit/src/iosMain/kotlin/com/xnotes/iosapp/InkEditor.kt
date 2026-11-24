@@ -24,9 +24,10 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     var revision by mutableIntStateOf(0); private set
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
-    var settings by mutableStateOf(false)
+    var popup by mutableStateOf<ToolPopup?>(null)
+    val tools = ToolSettings()
+    var dark by mutableStateOf(false)
     var finger by mutableStateOf(NSUserDefaults.standardUserDefaults.boolForKey("fingerDrawing")); private set
-    var area by mutableStateOf(NSUserDefaults.standardUserDefaults.boolForKey("areaEraser")); private set
     var warning by mutableStateOf<String?>(null); private set
     var canLeaveProtected by mutableStateOf(false); private set
     private var pendingBack = false
@@ -63,20 +64,19 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
 
     fun select(next: Tool) {
         if (next != tool) { cancelPointer?.invoke(); if (!active) leaveTool() }
-        if (!active) { gestures.manualSelect(next.id); tool = next }
+        if (!active) { gestures.manualSelect(next.id); tool = next; popup = null }
     }
     private fun leaveTool() { selection?.clear(); textSurface?.close() }
     fun toggleFinger() { if (!active) { finger = !finger; NSUserDefaults.standardUserDefaults.setBool(finger, "fingerDrawing") } }
-    fun toggleArea() { if (!active) { area = !area; NSUserDefaults.standardUserDefaults.setBool(area, "areaEraser") } }
     fun gesture(event: PencilGesture, action: PencilPreferredAction) {
         if (selection?.tracking == true) cancelPointer?.invoke()
         apply(gestures.onGesture(event, action, strokeActive = active))
     }
     private fun apply(outcome: PencilOutcome) {
         val next = Tool.fromId(outcome.tool) ?: tool
-        if (tool != next) leaveTool()
+        if (tool != next) { leaveTool(); popup = null }
         tool = next
-        if (PencilGestures.SHOW_TOOL_PALETTE in outcome.commands) settings = !settings
+        if (PencilGestures.SHOW_TOOL_PALETTE in outcome.commands) popup = if (popup != null) null else ToolPopup.of(tool) ?: ToolPopup.SETTINGS
     }
 
     fun begin(cancel: (() -> Unit)? = null) { check(!active); cancelPointer = cancel; active = true; revision++ }
@@ -144,12 +144,7 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
 internal class InkGesture(private val editor: InkEditor, private val space: PageSpace, pressure: Boolean) {
     private val session = editor.session
     private val tool = editor.tool
-    private val config = ToolDefaults.configFor(tool).let { when (tool) {
-        Tool.ERASER -> it.copy(eraseMode = if (editor.area) EraseMode.AREA else EraseMode.STROKE)
-        Tool.HIGHLIGHTER -> it.copy(rgba = Rgba(170, 170, 170))
-        Tool.PEN -> it.copy(rgba = black)
-        else -> it
-    } }
+    private val config = editor.tools.config(tool, editor.dark)
     private val feed = PencilFeed(pressure)
     private var finished = false
     private val capture = PagedStrokeCapture(space)

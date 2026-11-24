@@ -74,6 +74,7 @@ internal fun PanelActions(editor: InkEditor, palette: ToolbarPalette) {
 internal fun PanelHost(editor: InkEditor, dark: Boolean, style: TextStyle, surface: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         surface()
+        SelectionMenu(editor, ToolbarPalette.forTheme(dark))
         val panel = editor.panels.shown ?: return@Box
         Column(Modifier.align(Alignment.CenterEnd).width(Space.sidebar).fillMaxHeight()
             .background(if (dark) Color.Black else Color.White).border(Dp.Hairline, Color.Gray)
