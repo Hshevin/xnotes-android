@@ -353,3 +353,4 @@
 - 用户随后要求「安装到设备上，覆盖更新」：test15 覆盖安装到 MovinkPad Pro 14 上的主线测试版（原 test14 / code 14），正式版未动。
 - 用户反馈点选仍卡并要求去掉双击改名；修复后 test16 覆盖安装到 MovinkPad（原 test15）。本次未推送。
 - 用户随后要求「推送到主分支吧」：将 test15 安装记录、点选修复（`68428def`）、test16 记录连同本条推送到 `origin/master`。
+- 用户随后要求「打包正式版我用用」，版本名定为 `0.9.9beta2`：本地打包 `com.xnotes.movinkpad` code 103 并覆盖安装到 MovinkPad。不推送、不发布 GitHub Release。
