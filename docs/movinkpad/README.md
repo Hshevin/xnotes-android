@@ -61,6 +61,7 @@
 - 2026-11-22 [导图 v2 test1 打包与真机测试](test-builds/mindmapv2-test1-2026-11-22.md)
 - 2026-11-22 [导图 v2 test2 打包与真机测试](test-builds/mindmapv2-test2-2026-11-22.md)
 - 2026-11-22 [导图 v2 test3 打包与真机复验](test-builds/mindmapv2-test3-2026-11-22.md)
+- 2026-11-24 [主线独立测试版 test15：图层切换提速](test-builds/master-test15-2026-11-24.md)
 
 ## 编辑器（`editor/`）
 
