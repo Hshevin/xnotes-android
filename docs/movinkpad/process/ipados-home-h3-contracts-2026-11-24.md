@@ -39,3 +39,39 @@ Android 参照：`app/src/main/java/com/xnotes/platform/Pdf.kt` 的 `PdfExporter
 - 新建笔记页（纸张、方向、模板、封面、名称）。
 - 偏好设置（只放 iPad 已有的：用手指绘画、回收站保留天数、日期样式、显示扩展名、侧栏显示项）、关于。
 - 条目菜单：分享（系统分享面板）、导出 PDF。拖动磁贴到文件夹移入。
+
+## S5 实现记录
+
+iPad 首页可为所选文件单独打开 `LiteSession`，在后台调用以下同步接口。调用期间保持会话和解包资源可用。返回 `true` 后可把 `out` 交给系统分享面板，返回 `false` 表示已取消，绘制或写入错误以异常报告。首页菜单与分享面板由 H3 界面接入。
+
+```kotlin
+package com.xnotes.platform.ios
+
+import com.xnotes.storage.lite.LiteSession
+import okio.Path
+
+object PdfExport {
+    fun export(
+        session: LiteSession,
+        out: Path,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+    ): Boolean
+}
+```
+
+- 分页笔记保持页序，以 `72 / dpi` 将含页边的纸面换算为 PDF 点。预览与导出共用 `CgPageDrawing` 的模板与正文排版，`CgRenderer` 将图形、笔迹、图片和文本框直接绘入 CoreGraphics PDF 上下文。正文和文本框文字可选取，荧光笔保留混合模式，半透明墨迹按整笔合成。
+- 底稿使用 **CGPDFDocument**。从系统 PDFKit 的 `PDFPage.pageRef` 取得底稿页，以 `CGContextDrawPDFPage` 矢量绘入并叠加原 PDF 可见批注的外观，再绘制笔记批注。裁切框、底稿自带旋转、笔记额外旋转以及插入空白后的分块都计入坐标转换。PDFium 用于测试读回页数、尺寸和像素。
+- 画布按可见图层顺序绘制普通对象与导图，以 `CanvasPdfLayout` 给内容边界留白并导出一页。进度从零开始，笔记按页、画布按对象计数。
+- 在目标目录独占创建临时文件，关闭 PDF 上下文并确认写入、刷新和关闭文件成功后才原子改名。取消、底稿或图片读取失败、改名失败都会清理临时文件并保留已有目标。
+
+验证使用 JDK 21.0.13.1 和指定的 iPad Pro 13 英寸（M5）iOS 27.2 模拟器。按测试报告汇总，以下 7,118 项均通过，失败、错误、跳过均为 0。
+
+| 测试任务 | 通过数 |
+| --- | ---: |
+| `:shared:testDebugUnitTest` | 2,721 |
+| `:shared:iosSimulatorArm64Test` | 2,539 |
+| `:iosKit:iosSimulatorArm64Test` | 40 |
+| `:app:testDebugUnitTest` | 1,818 |
+
+其中新增 8 项 iOS 导出测试，覆盖 PDFium 独立读回、多页尺寸、底稿与文字、图层可见性、透明混合、取消与发布失败。`:app:assembleDebug` 通过，产物 ABI 为 `arm64-v8a`。本轮仅做本地构建与提交，分享面板交互和 iPad 真机效果待界面集成后验收。

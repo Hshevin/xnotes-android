@@ -16,9 +16,9 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.max
 
-internal class CgRenderer(private val surface: CgSurface, private val bitmap: OwnedContext, private val nightInk: Boolean) : Renderer {
+internal class CgRenderer(private val surface: CgSurface?, private val context: OwnedContext, private val nightInk: Boolean) : Renderer {
     override fun inkColor(color: Rgba) = NightInk.displayColor(color, nightInk)
-    private val cg get() = bitmap.ref
+    private val cg get() = context.ref
     private val layers = ArrayDeque<Boolean>()
     private val tangents = DoubleArray(4)
     private val scaleX get() = CGContextGetCTM(cg).useContents { hypot(a, b) }
@@ -240,7 +240,12 @@ internal class CgRenderer(private val surface: CgSurface, private val bitmap: Ow
         val turned = quarter == 90 || quarter == 270
         val width = (if (turned) dest.h else dest.w) / (crop?.w ?: 1.0)
         val height = (if (turned) dest.w else dest.h) / (crop?.h ?: 1.0)
-        val bitmap = decodeImage(image, width * (if (turned) scaleY else scaleX), height * (if (turned) scaleX else scaleY)) ?: return
+        val bitmap = if (surface == null) {
+            // Paper has no screen pixel density. Keep the available image detail for zooming/printing.
+            checkNotNull(decodeImage(image, image.width.toDouble(), image.height.toDouble())) { "Could not decode PDF image" }
+        } else {
+            decodeImage(image, width * (if (turned) scaleY else scaleX), height * (if (turned) scaleX else scaleY)) ?: return
+        }
         try {
             cg.saved {
                 translate(dest.centerX, dest.centerY)

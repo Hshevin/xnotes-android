@@ -4,43 +4,25 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.*
 import com.xnotes.core.pal.*
 import com.xnotes.core.pdf.MarkupPainter
-import com.xnotes.core.template.*
 import com.xnotes.core.text.*
-import com.xnotes.format.TemplatePackage
-import com.xnotes.format.TemplateReader
 import com.xnotes.kio.KFiles
-import com.xnotes.kio.Uuids
 import com.xnotes.nativelibs.Pdfium
 import com.xnotes.platform.ios.*
-import com.xnotes.storage.ios.IosStorageLocations
 import platform.UIKit.UIImage
 import kotlin.math.roundToInt
 
 internal val black = Rgba(0, 0, 0)
 internal val white = Rgba(255, 255, 255)
 
-internal fun Page.paperRect(doc: Document) = insets(doc).let {
-    Rect(-it.left, -it.top, width + it.left + it.right, height + it.top + it.bottom)
-}
-
 internal class PageImages(private val doc: Document, private val dark: Boolean) : AutoCloseable {
-    private val assets = lazy { (IosStorageLocations.cache / Uuids.random()).also { KFiles.system.createDirectory(it, mustCreate = true) } }
-    private val layout = TemplateLayoutCache(TemplateEval())
-    private val templates = mutableMapOf<String, Template>()
-    private val pictures = mutableMapOf<Pair<String, String>, ImageData>()
+    private val drawing = CgPageDrawing(doc)
     private val frames = mutableMapOf<Boolean, FlowFrame>()
-    private val textLayout = FlowLayout(CgTextMeasurer)
-    val slotHeight get() = textLayout.defaultSlotHeight(doc.flow)
+    val slotHeight get() = drawing.slotHeight
     private var previewPages = emptyList<Page>()
     val displayPages get() = if (previewPages.isEmpty()) doc.pages else doc.pages + previewPages
     fun invalidateFlow() = frames.clear()
     fun flow(night: Boolean) = frames.getOrPut(night) {
-        val pages = displayPages
-        val (width, height) = doc.blankPageSize(doc.pages.last())
-        textLayout.autoColor = { if (night) white else black }
-        textLayout.layout(doc.flow,
-            pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
-            firstPage = if (pages.size > 1 && pages[0].cover) 1 else 0, addedPage = PageBox(width, height))
+        drawing.layoutFlow(displayPages, if (night) white else black)
     }
     fun clearPreviewPages() {
         if (previewPages.isNotEmpty()) { previewPages = emptyList(); invalidateFlow() }
@@ -77,7 +59,7 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
             if (upper == true) {
                 items.forEach { it.paint(renderer) }; return surface.image()
             }
-            background(page, renderer, cover)
+            drawing.paintTemplate(page, renderer, cover)
             val pdfIndex = page.pdfPage
             if (pdfIndex != null) {
                 val source = pdf ?: checkNotNull(Pdfium.open(KFiles.system.read(checkNotNull(doc.pdfFile)) { readByteArray() })).also { pdf = it }
@@ -108,37 +90,5 @@ internal class PageImages(private val doc: Document, private val dark: Boolean) 
         } finally { surface.recycle() }
     }
 
-    private fun background(page: Page, renderer: Renderer, cover: Rect) {
-        val key = page.resolvedTemplate(doc)
-        if (key == PageTemplates.NONE) return
-        val areas = if (page.pdfPage == null) listOf(cover) else Rooms.paper(cover, page.rooms, page.sourceWidth, page.sourceHeight)
-        val ink = page.resolvedPatternColor(doc)
-        val pattern = PagePattern.fromId(key)
-        if (pattern != null) {
-            for (paper in areas) paintPagePattern(renderer, pattern, ink, page.resolvedSpacing(doc) ?: PageStyle.DEFAULT_SPACING, paper, paper)
-            return
-        }
-        val pkg = doc.templatePackages[key]
-        val template = templates.getOrPut(key) {
-            TemplateReader.read(doc.templates[key] ?: pkg?.let(TemplatePackage::readJson) ?: return)
-        }
-        val scale = doc.dpi / 25.4
-        val numbers = page.resolvedParams(doc).toMutableMap()
-        page.resolvedSpacing(doc)?.let { spacing -> template.spacingParam?.let { numbers[it.name] = spacing / scale } }
-        val values = TemplateValues(numbers, page.resolvedColors(doc))
-        for (paper in areas) {
-            val definition = TemplatePage(page.width / scale, page.height / scale,
-                Rect(paper.x / scale, paper.y / scale, paper.w / scale, paper.h / scale), ink, page.resolvedAccentColor(doc), values)
-            TemplatePainter.paint(renderer, layout.layout(template, definition), scale, paper) { src ->
-                if (pkg == null) null else pictures.getOrPut(key to src) {
-                    val file = assets.value / Uuids.random()
-                    check(TemplatePackage.extract(pkg, src, file))
-                    val size = checkNotNull(CgImageCodec.probeFile(file.toString()))
-                    ImageData(file, size.width, size.height)
-                }
-            }
-        }
-    }
-
-    override fun close() { pdf?.close(); pdf = null; if (assets.isInitialized()) KFiles.system.deleteRecursively(assets.value) }
+    override fun close() { pdf?.close(); pdf = null; drawing.close() }
 }

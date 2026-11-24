@@ -4,6 +4,7 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.iosapp.ui.theme.Space
+import com.xnotes.platform.ios.paperRect
 
 internal class PagePlacement(doc: Document, val pages: List<Page> = doc.pages.toList()) {
     val frames = pages.map { it.paperRect(doc) }
