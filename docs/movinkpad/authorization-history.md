@@ -352,3 +352,4 @@
 - 用户要求解决图层切换卡顿并「按那样的分工」开始；放行范围选「推送加打包，不发版」：合并 `perf/layer-switch` 到 `master` 并推送 `origin/master`，打包主线测试版 `com.xnotes.movinkpad.branchtest.master`。不安装到用户设备（当时未连接）、不改动正式版、不发布 GitHub Release。
 - 用户随后要求「安装到设备上，覆盖更新」：test15 覆盖安装到 MovinkPad Pro 14 上的主线测试版（原 test14 / code 14），正式版未动。
 - 用户反馈点选仍卡并要求去掉双击改名；修复后 test16 覆盖安装到 MovinkPad（原 test15）。本次未推送。
+- 用户随后要求「推送到主分支吧」：将 test15 安装记录、点选修复（`68428def`）、test16 记录连同本条推送到 `origin/master`。
