@@ -34,17 +34,50 @@
     <string name="toolbar_sidebar">侧边栏</string>
     <string name="undo">撤销</string>
     <string name="redo">重做</string>
-    <string name="toolbar_page_nav">页面导航</string>
-    <string name="toolbar_styles">样式</string>
-    <string name="toolbar_margins">页边距</string>
     <string name="toolbar_view">视图</string>
-    <string name="toolbar_zoom">缩放</string>
-    <string name="toolbar_fit">适应</string>
-    <string name="toolbar_zoom_lock">缩放锁定</string>
     <string name="toolbar_fullscreen">全屏</string>
     <string name="toolbar_colours">颜色</string>
-    <string name="toolbar_waypoints">已保存视图</string>
     <string name="toolbar_minimap">小地图</string>
+    <string name="settings">设置</string>
+    <string name="back">返回</string>
+    <string name="caption_page">页面</string>
+    <string name="page_of_count">/ %1$d</string>
+    <string name="limits_off">未限制</string>
+    <string name="limits_on">已限制</string>
+    <string name="title_zoom_limits">缩放范围</string>
+    <string name="zoom_limits_hint">开启后，双指缩放、缩放按钮、快捷键和各项适应操作都不会超出此范围。</string>
+    <string name="fit_page_short">适应页面</string>
+    <string name="fit_width_short">适应宽度</string>
+    <string name="fit_height_short">适应高度</string>
+    <string name="rotate">旋转</string>
+    <string name="read_only">只读</string>
+    <string name="on">开启</string>
+    <string name="caption_edge">页边</string>
+    <string name="tap_an_edge">点按页边即可选中</string>
+    <string name="margin_edge_value">%1$s %2$d%%</string>
+    <string name="no_template">无模板</string>
+    <string name="new_pages_size">新页面 %1$s</string>
+    <string name="vertical_scrolling_lower">纵向滚动</string>
+    <string name="rotated_degrees">已旋转 %1$d°</string>
+    <string name="filters_on">PDF 滤镜已开启</string>
+    <string name="filters_hint">整份 PDF 需要重新绘制，调整在松手后生效。</string>
+    <string name="speed_mm_s">%1$s 毫米/秒</string>
+    <plurals name="waypoints_saved">
+        <item quantity="other">已保存 %1$d 个视图</item>
+    </plurals>
+    <string name="box_defaults_hint">新建文本框默认使用此样式。</string>
+    <string name="box_fill">填充</string>
+    <string name="box_border">边框</string>
+    <string name="box_thickness">粗细</string>
+    <string name="box_corners">圆角</string>
+    <string name="box_style">文本框样式</string>
+    <string name="edit_text">编辑文字</string>
+    <string name="stroke_preview">笔迹预览</string>
+    <string name="decrease">减少</string>
+    <string name="increase">增加</string>
+    <string name="use_default">恢复默认</string>
+    <string name="all_templates">全部模板</string>
+    <string name="add_template">添加模板</string>
     <string name="edge_left">左侧</string>
     <string name="edge_right">右侧</string>
     <string name="edge_top">顶部</string>
@@ -111,7 +144,6 @@
     <string name="caption_autoscroll">自动滚动</string>
     <string name="caption_autoscroll_speed">速度</string>
     <string name="caption_pdf_filters">PDF 颜色滤镜</string>
-    <string name="adjust">调整</string>
     <string name="filter_contrast">对比度</string>
     <string name="filter_invert">反色</string>
     <string name="filter_brightness">亮度</string>
@@ -281,8 +313,6 @@
     <string name="caption_opacity">不透明度</string>
     <string name="caption_dashed">虚线</string>
     <string name="default_suffix">"（默认）"</string>
-    <string name="caption_opacity_percent">"不透明度  %1$d%%"</string>
-    <string name="caption_rotate_degrees">"旋转  %1$d°"</string>
     <string name="caption_glow_intensity">发光强度</string>
 
     <!-- Toolbar -->
@@ -303,9 +333,6 @@
     <string name="no_stickers">尚无贴纸。</string>
     <string name="stickers_hint">点按插入，长按移除</string>
     <string name="sticker">贴纸</string>
-    <string name="fit_page">显示完整页面</string>
-    <string name="fit_width">适应页面宽度</string>
-    <string name="fit_height">适应页面高度</string>
     <string name="err_rename_note">无法重命名笔记。</string>
     <string name="untitled">未命名</string>
     <string name="insert_image">插入图片</string>
@@ -356,7 +383,7 @@
     <string name="pref_pdf_export">PDF 导出</string>
     <string name="pref_pdf_heading_bookmarks">根据标题生成书签</string>
     <string name="pref_performance">性能</string>
-    <string name="pref_cache_help">设置越高，平移和缩放越流畅，但会使用更多内存。无论如何设置，笔迹和 PDF 都会保持清晰。</string>
+    <string name="pref_cache_help">设置越高，滚动时已准备好的内容越多。“自动”会按此设备调整。</string>
     <string name="pref_disable_front_buffering">禁用前缓冲绘制</string>
     <string name="pref_front_buffering_help">前缓冲绘制可降低笔迹延迟。部分屏幕可能出现笔迹闪烁或跟笔延迟，遇到这些问题时可关闭此功能，使用常规画布绘制。</string>
     <string name="pref_code_highlighting">代码高亮</string>
@@ -379,8 +406,9 @@
     <string name="toggle_previous">切换上一个工具</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss 会展开为创建日期和时间。# 会变为序号以确保文件夹中的名称不重复。</string>
     <string name="pref_next_note_named">下一篇笔记将命名为 %1$s</string>
-    <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
-    <string name="pref_max_cache_px">"最大缓存分辨率  %1$d px"</string>
+    <string name="pref_side_margin_px">"页边距  %1$d px"</string>
+    <string name="pref_cache_memory_auto">"缓存内存  自动（%1$d MB）"</string>
+    <string name="pref_cache_memory_mb">"缓存内存  %1$d MB"</string>
     <string name="pref_toolbar_colours_n">"工具栏颜色  %1$d"</string>
 
     <!-- Home screen and explorer -->
@@ -626,16 +654,16 @@
     <string name="bookmarks">书签</string>
     <string name="selected">已选择</string>
     <string name="page_options">页面选项</string>
-    <string name="back_share_as">"‹  分享为"</string>
+    <string name="back_share_as">分享为</string>
     <string name="image_png">图片（PNG）</string>
-    <string name="back_save_as">"‹  另存为"</string>
+    <string name="back_save_as">另存为</string>
     <string name="add_page">添加页面</string>
     <string name="insert_pdf">插入 PDF</string>
     <string name="erase_page">清空页面</string>
     <string name="erase">清空</string>
     <string name="share_ellipsis">分享…</string>
     <string name="rotate_ellipsis">旋转…</string>
-    <string name="back_rotate">"‹  旋转"</string>
+    <string name="back_rotate">旋转</string>
     <string name="rotate_right">向右</string>
     <string name="rotate_left">向左</string>
     <string name="rotate_upside_down">旋转 180°</string>
@@ -651,7 +679,8 @@
     <string name="no_bookmarks">— 没有书签 —</string>
     <string name="add">添加</string>
     <string name="page_n">第 %1$d 页</string>
-    <string name="bookmark_entry">%1$s · 第 %2$d 页</string>
+    <string name="expand_entry">展开</string>
+    <string name="collapse_entry">收起</string>
 
     <!-- Selection and long-press menus -->
     <string name="bring_to_front">置于顶层</string>
@@ -753,7 +782,7 @@
     <!-- Colour picker -->
     <string name="swatches">色板</string>
     <string name="spectrum">光谱</string>
-    <string name="caption_recent">最近使用</string>
+    <string name="previous_colour">之前的颜色</string>
 
     <!-- Canvas and storage -->
     <string name="pull_to_add_page">拉动以添加页面</string>
@@ -860,24 +889,18 @@
     <!-- Explorer -->
     <string name="sort_created">创建日期</string>
     <string name="select_all">全选</string>
-    <string name="close_view_options">关闭视图选项</string>
     <string name="opt_layout">布局</string>
-    <string name="opt_rows">行</string>
-    <string name="rows_comfortable">宽松</string>
-    <string name="rows_compact">紧凑</string>
+    <string name="opt_compact_rows">紧凑行</string>
     <string name="opt_tile_size">图块大小</string>
-    <string name="pinch_hint">也可以双指缩放网格来调整图块大小</string>
     <string name="opt_place_by">文件放置依据</string>
-    <string name="opt_thumbnail">缩略图</string>
-    <string name="thumb_top">页面顶部</string>
-    <string name="thumb_page">整页</string>
+    <string name="opt_whole_page_thumbs">整页缩略图</string>
     <string name="opt_show_on_tiles">图块上显示</string>
+    <string name="shown_of">%1$d/%2$d</string>
     <string name="show_page_count">页数</string>
     <string name="show_time">时间</string>
     <string name="colour_code">颜色标记</string>
     <string name="opt_group_by">分组方式</string>
     <string name="view_every_folder">在所有文件夹中使用此视图</string>
-    <string name="view_every_folder_hint">关闭时：每个文件夹记住自己的视图</string>
     <string name="sort_z_to_a">Z 到 A</string>
     <string name="sort_a_to_z">A 到 Z</string>
     <string name="largest_first">从大到小</string>
@@ -972,14 +995,12 @@
     <string name="caption_template">模板</string>
     <string name="caption_accent_colour">强调色</string>
     <string name="customize">自定义</string>
-    <string name="back_customize">"‹  自定义"</string>
     <string name="import_template">导入</string>
     <string name="remove_template">从模板库移除</string>
     <string name="keep_template">添加到模板库</string>
     <string name="template_imported">已导入模板“%1$s”。</string>
     <string name="err_import_template">无法导入模板：%1$s</string>
     <string name="template_too_large">文件超过 1 MiB</string>
-    <string name="caption_value_percent">"%1$s  %2$d%%"</string>
 
     <!-- Audio and recording -->
     <string name="insert_group_image">图片</string>
@@ -1027,7 +1048,6 @@
     <string name="audio_off_while_recording">录音期间无法播放。</string>
 
     <!-- New note, covers and templates -->
-    <string name="new_note_in">在 %1$s 中新建笔记</string>
     <string name="close_new_note">关闭且不创建</string>
     <string name="cover">封面</string>
     <string name="no_cover">无封面</string>
@@ -1036,11 +1056,7 @@
     <string name="change_cover">更换封面…</string>
     <string name="change_cover_title">更换封面</string>
     <string name="remove_cover">移除封面</string>
-    <string name="templates_built_in">内置</string>
-    <string name="templates_examples">示例</string>
     <string name="templates_imported">已导入</string>
-    <string name="templates_imported_help">保存在笔记文件夹里，会和笔记一起备份、迁移。</string>
-    <string name="cover_designs">设计</string>
     <string name="import_template_file">导入模板</string>
     <string name="page_from_image">用图片制作页面模板</string>
     <string name="cover_from_image">用图片制作封面模板</string>
@@ -1068,10 +1084,7 @@
     <string name="ai_prompt_cover_pattern">用 Python 绘制由深蓝和青绿色半透明圆形相互重叠构成的生成式图案，做成封面模板，加上细金色边框和标题标签。</string>
     <string name="ai_prompt_cover_leather">一个仿皮革笔记本的封面模板：用 Python 绘制深色皮革纹理，以明暗叠加在可更改的颜色上，再加上压印边框和金色标签。</string>
     <string name="tag_all">全部</string>
-    <string name="every_page">每一页</string>
     <string name="plain_paper">空白纸</string>
-    <string name="pick_template_hint">选择模板以设置线条、颜色和间距。</string>
-    <string name="pick_cover_hint">选择一种设计，为笔记添加封面。</string>
     <string name="page_size_mm">%1$s × %2$s 毫米</string>
     <string name="custom_size_range">每边介于 %1$s 和 %2$s 毫米之间</string>
 

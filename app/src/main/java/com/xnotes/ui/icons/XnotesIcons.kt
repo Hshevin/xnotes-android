@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
  * The line-icon set (spec 11 §3), built as Compose [ImageVector]s straight from
  * the reference SVG path bodies (Feather/Lucide). Each is a 24x24 viewBox, 2px
  * round-capped stroke, no fill; the stroke colour is a placeholder recoloured by
- * the `Icon` tint at use.
+ * the `Icon` tint at use. The fit glyphs alone are 28 wide ([wide]).
  *
  * [icon] joins its path strings into one path before parsing, so every string after
  * the first must open with an ABSOLUTE moveto. A relative "m" there starts from the
@@ -20,16 +20,25 @@ import androidx.compose.ui.unit.dp
  */
 object XnotesIcons {
 
-    private fun icon(vararg pathData: String): ImageVector {
+    private fun icon(vararg pathData: String): ImageVector = build(24f, pathData)
+
+    /** An [icon] filled in as well as outlined, for a mark that is on. */
+    private fun solid(vararg pathData: String): ImageVector = build(24f, pathData, filled = true)
+
+    /** An icon 28 across: room for an arrow between two walls at the set's stroke. */
+    private fun wide(vararg pathData: String): ImageVector = build(28f, pathData)
+
+    private fun build(width: Float, pathData: Array<out String>, filled: Boolean = false): ImageVector {
         val nodes = PathParser().parsePathString(pathData.joinToString(" ")).toNodes()
         return ImageVector.Builder(
             name = "xn",
-            defaultWidth = 24.dp,
+            defaultWidth = width.dp,
             defaultHeight = 24.dp,
-            viewportWidth = 24f,
+            viewportWidth = width,
             viewportHeight = 24f,
         ).addPath(
             pathData = nodes,
+            fill = if (filled) SolidColor(Color.White) else null,
             stroke = SolidColor(Color.White),
             strokeLineWidth = 2f,
             strokeLineCap = StrokeCap.Round,
@@ -177,7 +186,20 @@ object XnotesIcons {
     val file = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z", "M14 2v6h6")
     val edit = icon("M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z")
     val sidebar = icon(rect(3.0, 3.0, 18.0, 18.0), "M9 3v18")
+    // The gear both bars end in (Lucide "settings").
+    val settings = icon(
+        "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+        circle(12.0, 12.0, 3.0),
+    )
+    val autoscroll = icon("M12 3v12", "M7 10l5 5 5-5", "M5 21h14")
+    val contrast = icon(circle(12.0, 12.0, 9.0), "M12 3v18", "M12 7.5h4.5", "M12 12h6", "M12 16.5h4.5")
     val fullscreen = icon("M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7")
+    // The fit tiles: what is fitted, held in corner brackets, or an arrow run out to two walls.
+    private val brackets = arrayOf("M5 7V5a2 2 0 0 1 2-2h2", "M19 3h2a2 2 0 0 1 2 2v2", "M23 17v2a2 2 0 0 1-2 2h-2", "M9 21H7a2 2 0 0 1-2-2v-2")
+    val fitPage = wide(*brackets, roundRect(10.5, 7.0, 7.0, 10.0, 1.0))
+    val fitWidth = wide("M4 5v14", "M24 5v14", "M8 12h12", "M11 9l-3 3 3 3", "M17 9l3 3-3 3")
+    val fitHeight = wide("M7 2h14", "M7 22h14", "M14 6v12", "M11 9l3-3 3 3", "M11 15l3 3 3-3")
+    val fitAll = wide(*brackets, "M9 13.5c1.5-4 3.5-4 5 0s3.5 3 5-1.5")
     val plus = icon("M12 5v14", "M5 12h14")
     val minus = icon("M5 12h14")
     // The flow bar's font-face button (Lucide "type").
@@ -185,6 +207,7 @@ object XnotesIcons {
     val trash = icon("M3 6h18", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2")
     val close = icon("M18 6 6 18", "M6 6l12 12")
     val bookmark = icon("M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z")
+    val bookmarkFilled = solid("M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z")
     val contents = icon("M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01")
     val thumbnails = icon(rect(3.0, 3.0, 7.0, 7.0), rect(14.0, 3.0, 7.0, 7.0), rect(3.0, 14.0, 7.0, 7.0), rect(14.0, 14.0, 7.0, 7.0))
     val lock = icon(rect(3.0, 11.0, 18.0, 11.0), "M7 11V7a5 5 0 0 1 10 0v4")
@@ -199,6 +222,15 @@ object XnotesIcons {
     val magicWand = icon(
         "m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z",
         "M14 7 17 10", "M5 6v4", "M19 14v4", "M10 2v2", "M7 8H3", "M21 16h-4", "M11 3H9",
+    )
+    val bookOpen = icon(
+        "M12 7v14",
+        "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z",
+    )
+    val eye = icon("M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z")
+    val eyeOff = icon(
+        "M3 3l18 18", "M10.6 5.1A10.7 10.7 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4",
+        "M6.5 6.6C3.6 8.5 2 12 2 12s3.6 7 10 7a9.9 9.9 0 0 0 4.4-1", "M9.9 9.9a3 3 0 0 0 4.2 4.2",
     )
     // A 3D roll seen at a diagonal (turned 50 degrees, looked down on at 25), its torn tape lying out towards you.
     val tape = icon(
@@ -226,6 +258,19 @@ object XnotesIcons {
         "M12 2.5 22 7.5 12 12.5 2 7.5Z",
         "M22 12.5 12 17.5 2 12.5",
         "M22 17.5 12 22.5 2 17.5",
+    )
+    // The selection menu's own rows (Lucide: flip-horizontal, flip-vertical, group, ungroup, unlink).
+    val flipHorizontal = icon("M8 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h3", "M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3", "M12 20v2", "M12 14v2", "M12 8v2", "M12 2v2")
+    val flipVertical = icon("M21 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v3", "M21 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3", "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2")
+    val group = icon(
+        "M3 7V5c0-1.1.9-2 2-2h2", "M17 3h2c1.1 0 2 .9 2 2v2", "M21 17v2c0 1.1-.9 2-2 2h-2", "M7 21H5c-1.1 0-2-.9-2-2v-2",
+        roundRect(7.0, 7.0, 7.0, 5.0, 1.0), roundRect(10.0, 12.0, 7.0, 5.0, 1.0),
+    )
+    val ungroup = icon(roundRect(5.0, 4.0, 8.0, 6.0, 1.0), roundRect(11.0, 14.0, 8.0, 6.0, 1.0))
+    val unlink = icon(
+        "M18.84 12.25l1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71",
+        "M5.17 11.75l-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71",
+        "M8 2v3", "M2 8h3", "M16 19v3", "M19 16h3",
     )
     /** Two panes with a divider down the middle: opening a pair of files side by side. */
     val split = icon(rect(3.0, 3.0, 18.0, 18.0), "M12 3v18")
@@ -314,6 +359,7 @@ object XnotesIcons {
     val filter = icon("M3 6h18", "M7 12h10", "M10 18h4")
     val chevronDown = icon("M6 9l6 6 6-6")
     val chevronUp = icon("M18 15l-6-6-6 6")
+    val chevronRight = icon("M9 6l6 6-6 6")
     val clock = icon(circle(12.0, 12.0, 10.0), "M12 6v6l4 2")
     val restore = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
     val moveToFolder = icon(

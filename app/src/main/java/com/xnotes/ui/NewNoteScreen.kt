@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -8,60 +9,65 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -69,42 +75,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -118,8 +109,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.R
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
@@ -131,11 +128,11 @@ import com.xnotes.core.model.withTemplate
 import com.xnotes.core.template.Template
 import com.xnotes.core.template.TemplateKind
 import com.xnotes.platform.TemplateLibrary
-import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
+import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
 import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
@@ -174,6 +171,11 @@ private enum class Face { PAGES, COVER }
 /** New notes are made at the default resolution, so lengths turn into px at it. */
 private const val DPI = PageSize.DEFAULT_DPI
 
+/** On a wide screen: the note's column, the gap either side of it, and the bar above both. */
+private val NOTE_W = 360.dp
+private val GUTTER = 24.dp
+private val TOP_BAR = 72.dp
+
 /** A length in mm as it is typed: no ".0" on a whole number. */
 private fun mmText(v: Double): String =
     if (v == Math.floor(v)) v.toInt().toString() else String.format(java.util.Locale.ROOT, "%.1f", v)
@@ -183,17 +185,17 @@ internal class CoverEdit(val pageMm: Pair<Double, Double>, val current: PageStyl
 
 /**
  * The full-screen New note. The note sits on the left: its cover and its pages side by side (a tap
- * picks which one to style), their size and orientation, then the picked one's colours and
- * settings. The gallery sits on the right with Pages and Cover tabs, and a Generate using AI tab
- * that has a chat assistant write a template ([AiTemplateTab]). Narrow screens stack the same
- * parts and move the settings into a bottom sheet. Nothing is written until Create. Given a
- * [coverEdit], it is that note's cover picker instead: the cover alone, and Done.
+ * picks which one to style), their size and orientation, and the picked one's name with Customize,
+ * which opens its colours and settings beside it, so the sheets show each change. The gallery sits
+ * on the right: Pages or Cover, a filter by tag, and an add menu that imports a template, makes one
+ * from an image or opens Generate using AI ([AiTemplateTab]). Narrow screens stack the same parts and
+ * open Customize as a bottom sheet. Nothing is written until Create. Given a [coverEdit], it is that
+ * note's cover picker instead: the cover alone, and Done.
  */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun NewNoteScreen(
     editor: Editor,
-    folderName: String,
     initialName: String,
     error: String?,
     busy: Boolean,
@@ -206,10 +208,13 @@ internal fun NewNoteScreen(
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         MatchActivityWindow()
         val palette = LocalPalette.current
+        val panel = panelColors()
         val text = palette.text.toComposeColor()
         val dim = palette.textDim.toComposeColor()
         val accent = palette.accent.toComposeColor()
         val border = palette.border.toComposeColor()
+        val selBg = palette.selectionBackground.toComposeColor()
+        val selFg = palette.selectionForeground.toComposeColor()
         val prefs = editor.preferences
 
         var name by remember { mutableStateOf(TextFieldValue(initialName, TextRange(initialName.length))) }
@@ -236,10 +241,11 @@ internal fun NewNoteScreen(
         var coverOn by remember { mutableStateOf(coverOnly) }
         var coverStyle by remember { mutableStateOf(coverEdit?.current ?: PageStyle(template = covers.firstOrNull()?.key)) }
         var face by remember { mutableStateOf(if (coverOnly) Face.COVER else Face.PAGES) }
-        // The Generate using AI tab takes the gallery's place; the note keeps showing the face it styles.
+        // Generate using AI takes the gallery's place; the note keeps showing the face it styles.
         var aiOpen by remember { mutableStateOf(false) }
         // A template being made keeps going while the gallery tabs are looked at; closing this screen stops it.
         val templateGen = rememberTemplateGen(coverOnly)
+        var customOpen by remember { mutableStateOf(false) }
         var tag by remember { mutableStateOf<String?>(null) }
 
         // A template the library gains while this is open was imported from here: select it.
@@ -287,6 +293,13 @@ internal fun NewNoteScreen(
         val coverKey = coverStyle.template
         val coverT = covers.firstOrNull { it.key == coverKey }?.template
         val hasCover = coverOn && coverT != null
+        val canCustomize = face == Face.PAGES || hasCover
+        LaunchedEffect(canCustomize) { if (!canCustomize) customOpen = false }
+        val faceTitle = when {
+            face == Face.PAGES -> pageT?.name ?: stringResource(R.string.plain_paper)
+            hasCover -> coverT!!.name
+            else -> stringResource(R.string.no_cover)
+        }
 
         fun create() {
             if (coverEdit != null) {
@@ -363,11 +376,11 @@ internal fun NewNoteScreen(
                     .clip(MaterialTheme.shapes.small)
                     .semantics { this.selected = selected }
                     .clickable(onClick = onClick)
-                    .padding(Space.s6),
+                    .padding(Space.s4),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Space.s12),
             ) {
-                Box(Modifier.border(2.dp, if (selected) accent else Color.Transparent, RoundedCornerShape(5.dp)).padding(Space.s4)) { content() }
+                Box(Modifier.border(2.dp, if (selected) accent else Color.Transparent, RoundedCornerShape(6.dp)).padding(Space.s4)) { content() }
                 Text(label, color = if (selected) accent else dim, fontSize = TextSize.body, fontWeight = FontWeight.Medium)
             }
         }
@@ -383,7 +396,7 @@ internal fun NewNoteScreen(
                     )
                 },
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space.s8, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.Center,
                 content = content,
             )
         }
@@ -393,6 +406,7 @@ internal fun NewNoteScreen(
             val ok = value.toDoubleOrNull()?.let { it in range } == true
             var focused by remember { mutableStateOf(false) }
             DisposableEffect(label) { onDispose { fieldBounds.remove(label) } }
+            val shape = MaterialTheme.shapes.medium
             BasicTextField(
                 value = value,
                 onValueChange = onChange,
@@ -402,64 +416,41 @@ internal fun NewNoteScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                 modifier = Modifier
-                    .width(64.dp)
+                    .width(72.dp)
                     .height(40.dp)
                     .semantics { contentDescription = label }
                     .onGloballyPositioned { fieldBounds[label] = it.boundsInRoot() }
                     .onFocusChanged { focused = it.isFocused }
-                    .border(
-                        if (focused) 2.dp else 1.dp,
+                    .background(panel.card, shape)
+                    .then(
                         when {
-                            !ok -> palette.danger.toComposeColor()
-                            focused -> accent
-                            else -> border
+                            !ok -> Modifier.border(1.dp, palette.danger.toComposeColor(), shape)
+                            focused -> Modifier.border(2.dp, accent, shape)
+                            else -> Modifier
                         },
-                        MaterialTheme.shapes.small,
                     )
-                    .background(palette.menuBg.toComposeColor(), MaterialTheme.shapes.small)
                     .padding(vertical = Space.s12),
             )
         }
 
         @Composable
-        fun OrientationButton(o: Orientation, desc: String) {
-            val on = (o == Orientation.PORTRAIT) == portrait
-            Box(
-                Modifier
-                    .size(44.dp, 38.dp)
-                    .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
-                    .semantics { contentDescription = desc; selected = on }
-                    .clickable { setOrientation(o) },
-                contentAlignment = Alignment.Center,
-            ) {
-                val fg = if (on) palette.selectionForeground.toComposeColor() else dim
-                Box(Modifier.size(if (o == Orientation.PORTRAIT) 11.dp else 17.dp, if (o == Orientation.PORTRAIT) 17.dp else 11.dp).border(2.dp, fg, RoundedCornerShape(2.dp)))
-            }
-        }
-
-        @Composable
-        fun FormatRow() = Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            FlowRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Space.s12, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(Space.s8),
-            ) {
+        fun SizeRow() = Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s8)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
                 Box {
                     var open by remember { mutableStateOf(false) }
                     Row(
                         Modifier
                             .height(40.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .border(1.dp, border, MaterialTheme.shapes.small)
-                            .background(palette.menuBg.toComposeColor())
-                            .clickable { open = true }
-                            .padding(start = Space.s16, end = Space.s8),
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(panel.card)
+                            .clickable(role = Role.DropdownList) { open = true }
+                            .padding(start = Space.s16, end = Space.s12),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Space.s8),
                     ) {
-                        Text(pageSizeLabel(size), color = text, fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(pageSizeLabel(size), color = text, fontSize = TextSize.bodyLarge)
                         if (!custom) Text(stringResource(R.string.page_size_mm, mmText(pageMm.first.roundToInt().toDouble()), mmText(pageMm.second.roundToInt().toDouble())), color = dim, fontSize = TextSize.body)
-                        Icon(XnotesIcons.chevronDown, null, tint = dim, modifier = Modifier.size(18.dp))
+                        Icon(XnotesIcons.chevronDown, null, tint = dim, modifier = Modifier.size(16.dp))
                     }
                     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                         for (s in PageSize.entries.filter { it != PageSize.CUSTOM } + PageSize.CUSTOM) {
@@ -467,57 +458,54 @@ internal fun NewNoteScreen(
                                 val (a, b) = if (portrait) s.shortMm to s.longMm else s.longMm to s.shortMm
                                 stringResource(R.string.page_size_mm, mmText(a.roundToInt().toDouble()), mmText(b.roundToInt().toDouble()))
                             }
-                            DropdownMenuItem(
-                                text = {
-                                    Row(Modifier.widthIn(min = 220.dp)) {
-                                        Text(pageSizeLabel(s), Modifier.weight(1f))
-                                        Text(dims, color = dim)
-                                    }
-                                },
-                                leadingIcon = {
-                                    if (s == size) Icon(XnotesIcons.check, null, tint = accent, modifier = Modifier.size(18.dp)) else Spacer(Modifier.size(Space.s20))
-                                },
-                                onClick = {
-                                    if (s == PageSize.CUSTOM && !custom) {
-                                        customW = mmText(pageMm.first)
-                                        customH = mmText(pageMm.second)
-                                    }
-                                    size = s
-                                    open = false
-                                },
-                            )
+                            ChoiceMenuItem(s == size, onClick = {
+                                if (s == PageSize.CUSTOM && !custom) {
+                                    customW = mmText(pageMm.first)
+                                    customH = mmText(pageMm.second)
+                                }
+                                size = s
+                                open = false
+                            }) { fg ->
+                                Row(Modifier.widthIn(min = 220.dp)) {
+                                    Text(pageSizeLabel(s), color = fg, modifier = Modifier.weight(1f))
+                                    Text(dims, color = if (s == size) fg else dim)
+                                }
+                            }
                         }
                     }
                 }
-                if (custom) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
-                        MmField(customW, stringResource(R.string.width_mm)) { customW = it }
-                        Text("×", color = dim, fontSize = TextSize.body)
-                        MmField(customH, stringResource(R.string.height_mm)) { customH = it }
-                        Text("mm", color = dim, fontSize = TextSize.body)
+                Box(Modifier.width(88.dp)) {
+                    PanelSegmented(2, if (portrait) 0 else 1, { setOrientation(if (it == 0) Orientation.PORTRAIT else Orientation.LANDSCAPE) }, height = 34.dp, sunken = false) { i, on ->
+                        val desc = stringResource(if (i == 0) R.string.orientation_portrait else R.string.orientation_landscape)
+                        Box(
+                            Modifier
+                                .size(if (i == 0) 11.dp else 15.dp, if (i == 0) 15.dp else 11.dp)
+                                .semantics { contentDescription = desc }
+                                .border(1.6.dp, if (on) selFg else dim, RoundedCornerShape(2.dp)),
+                        )
                     }
                 }
-                Row(Modifier.clip(MaterialTheme.shapes.small).border(1.dp, border, MaterialTheme.shapes.small)) {
-                    OrientationButton(Orientation.PORTRAIT, stringResource(R.string.orientation_portrait))
-                    Box(Modifier.width(1.dp).height(38.dp).background(border))
-                    OrientationButton(Orientation.LANDSCAPE, stringResource(R.string.orientation_landscape))
+            }
+            if (custom) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
+                    MmField(customW, stringResource(R.string.width_mm)) { customW = it }
+                    Text("×", color = dim, fontSize = TextSize.body)
+                    MmField(customH, stringResource(R.string.height_mm)) { customH = it }
+                    Text("mm", color = dim, fontSize = TextSize.body)
                 }
             }
             // Create waits for a size that fits; this says why.
             if (custom && (cw == null || ch == null)) {
-                Text(
-                    stringResource(R.string.custom_size_range, mmText(range.start), mmText(range.endInclusive)),
-                    color = palette.danger.toComposeColor(), fontSize = TextSize.label, modifier = Modifier.padding(top = Space.s6),
-                )
+                Text(stringResource(R.string.custom_size_range, mmText(range.start), mmText(range.endInclusive)), color = palette.danger.toComposeColor(), fontSize = TextSize.label)
             }
         }
 
         @Composable
         fun Sheets(maxW: Dp, maxH: Dp) = BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // Each sheet adds its ring's padding (4 dp) and its own (6 dp) on both sides; sized
+            // Each sheet adds its ring's border and padding (6 dp) and its own (4 dp) on both sides; sized
             // without them, the second sheet was squeezed and its picture shrank inside it.
             val count = if (coverOnly) 1 else 2
-            val fits = (maxWidth - 16.dp * (count - 1) - 20.dp * count) / count
+            val fits = (maxWidth - 24.dp * (count - 1) - 20.dp * count) / count
             val aspect = (pageMm.second / pageMm.first).toFloat()
             var w = minOf(maxW, fits)
             var h = w * aspect
@@ -527,7 +515,7 @@ internal fun NewNoteScreen(
             }
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Space.s16, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(Space.s24, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 // Sheets of paper: a hairline edge keeps a dark page apart from the dark stage.
@@ -541,10 +529,7 @@ internal fun NewNoteScreen(
                     if (hasCover) {
                         Box(paper) { Thumb(coverT, coverKey!!, coverStyle.settings, coverPaper, w, h, keep = false) }
                     } else {
-                        Dashed(w, h) {
-                            Icon(XnotesIcons.plus, null, tint = dim, modifier = Modifier.size(22.dp))
-                            Text(stringResource(R.string.add_cover), color = dim, fontSize = TextSize.body, fontWeight = FontWeight.Medium)
-                        }
+                        Dashed(w, h) { Icon(XnotesIcons.plus, null, tint = dim, modifier = Modifier.size(22.dp)) }
                     }
                 }
                 if (!coverOnly) {
@@ -563,115 +548,94 @@ internal fun NewNoteScreen(
         }
 
         @Composable
-        fun ColourRow(caption: String, role: SwatchRole, value: Rgba?, onDefault: () -> Unit, onPick: (Rgba) -> Unit) {
-            Spacer(Modifier.size(Space.s12))
-            StyleCaption(caption)
-            Spacer(Modifier.size(Space.s6))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s6), verticalArrangement = Arrangement.spacedBy(Space.s4)) {
-                ModeChip(stringResource(R.string.default_choice), value == null, onDefault)
-                CompositionLocalProvider(LocalEyedropper provides false) { SwatchCircles(editor, role, value, onPick) }
+        fun FaceRow(modifier: Modifier) {
+            Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+                Text(faceTitle, color = text, fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (canCustomize) {
+                    Row(
+                        Modifier
+                            .height(40.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(if (customOpen) selBg else panel.raised)
+                            .semantics { selected = customOpen }
+                            .clickable(role = Role.Button) { customOpen = true }
+                            .padding(start = Space.s12, end = Space.s16),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.s6),
+                    ) {
+                        Icon(XnotesIcons.sliders, null, tint = if (customOpen) selFg else accent, modifier = Modifier.size(16.dp))
+                        Text(stringResource(R.string.customize), color = if (customOpen) selFg else text, fontSize = TextSize.body, fontWeight = FontWeight.Medium)
+                    }
+                }
             }
         }
 
+        // The tags at least two page templates share, most shared first.
+        val tags = remember(pages) {
+            pages.flatMap { it.template.tags }.groupingBy { it }.eachCount().filter { it.value >= 2 }
+                .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).map { it.key }
+        }
+        fun tagLabel(t: String) = t.replaceFirstChar { it.uppercase() }
+
         @Composable
-        fun Tune() {
-            Column {
-                // Reset returns to how the screen began: the saved new-note style with this template, or the design as drawn.
-                val start = if (face == Face.PAGES) editor.newNoteStyle.withTemplate(style.template, PageTemplates.NONE) else PageStyle(template = coverStyle.template)
-                val changed = if (face == Face.PAGES) style != start else hasCover && coverStyle != start
-                Row(Modifier.heightIn(min = 40.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(if (face == Face.PAGES) R.string.every_page else R.string.cover), color = dim, fontSize = TextSize.label)
-                        Text(
-                            when {
-                                face == Face.PAGES -> pageT?.name ?: stringResource(R.string.plain_paper)
-                                hasCover -> coverT!!.name
-                                else -> stringResource(R.string.no_cover)
-                            },
-                            color = text, fontSize = TextSize.title, fontWeight = FontWeight.Medium,
+        fun Toolbar(segmentW: Dp, allLabel: String) {
+            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s4)) {
+                // The cover picker of an open note styles its cover alone, so it has no Pages to switch to.
+                if (!coverOnly) {
+                    Box(Modifier.width(segmentW)) {
+                        PanelSegmented(
+                            listOf(stringResource(R.string.pages), stringResource(R.string.cover)),
+                            if (face == Face.PAGES) 0 else 1,
+                            { face = if (it == 0) Face.PAGES else Face.COVER },
+                            height = 36.dp,
+                            sunken = false,
                         )
-                        // What the template is for, or for a cover, whose picture it is.
-                        val about = if (face == Face.PAGES) pageT?.description else coverT?.takeIf { hasCover }?.description
-                        if (!about.isNullOrBlank()) {
-                            Text(
-                                about, color = dim, fontSize = TextSize.body, lineHeight = TextSize.headline, maxLines = 4, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = Space.s4),
-                            )
-                        }
-                    }
-                    if (changed) {
-                        TextButton(
-                            onClick = { if (face == Face.PAGES) style = start else coverStyle = start },
-                            colors = ButtonDefaults.textButtonColors(contentColor = accent),
-                        ) { Text(stringResource(R.string.reset), fontWeight = FontWeight.Medium) }
                     }
                 }
-                if (face == Face.PAGES) {
-                    ColourRow(stringResource(R.string.caption_paper), SwatchRole.PAPER, style.pageColor, { style = style.copy(pageColor = null) }) {
-                        style = style.copy(pageColor = it)
-                    }
-                    if (pageT == null) {
-                        Spacer(Modifier.size(Space.s12))
-                        Text(stringResource(R.string.pick_template_hint), color = dim, fontSize = TextSize.body)
-                    } else {
-                        if (pageT.usesInk) {
-                            // Circles hold the hue at full strength; the opacity slider sets the alpha.
-                            ColourRow(stringResource(R.string.caption_pattern_colour), SwatchRole.LINES, style.patternColor?.copy(a = 255), {
-                                style = style.copy(patternColor = null)
-                            }) { style = style.copy(patternColor = it.copy(a = look.ink.a)) }
-                            Spacer(Modifier.size(Space.s12))
-                            val pct = look.ink.a * 100f / 255f
-                            StyleCaption(stringResource(R.string.caption_opacity_percent, pct.roundToInt()))
-                            Slider(
-                                value = pct,
-                                onValueChange = { v -> style = style.copy(patternColor = look.ink.copy(a = (v / 100f * 255f).roundToInt().coerceIn(0, 255))) },
-                                valueRange = 0f..100f,
-                            )
+                Spacer(Modifier.weight(1f))
+                if (face == Face.PAGES && tags.isNotEmpty()) {
+                    Box {
+                        var open by remember { mutableStateOf(false) }
+                        Row(
+                            Modifier
+                                .height(40.dp)
+                                .clip(MaterialTheme.shapes.medium)
+                                .clickable(role = Role.DropdownList) { open = true }
+                                .padding(start = Space.s12, end = Space.s8),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.s4),
+                        ) {
+                            Text(tag?.let(::tagLabel) ?: allLabel, color = dim, fontSize = TextSize.body, maxLines = 1)
+                            Icon(XnotesIcons.chevronDown, null, tint = dim, modifier = Modifier.size(16.dp))
                         }
-                        if (pageT.usesAccent) {
-                            ColourRow(stringResource(R.string.caption_accent_colour), SwatchRole.ACCENT, style.accentColor?.copy(a = 255), {
-                                style = style.copy(accentColor = null)
-                            }) { style = style.copy(accentColor = it.copy(a = look.accent.a)) }
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            ChoiceMenuItem(tag == null, onClick = { tag = null; open = false }) { fg -> Text(stringResource(R.string.all_templates), color = fg) }
+                            for (t in tags) ChoiceMenuItem(tag == t, onClick = { tag = t; open = false }) { fg -> Text(tagLabel(t), color = fg) }
                         }
-                        TemplateParamControls(pageT, style, null, DPI, editor, captionGap = 6.dp) { style = it }
                     }
-                } else if (hasCover) {
-                    TemplateParamControls(coverT!!, coverStyle, null, DPI, editor, captionGap = 6.dp) { coverStyle = it }
-                } else {
-                    Spacer(Modifier.size(Space.s12))
-                    Text(stringResource(R.string.pick_cover_hint), color = dim, fontSize = TextSize.body)
                 }
-                Spacer(Modifier.size(Space.s24))
+                Box {
+                    var open by remember { mutableStateOf(false) }
+                    RoundButton(XnotesIcons.plus, stringResource(R.string.add_template), 40.dp) { open = true }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        val kind = if (face == Face.COVER) TemplateKind.COVER else TemplateKind.PAGE
+                        MenuItem(stringResource(R.string.import_template_file), XnotesIcons.importDoc) { open = false; onImportTemplate() }
+                        MenuItem(stringResource(if (kind == TemplateKind.COVER) R.string.cover_from_image else R.string.page_from_image), XnotesIcons.image) {
+                            open = false
+                            onTemplateFromImage(kind)
+                        }
+                        // A template still being made shows on its entry while the gallery is looked at.
+                        MenuItem(stringResource(R.string.tab_generate_ai) + if (templateGen.running) " …" else "", XnotesIcons.magicWand) { open = false; aiOpen = true }
+                    }
+                }
             }
         }
 
         @Composable
-        fun Tab(label: String, on: Boolean, onClick: () -> Unit) {
-            // The underline is drawn, not laid out: a full-width child would widen this tab over the others.
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .semantics { selected = on }
-                    .drawBehind {
-                        if (on) {
-                            val h = 3.dp.toPx()
-                            drawRoundRect(accent, topLeft = Offset(0f, this.size.height - h), size = Size(this.size.width, h), cornerRadius = CornerRadius(h))
-                        }
-                    }
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = Space.s16),
-                contentAlignment = Alignment.Center,
-            ) { Text(label, color = if (on) accent else dim, fontSize = TextSize.title, fontWeight = FontWeight.Medium, maxLines = 1) }
-        }
-
-        @Composable
-        fun Tabs() {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Space.s12)) {
-                // The cover picker of an open note styles its cover alone, so it has no Pages tab.
-                if (!coverOnly) Tab(stringResource(R.string.pages), !aiOpen && face == Face.PAGES) { face = Face.PAGES; aiOpen = false }
-                Tab(stringResource(R.string.cover), !aiOpen && face == Face.COVER) { face = Face.COVER; aiOpen = false }
-                // A template still being made shows on its tab while another one is looked at.
-                Tab(stringResource(R.string.tab_generate_ai) + if (templateGen.running && !aiOpen) " …" else "", aiOpen) { aiOpen = true }
+        fun AiHeader() {
+            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+                RoundButton(XnotesIcons.prev, stringResource(R.string.back), 40.dp) { aiOpen = false }
+                Text(stringResource(R.string.tab_generate_ai), color = text, fontSize = TextSize.title, fontWeight = FontWeight.Medium)
             }
         }
 
@@ -685,138 +649,83 @@ internal fun NewNoteScreen(
                     .semantics { this.selected = selected }
                     .combinedClickable(onClick = onClick, onLongClick = onRemove?.let { { menu = true } }),
             ) {
-                BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio((pageMm.first / pageMm.second).toFloat())) {
-                    val w = maxWidth
-                    val h = maxHeight
-                    // The ring draws over the picture's edge, so the picture keeps one size and is never drawn again for a pick.
-                    Box(
+                // The ring sits outside the picture, so the picture keeps one size and is never drawn again for a pick.
+                Box(Modifier.fillMaxWidth().border(2.dp, if (selected) accent else Color.Transparent, RoundedCornerShape(7.dp)).padding(Space.s6)) {
+                    BoxWithConstraints(
                         Modifier
-                            .fillMaxSize()
-                            .then(
-                                when {
-                                    selected -> Modifier.border(2.dp, accent, RoundedCornerShape(3.dp))
-                                    framed -> Modifier.border(1.dp, border, RoundedCornerShape(3.dp))
-                                    else -> Modifier
-                                },
-                            )
-                            .padding(Space.s2),
-                    ) { thumb(w - 2.dp, h - 2.dp) }
-                    if (selected) {
-                        Box(
-                            Modifier.align(Alignment.TopEnd).padding(Space.s6).size(22.dp).background(accent, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(XnotesIcons.check, null, tint = palette.onAccent.toComposeColor(), modifier = Modifier.size(14.dp)) }
-                    }
+                            .fillMaxWidth()
+                            .aspectRatio((pageMm.first / pageMm.second).toFloat())
+                            .clip(RoundedCornerShape(3.dp))
+                            .then(if (framed) Modifier.border(1.dp, border, RoundedCornerShape(3.dp)) else Modifier),
+                    ) { thumb(maxWidth, maxHeight) }
                 }
-                Spacer(Modifier.size(Space.s8))
+                Spacer(Modifier.size(Space.s4))
                 Text(
-                    label, color = if (selected) palette.selectionForeground.toComposeColor() else text,
-                    fontSize = TextSize.label, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    label,
+                    color = if (selected) accent else dim,
+                    fontSize = TextSize.label,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.remove_template)) }, onClick = { menu = false; onRemove?.invoke() })
+                    MenuItem(stringResource(R.string.remove_template), XnotesIcons.trash, danger = true, onClick = { menu = false; onRemove?.invoke() })
                 }
             }
         }
 
-        @Composable
-        fun ActionTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-            Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onClick)) {
-                BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio((pageMm.first / pageMm.second).toFloat())) {
-                    Dashed(maxWidth, maxHeight) { Icon(icon, null, tint = dim, modifier = Modifier.size(26.dp)) }
-                }
-                Spacer(Modifier.size(Space.s8))
-                Text(label, color = text, fontSize = TextSize.label, maxLines = 2)
-            }
-        }
-
-        // The grid's builder is not composable, so its headings are looked up here.
-        val sBuiltIn = stringResource(R.string.templates_built_in)
-        val sExamples = stringResource(R.string.templates_examples)
+        // The grid's builder is not composable, so its words are looked up here.
         val sImported = stringResource(R.string.templates_imported)
-        val sImportedHelp = stringResource(R.string.templates_imported_help)
-        val sDesigns = stringResource(R.string.cover_designs)
+        val sNone = stringResource(R.string.none)
 
-        fun LazyGridScope.heading(title: String, count: Int?, help: String? = null) {
+        fun LazyGridScope.heading(title: String) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(Modifier.padding(top = Space.s20, bottom = Space.s2)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                        Text(title, color = dim, fontSize = TextSize.body, fontWeight = FontWeight.Medium)
-                        if (count != null) Text(count.toString(), color = dim.copy(alpha = 0.75f), fontSize = TextSize.body)
-                    }
-                    if (help != null) Text(help, color = dim, fontSize = TextSize.label, modifier = Modifier.padding(top = Space.s2))
-                }
+                Text(title, color = dim, fontSize = TextSize.label, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = Space.s4, top = Space.s12))
             }
         }
 
         fun LazyGridScope.gallery() {
             if (face == Face.PAGES) {
-                val tags = pages.flatMap { it.template.tags }.groupingBy { it }.eachCount().filter { it.value >= 2 }
-                    .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).map { it.key }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s8), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-                        ModeChip(stringResource(R.string.tag_all), tag == null) { tag = null }
-                        for (t in tags) ModeChip(t.replaceFirstChar { it.uppercase() }, tag == t) { tag = t }
-                    }
-                }
                 fun shown(e: TemplateLibrary.Entry) = tag == null || tag in e.template.tags
-                val builtIn = pages.filter { it.source == TemplateLibrary.Source.BUILT_IN && shown(it) }
-                val examples = pages.filter { it.source == TemplateLibrary.Source.BUNDLED && shown(it) }
+                val listed = pages.filter { (it.source == TemplateLibrary.Source.BUILT_IN || it.source == TemplateLibrary.Source.BUNDLED) && shown(it) }
                 val imported = pages.filter { it.source == TemplateLibrary.Source.IMPORTED && shown(it) }
-                if (tag == null || builtIn.isNotEmpty()) {
-                    heading(sBuiltIn, builtIn.size)
-                    if (tag == null) item {
-                        Tile(stringResource(R.string.none), pageKey == PageTemplates.NONE, { pickPage(PageTemplates.NONE) }, null) { w, h -> Thumb(null, PageTemplates.NONE, TemplateSettings(), look.paper, w, h, keep = true) }
-                    }
-                    items(builtIn, key = { it.key }) { e ->
-                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> PageThumb(e, w, h) }
+                if (tag == null) item(key = "none") {
+                    Tile(sNone, pageKey == PageTemplates.NONE, { pickPage(PageTemplates.NONE) }, null) { w, h -> Thumb(null, PageTemplates.NONE, TemplateSettings(), look.paper, w, h, keep = true) }
+                }
+                items(listed, key = { it.key }) { e ->
+                    Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> PageThumb(e, w, h) }
+                }
+                if (imported.isNotEmpty()) {
+                    heading(sImported)
+                    items(imported, key = { it.key }) { e ->
+                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, {
+                            editor.removeTemplate(e.key)
+                            if (pageKey == e.key) pickPage(PageTemplates.NONE)
+                        }) { w, h -> PageThumb(e, w, h) }
                     }
                 }
-                if (examples.isNotEmpty()) {
-                    heading(sExamples, examples.size)
-                    items(examples, key = { it.key }) { e ->
-                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> PageThumb(e, w, h) }
-                    }
-                }
-                heading(sImported, null, sImportedHelp)
-                items(imported, key = { it.key }) { e ->
-                    Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, {
-                        editor.removeTemplate(e.key)
-                        if (pageKey == e.key) pickPage(PageTemplates.NONE)
-                    }) { w, h ->
-                        PageThumb(e, w, h)
-                    }
-                }
-                item { ActionTile(XnotesIcons.importDoc, stringResource(R.string.import_template_file), onImportTemplate) }
-                item { ActionTile(XnotesIcons.image, stringResource(R.string.page_from_image)) { onTemplateFromImage(TemplateKind.PAGE) } }
             } else {
                 val bundled = covers.filter { it.source != TemplateLibrary.Source.IMPORTED }
                 val imported = covers.filter { it.source == TemplateLibrary.Source.IMPORTED }
-                heading(sDesigns, bundled.size)
-                // None is the note without a cover, drawn as the empty frame the stage shows; picking a design turns one
+                // None is the note without a cover, drawn as the empty frame the note shows; picking a design turns one
                 // on. A cover being changed has no None here: the pages panel's Remove cover does that.
-                if (!coverOnly) item {
-                    Tile(stringResource(R.string.none), !hasCover, {
-                        coverOn = false
-                        face = Face.COVER
-                    }, null, framed = false) { w, h -> Dashed(w, h) {} }
+                if (!coverOnly) item(key = "none") {
+                    Tile(sNone, !hasCover, { coverOn = false; face = Face.COVER }, null, framed = false) { w, h -> Dashed(w, h) {} }
                 }
                 items(bundled, key = { it.key }) { e ->
-                    Tile(e.template.name, hasCover && coverKey == e.key, { pickCover(e.key) }, null) { w, h ->
-                        CoverThumb(e, w, h)
+                    Tile(e.template.name, hasCover && coverKey == e.key, { pickCover(e.key) }, null) { w, h -> CoverThumb(e, w, h) }
+                }
+                if (imported.isNotEmpty()) {
+                    heading(sImported)
+                    items(imported, key = { it.key }) { e ->
+                        Tile(e.template.name, hasCover && coverKey == e.key, { pickCover(e.key) }, {
+                            editor.removeTemplate(e.key)
+                            if (coverKey == e.key) coverOn = false
+                        }) { w, h -> CoverThumb(e, w, h) }
                     }
                 }
-                heading(sImported, null, sImportedHelp)
-                items(imported, key = { it.key }) { e ->
-                    Tile(e.template.name, hasCover && coverKey == e.key, { pickCover(e.key) }, {
-                        editor.removeTemplate(e.key)
-                        if (coverKey == e.key) coverOn = false
-                    }) { w, h ->
-                        CoverThumb(e, w, h)
-                    }
-                }
-                item { ActionTile(XnotesIcons.importDoc, stringResource(R.string.import_template_file), onImportTemplate) }
-                item { ActionTile(XnotesIcons.image, stringResource(R.string.cover_from_image)) { onTemplateFromImage(TemplateKind.COVER) } }
             }
         }
 
@@ -824,25 +733,42 @@ internal fun NewNoteScreen(
         fun pickedIndex(f: Face): Int? {
             fun at(base: Int, list: List<TemplateLibrary.Entry>, key: String?) = list.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { base + it }
             if (f == Face.PAGES) {
-                val builtIn = pages.filter { it.source == TemplateLibrary.Source.BUILT_IN }
-                val examples = pages.filter { it.source == TemplateLibrary.Source.BUNDLED }
+                if (pageKey == PageTemplates.NONE) return 0
+                val listed = pages.filter { it.source == TemplateLibrary.Source.BUILT_IN || it.source == TemplateLibrary.Source.BUNDLED }
                 val imported = pages.filter { it.source == TemplateLibrary.Source.IMPORTED }
-                // The tag chips, then Built-in's heading and its None tile.
-                if (pageKey == PageTemplates.NONE) return 2
-                at(3, builtIn, pageKey)?.let { return it }
-                var next = 3 + builtIn.size
-                if (examples.isNotEmpty()) {
-                    at(next + 1, examples, pageKey)?.let { return it }
-                    next += 1 + examples.size
-                }
-                return at(next + 1, imported, pageKey)
+                // None, the listed ones, then Imported's heading.
+                return at(1, listed, pageKey) ?: at(2 + listed.size, imported, pageKey)
             }
             val bundled = covers.filter { it.source != TemplateLibrary.Source.IMPORTED }
             val imported = covers.filter { it.source == TemplateLibrary.Source.IMPORTED }
-            val first = if (coverOnly) 1 else 2
-            if (!hasCover) return if (coverOnly) null else 1
+            val first = if (coverOnly) 0 else 1
+            if (!hasCover) return if (coverOnly) null else 0
             return at(first, bundled, coverKey) ?: at(first + bundled.size + 1, imported, coverKey)
         }
+
+        // Customize: the picked face's name with Reset once it differs from how the screen began, then its cards.
+        @Composable
+        fun CustomizeContent() {
+            val start = if (face == Face.PAGES) editor.newNoteStyle.withTemplate(style.template, PageTemplates.NONE) else PageStyle(template = coverStyle.template)
+            val changed = if (face == Face.PAGES) style != start else hasCover && coverStyle != start
+            Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(start = Space.s4), verticalAlignment = Alignment.CenterVertically) {
+                Text(faceTitle, color = text, fontSize = TextSize.title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = Space.s8))
+                if (changed) PanelChip(stringResource(R.string.reset)) { if (face == Face.PAGES) style = start else coverStyle = start }
+            }
+            val about = if (face == Face.PAGES) pageT?.description else coverT?.takeIf { hasCover }?.description
+            if (!about.isNullOrBlank()) {
+                Text(about, color = dim, fontSize = TextSize.label, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = Space.s4))
+            }
+            // The screen is a window of its own, so there is no note under it to sample a colour from.
+            CompositionLocalProvider(LocalEyedropper provides false) {
+                if (face == Face.PAGES) {
+                    TemplateCards(pageT, style, null, look, DPI, editor, withPaper = true, withInk = true) { style = it }
+                } else if (hasCover) {
+                    TemplateCards(coverT, coverStyle, null, TemplateLook.of(coverStyle, null, look.paper), DPI, editor, withPaper = false, withInk = false) { coverStyle = it }
+                }
+            }
+        }
+
         val pagesGrid = rememberLazyGridState()
         val coverGrid = rememberLazyGridState()
         val aiScroll = rememberScrollState()
@@ -868,6 +794,8 @@ internal fun NewNoteScreen(
                 focusManager.clearFocus()
             }
         }
+        // Back steps out of Generate using AI before it leaves the screen.
+        BackHandler(enabled = aiOpen && !customOpen) { aiOpen = false }
         Surface(
             // Read before the insets' padding, a press shares the fields' root coordinates.
             Modifier.fillMaxSize().pointerInput(Unit) {
@@ -876,23 +804,23 @@ internal fun NewNoteScreen(
                     if (fieldBounds.values.none { it.contains(down.position) }) focusManager.clearFocus()
                 }
             }.windowInsetsPadding(WindowInsets.systemBars),
-            color = palette.panel.toComposeColor(),
+            color = panel.sheet,
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val screenW = maxWidth
-                val wide = screenW >= 720.dp
+                val screenH = maxHeight
+                val wide = maxWidth >= 720.dp
                 Column(Modifier.fillMaxSize()) {
                     Row(
-                        Modifier.fillMaxWidth().height(76.dp).padding(start = Space.s8, end = Space.s20),
+                        Modifier.fillMaxWidth().height(TOP_BAR).padding(start = if (wide) Space.s16 else Space.s12, end = if (wide) GUTTER else Space.s12),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Space.s8),
+                        horizontalArrangement = Arrangement.spacedBy(if (wide) Space.s16 else Space.s12),
                     ) {
-                        IconButton(onClick = onClose) { Icon(XnotesIcons.close, stringResource(R.string.close_new_note), tint = text) }
+                        RoundButton(XnotesIcons.prev, stringResource(R.string.close_new_note), 40.dp, onClick = onClose)
+                        val titleSize = if (wide) 22.sp else 18.sp
                         if (coverOnly) {
-                            Text(stringResource(if (coverEdit?.current == null) R.string.add_cover else R.string.change_cover_title), color = text, fontSize = TextSize.display, modifier = Modifier.weight(1f))
+                            Text(stringResource(if (coverEdit?.current == null) R.string.add_cover else R.string.change_cover_title), color = text, fontSize = titleSize, modifier = Modifier.weight(1f))
                         } else Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.new_note_in, folderName), color = dim, fontSize = TextSize.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            val nameStyle = TextStyle(color = text, fontSize = TextSize.display)
+                            val nameStyle = TextStyle(color = text, fontSize = titleSize)
                             BasicTextField(
                                 value = name,
                                 onValueChange = { v ->
@@ -918,22 +846,21 @@ internal fun NewNoteScreen(
                                     .onGloballyPositioned { fieldBounds["name"] = it.boundsInRoot() }
                                     .padding(vertical = Space.s4)
                                     .onFocusChanged {
-                                    nameFocused = it.isFocused
-                                    if (it.isFocused && !selectedOnce) {
-                                        selectedOnce = true
-                                        keepAllUntil = android.os.SystemClock.uptimeMillis() + 500
-                                        name = name.copy(selection = TextRange(0, name.text.length))
-                                    }
-                                },
+                                        nameFocused = it.isFocused
+                                        if (it.isFocused && !selectedOnce) {
+                                            selectedOnce = true
+                                            keepAllUntil = android.os.SystemClock.uptimeMillis() + 500
+                                            name = name.copy(selection = TextRange(0, name.text.length))
+                                        }
+                                    },
                             )
-                            // The line under the name stays quiet until the name is being edited.
-                            Box(Modifier.widthIn(max = 480.dp).fillMaxWidth().height(2.dp), contentAlignment = Alignment.BottomStart) {
-                                Box(Modifier.fillMaxWidth().height(if (nameFocused) 2.dp else 1.dp).background(if (nameFocused) accent else dim.copy(alpha = 0.4f)))
-                            }
+                            // The line under the name shows only while it is being edited.
+                            Box(Modifier.widthIn(max = 480.dp).fillMaxWidth().height(2.dp).background(if (nameFocused) accent else Color.Transparent))
                             if (error != null) Text(error, color = palette.danger.toComposeColor(), fontSize = TextSize.label, modifier = Modifier.padding(top = Space.s2))
                         }
                         Button(
                             onClick = { create() },
+                            shape = MaterialTheme.shapes.medium,
                             // While the note is written the button stays gold and spins; create() ignores another tap.
                             enabled = if (coverOnly) hasCover else sizeOk,
                             colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = palette.onAccent.toComposeColor()),
@@ -947,50 +874,27 @@ internal fun NewNoteScreen(
                             Text(stringResource(if (coverOnly) R.string.done else R.string.create), fontWeight = FontWeight.Medium)
                         }
                     }
-                    HorizontalDivider(color = border)
                     if (wide) {
-                        val stageW = (screenW * 0.38f).coerceIn(340.dp, 520.dp)
-                        Row(Modifier.weight(1f).fillMaxWidth()) {
+                        Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = GUTTER), horizontalArrangement = Arrangement.spacedBy(GUTTER)) {
                             Column(
-                                Modifier.width(stageW).fillMaxHeight().background(palette.bg.toComposeColor()).padding(horizontal = Space.s24, vertical = Space.s20),
-                                verticalArrangement = Arrangement.spacedBy(Space.s16),
+                                Modifier.width(NOTE_W).fillMaxHeight().verticalScroll(rememberScrollState()).padding(top = Space.s32, bottom = Space.s24),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(Space.s24),
                             ) {
-                                Sheets(260.dp, 300.dp)
-                                if (!coverOnly) FormatRow()
-                                HorizontalDivider(color = border)
-                                // The settings fade at an edge with more beyond it, so a cut-off row reads as scrollable.
-                                val tuneScroll = rememberScrollState()
-                                val stage = palette.bg.toComposeColor()
-                                Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .drawWithContent {
-                                            drawContent()
-                                            val fade = 28.dp.toPx()
-                                            val box = this.size
-                                            if (tuneScroll.canScrollForward) {
-                                                drawRect(
-                                                    Brush.verticalGradient(listOf(Color.Transparent, stage), startY = box.height - fade, endY = box.height),
-                                                    topLeft = Offset(0f, box.height - fade), size = Size(box.width, fade),
-                                                )
-                                            }
-                                            if (tuneScroll.canScrollBackward) {
-                                                drawRect(Brush.verticalGradient(listOf(stage, Color.Transparent), endY = fade / 2), size = Size(box.width, fade / 2))
-                                            }
-                                        }
-                                        .verticalScroll(tuneScroll),
-                                ) { Tune() }
+                                Sheets(150.dp, 214.dp)
+                                if (!coverOnly) SizeRow()
+                                FaceRow(Modifier.width(312.dp))
                             }
                             Column(Modifier.weight(1f).fillMaxHeight()) {
-                                Tabs()
-                                HorizontalDivider(color = border)
                                 if (aiOpen) {
+                                    AiHeader()
                                     AiTemplateTab(
                                         coverOnly, wide = true, onImport = onImportTemplate, onGenerated = editor::importGeneratedTemplate, gen = templateGen,
-                                        modifier = Modifier.fillMaxSize().verticalScroll(aiScroll).padding(start = Space.s24, end = Space.s24, top = Space.s20, bottom = Space.s40),
+                                        modifier = Modifier.fillMaxSize().verticalScroll(aiScroll).padding(start = Space.s4, end = Space.s4, top = Space.s20, bottom = Space.s40),
                                     )
                                 } else {
-                                    // Each tab keeps its own scroll, and the first time one shows, its picked tile comes into view.
+                                    Toolbar(220.dp, stringResource(R.string.all_templates))
+                                    // Each face keeps its own scroll, and the first time one shows, its picked tile comes into view.
                                     val grid = if (face == Face.PAGES) pagesGrid else coverGrid
                                     LaunchedEffect(face) {
                                         if (!revealed.add(face)) return@LaunchedEffect
@@ -1007,7 +911,7 @@ internal fun NewNoteScreen(
                                             columns = GridCells.Adaptive(112.dp),
                                             modifier = Modifier.fillMaxSize(),
                                             state = grid,
-                                            contentPadding = PaddingValues(start = Space.s24, end = Space.s24, top = Space.s16, bottom = Space.s40),
+                                            contentPadding = PaddingValues(top = Space.s16, bottom = Space.s40),
                                             horizontalArrangement = Arrangement.spacedBy(Space.s16),
                                             verticalArrangement = Arrangement.spacedBy(Space.s16),
                                         ) { gallery() }
@@ -1016,58 +920,73 @@ internal fun NewNoteScreen(
                             }
                         }
                     } else {
-                        var tuneOpen by remember { mutableStateOf(false) }
-                        Box(Modifier.weight(1f).fillMaxWidth()) {
-                            LazyVerticalGrid(
-                                columns = GridCells.Adaptive(100.dp),
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(start = Space.s16, end = Space.s16, bottom = 96.dp),
-                                horizontalArrangement = Arrangement.spacedBy(Space.s12),
-                                verticalArrangement = Arrangement.spacedBy(Space.s16),
-                            ) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(100.dp),
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentPadding = PaddingValues(start = Space.s16, end = Space.s16, bottom = Space.s32),
+                            horizontalArrangement = Arrangement.spacedBy(Space.s12),
+                            verticalArrangement = Arrangement.spacedBy(Space.s12),
+                        ) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(top = Space.s8, bottom = Space.s12),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(Space.s16),
+                                ) {
+                                    Sheets(100.dp, 140.dp)
+                                    if (!coverOnly) SizeRow()
+                                    FaceRow(Modifier.fillMaxWidth().padding(horizontal = Space.s4))
+                                }
+                            }
+                            item(span = { GridItemSpan(maxLineSpan) }) { if (aiOpen) AiHeader() else Toolbar(168.dp, stringResource(R.string.tag_all)) }
+                            if (aiOpen) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
-                                    Column(
-                                        Modifier.fillMaxWidth().padding(top = Space.s12).background(palette.bg.toComposeColor(), RoundedCornerShape(12.dp)).padding(Space.s16),
-                                        verticalArrangement = Arrangement.spacedBy(Space.s12),
-                                    ) {
-                                        Sheets(120.dp, 170.dp)
-                                        if (!coverOnly) FormatRow()
-                                    }
+                                    AiTemplateTab(coverOnly, wide = false, onImport = onImportTemplate, onGenerated = editor::importGeneratedTemplate, gen = templateGen, modifier = Modifier.padding(top = Space.s12))
                                 }
-                                item(span = { GridItemSpan(maxLineSpan) }) { Tabs() }
-                                if (aiOpen) {
-                                    item(span = { GridItemSpan(maxLineSpan) }) {
-                                        AiTemplateTab(coverOnly, wide = false, onImport = onImportTemplate, onGenerated = editor::importGeneratedTemplate, gen = templateGen, modifier = Modifier.padding(top = Space.s12))
-                                    }
-                                } else gallery()
-                            }
-                            Row(
-                                Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth()
-                                    .background(palette.menuBg.toComposeColor(), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                                    .clickable { tuneOpen = true }
-                                    .padding(horizontal = Space.s20, vertical = Space.s16),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        when {
-                                            face == Face.PAGES -> pageT?.name ?: stringResource(R.string.plain_paper)
-                                            hasCover -> coverT!!.name
-                                            else -> stringResource(R.string.no_cover)
-                                        },
-                                        color = text, fontSize = TextSize.title, fontWeight = FontWeight.Medium,
-                                    )
-                                    Text(stringResource(if (face == Face.PAGES) R.string.every_page else R.string.cover), color = dim, fontSize = TextSize.label)
-                                }
-                                Text(stringResource(R.string.customize), color = accent, fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
-                            }
+                            } else gallery()
                         }
-                        if (tuneOpen) {
-                            ModalBottomSheet(onDismissRequest = { tuneOpen = false }, containerColor = palette.menuBg.toComposeColor()) {
-                                Column(Modifier.padding(horizontal = Space.s20).verticalScroll(rememberScrollState())) { Tune() }
-                            }
+                    }
+                }
+
+                // Beside the note on a wide screen, so the sheets show every change; a tap elsewhere or Back puts it away.
+                if (wide && customOpen) {
+                    BackHandler { customOpen = false }
+                    Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { customOpen = false } })
+                    val shape = MaterialTheme.shapes.large
+                    ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
+                        Column(
+                            Modifier
+                                .padding(start = GUTTER + NOTE_W + GUTTER, top = TOP_BAR)
+                                .width(PANEL_WIDTH + 24.dp)
+                                .heightIn(max = screenH - TOP_BAR - 16.dp)
+                                .background(panel.sheet, shape)
+                                .border(1.dp, border, shape)
+                                .clip(shape)
+                                .pointerInput(Unit) { detectTapGestures { } }
+                                .verticalScroll(rememberScrollState())
+                                .padding(start = Space.s12, top = Space.s12, end = Space.s12, bottom = Space.s16),
+                            verticalArrangement = Arrangement.spacedBy(Space.s8),
+                        ) { CustomizeContent() }
+                    }
+                }
+                // On a narrow screen it rises from the bottom only as far as the sheets, which stay in view above it.
+                if (!wide && customOpen) {
+                    ModalBottomSheet(
+                        onDismissRequest = { customOpen = false },
+                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                        shape = MaterialTheme.shapes.large.copy(bottomStart = CornerSize(0), bottomEnd = CornerSize(0)),
+                        containerColor = panel.sheet,
+                        dragHandle = { BottomSheetDefaults.DragHandle(color = dim.copy(alpha = 0.4f)) },
+                    ) {
+                        ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = screenH * 0.6f)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(start = Space.s12, end = Space.s12, bottom = Space.s24),
+                                verticalArrangement = Arrangement.spacedBy(Space.s8),
+                            ) { CustomizeContent() }
                         }
                     }
                 }

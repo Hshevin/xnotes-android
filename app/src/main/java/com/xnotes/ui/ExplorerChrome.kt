@@ -7,12 +7,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -23,12 +20,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,11 +44,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -128,7 +131,7 @@ private fun ChipBody(
             .background(if (on) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
             .border(1.dp, if (on) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.small)
             .clickable(onClick = onClick)
-            .padding(start = if (icon != null) 8.dp else 12.dp, end = if (trailing != null || !labelled) 8.dp else 12.dp),
+            .padding(start = if (icon != null) Space.s8 else Space.s12, end = if (trailing != null || !labelled) Space.s8 else Space.s12),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s6, Alignment.CenterHorizontally),
     ) {
@@ -320,7 +323,7 @@ internal fun TileBadge(icon: ImageVector, text: String, modifier: Modifier = Mod
             .clip(shape)
             .background(palette.bg.withAlpha(if (palette.isDark) 200 else 235).toComposeColor())
             .border(1.dp, palette.border.toComposeColor(), shape)
-            .padding(start = 6.dp, end = if (text.isEmpty()) 6.dp else 8.dp),
+            .padding(start = Space.s6, end = if (text.isEmpty()) Space.s6 else Space.s8),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s4),
     ) {
@@ -349,7 +352,7 @@ internal fun CheckRing(selected: Boolean, modifier: Modifier = Modifier) {
 @Composable
 internal fun RowCheck(selected: Boolean, modifier: Modifier = Modifier) {
     val palette = LocalPalette.current
-    val shape = RoundedCornerShape(3.dp)
+    val shape = MaterialTheme.shapes.extraSmall
     Box(
         modifier
             .size(18.dp)
@@ -362,156 +365,237 @@ internal fun RowCheck(selected: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
+/** Every value control in the View menu is this wide, so their edges line up down a card. */
+private val PICKER_WIDTH = 148.dp
+
+private val DIRECTION_BUTTON = 36.dp
+
 /**
- * The View options popover's contents: every setting of [view] the current [layout] uses, applied as it's tapped.
+ * The explorer's View menu: every setting of [view] its layout uses, applied as it's tapped.
  * [everyFolder] is whether one view serves every folder; off, each folder keeps its own.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ViewOptionsContent(
+internal fun ViewOptionsMenu(
     view: ExplorerView,
     layouts: List<ExplorerLayout>,
     everyFolder: Boolean,
     onChange: (ExplorerView) -> Unit,
     onReset: () -> Unit,
     onEveryFolder: (Boolean) -> Unit,
-    onClose: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    val palette = LocalPalette.current
     val layout = view.layout
-    Column(Modifier.widthIn(max = 372.dp).padding(start = Space.s20, end = Space.s12, top = Space.s6, bottom = Space.s12), verticalArrangement = Arrangement.spacedBy(Space.s16)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.toolbar_view), color = palette.text.toComposeColor(), fontSize = TextSize.title, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Text(
-                stringResource(R.string.reset),
-                color = palette.accent.toComposeColor(),
-                fontSize = TextSize.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onReset).padding(horizontal = Space.s8, vertical = Space.s6),
-            )
-            ExplorerIcon(XnotesIcons.close, stringResource(R.string.close_view_options), palette.textDim.toComposeColor(), onClick = onClose)
-        }
-        OptionBlock(stringResource(R.string.opt_layout)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                layouts.forEach { l ->
-                    val on = l == layout
-                    val shape = MaterialTheme.shapes.medium
-                    Column(
-                        Modifier
-                            .width(62.dp)
-                            .height(62.dp)
-                            .clip(shape)
-                            .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
-                            .border(1.dp, if (on) palette.accent.toComposeColor() else palette.border.toComposeColor(), shape)
-                            .clickable { onChange(view.copy(layout = l)) },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        val tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
-                        Icon(layoutIcon(l), null, tint = tint, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.height(Space.s4))
-                        Text(stringResource(l.labelRes), color = tint, fontSize = TextSize.label, lineHeight = 14.sp, maxLines = 1)
+    ToolMenu(
+        stringResource(R.string.toolbar_view),
+        onDismiss,
+        width = 360.dp,
+        action = { PanelChip(stringResource(R.string.reset), onClick = onReset) },
+    ) {
+        // How a file is drawn.
+        MenuCard(buildList<MenuGroup> {
+            add {
+                ViewPicker(stringResource(R.string.opt_layout), stringResource(layout.labelRes), icon = layoutIcon(layout), listWidth = 180.dp) { close ->
+                    layouts.forEach { l ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(l.labelRes)) },
+                            onClick = { close(); onChange(view.copy(layout = l)) },
+                            leadingIcon = { Icon(layoutIcon(l), null, modifier = Modifier.size(18.dp)) },
+                            selected = l == layout,
+                        )
                     }
                 }
             }
-        }
-        if (layout == ExplorerLayout.LIST) {
-            OptionBlock(stringResource(R.string.opt_rows)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    ExplorerChip(stringResource(R.string.rows_comfortable), !view.compactRows) { onChange(view.copy(compactRows = false)) }
-                    ExplorerChip(stringResource(R.string.rows_compact), view.compactRows) { onChange(view.copy(compactRows = true)) }
-                }
-            }
-        } else if (layout != ExplorerLayout.COLUMNS) {
-            OptionBlock(stringResource(R.string.opt_tile_size)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    TileSize.entries.forEach { t -> ExplorerChip(t.label, view.tileSize == t, Modifier.widthIn(min = 48.dp)) { onChange(view.copy(tileSize = t)) } }
-                }
-                if (layout == ExplorerLayout.GRID) {
-                    Text(stringResource(R.string.pinch_hint), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
-                }
-            }
-        }
-        if (layout == ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_place_by)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    ExplorerChip(stringResource(R.string.sort_created), view.timelineByCreated) { onChange(view.copy(timelineByCreated = true)) }
-                    ExplorerChip(stringResource(R.string.sort_modified), !view.timelineByCreated) { onChange(view.copy(timelineByCreated = false)) }
-                }
-            }
-        }
-        if (layout == ExplorerLayout.GRID) {
-            OptionBlock(stringResource(R.string.opt_thumbnail)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    ExplorerChip(stringResource(R.string.thumb_top), view.thumb == ThumbShape.TOP) { onChange(view.copy(thumb = ThumbShape.TOP)) }
-                    ExplorerChip(stringResource(R.string.thumb_page), view.thumb == ThumbShape.PAGE) { onChange(view.copy(thumb = ThumbShape.PAGE)) }
-                }
-            }
-        }
-        if (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_show_on_tiles)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s8), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    @Composable
-                    fun toggle(label: String, on: Boolean, flip: () -> ExplorerView) =
-                        ExplorerChip(label, on, icon = if (on) XnotesIcons.check else XnotesIcons.plus) { onChange(flip()) }
-                    toggle(stringResource(R.string.group_kind), view.showKind) { view.copy(showKind = !view.showKind) }
-                    if (layout != ExplorerLayout.TIMELINE) {
-                        toggle(stringResource(R.string.show_page_count), view.showPages) { view.copy(showPages = !view.showPages) }
-                        toggle(stringResource(R.string.show_time), view.showTime) { view.copy(showTime = !view.showTime) }
-                        toggle(stringResource(R.string.sort_size), view.showSize) { view.copy(showSize = !view.showSize) }
+            if (layout != ExplorerLayout.LIST && layout != ExplorerLayout.COLUMNS) {
+                add {
+                    MenuRow(stringResource(R.string.opt_tile_size)) {
+                        val sizes = TileSize.entries
+                        Slider(
+                            value = view.tileSize.ordinal.toFloat(),
+                            onValueChange = { v ->
+                                val size = sizes[v.roundToInt().coerceIn(0, sizes.lastIndex)]
+                                if (size != view.tileSize) onChange(view.copy(tileSize = size))
+                            },
+                            valueRange = 0f..sizes.lastIndex.toFloat(),
+                            steps = sizes.size - 2,
+                            colors = NoTicks,
+                            modifier = Modifier.width(PICKER_WIDTH).height(32.dp),
+                        )
                     }
-                    toggle(stringResource(R.string.colour_code), view.showColour) { view.copy(showColour = !view.showColour) }
                 }
             }
-        }
-        if (layout != ExplorerLayout.COLUMNS && layout != ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_group_by)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    GroupBy.entries.forEach { g -> ExplorerChip(stringResource(g.labelRes), view.groupBy == g) { onChange(view.copy(groupBy = g)) } }
-                }
+            if (layout == ExplorerLayout.LIST) {
+                add { MenuSwitch(stringResource(R.string.opt_compact_rows), view.compactRows) { onChange(view.copy(compactRows = it)) } }
             }
-        }
-        if (layout != ExplorerLayout.TIMELINE) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.sort_by), color = palette.accent.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.weight(1f))
-                    Text(directionLabel(view.sortKey, view.descending), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s8), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    listOf(ExplorerSortKey.NAME to stringResource(R.string.sort_name), ExplorerSortKey.MODIFIED to stringResource(R.string.modified), ExplorerSortKey.CREATED to stringResource(R.string.created), ExplorerSortKey.SIZE to stringResource(R.string.sort_size)).forEach { (k, label) ->
-                        val active = view.sortKey == k
-                        ExplorerChip(label, active, trailing = if (active) (if (view.descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp) else null) {
-                            onChange(if (active) view.copy(descending = !view.descending) else view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
+            if (layout == ExplorerLayout.TIMELINE) {
+                add {
+                    val created = stringResource(R.string.sort_created)
+                    val modified = stringResource(R.string.sort_modified)
+                    ViewPicker(stringResource(R.string.opt_place_by), if (view.timelineByCreated) created else modified, listWidth = 180.dp) { close ->
+                        listOf(true to created, false to modified).forEach { (byCreated, label) ->
+                            ChoiceMenuItem(byCreated == view.timelineByCreated, onClick = { close(); onChange(view.copy(timelineByCreated = byCreated)) }) { fg ->
+                                Text(label, color = fg)
+                            }
                         }
                     }
                 }
             }
-            OptionBlock(stringResource(R.string.kind_folders)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                    FolderPlacement.entries.forEach { f -> ExplorerChip(stringResource(f.labelRes), view.folders == f) { onChange(view.copy(folders = f)) } }
+            if (layout == ExplorerLayout.GRID) {
+                add {
+                    MenuSwitch(stringResource(R.string.opt_whole_page_thumbs), view.thumb == ThumbShape.PAGE) {
+                        onChange(view.copy(thumb = if (it) ThumbShape.PAGE else ThumbShape.TOP))
+                    }
                 }
             }
-        }
-        HorizontalDivider(color = palette.border.toComposeColor())
-        Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraSmall).clickable { onEveryFolder(!everyFolder) }.padding(vertical = Space.s2),
-            verticalAlignment = Alignment.Top,
-        ) {
-            RowCheck(everyFolder, Modifier.padding(top = Space.s2))
-            Spacer(Modifier.width(Space.s12))
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-                Text(stringResource(R.string.view_every_folder), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge)
-                Text(stringResource(R.string.view_every_folder_hint), color = palette.textDim.toComposeColor(), fontSize = TextSize.label)
+            if (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE) {
+                add {
+                    // The Timeline's cards carry only the kind and the colour code.
+                    val full = layout != ExplorerLayout.TIMELINE
+                    val shown = if (full) listOf(view.showKind, view.showPages, view.showTime, view.showSize, view.showColour) else listOf(view.showKind, view.showColour)
+                    ViewPicker(stringResource(R.string.opt_show_on_tiles), stringResource(R.string.shown_of, shown.count { it }, shown.size), listWidth = 200.dp) {
+                        @Composable
+                        fun mark(label: String, on: Boolean, flip: () -> ExplorerView) = DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = { onChange(flip()) },
+                            leadingIcon = { RowCheck(on) },
+                        )
+                        mark(stringResource(R.string.group_kind), view.showKind) { view.copy(showKind = !view.showKind) }
+                        if (full) {
+                            mark(stringResource(R.string.show_page_count), view.showPages) { view.copy(showPages = !view.showPages) }
+                            mark(stringResource(R.string.show_time), view.showTime) { view.copy(showTime = !view.showTime) }
+                            mark(stringResource(R.string.sort_size), view.showSize) { view.copy(showSize = !view.showSize) }
+                        }
+                        mark(stringResource(R.string.colour_code), view.showColour) { view.copy(showColour = !view.showColour) }
+                    }
+                }
             }
+        })
+        // How the files are ordered.
+        MenuCard(buildList<MenuGroup> {
+            if (layout != ExplorerLayout.TIMELINE) {
+                add {
+                    ViewPicker(
+                        stringResource(R.string.sort_by),
+                        shortSortLabel(view.sortKey),
+                        fieldWidth = PICKER_WIDTH - DIRECTION_BUTTON - 8.dp,
+                        listWidth = 200.dp,
+                        beside = { SortDirectionButton(view.sortKey, view.descending) { onChange(view.copy(descending = !view.descending)) } },
+                    ) { close ->
+                        ExplorerSortKey.entries.forEach { k ->
+                            ChoiceMenuItem(k == view.sortKey, onClick = {
+                                close()
+                                if (k != view.sortKey) onChange(view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
+                            }) { fg -> Text(sortLabel(k), color = fg) }
+                        }
+                        MenuDivider()
+                        // Names read A to Z first; dates and sizes newest and largest first.
+                        val orders = if (view.sortKey == ExplorerSortKey.NAME) listOf(false, true) else listOf(true, false)
+                        orders.forEach { descending ->
+                            ChoiceMenuItem(descending == view.descending, onClick = { close(); onChange(view.copy(descending = descending)) }) { fg ->
+                                Text(directionLabel(view.sortKey, descending), color = fg)
+                            }
+                        }
+                    }
+                }
+            }
+            if (layout != ExplorerLayout.COLUMNS && layout != ExplorerLayout.TIMELINE) {
+                add {
+                    ViewPicker(stringResource(R.string.opt_group_by), stringResource(view.groupBy.labelRes), listWidth = 160.dp) { close ->
+                        GroupBy.entries.forEach { g ->
+                            ChoiceMenuItem(g == view.groupBy, onClick = { close(); onChange(view.copy(groupBy = g)) }) { fg -> Text(stringResource(g.labelRes), color = fg) }
+                        }
+                    }
+                }
+            }
+            if (layout != ExplorerLayout.TIMELINE) {
+                add {
+                    ViewPicker(stringResource(R.string.kind_folders), stringResource(view.folders.labelRes), listWidth = 160.dp) { close ->
+                        FolderPlacement.entries.forEach { f ->
+                            ChoiceMenuItem(f == view.folders, onClick = { close(); onChange(view.copy(folders = f)) }) { fg -> Text(stringResource(f.labelRes), color = fg) }
+                        }
+                    }
+                }
+            }
+        })
+        MenuCard(listOf<MenuGroup> { MenuSwitch(stringResource(R.string.view_every_folder), everyFolder, onChange = onEveryFolder) })
+    }
+}
+
+/** The sort field's word for each key; its list spells the dates out. */
+@Composable
+private fun shortSortLabel(k: ExplorerSortKey): String = when (k) {
+    ExplorerSortKey.NAME -> stringResource(R.string.sort_name)
+    ExplorerSortKey.MODIFIED -> stringResource(R.string.modified)
+    ExplorerSortKey.CREATED -> stringResource(R.string.created)
+    ExplorerSortKey.SIZE -> stringResource(R.string.sort_size)
+}
+
+/** A View menu setting whose [value] sits on a field that opens [items] under it, with room [beside] it for one more button. */
+@Composable
+private fun ViewPicker(
+    label: String,
+    value: String,
+    icon: ImageVector? = null,
+    fieldWidth: Dp = PICKER_WIDTH,
+    listWidth: Dp = 180.dp,
+    beside: (@Composable () -> Unit)? = null,
+    items: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    MenuRow(label) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+            Box {
+                PickerField(value, icon, open, Modifier.width(fieldWidth)) { open = !open }
+                // Hung under the field with its end in line with the row's last control.
+                DropdownMenu(
+                    expanded = open,
+                    onDismissRequest = { open = false },
+                    modifier = Modifier.width(listWidth),
+                    offset = DpOffset(PICKER_WIDTH - listWidth, 4.dp),
+                ) { items { open = false } }
+            }
+            beside?.invoke()
         }
     }
 }
 
+/** A value on a raised field, ringed in the accent while its list is open. */
 @Composable
-private fun OptionBlock(label: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s8)) {
-        Text(label, color = LocalPalette.current.accent.toComposeColor(), fontSize = TextSize.body)
-        content()
+private fun PickerField(value: String, icon: ImageVector?, open: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val shape = MaterialTheme.shapes.small
+    Row(
+        modifier
+            .height(36.dp)
+            .clip(shape)
+            .background(panelColors().raised)
+            .border(1.dp, if (open) palette.accent.toComposeColor() else Color.Transparent, shape)
+            .clickable(role = Role.DropdownList, onClick = onClick)
+            .padding(start = Space.s12, end = Space.s8),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s8),
+    ) {
+        if (icon != null) Icon(icon, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(16.dp))
+        Text(value, color = palette.text.toComposeColor(), fontSize = TextSize.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Icon(if (open) XnotesIcons.chevronUp else XnotesIcons.chevronDown, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+    }
+}
+
+/** Turns the sort round; its arrow points the way the order runs. */
+@Composable
+private fun SortDirectionButton(key: ExplorerSortKey, descending: Boolean, onFlip: () -> Unit) {
+    val palette = LocalPalette.current
+    val label = directionLabel(key, descending)
+    Tooltip(label) {
+        Box(
+            Modifier
+                .size(DIRECTION_BUTTON)
+                .clip(MaterialTheme.shapes.small)
+                .background(panelColors().raised)
+                .clickable(role = Role.Button, onClick = onFlip),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp, label, tint = palette.accent.toComposeColor(), modifier = Modifier.size(18.dp))
+        }
     }
 }
 

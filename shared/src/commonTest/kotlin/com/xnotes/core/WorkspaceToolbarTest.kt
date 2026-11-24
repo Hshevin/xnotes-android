@@ -29,11 +29,11 @@ class WorkspaceToolbarTest {
             for (kind in documents) {
                 val local = items(documentToolbarLayout(layout, kind, documents))
                 if (kind == ToolbarDocument.MAP) assertTrue(local.isEmpty())
-                else assertTrue(local.containsAll(listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES)))
                 assertTrue(common.intersect(local.toSet()).isEmpty())
                 assertEquals(local.size, local.distinct().size)
-                assertEquals(kind == ToolbarDocument.NOTE || kind == ToolbarDocument.PDF, ToolbarItem.PAGE_NAV in local)
-                assertEquals(kind == ToolbarDocument.CANVAS, ToolbarItem.WAYPOINTS in local)
+                // View settings sit behind each pane's gear; what stays per document on the bar is its own panel.
+                assertEquals(kind == ToolbarDocument.NOTE || kind == ToolbarDocument.PDF, ToolbarItem.SIDEBAR in local)
+                assertEquals(kind == ToolbarDocument.CANVAS, ToolbarItem.LAYERS in local)
             }
             if (ToolbarDocument.MAP in documents) assertTrue(common.isEmpty())
             else assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT, ToolbarItem.AI)))
@@ -47,7 +47,7 @@ class WorkspaceToolbarTest {
         val common = layout.forDocumentControls(false).visibleSections.flatMap { it.visibleEntries }.map { it.item }
         val document = layout.forDocumentControls(true).visibleSections.flatMap { it.visibleEntries }.map { it.item }
         assertTrue(common.containsAll(listOf(ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT)))
-        assertTrue(document.containsAll(listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK)))
+        assertTrue(document.containsAll(listOf(ToolbarItem.SIDEBAR, ToolbarItem.LAYERS)))
         assertTrue(ToolbarItem.PEN in common)
         assertTrue(ToolbarItem.ERASER in common)
         assertTrue(ToolbarItem.MARKUP in document)
@@ -60,10 +60,9 @@ class WorkspaceToolbarTest {
         fun items(canvas: Boolean, pdf: Boolean) = documentToolbarLayout(layout, canvas, pdf).visibleSections.flatMap { it.visibleEntries }.map { it.item }
         assertTrue(ToolbarItem.MARKUP in items(false, true))
         assertFalse(ToolbarItem.MARKUP in items(false, false))
-        assertFalse(ToolbarItem.PAGE_NAV in items(true, false))
-        assertTrue(ToolbarItem.MINIMAP in items(true, false))
-        assertTrue(items(true, false).containsAll(listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK)))
-        assertFalse(ToolbarItem.MINIMAP in items(false, true))
+        assertFalse(ToolbarItem.SIDEBAR in items(true, false))
+        assertTrue(ToolbarItem.LAYERS in items(true, false))
+        assertFalse(ToolbarItem.LAYERS in items(false, true))
     }
 
     @Test fun insertSpaceIsCommonForNotesAndPdfs() {

@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -9,11 +10,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,22 +32,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,7 +63,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
@@ -71,8 +78,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -81,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Page
+import com.xnotes.core.model.Rgba
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -94,6 +104,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** The side panel's tabs. */
+/** In the order the tabs stand, which the glide behind the chosen one reads. */
 enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH, LAYERS }
 
 /**
@@ -118,7 +129,6 @@ fun SidePanel(
     if (pickingCover) {
         NewNoteScreen(
             editor = editor,
-            folderName = "",
             initialName = "",
             error = null,
             busy = false,
@@ -138,13 +148,7 @@ fun SidePanel(
             .fillMaxHeight()
             .background(palette.panel.toComposeColor()),
     ) {
-        Row(Modifier.fillMaxWidth().padding(Space.s4), horizontalArrangement = Arrangement.SpaceEvenly) {
-            SegIcon(XnotesIcons.thumbnails, stringResource(R.string.pages), tab == SidePanelTab.PAGES) { editor.sidePanelTab = SidePanelTab.PAGES }
-            SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == SidePanelTab.CONTENTS) { editor.sidePanelTab = SidePanelTab.CONTENTS }
-            SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == SidePanelTab.BOOKMARKS) { editor.sidePanelTab = SidePanelTab.BOOKMARKS }
-            SegIcon(XnotesIcons.layers, stringResource(R.string.layers_title), tab == SidePanelTab.LAYERS) { editor.sidePanelTab = SidePanelTab.LAYERS }
-            SegIcon(XnotesIcons.search, stringResource(R.string.search), tab == SidePanelTab.SEARCH, shortcut = Keys.SEARCH) { editor.sidePanelTab = SidePanelTab.SEARCH }
-        }
+        PanelTabs(editor)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when (tab) {
                 SidePanelTab.PAGES -> PagesTab(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf) { pickingCover = true }
@@ -153,24 +157,66 @@ fun SidePanel(
                 SidePanelTab.SEARCH -> SearchTab(editor)
                 SidePanelTab.LAYERS -> LayersSidebar(editor)
             }
-        }
-        if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {
-            PageSelectionBar(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
+            if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {
+                PageSelectionBar(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, Modifier.align(Alignment.BottomCenter))
+            }
         }
     }
 }
 
+/** The tabs along the panel's top; the chosen one sits in a pill that glides over to each new pick. */
 @Composable
-private fun SegIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, selected: Boolean, shortcut: String? = null, onClick: () -> Unit) {
+private fun PanelTabs(editor: Editor) {
     val palette = LocalPalette.current
-    Tooltip(desc, shortcut = shortcut) {
-        IconButton(onClick = onClick) {
-            Icon(
-                icon,
-                contentDescription = desc,
-                tint = if (selected) palette.accent.toComposeColor() else palette.textDim.toComposeColor(),
-                modifier = Modifier.size(20.dp),
-            )
+    var cell by remember { mutableStateOf(0f) }
+    val glide = rememberGlide(if (cell > 0f) cell * (editor.sidePanelTab.ordinal + 0.5f) else null)
+    val shape = MaterialTheme.shapes.small
+    val fill = palette.selectionBackground.toComposeColor()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .padding(horizontal = Space.s8)
+            .onSizeChanged { cell = it.width / SidePanelTab.entries.size.toFloat() }
+            .drawBehind {
+                if (glide.visible == 0f) return@drawBehind
+                val w = TAB_PILL_W.toPx().coerceAtMost(cell)
+                val h = TAB_PILL_H.toPx()
+                translate(glide.start(w), (size.height - h) / 2f) {
+                    drawOutline(shape.createOutline(Size(w + glide.stretch, h), layoutDirection, this), fill.copy(alpha = fill.alpha * glide.visible))
+                }
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PanelTab(editor, SidePanelTab.PAGES, XnotesIcons.thumbnails, stringResource(R.string.pages))
+        PanelTab(editor, SidePanelTab.CONTENTS, XnotesIcons.contents, stringResource(R.string.contents))
+        PanelTab(editor, SidePanelTab.BOOKMARKS, XnotesIcons.bookmark, stringResource(R.string.bookmarks))
+        PanelTab(editor, SidePanelTab.SEARCH, XnotesIcons.search, stringResource(R.string.search), Keys.SEARCH)
+        PanelTab(editor, SidePanelTab.LAYERS, XnotesIcons.layers, stringResource(R.string.layers_title))
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(palette.border.toComposeColor()))
+}
+
+/** The pill behind the chosen tab. */
+private val TAB_PILL_W = 52.dp
+private val TAB_PILL_H = 32.dp
+
+@Composable
+private fun RowScope.PanelTab(editor: Editor, tab: SidePanelTab, icon: ImageVector, label: String, shortcut: String? = null) {
+    val palette = LocalPalette.current
+    val selected = editor.sidePanelTab == tab
+    val tint by animateColorAsState(
+        (if (selected) palette.selectionForeground else palette.accent).toComposeColor(),
+        tween(GLIDE_TINT_MS),
+        label = "tabTint",
+    )
+    // No ripple: the pill is the feedback, as on the toolbar.
+    Tooltip(label, Modifier.weight(1f).height(40.dp), shortcut = shortcut) {
+        Box(
+            Modifier.selectable(selected, remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { editor.sidePanelTab = tab },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -191,6 +237,8 @@ private fun PagesTab(
     // contentVersion drives a fresh read of the order whenever the page list changes.
     val pages = remember(editor.contentVersion) { editor.pagesSnapshot() }
     val selecting = editor.inPageSelectionMode
+    // A read-only note's pages are only turned to: none is picked up, moved or given a menu.
+    val reading = editor.readOnly
     // One panel-wide "the list has stopped moving" flag. The custom scrollbar amplifies a slow
     // finger scrub into large page-space jumps, so the old per-row 150ms debounce still fired ~8
     // renders per window it swept past and stormed the CPU / the single-threaded PDF render lock.
@@ -225,9 +273,11 @@ private fun PagesTab(
     LaunchedEffect(drag != null) {
         val band = with(density) { 56.dp.toPx() }
         val step = with(density) { 22.dp.toPx() }
+        // Only selected pages are carried, so the selection bar floats over the list's foot meanwhile.
+        val barRoom = with(density) { SELECTION_BAR_ROOM.toPx() }
         while (drag != null) {
             val y = finger.y
-            val bottom = boxSize.height.toFloat()
+            val bottom = boxSize.height - barRoom
             val delta = when {
                 y < band -> -((band - y) / band).coerceIn(0f, 1f) * step
                 y > bottom - band -> ((y - (bottom - band)) / band).coerceIn(0f, 1f) * step
@@ -248,7 +298,8 @@ private fun PagesTab(
             // Long-presses live on the panel, not the rows, so a drag keeps running while the list
             // scrolls its pressed row away: the first selects a page, a second on a selected page
             // picks the whole selection up. Taps stay with the rows.
-            .pointerInput(editor) {
+            .pointerInput(editor, reading) {
+                if (reading) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     // Only a held, near-still single finger qualifies; a lift, a scroll or a second finger ends the wait first.
@@ -334,12 +385,14 @@ private fun PagesTab(
         LazyColumn(
             Modifier.fillMaxSize().padding(LIST_PAD),
             state = listState,
+            // Room under the last page so it can scroll clear of the floating selection bar.
+            contentPadding = PaddingValues(bottom = if (selecting) SELECTION_BAR_ROOM else 0.dp),
             verticalArrangement = Arrangement.spacedBy(ROW_GAP),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             itemsIndexed(pages, key = { _, page -> page.uid }) { index, page ->
                 val carried = drag?.pages?.any { it === page } == true
-                PageThumb(editor, index, page, selecting, settled, carried, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover)
+                PageThumb(editor, index, page, selecting, settled, carried, reading, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover)
             }
         }
         drag?.let { d ->
@@ -356,6 +409,9 @@ private val ROW_GAP = 10.dp
 
 /** A thumbnail's width in the panel. */
 private val THUMB_W = 150.dp
+
+/** How much of the list's foot the floating selection bar covers, its margins included. */
+private val SELECTION_BAR_ROOM = 60.dp
 
 /** Selected pages being carried; the one pressed lay at [from] in the panel and shows as [bitmap] at its [aspect]. */
 private class PageDrag(val pages: List<Page>, val from: Offset, val bitmap: ImageBitmap?, val aspect: Float)
@@ -444,6 +500,8 @@ private fun PageThumb(
     settled: Boolean,
     /** Lifted in a drag: the row dims while the pages are carried. */
     carried: Boolean,
+    /** The note is read-only: a tap turns to the page and that is all. */
+    reading: Boolean,
     rowModifier: Modifier,
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
@@ -489,20 +547,16 @@ private fun PageThumb(
                 // Tap navigates (or toggles selection in select mode). Long-presses belong to the
                 // panel (see PagesTab), so a drag survives the row scrolling away.
                 .clickable { if (selecting) editor.togglePageSelection(index) else editor.goToPage(index) }
-                .semantics { onLongClick { editor.togglePageSelection(index); true } },
+                .then(if (reading) Modifier else Modifier.semantics { onLongClick { editor.togglePageSelection(index); true } }),
         ) {
             bitmap?.let { Image(it, contentDescription = stringResource(R.string.page_n, index + 1), modifier = Modifier.fillMaxSize()) }
 
             if (selected) {
                 Box(Modifier.matchParentSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
-                Box(
-                    Modifier.align(Alignment.TopStart).padding(Space.s4).size(20.dp)
-                        .clip(CircleShape).background(palette.accent.toComposeColor()),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(XnotesIcons.check, stringResource(R.string.selected), tint = palette.onAccent.toComposeColor(), modifier = Modifier.size(13.dp))
-                }
-            } else if (!selecting) {
+                SelectMark(checked = true, Modifier.align(Alignment.TopStart))
+            } else if (selecting) {
+                SelectMark(checked = false, Modifier.align(Alignment.TopStart))
+            } else if (!reading) {
                 // Three-dot menu, on a faint scrim so it reads over any thumbnail.
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.s2)) {
                     Tooltip(stringResource(R.string.page_options)) {
@@ -531,6 +585,30 @@ private fun PageThumb(
     }
 }
 
+/** A page's corner mark while pages are being picked: a check on a picked page, an empty ring on the rest. */
+@Composable
+private fun SelectMark(checked: Boolean, modifier: Modifier) {
+    val palette = LocalPalette.current
+    val panel = palette.panel.toComposeColor()
+    Box(
+        modifier
+            .padding(Space.s4)
+            .size(26.dp)
+            .clip(CircleShape)
+            // A ring of the panel's colour keeps the check clear of the page drawn under it.
+            .background(if (checked) panel else Color.Transparent)
+            .padding(Space.s2)
+            .clip(CircleShape)
+            .then(
+                if (checked) Modifier.background(palette.accent.toComposeColor())
+                else Modifier.background(panel.copy(alpha = 0.5f)).border(1.5.dp, palette.text.toComposeColor(), CircleShape),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (checked) Icon(XnotesIcons.check, stringResource(R.string.selected), tint = palette.onAccent.toComposeColor(), modifier = Modifier.size(14.dp))
+    }
+}
+
 /** Page sub-pages of the three-dot menu (main / share-format / save-format / rotate). */
 private const val MENU_MAIN = 0
 private const val MENU_SHARE = 1
@@ -541,11 +619,10 @@ private const val MENU_ROTATE = 3
 @Composable
 private fun RotateRows(onBack: () -> Unit, onTurn: (Int) -> Unit) {
     val palette = LocalPalette.current
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
-    DropdownMenuItem(text = { Text(stringResource(R.string.back_rotate)) }, onClick = onBack)
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_right)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { onTurn(1) })
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_left)) }, leadingIcon = menuIcon(XnotesIcons.rotateLeft), onClick = { onTurn(3) })
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_upside_down)) }, leadingIcon = menuIcon(XnotesIcons.rotateHalf), onClick = { onTurn(2) })
+    MenuBack(stringResource(R.string.back_rotate), onBack)
+    MenuItem(stringResource(R.string.rotate_right), XnotesIcons.rotateRight, onClick = { onTurn(1) })
+    MenuItem(stringResource(R.string.rotate_left), XnotesIcons.rotateLeft, onClick = { onTurn(3) })
+    MenuItem(stringResource(R.string.rotate_upside_down), XnotesIcons.rotateHalf, onClick = { onTurn(2) })
 }
 
 @Composable
@@ -569,7 +646,6 @@ private fun PageContextMenu(
     var sub by remember { mutableStateOf(MENU_MAIN) }
     LaunchedEffect(expanded) { if (!expanded) sub = MENU_MAIN } // always reopen on the main page
     val one = listOf(index)
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         when (sub) {
             MENU_ROTATE -> RotateRows({ sub = MENU_MAIN }) { turns -> onDismiss(); editor.rotatePages(one, turns) }
@@ -585,32 +661,30 @@ private fun PageContextMenu(
             else -> {
                 // The cover is only ever the first page, so only it offers these.
                 if (isCover) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.change_cover)) }, leadingIcon = menuIcon(XnotesIcons.palette), onClick = { onDismiss(); onPickCover() })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.remove_cover)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.removeCover(); onDismiss() })
-                    HorizontalDivider(color = palette.border.toComposeColor())
+                    MenuItem(stringResource(R.string.change_cover), XnotesIcons.palette, onClick = { onDismiss(); onPickCover() })
+                    MenuItem(stringResource(R.string.remove_cover), XnotesIcons.trash, danger = true, onClick = { editor.removeCover(); onDismiss() })
+                    MenuDivider()
                 } else if (index == 0) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.add_cover_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.palette), onClick = { onDismiss(); onPickCover() })
-                    HorizontalDivider(color = palette.border.toComposeColor())
+                    MenuItem(stringResource(R.string.add_cover_ellipsis), XnotesIcons.palette, onClick = { onDismiss(); onPickCover() })
+                    MenuDivider()
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_page)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.insert_pdf)) }, leadingIcon = menuIcon(XnotesIcons.importDoc), onClick = { onInsertPdf(index); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { onDismiss(); editor.duplicatePages(one) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.map2_copy_page_link), fontSize = TextSize.body) },
-                    modifier = Modifier.heightIn(min = com.xnotes.ui.theme.MinTouchTarget),
-                    leadingIcon = menuIcon(XnotesIcons.link), onClick = { onDismiss(); onCopyPageLink() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
+                MenuItem(stringResource(R.string.add_page), XnotesIcons.plus, onClick = { editor.insertPageAfter(index); onDismiss() })
+                MenuItem(stringResource(R.string.insert_pdf), XnotesIcons.importDoc, onClick = { onInsertPdf(index); onDismiss() })
+                MenuItem(stringResource(R.string.duplicate), XnotesIcons.duplicate, onClick = { onDismiss(); editor.duplicatePages(one) })
+                MenuItem(stringResource(R.string.copy), XnotesIcons.copy, onClick = { editor.copyPages(one); onDismiss() })
+                MenuItem(stringResource(R.string.map2_copy_page_link), XnotesIcons.link, onClick = { onDismiss(); onCopyPageLink() })
+                MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })
+                    MenuItem(stringResource(R.string.paste), XnotesIcons.paste, onClick = { editor.pastePagesAfter(index); onDismiss() })
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.rotate_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { sub = MENU_ROTATE })
-                DropdownMenuItem(text = { Text(stringResource(R.string.page_size_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.pageSize), enabled = !isPdf, onClick = { onDismiss(); onPageSize() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.extract_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.extract), onClick = { onDismiss(); onExtract(false) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.move_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.moveToFolder), onClick = { onDismiss(); onExtract(true) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.erase_page)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { editor.erasePages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.deletePages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
-                DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
+                MenuItem(stringResource(R.string.rotate_ellipsis), XnotesIcons.rotateRight, more = true, onClick = { sub = MENU_ROTATE })
+                MenuItem(stringResource(R.string.page_size_ellipsis), XnotesIcons.pageSize, enabled = !isPdf, onClick = { onDismiss(); onPageSize() })
+                MenuItem(stringResource(R.string.extract_to_new_note), XnotesIcons.extract, onClick = { onDismiss(); onExtract(false) })
+                MenuItem(stringResource(R.string.move_to_new_note), XnotesIcons.moveToFolder, onClick = { onDismiss(); onExtract(true) })
+                MenuItem(stringResource(R.string.erase_page), XnotesIcons.eraser, danger = true, onClick = { editor.erasePages(one); onDismiss() })
+                MenuItem(stringResource(R.string.delete), XnotesIcons.trash, danger = true, onClick = { editor.deletePages(one); onDismiss() })
+                MenuItem(stringResource(R.string.share_ellipsis), XnotesIcons.share, more = true, onClick = { sub = MENU_SHARE })
+                MenuItem(stringResource(R.string.save_as_ellipsis), XnotesIcons.download, more = true, onClick = { sub = MENU_SAVE })
             }
         }
     }
@@ -621,42 +695,31 @@ private fun PageContextMenu(
 private fun ExtractDialog(editor: Editor, indices: List<Int>, move: Boolean, onDismiss: () -> Unit) {
     val suggested = remember(indices) { editor.extractName(indices) }
     var name by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(suggested, androidx.compose.ui.text.TextRange(0, suggested.length))) }
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(if (move) R.string.move_to_new_note_title else R.string.extract_to_new_note_title)) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                label = { Text(stringResource(R.string.new_note_name)) },
-                modifier = Modifier.focusRequester(focus),
-            )
+    val extract = { if (name.text.isNotBlank()) { onDismiss(); editor.extractPages(indices, name.text.trim(), move) } }
+    SheetDialog(
+        title = stringResource(if (move) R.string.move_to_new_note_title else R.string.extract_to_new_note_title),
+        onDismiss = onDismiss,
+        foot = {
+            ConfirmButtons(stringResource(if (move) R.string.move else R.string.extract), onDismiss, enabled = name.text.isNotBlank(), onConfirm = extract)
         },
-        confirmButton = {
-            TextButton(enabled = name.text.isNotBlank(), onClick = { onDismiss(); editor.extractPages(indices, name.text.trim(), move) }) {
-                Text(stringResource(if (move) R.string.move else R.string.extract))
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
+    ) {
+        DialogField(name, { name = it }, label = stringResource(R.string.new_note_name), autoFocus = true, onDone = extract, onEscape = onDismiss)
+    }
 }
 
 /** A Share or Save as sub-page: its back row, then Image (PNG) and PDF; [onPick] says which. */
 @Composable
 private fun PageFormatRows(share: Boolean, onBack: () -> Unit, onPick: (image: Boolean) -> Unit) {
     val palette = LocalPalette.current
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
-    DropdownMenuItem(text = { Text(stringResource(if (share) R.string.back_share_as else R.string.back_save_as)) }, onClick = onBack)
-    DropdownMenuItem(text = { Text(stringResource(R.string.image_png)) }, leadingIcon = menuIcon(XnotesIcons.image), onClick = { onPick(true) })
-    DropdownMenuItem(text = { Text("PDF") }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { onPick(false) })
+    MenuBack(stringResource(if (share) R.string.back_share_as else R.string.back_save_as), onBack)
+    MenuItem(stringResource(R.string.image_png), XnotesIcons.image, onClick = { onPick(true) })
+    MenuItem("PDF", XnotesIcons.pdfFile, onClick = { onPick(false) })
 }
 
 /**
- * Bottom action bar shown while pages are multi-selected: Select all, Copy and Delete, and a
- * three-dot menu with the rest. A tap anywhere but the pages and this bar lets the selection go.
+ * The bar floating over the panel's foot while pages are multi-selected: Select all, Copy and
+ * Delete, and a three-dot menu with the rest. A tap anywhere but the pages and this bar lets the
+ * selection go.
  */
 @Composable
 private fun PageSelectionBar(
@@ -664,28 +727,43 @@ private fun PageSelectionBar(
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
     onSavePagesAsImages: (List<Int>) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
+    val shape = MaterialTheme.shapes.large
     // The bar sits at the panel's foot, so its tips open upward.
     CompositionLocalProvider(LocalTipSide provides TipSide.ABOVE) {
         Row(
-            Modifier.fillMaxWidth().height(52.dp).background(palette.surface.toComposeColor()).padding(horizontal = Space.s4),
+            modifier
+                .padding(Space.s8)
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(shape)
+                .background(palette.surface.toComposeColor())
+                // Holds taps between the buttons, which would otherwise reach the pages under the bar and end the selection.
+                .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
+                .padding(horizontal = Space.s6),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s2),
         ) {
             Tooltip(stringResource(R.string.clear_selection)) {
-                IconButton(onClick = { editor.clearPageSelection() }) {
-                    Icon(XnotesIcons.close, stringResource(R.string.clear_selection), tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                IconButton(onClick = { editor.clearPageSelection() }, modifier = Modifier.size(40.dp)) {
+                    Icon(XnotesIcons.close, stringResource(R.string.clear_selection), tint = palette.text.toComposeColor(), modifier = Modifier.size(18.dp))
                 }
             }
-            Text("${editor.pageSelectionCount}", color = palette.text.toComposeColor(), fontSize = TextSize.body)
+            Text("${editor.pageSelectionCount}", color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium, style = tabular())
             Spacer(Modifier.weight(1f))
             BarAction(XnotesIcons.selectAll, stringResource(R.string.select_all)) { editor.selectAllPages() }
             BarAction(XnotesIcons.copy, stringResource(R.string.copy)) { editor.copyPages(editor.selectedPageIndices()) }
-            BarAction(XnotesIcons.trash, stringResource(R.string.delete)) { editor.deletePages(editor.selectedPageIndices()) }
+            BarAction(XnotesIcons.trash, stringResource(R.string.delete), tint = palette.danger) { editor.deletePages(editor.selectedPageIndices()) }
             PageSelectionMore(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
         }
     }
 }
+
+/** The current text style with figures of one width, so counts and page numbers line up. */
+@Composable
+private fun tabular(): TextStyle = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
 
 /** The selection bar's three-dot menu: everything else that can be done to the selected pages. */
 @Composable
@@ -702,7 +780,6 @@ private fun PageSelectionMore(
     var extracting by remember { mutableStateOf<Pair<List<Int>, Boolean>?>(null) }
     LaunchedEffect(open) { if (!open) sub = MENU_MAIN }
     extracting?.let { (picked, move) -> ExtractDialog(editor, picked, move) { extracting = null } }
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     fun close() { open = false }
     sizing?.let { initial ->
         PageSizeDialog(initial, onApply = { sizing = null; editor.resizePages(editor.selectedPageIndices(), it) }) { sizing = null }
@@ -723,30 +800,25 @@ private fun PageSelectionMore(
                     }
                 }
                 else -> {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { close(); editor.cutPages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { close(); editor.duplicatePages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { sub = MENU_ROTATE })
+                    MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = { close(); editor.cutPages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.duplicate), XnotesIcons.duplicate, onClick = { close(); editor.duplicatePages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.rotate_ellipsis), XnotesIcons.rotateRight, more = true, onClick = { sub = MENU_ROTATE })
                     val plain = editor.selectedPagesInOrder().firstOrNull { it.pdfPage == null }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.page_size_ellipsis)) },
-                        leadingIcon = menuIcon(XnotesIcons.pageSize),
-                        enabled = plain != null,
-                        onClick = {
-                            close()
-                            sizing = plain?.let { editor.pageSizeChoice(editor.pageIndexOf(it)) }
-                        },
-                    )
-                    DropdownMenuItem(text = { Text(stringResource(R.string.erase)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { close(); editor.erasePages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.extract_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.extract), onClick = {
+                    MenuItem(stringResource(R.string.page_size_ellipsis), XnotesIcons.pageSize, enabled = plain != null, onClick = {
+                        close()
+                        sizing = plain?.let { editor.pageSizeChoice(editor.pageIndexOf(it)) }
+                    })
+                    MenuItem(stringResource(R.string.erase), XnotesIcons.eraser, danger = true, onClick = { close(); editor.erasePages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.extract_to_new_note), XnotesIcons.extract, onClick = {
                         close()
                         extracting = editor.selectedPageIndices() to false
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.move_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.moveToFolder), onClick = {
+                    MenuItem(stringResource(R.string.move_to_new_note), XnotesIcons.moveToFolder, onClick = {
                         close()
                         extracting = editor.selectedPageIndices() to true
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
+                    MenuItem(stringResource(R.string.save_as_ellipsis), XnotesIcons.download, more = true, onClick = { sub = MENU_SAVE })
+                    MenuItem(stringResource(R.string.share_ellipsis), XnotesIcons.share, more = true, onClick = { sub = MENU_SHARE })
                 }
             }
         }
@@ -754,10 +826,10 @@ private fun PageSelectionMore(
 }
 
 @Composable
-private fun BarAction(icon: ImageVector, desc: String, onClick: () -> Unit) {
+private fun BarAction(icon: ImageVector, desc: String, tint: Rgba = LocalPalette.current.textDim, onClick: () -> Unit) {
     Tooltip(desc) {
-        IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
-            Icon(icon, desc, tint = LocalPalette.current.textDim.toComposeColor(), modifier = Modifier.size(19.dp))
+        IconButton(onClick = onClick, modifier = Modifier.size(34.dp, 40.dp)) {
+            Icon(icon, desc, tint = tint.toComposeColor(), modifier = Modifier.size(19.dp))
         }
     }
 }
@@ -866,30 +938,122 @@ private fun ContentsTab(editor: Editor) {
         EmptyHint(stringResource(R.string.no_contents))
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
-        itemsIndexed(entries) { _, e ->
-            val hasTarget = e.destPage >= 0
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (hasTarget) Modifier.clickable { editor.goToTocEntry(e) } else Modifier)
-                    .padding(
-                        start = (10 + e.level.coerceAtMost(6) * 12).dp,
-                        end = 10.dp,
-                        top = 6.dp,
-                        bottom = 6.dp,
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    e.title,
-                    color = (if (hasTarget) palette.text else palette.textDim).toComposeColor(),
-                    fontSize = TextSize.label,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+    val targets = remember(version, editor.contentVersion) { editor.tocTargets() }
+    val folded = editor.tocFolded
+    val rows = remember(entries, folded) { shownToc(entries, folded) }
+    // The entry being read: the one leading furthest on without passing the current page, the deepest of a tie.
+    val here = editor.pageIndex
+    val reading = remember(targets, here) {
+        var best = -1
+        for (i in targets.indices) if (targets[i] in 0..here && (best < 0 || targets[i] >= targets[best])) best = i
+        best
+    }
+    // Folded away, it shows on the row that holds it: the last open one before it.
+    val marked = remember(rows, reading) { if (reading < 0) -1 else rows.indexOfLast { it.index <= reading } }
+    val listState = rememberLazyListState()
+    LaunchedEffect(entries) { if (marked > 0) listState.scrollToItem((marked - 3).coerceAtLeast(0)) }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        state = listState,
+        contentPadding = PaddingValues(start = Space.s8, end = Space.s8, top = Space.s6, bottom = Space.s8),
+    ) {
+        itemsIndexed(rows, key = { _, r -> r.index }) { i, r ->
+            TocLine(editor, r, targets[r.index], marked = i == marked, folded = r.index in folded, first = i == 0)
+        }
+    }
+}
+
+/** An outline entry the Contents tab shows: its [index] among the entries, and whether entries nest under it. */
+private class TocRow(val index: Int, val entry: com.xnotes.platform.PdfOutlineEntry, val parent: Boolean)
+
+/** The entries not hidden under a folded one. */
+private fun shownToc(entries: List<com.xnotes.platform.PdfOutlineEntry>, folded: Set<Int>): List<TocRow> {
+    val rows = ArrayList<TocRow>()
+    var shut = Int.MAX_VALUE
+    for (i in entries.indices) {
+        val e = entries[i]
+        if (e.level > shut) continue
+        shut = Int.MAX_VALUE
+        val parent = (entries.getOrNull(i + 1)?.level ?: -1) > e.level
+        rows += TocRow(i, e, parent)
+        if (parent && i in folded) shut = e.level
+    }
+    return rows
+}
+
+/** How far each level indents, the deepest one indented, and where the first level's guide runs. */
+private val TOC_STEP = 14.dp
+private const val TOC_MAX_DEPTH = 5
+private val TOC_GUIDE = 18.dp
+
+/** One outline row: a fold chevron when entries nest under it, the title, and the page it opens ([target], or -1 for none). */
+@Composable
+private fun TocLine(editor: Editor, row: TocRow, target: Int, marked: Boolean, folded: Boolean, first: Boolean) {
+    val palette = LocalPalette.current
+    val depth = row.entry.level.coerceIn(0, TOC_MAX_DEPTH)
+    val guide = palette.border.toComposeColor()
+    val ink = when {
+        marked -> palette.selectionForeground
+        target < 0 -> palette.materialColors.outline
+        depth >= 2 -> palette.textDim
+        else -> palette.text
+    }.toComposeColor()
+    Row(
+        Modifier
+            // A gap before each top-level entry keeps the chapters apart.
+            .padding(top = if (depth == 0 && !first) Space.s6 else 0.dp)
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(if (marked) palette.selectionBackground.toComposeColor() else Color.Transparent)
+            .drawBehind {
+                for (a in 0 until depth) {
+                    val x = (TOC_GUIDE + TOC_STEP * a).toPx()
+                    drawLine(guide, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
+                }
+            }
+            .then(if (target >= 0) Modifier.clickable { editor.goToPage(target) } else Modifier)
+            .padding(start = Space.s4 + TOC_STEP * depth, end = Space.s12),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(28.dp, 36.dp)
+                .then(
+                    if (!row.parent) Modifier
+                    else Modifier.clickable(role = Role.Button) {
+                        editor.tocFolded = if (folded) editor.tocFolded - row.index else editor.tocFolded + row.index
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (row.parent) {
+                Icon(
+                    if (folded) XnotesIcons.chevronRight else XnotesIcons.chevronDown,
+                    stringResource(if (folded) R.string.expand_entry else R.string.collapse_entry),
+                    tint = (if (marked) palette.selectionForeground else palette.textDim).toComposeColor(),
+                    modifier = Modifier.size(16.dp),
                 )
             }
+        }
+        Text(
+            row.entry.title,
+            color = ink,
+            fontSize = TextSize.body,
+            lineHeight = 18.sp,
+            fontWeight = if (depth == 0) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(vertical = Space.s8),
+        )
+        if (target >= 0) {
+            Text(
+                "${target + 1}",
+                color = (if (marked) palette.selectionForeground else palette.textDim).toComposeColor(),
+                fontSize = TextSize.label,
+                style = tabular(),
+                modifier = Modifier.padding(start = Space.s8),
+            )
         }
     }
 }
@@ -904,30 +1068,28 @@ private fun BookmarksTab(editor: Editor) {
     val bookmarks = remember(version) { editor.bookmarks }
 
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.s8), horizontalArrangement = Arrangement.End) {
-            Tooltip(stringResource(R.string.add_bookmark)) {
-                IconButton(onClick = { showAdd = true }) {
-                    Icon(XnotesIcons.plus, stringResource(R.string.add_bookmark), tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
-                }
-            }
+        Row(
+            Modifier
+                .padding(start = Space.s8, end = Space.s8, top = Space.s12, bottom = Space.s8)
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .background(palette.selectionBackground.toComposeColor())
+                .clickable(role = Role.Button) { showAdd = true },
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(XnotesIcons.plus, null, tint = palette.selectionForeground.toComposeColor(), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(Space.s8))
+            Text(stringResource(R.string.add_bookmark), color = palette.selectionForeground.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
         }
         if (bookmarks.isEmpty()) {
             EmptyHint(stringResource(R.string.no_bookmarks))
         } else {
             LazyColumn(Modifier.fillMaxWidth()) {
-                itemsIndexed(bookmarks) { _, bm ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { editor.goToPage(bm.page) }.padding(start = Space.s12, top = Space.s2, bottom = Space.s2),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            stringResource(R.string.bookmark_entry, bm.label, bm.page + 1),
-                            color = palette.text.toComposeColor(),
-                            fontSize = TextSize.label,
-                            modifier = Modifier.weight(1f),
-                        )
-                        BookmarkMenu(editor, bm) { renaming = bm }
-                    }
+                itemsIndexed(bookmarks) { i, bm ->
+                    if (i > 0) Box(Modifier.padding(start = 44.dp, end = Space.s8).fillMaxWidth().height(1.dp).background(palette.border.toComposeColor()))
+                    BookmarkRow(editor, bm, here = bm.page == editor.pageIndex) { renaming = bm }
                 }
             }
         }
@@ -935,29 +1097,57 @@ private fun BookmarksTab(editor: Editor) {
 
     renaming?.let { mark ->
         var label by remember(mark) { mutableStateOf(mark.label) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text(stringResource(R.string.rename_bookmark)) },
-            text = { OutlinedTextField(value = label, onValueChange = { label = it }, singleLine = true) },
-            confirmButton = {
-                TextButton(onClick = { editor.renameBookmark(mark, label); renaming = null }, enabled = label.isNotBlank()) { Text(stringResource(R.string.rename)) }
-            },
-            dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.cancel)) } },
-        )
+        val rename = { if (label.isNotBlank()) { editor.renameBookmark(mark, label); renaming = null } }
+        SheetDialog(
+            title = stringResource(R.string.rename_bookmark),
+            onDismiss = { renaming = null },
+            foot = { ConfirmButtons(stringResource(R.string.rename), { renaming = null }, enabled = label.isNotBlank(), onConfirm = rename) },
+        ) {
+            DialogField(label, { label = it }, onDone = rename)
+        }
     }
 
     if (showAdd) {
         val defaultLabel = stringResource(R.string.page_n, editor.pageIndex + 1)
         var label by remember { mutableStateOf(defaultLabel) }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text(stringResource(R.string.add_bookmark)) },
-            text = { OutlinedTextField(value = label, onValueChange = { label = it }, singleLine = true) },
-            confirmButton = {
-                TextButton(onClick = { editor.addBookmark(label.ifBlank { defaultLabel }); showAdd = false }) { Text(stringResource(R.string.add)) }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.cancel)) } },
+        val add = { editor.addBookmark(label.ifBlank { defaultLabel }); showAdd = false }
+        SheetDialog(
+            title = stringResource(R.string.add_bookmark),
+            onDismiss = { showAdd = false },
+            foot = { ConfirmButtons(stringResource(R.string.add), { showAdd = false }, onConfirm = add) },
+        ) {
+            DialogField(label, { label = it }, onDone = add)
+        }
+    }
+}
+
+/** One bookmark: its ribbon, filled when it marks the page in view, its label and page, and its menu. */
+@Composable
+private fun BookmarkRow(editor: Editor, mark: com.xnotes.core.model.Bookmark, here: Boolean, onRename: () -> Unit) {
+    val palette = LocalPalette.current
+    val accent = palette.accent.toComposeColor()
+    Row(
+        Modifier.fillMaxWidth().height(48.dp).clickable { editor.goToPage(mark.page) }.padding(start = Space.s16, end = Space.s2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (here) XnotesIcons.bookmarkFilled else XnotesIcons.bookmark, null, tint = accent, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(Space.s12))
+        Text(
+            mark.label,
+            color = if (here) accent else palette.text.toComposeColor(),
+            fontSize = TextSize.body,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        Text(
+            "${mark.page + 1}",
+            color = if (here) accent else palette.textDim.toComposeColor(),
+            fontSize = TextSize.label,
+            style = tabular(),
+            modifier = Modifier.padding(start = Space.s8),
+        )
+        BookmarkMenu(editor, mark, onRename)
     }
 }
 
@@ -966,16 +1156,15 @@ private fun BookmarksTab(editor: Editor) {
 private fun BookmarkMenu(editor: Editor, mark: com.xnotes.core.model.Bookmark, onRename: () -> Unit) {
     val palette = LocalPalette.current
     var open by remember { mutableStateOf(false) }
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     Box {
         Tooltip(stringResource(R.string.bookmark_options)) {
-            IconButton(onClick = { open = true }) {
+            IconButton(onClick = { open = true }, modifier = Modifier.size(36.dp)) {
                 Icon(XnotesIcons.more, stringResource(R.string.bookmark_options), tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, leadingIcon = menuIcon(XnotesIcons.edit), onClick = { open = false; onRename() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { open = false; editor.removeBookmark(mark) })
+            MenuItem(stringResource(R.string.rename), XnotesIcons.edit, onClick = { open = false; onRename() })
+            MenuItem(stringResource(R.string.delete), XnotesIcons.trash, danger = true, onClick = { open = false; editor.removeBookmark(mark) })
         }
     }
 }

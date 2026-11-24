@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -114,7 +115,7 @@ private fun QueryField(editor: Editor) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = Space.s8, end = Space.s8, top = Space.s2, bottom = Space.s2)
+            .padding(start = Space.s8, end = Space.s8, top = Space.s12, bottom = Space.s2)
             .height(36.dp)
             .clip(CircleShape)
             .background(palette.surface.toComposeColor())
@@ -206,8 +207,8 @@ private fun Toggle(label: String, description: String, on: Boolean, onToggle: ()
         Box(
             Modifier
                 .size(32.dp)
-                .padding(Space.s2)
-                .clip(RoundedCornerShape(6.dp))
+                .padding(Space.s4)
+                .clip(MaterialTheme.shapes.small)
                 .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
                 .toggleable(value = on, role = Role.Checkbox, onValueChange = { onToggle() })
                 .semantics { contentDescription = description },
@@ -309,7 +310,7 @@ private fun MatchRow(hit: SearchHit, current: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Space.s6, vertical = 1.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(if (current) palette.selectionBackground.toComposeColor() else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = Space.s6, vertical = Space.s4),

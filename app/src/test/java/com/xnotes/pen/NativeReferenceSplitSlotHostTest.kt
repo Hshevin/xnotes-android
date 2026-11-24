@@ -162,7 +162,7 @@ class NativeReferenceSplitSlotHostTest {
             f.editor.focusPane(Pane.SECONDARY);destination.selectTool(Tool.TEXT_BOX)
             parkingPen(destination,MotionEvent.ACTION_DOWN,Pt(220.0,220.0))
             parkingPen(destination,MotionEvent.ACTION_UP,Pt(220.0,220.0))
-            destination.updateEditingText("Keep this source-side text unconfirmed")
+            destination.typeInOpenBox("Keep this source-side text unconfirmed")
             val model=destination.state.document
             val target=NativeReferenceTarget(model.identity.documentId,model.pages[1].referenceIdentity.id!!)
             (f.editor.prepareReference(target,pagedDestination=destination) as NativeReferencePreparation.Ready).request
@@ -174,12 +174,12 @@ class NativeReferenceSplitSlotHostTest {
             repeat(3) {parkingDispatch()}
             withContext(Dispatchers.Main) {
                 assertFalse("A live text draft must finish naturally before source location",locating.isCompleted)
-                assertSame(draft,destination.controller.activeTextItem());assertNotNull(destination.editingField)
+                assertSame(draft,destination.controller.activeTextItem());assertTrue(destination.controller.isEditingText)
                 assertEquals(revision,model.bodyRevision);assertSame(undo,destination.history.nextUndo)
             }
             locating.cancelAndJoin()
             withContext(Dispatchers.Main) {
-                assertSame(draft,destination.controller.activeTextItem());assertNotNull(destination.editingField)
+                assertSame(draft,destination.controller.activeTextItem());assertTrue(destination.controller.isEditingText)
                 assertTrue(f.editor.noteOpen && destination.noteOpen);assertTrue(request.current())
                 assertEquals(revision,model.bodyRevision);assertSame(undo,destination.history.nextUndo)
                 destination.commitText()

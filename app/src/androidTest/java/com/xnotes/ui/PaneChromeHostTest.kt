@@ -54,7 +54,7 @@ class PaneChromeHostTest {
                                     if (vertical) thickness * 2 else thickness)
                                 .onGloballyPositioned { toolbarBounds = it.boundsInWindow() }
                                 .clickable { toolbarClicks++ })
-                        }, onCover = { _, _, _, _ -> }) { floatingBar ->
+                        }, onCover = { _, _, _, _ -> }, onPlace = { _, _ -> }) { floatingBar ->
                             Box(Modifier.fillMaxSize()) {
                                 AndroidView(factory = { context ->
                                     object : View(context) {
@@ -118,7 +118,7 @@ class PaneChromeHostTest {
                             Box(if (look.value.position.vertical)
                                 Modifier.width(thickness).fillMaxHeight()
                             else Modifier.height(thickness).fillMaxWidth())
-                        }, onCover = { l, t, r, b -> cover = listOf(l, t, r, b) },
+                        }, onCover = { l, t, r, b -> cover = listOf(l, t, r, b) }, onPlace = { _, _ -> },
                             showToolbar = shown.value) { floatingBar ->
                             Box(Modifier.fillMaxSize()) {
                                 AndroidView(factory = { context ->

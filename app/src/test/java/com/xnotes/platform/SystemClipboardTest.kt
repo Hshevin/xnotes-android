@@ -20,25 +20,26 @@ class SystemClipboardTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private val clipboard get() = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    @Test fun anImageOrUriClipMayHoldAnImage() {
+    @Test fun aClipDeclaringAnImageHoldsOne() {
         clipboard.setPrimaryClip(ClipData(ClipDescription("shot", arrayOf("image/png")),
             ClipData.Item(Uri.parse("content://test/shot.png"))))
-        assertTrue(SystemClipboard.mayHoldImage(context))
+        assertTrue(SystemClipboard.hasImage(context))
+        // A bare uri says nothing of its type without asking the app behind it, which a touch must not.
         clipboard.setPrimaryClip(ClipData(ClipDescription("link", arrayOf(ClipDescription.MIMETYPE_TEXT_URILIST)),
             ClipData.Item(Uri.parse("content://test/unknown"))))
-        assertTrue(SystemClipboard.mayHoldImage(context))
+        assertFalse(SystemClipboard.hasImage(context))
     }
 
     @Test fun textIsNotCountedEvenWhenItIsSvgSource() {
         clipboard.setPrimaryClip(ClipData.newPlainText("note", "hello"))
-        assertFalse(SystemClipboard.mayHoldImage(context))
+        assertFalse(SystemClipboard.hasImage(context))
         // Telling SVG source from other text means reading it, which the touch-down path must not.
         clipboard.setPrimaryClip(ClipData.newPlainText("svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"))
-        assertFalse(SystemClipboard.mayHoldImage(context))
+        assertFalse(SystemClipboard.hasImage(context))
     }
 
     @Test fun anEmptyClipboardHoldsNothing() {
         clipboard.clearPrimaryClip()
-        assertFalse(SystemClipboard.mayHoldImage(context))
+        assertFalse(SystemClipboard.hasImage(context))
     }
 }

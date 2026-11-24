@@ -166,7 +166,7 @@ class DocumentCodecTest : BundleTestFiles() {
         page.items.add(pinnedStroke)
         page.items.add(freeStroke)
         page.items.add(ImageItem(ImageData(imageFile(), 20, 10), Rect(0.0, 0.0, 20.0, 10.0)).apply { locked = true })
-        page.items.add(TextItem(Pt(1.0, 1.0), 100.0, 0.0, "hi", Rgba(0, 0, 0), 12.0, measurer = FakeTextMeasurer()).apply { locked = true })
+        page.items.add(TextItem(Pt(1.0, 1.0), 100.0, "hi", Rgba(0, 0, 0), 12.0, measurer = FakeTextMeasurer()).apply { locked = true })
         page.items.add(
             ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(9.0, 9.0), Rgba(1, 2, 3, 255)).apply { locked = true },
         )
@@ -493,6 +493,25 @@ class DocumentCodecTest : BundleTestFiles() {
         assertTrue(taper.config.taperEnabled)
         assertEquals(0.30, taper.config.taperMinFactor, 1e-9)   // tip-width floor survives
         assertEquals(0.0, taper.samples[0].t, 1e-9)   // non-speed stroke writes no time
+    }
+
+    @Test fun penOpacityRoundTripsAndATurnedOffOneWritesNone() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(opacityEnabled = true, opacity = 0.4), mutableListOf(Sample(1.0, 2.0, 1.0))))
+        page.items.add(Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(3.0, 4.0, 1.0))))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        val faded = items[0] as Stroke
+        assertEquals(0.4, faded.config.opacity, 1e-9)
+        assertEquals((255 * 0.4).toInt(), faded.renderColor.a)
+        assertFalse((items[1] as Stroke).config.opacityEnabled)
+        assertEquals(255, (items[1] as Stroke).renderColor.a)
+        page.items.removeAt(0)
+        val out = Buffer()
+        codec.write(doc, out)
+        assertFalse(manifestOf(out.bytes()).contains("\"opacity\""))
     }
 
     @Test fun legacyTaperLengthLoadsAsEnabledTaper() {
@@ -1276,5 +1295,96 @@ class DocumentCodecTest : BundleTestFiles() {
         assertEquals(band.shape, back[1].shape)
         assertEquals(TapePattern.SOLID, back[1].pattern)
         assertEquals(3, back[1].group)
+    }
+
+    // --- rich text boxes ---
+
+    private fun boxDoc(box: TextItem): Document = Document(dpi = 150).also { doc ->
+        doc.pages.add(Page(400.0, 400.0).also { it.items.add(box) })
+    }
+
+    private fun bundleOf(doc: Document): ByteArray = Buffer().also { codec.write(doc, it) }.bytes()
+
+    @Test fun aRichBoxKeepsItsRunsAndParagraphStyles() {
+        val box = TextItem(Pt(40.0, 50.0), width = 200.0, text = "bold plain\nitem", rgba = Rgba(1, 2, 3, 255), pointSize = 11.0, measurer = FakeTextMeasurer())
+        val ed = com.xnotes.core.text.FlowEditor(box.flow)
+        ed.setCharStyle(com.xnotes.core.text.FlowRange(com.xnotes.core.text.FlowPos(0, 0), com.xnotes.core.text.FlowPos(0, 4))) {
+            it.copy(bold = true, color = Rgba(200, 0, 0, 255), sizePt = 18.0)
+        }
+        ed.setParaStyle(com.xnotes.core.text.FlowRange.caret(com.xnotes.core.text.FlowPos(1, 0))) {
+            it.list = com.xnotes.core.text.ListKind.CHECK
+            it.checked = true
+        }
+        ed.setParaStyle(com.xnotes.core.text.FlowRange.caret(com.xnotes.core.text.FlowPos(0, 0))) { it.align = com.xnotes.core.text.ParaAlign.CENTER }
+        box.reflow()
+
+        val back = roundTrip(boxDoc(box)).pages[0].items[0] as TextItem
+
+        assertEquals("bold plain\nitem", back.text)
+        assertEquals(Pt(40.0, 50.0), back.pos)
+        assertEquals(200.0, back.width, 1e-9)
+        assertEquals(Rgba(1, 2, 3, 255), back.color)
+        assertEquals(11.0, back.pointSize, 1e-9)
+        val first = back.flow.paragraphs[0]
+        assertEquals("bold", first.runs[0].text)
+        assertTrue(first.runs[0].style.bold)
+        assertEquals(Rgba(200, 0, 0, 255), first.runs[0].style.color)
+        assertEquals(18.0, first.runs[0].style.sizePt!!, 1e-9)
+        assertEquals(com.xnotes.core.text.ParaAlign.CENTER, first.align)
+        assertEquals(com.xnotes.core.text.ListKind.CHECK, back.flow.paragraphs[1].list)
+        assertTrue(back.flow.paragraphs[1].checked)
+        // A box's flow has no page margins, whatever the flow file says of them.
+        assertEquals(com.xnotes.core.text.FlowMargins(0.0, 0.0, 0.0, 0.0), back.flow.margins)
+        assertEquals(box.bounds(), back.bounds())
+    }
+
+    @Test fun aRichBoxStillCarriesItsPlainWordsForOlderReaders() {
+        val box = TextItem(Pt(0.0, 0.0), width = 200.0, text = "one two", rgba = Rgba(1, 2, 3, 255), measurer = FakeTextMeasurer())
+        com.xnotes.core.text.FlowEditor(box.flow)
+            .setCharStyle(com.xnotes.core.text.FlowRange(com.xnotes.core.text.FlowPos(0, 0), com.xnotes.core.text.FlowPos(0, 3))) { it.copy(italic = true) }
+        box.reflow()
+        val manifest = manifestOf(bundleOf(boxDoc(box)))
+        assertTrue(manifest.contains("\"text\":\"one two\""))
+        assertTrue(manifest.contains("\"rgba\":[1,2,3,255]"))
+        assertTrue(manifest.contains("\"flow\":\""))
+    }
+
+    @Test fun aPlainBoxWritesNothingNew() {
+        val box = TextItem(Pt(0.0, 0.0), width = 200.0, text = "plain", rgba = Rgba(1, 2, 3, 255), measurer = FakeTextMeasurer())
+        val manifest = manifestOf(bundleOf(boxDoc(box)))
+        for (key in listOf("flow", "auto_color", "auto_width", "box_fill", "box_border", "box_border_width", "box_corner")) {
+            assertFalse(key, manifest.contains("\"$key\""))
+        }
+    }
+
+    @Test fun aHuggingAutoColouredBoxComesBackAsOne() {
+        val box = TextItem(Pt(10.0, 10.0), text = "label", rgba = null, pointSize = 12.0, face = FontFace.SANS, measurer = FakeTextMeasurer(), autoWidth = true)
+        val manifest = manifestOf(bundleOf(boxDoc(box)))
+        // The width an older reader wraps at is the width the text takes.
+        assertTrue(manifest.contains("\"width\":${box.textRect().w.toInt()}"))
+        val back = roundTrip(boxDoc(box)).pages[0].items[0] as TextItem
+        assertTrue(back.autoWidth)
+        assertEquals(null, back.color)
+        assertEquals(FontFace.SANS, back.face)
+        assertEquals(box.bounds(), back.bounds())
+    }
+
+    @Test fun aBoxFrameRoundTrips() {
+        val box = TextItem(Pt(0.0, 0.0), text = "card", measurer = FakeTextMeasurer())
+        box.box = com.xnotes.core.model.BoxStyle(fill = Rgba(255, 240, 150, 255), border = Rgba(0, 0, 0, 128), borderWidth = 2.5, corner = 9.0)
+        val back = roundTrip(boxDoc(box)).pages[0].items[0] as TextItem
+        assertEquals(box.box, back.box)
+    }
+
+    @Test fun aBoxWhoseFlowWillNotParseKeepsItsPlainWords() {
+        val json = "{\"format\":\"xnote\",\"version\":1,\"dpi\":150,\"has_pdf\":false,\"bookmarks\":[]," +
+            "\"pages\":[{\"width\":100,\"height\":100,\"pdf_page\":null,\"items\":[" +
+            "{\"kind\":\"text\",\"pos\":[1,2],\"width\":80,\"text\":\"kept\",\"rgba\":[0,0,0,255],\"point_size\":13," +
+            "\"flow\":\"<not xml\",\"height\":55}]}]}"
+        val out = Buffer()
+        bundleWriter(out).use { it.putDeflated("manifest.json", json.encodeToByteArray()) }
+        val back = codec.read(Buffer().write(out.bytes())).pages[0].items[0] as TextItem
+        assertEquals("kept", back.text)
+        assertEquals(80.0, back.width, 1e-9)
     }
 }

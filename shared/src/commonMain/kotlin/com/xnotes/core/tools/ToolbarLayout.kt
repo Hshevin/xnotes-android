@@ -37,21 +37,7 @@ enum class ToolbarItem(val id: String) {
     IMAGE("image"),
     UNDO("undo"),
     REDO("redo"),
-    PAGE_NAV("page_nav"),
-    STYLES("styles"),
-    MARGINS("margins"),
-    VIEW("view"),
-    ZOOM("zoom"),
-    FIT("fit"),
-    ZOOM_LOCK("zoom_lock"),
-    FULLSCREEN("fullscreen"),
     COLORS("colors"),
-
-    /** Canvas only: saved views, which are what page numbers are on an unbounded surface. */
-    WAYPOINTS("waypoints"),
-
-    /** Canvas only: the overview map in the corner. */
-    MINIMAP("minimap"),
 
     /** Notes only: opens and closes room on a page. Last, so a stored bar missing older items too still gets it right after the lasso. */
     INSERT_SPACE("insert_space"),
@@ -158,9 +144,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         /** Later-added items that belong beside an existing one in stored layouts. */
         private val INSERT_AFTER = mapOf(
             ToolbarItem.TEXT_BOX to ToolbarItem.TEXT,
-            ToolbarItem.VIEW to ToolbarItem.STYLES,
-            ToolbarItem.LAYERS to ToolbarItem.STYLES,
-            ToolbarItem.MARGINS to ToolbarItem.STYLES,
+            ToolbarItem.LAYERS to ToolbarItem.REDO,
             ToolbarItem.WAND to ToolbarItem.LASSO,
             ToolbarItem.TAPE to ToolbarItem.WAND,
             ToolbarItem.INSERT_SPACE to ToolbarItem.LASSO,
@@ -171,9 +155,8 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
 
         /**
          * The two bars hold different things, so each has its own set and neither can be handed the
-         * other's. Page navigation means nothing on an unbounded canvas, and a waypoint means
-         * nothing in a paged note; an item outside a layout's set is dropped on load rather than
-         * drawn as a dead chip.
+         * other's: text, the ruler and the page tools mean nothing on an unbounded canvas. An item
+         * outside a layout's set is dropped on load rather than drawn as a dead chip.
          */
         val CANVAS_ITEMS: Set<ToolbarItem> = setOf(
             ToolbarItem.HOME, ToolbarItem.TITLE,
@@ -181,17 +164,14 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.WAND,
             ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.MAP, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.RULER, ToolbarItem.SCREENSHOT,
-            ToolbarItem.AI, ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
-            ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
-            ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
+            ToolbarItem.AI, ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.LAYERS,
         )
 
-        /** Everything the paged bar can hold: the whole enum bar the canvas-only additions. Insert space is the note bar's alone;
-         *  paged layers live in the side panel's tab, so a stored paged bar drops its old button on load. */
-        val NOTE_ITEMS: Set<ToolbarItem> =
-            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.LAYERS, ToolbarItem.MAP)
+        /** Everything the paged bar can hold: the whole enum bar the canvas-only additions. Page, zoom and view settings live
+         *  behind the gear on both bars; paged layers live in the side panel's tab, so a stored paged bar drops its old button on load. */
+        val NOTE_ITEMS: Set<ToolbarItem> = ToolbarItem.entries.toSet() - setOf(ToolbarItem.LAYERS, ToolbarItem.MAP)
 
-        /** Mirrors the hardcoded bar exactly (see Toolbar.kt) so existing users see no change. */
+        /** The note bar as it ships; the gear after it is always on the bar, not part of the layout. */
         val DEFAULT: ToolbarLayout = of(
             listOf(ToolbarItem.HOME, ToolbarItem.TITLE),
             listOf(ToolbarItem.SIDEBAR),
@@ -204,9 +184,6 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
-            listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
-            listOf(ToolbarItem.FULLSCREEN),
         )
 
         /** Mirrors the hardcoded canvas bar (see InfiniteToolbar.kt). */
@@ -221,8 +198,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.STYLES, ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP),
-            listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
+            listOf(ToolbarItem.LAYERS),
         )
 
         private fun of(vararg groups: List<ToolbarItem>): ToolbarLayout =
@@ -252,7 +228,9 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 )
             }
             if (sections.all { it.entries.isEmpty() }) return fallback
-            return ToolbarLayout(sections).withMissingItemsAppended(among)
+            // A section emptied by dropped items goes with them; one stored empty is the user's and stays.
+            val kept = sections.filterIndexed { i, s -> s.entries.isNotEmpty() || rawSections[i].isEmpty() }
+            return ToolbarLayout(kept).withMissingItemsAppended(among)
         }
     }
 }
@@ -272,7 +250,6 @@ private enum class ToolbarScope(val supported: Set<ToolbarDocument>, val perDocu
     PAGED_TOOL(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), false),
     PDF_TOOL(setOf(ToolbarDocument.PDF), false),
     CANVAS_TOOL(setOf(ToolbarDocument.CANVAS), false),
-    ALL_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF, ToolbarDocument.CANVAS), true),
     PAGED_VIEW(setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF), true),
     CANVAS_VIEW(setOf(ToolbarDocument.CANVAS), true),
 }
@@ -282,15 +259,14 @@ private val ToolbarItem.scope: ToolbarScope get() = when (this) {
     ToolbarItem.ERASER, ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO,
     ToolbarItem.SCREENSHOT, ToolbarItem.AI, ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE,
     ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.IMAGE,
-    ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FULLSCREEN, ToolbarItem.COLORS -> ToolbarScope.COMMON
+    ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.COLORS -> ToolbarScope.COMMON
     ToolbarItem.INSERT_SPACE -> ToolbarScope.PAGED_TOOL
     ToolbarItem.MARKUP -> ToolbarScope.PDF_TOOL
     // Mind maps live on canvases only.
     ToolbarItem.MAP -> ToolbarScope.CANVAS_TOOL
-    ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK, ToolbarItem.STYLES -> ToolbarScope.ALL_VIEW
-    ToolbarItem.SIDEBAR, ToolbarItem.PAGE_NAV, ToolbarItem.MARGINS, ToolbarItem.VIEW -> ToolbarScope.PAGED_VIEW
+    ToolbarItem.SIDEBAR -> ToolbarScope.PAGED_VIEW
     // Paged documents reach layers through the side panel; only the canvas needs a button.
-    ToolbarItem.LAYERS, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> ToolbarScope.CANVAS_VIEW
+    ToolbarItem.LAYERS -> ToolbarScope.CANVAS_VIEW
 }
 
 private val pagedDocuments = setOf(ToolbarDocument.NOTE, ToolbarDocument.PDF)

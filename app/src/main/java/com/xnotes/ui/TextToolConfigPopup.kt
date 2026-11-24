@@ -1,17 +1,21 @@
 package com.xnotes.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,7 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
@@ -30,6 +36,7 @@ import com.xnotes.core.pal.FontFace
 import com.xnotes.core.text.FlowDefaults
 import com.xnotes.core.text.FlowMargins
 import com.xnotes.platform.FontCatalog
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
@@ -47,7 +54,6 @@ import com.xnotes.ui.theme.TextSize
  */
 @Composable
 internal fun TextToolConfigPopup(editor: Editor, onDismiss: () -> Unit) {
-    val palette = LocalPalette.current
     var config by remember { mutableStateOf(editor.flowConfigValue()) }
     // The new-note row shows once the config differs from the saved default and
     // stays for the popup session; an all-default config hides it (see StylesPopup).
@@ -59,95 +65,84 @@ internal fun TextToolConfigPopup(editor: Editor, onDismiss: () -> Unit) {
         if (next != editor.newNoteFlow) showNewNoteRow = true
     }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = Space.s16, vertical = Space.s6)) {
-            Text(stringResource(R.string.tool_text), color = palette.text.toComposeColor(), fontSize = TextSize.title)
-
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Space.s8)) {
-                Text(stringResource(R.string.font), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(74.dp))
-                FaceDropdown(config.face) { apply(config.copy(face = it)) }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.mono_font), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(74.dp))
-                FaceDropdown(config.monoFace, monoOnly = true) { apply(config.copy(monoFace = it)) }
-            }
-            SpinField(stringResource(R.string.size_pt), config.sizePt, min = 6.0, max = 96.0) { apply(config.copy(sizePt = it)) }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = Space.s4)) {
-                Text(stringResource(R.string.colour), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(74.dp))
-                ModeChip(stringResource(R.string.auto), config.color == null) { apply(config.copy(color = null)) }
-                Spacer(Modifier.width(Space.s8))
-                ColorPickerDot(
-                    config.color,
-                    custom = config.color != null,
-                    onPick = { apply(config.copy(color = it)) },
-                    dismissOnPick = false,
-                ) { d, p -> ColorPickerPopup(config.color ?: editor.flowDefaultColor(), editor.recentColors, d, p) }
-            }
-
-            Text(
-                stringResource(R.string.margins_mm),
-                color = palette.textDim.toComposeColor(),
-                fontSize = TextSize.label,
-                modifier = Modifier.padding(top = Space.s12, bottom = Space.s2),
-            )
-            val m = config.margins
-            SpinField(stringResource(R.string.edge_left), m.leftMm, FlowMargins.MIN_MM, FlowMargins.MAX_MM) { apply(config.copy(margins = m.copy(leftMm = it))) }
-            SpinField(stringResource(R.string.edge_right), m.rightMm, FlowMargins.MIN_MM, FlowMargins.MAX_MM) { apply(config.copy(margins = m.copy(rightMm = it))) }
-            SpinField(stringResource(R.string.edge_top), m.topMm, FlowMargins.MIN_MM, FlowMargins.MAX_MM) { apply(config.copy(margins = m.copy(topMm = it))) }
-            SpinField(stringResource(R.string.edge_bottom), m.bottomMm, FlowMargins.MIN_MM, FlowMargins.MAX_MM) { apply(config.copy(margins = m.copy(bottomMm = it))) }
-
-            Spacer(Modifier.size(Space.s8))
-            // App preferences, not document defaults: Reset and the new-note row skip them.
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
-                Checkbox(checked = editor.markdownInput, onCheckedChange = { editor.setMarkdownInputPref(it) })
-                Text(
-                    stringResource(R.string.markdown_shortcuts),
-                    color = palette.text.toComposeColor(),
-                    fontSize = TextSize.body,
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
-                Checkbox(checked = editor.slashCommands, onCheckedChange = { editor.setSlashCommandsPref(it) })
-                Text(
-                    stringResource(R.string.slash_commands),
-                    color = palette.text.toComposeColor(),
-                    fontSize = TextSize.body,
-                )
-            }
-            if (showNewNoteRow && config != editor.factoryFlow) {
-                // The checkbox's 48dp touch frame insets the drawn box; pull the row back to align it.
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
-                    Checkbox(
-                        checked = editor.newNoteFlow != editor.factoryFlow && config == editor.newNoteFlow,
-                        onCheckedChange = { on -> editor.saveNewNoteFlow(if (on) config else editor.factoryFlow) },
-                    )
-                    Text(
-                        stringResource(R.string.default_for_new_notes),
-                        color = palette.text.toComposeColor(),
-                        fontSize = TextSize.label,
-                    )
+    ToolMenu(
+        stringResource(R.string.tool_text), onDismiss,
+        action = { PanelChip(stringResource(R.string.reset)) { apply(editor.factoryFlow) } },
+    ) {
+        MenuCard(buildList<MenuGroup> {
+            add { MenuRow(stringResource(R.string.font)) { FaceDropdown(config.face) { apply(config.copy(face = it)) } } }
+            add { MenuRow(stringResource(R.string.mono_font)) { FaceDropdown(config.monoFace, monoOnly = true) { apply(config.copy(monoFace = it)) } } }
+            add {
+                MenuRow(stringResource(R.string.size_pt)) {
+                    SpinField(config.sizePt, min = 6.0, max = 96.0, Modifier.width(116.dp)) { apply(config.copy(sizePt = it)) }
                 }
-                Spacer(Modifier.size(Space.s4))
             }
-            Row(Modifier.align(Alignment.End)) {
-                ModeChip(stringResource(R.string.reset), false) { apply(editor.factoryFlow) }
+            add {
+                MenuRow(stringResource(R.string.colour)) {
+                    ColorOrNone(stringResource(R.string.auto), config.color, editor.flowDefaultColor(), onChange = { apply(config.copy(color = it)) }) { d, p ->
+                        ColorPickerPopup(config.color ?: editor.flowDefaultColor(), editor.recentColors, d, p)
+                    }
+                }
+            }
+        })
+        PanelCard(padding = PaddingValues(start = Space.s12, top = Space.s12, end = Space.s12, bottom = Space.s16)) {
+            PanelCaption(stringResource(R.string.margins_mm))
+            val m = config.margins
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+                MarginField(stringResource(R.string.edge_left), m.leftMm, Modifier.weight(1f)) { apply(config.copy(margins = m.copy(leftMm = it))) }
+                MarginField(stringResource(R.string.edge_right), m.rightMm, Modifier.weight(1f)) { apply(config.copy(margins = m.copy(rightMm = it))) }
+            }
+            Spacer(Modifier.height(Space.s12))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s12)) {
+                MarginField(stringResource(R.string.edge_top), m.topMm, Modifier.weight(1f)) { apply(config.copy(margins = m.copy(topMm = it))) }
+                MarginField(stringResource(R.string.edge_bottom), m.bottomMm, Modifier.weight(1f)) { apply(config.copy(margins = m.copy(bottomMm = it))) }
             }
         }
+        if (showNewNoteRow && config != editor.factoryFlow) {
+            MenuCard(buildList<MenuGroup> {
+                add {
+                    MenuSwitch(
+                        stringResource(R.string.default_for_new_notes),
+                        checked = editor.newNoteFlow != editor.factoryFlow && config == editor.newNoteFlow,
+                    ) { on -> editor.saveNewNoteFlow(if (on) config else editor.factoryFlow) }
+                }
+            })
+        }
+        // App preferences, not document defaults: Reset and the new-note switch skip them.
+        MenuCard(buildList<MenuGroup> {
+            add { MenuSwitch(stringResource(R.string.markdown_shortcuts), editor.markdownInput) { editor.setMarkdownInputPref(it) } }
+            add { MenuSwitch(stringResource(R.string.slash_commands), editor.slashCommands) { editor.setSlashCommandsPref(it) } }
+        })
     }
 }
 
+/** A font as a field that opens the list of them. */
 @Composable
-private fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (FontFace) -> Unit) {
+internal fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (FontFace) -> Unit) {
     val palette = LocalPalette.current
+    val shape = MaterialTheme.shapes.small
     var open by remember { mutableStateOf(false) }
     Box {
-        Row(Modifier.clickable { open = true }.padding(vertical = Space.s6, horizontal = Space.s4)) {
+        Row(
+            Modifier
+                .width(150.dp)
+                .height(36.dp)
+                .clip(shape)
+                .background(palette.bg.toComposeColor())
+                .border(1.dp, palette.border.toComposeColor(), shape)
+                .clickable(role = Role.DropdownList) { open = true }
+                .padding(start = Space.s12, end = Space.s8),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 fontLabel(current),
                 color = palette.text.toComposeColor(),
-                style = TextStyle(fontFamily = current.toComposeFamily(), fontSize = TextSize.bodyLarge),
+                style = TextStyle(fontFamily = current.toComposeFamily(), fontSize = TextSize.body),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            Text(" ▾", color = palette.textDim.toComposeColor(), fontSize = TextSize.caption)
+            Icon(XnotesIcons.chevronDown, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             FontMenuItems(current = current, monoOnly = monoOnly) {
@@ -158,23 +153,27 @@ private fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (
     }
 }
 
-/** A labelled numeric spinfield: minus / value / plus, stepping by 1. */
+/** One page margin: its edge's name over its millimetres. */
 @Composable
-private fun SpinField(label: String, value: Double, min: Double, max: Double, onChange: (Double) -> Unit) {
-    val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.width(74.dp))
-        Box(Modifier.size(34.dp).clip(CircleShape).clickable { onChange((value - 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("−", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
-        }
+private fun MarginField(label: String, mm: Double, modifier: Modifier = Modifier, onChange: (Double) -> Unit) {
+    Column(modifier) {
         Text(
-            value.roundToInt().toString(),
-            color = palette.text.toComposeColor(),
-            fontSize = TextSize.bodyLarge,
-            modifier = Modifier.width(30.dp),
+            label,
+            color = LocalPalette.current.textDim.toComposeColor().copy(alpha = 0.8f),
+            fontSize = TextSize.label,
+            maxLines = 1,
+            modifier = Modifier.padding(start = Space.s4, bottom = Space.s4),
         )
-        Box(Modifier.size(34.dp).clip(CircleShape).clickable { onChange((value + 1.0).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("+", color = palette.text.toComposeColor(), fontSize = TextSize.heading)
-        }
+        SpinField(mm, FlowMargins.MIN_MM, FlowMargins.MAX_MM, Modifier.fillMaxWidth(), onChange)
     }
+}
+
+/** A whole number stepped by 1 inside [min]..[max]. */
+@Composable
+internal fun SpinField(value: Double, min: Double, max: Double, modifier: Modifier = Modifier, onChange: (Double) -> Unit) {
+    MenuStepper(
+        value.roundToInt().toString(), stringResource(R.string.decrease), stringResource(R.string.increase), modifier,
+        canLess = value > min, canMore = value < max,
+        onLess = { onChange((value - 1.0).coerceIn(min, max)) }, onMore = { onChange((value + 1.0).coerceIn(min, max)) },
+    )
 }

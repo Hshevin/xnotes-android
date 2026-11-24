@@ -71,9 +71,12 @@ class NightInkRenderTest {
             stroke.finished = true
             page.items.add(stroke)
             fun cachedPixel(): Int {
-                val entry = state.cacheFor(page)
-                val bitmap = (entry.surface as com.xnotes.platform.AndroidRasterSurface).bitmap
-                return bitmap.getPixel(((32.0 - entry.cover.left) * entry.res).toInt(), ((32.0 - entry.cover.top) * entry.res).toInt())
+                // The ink layer's bands drawn back in page space, where a pixel is a page unit at this zoom.
+                val drawn = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+                try {
+                    state.drawBands(AndroidRenderer(Canvas(drawn)), state.cacheFor(page))
+                    return drawn.getPixel(32, 32)
+                } finally { drawn.recycle() }
             }
             assertEquals(Color.WHITE, cachedPixel())
             state.palette = com.xnotes.ui.theme.monochromePalette(false)

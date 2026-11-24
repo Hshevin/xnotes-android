@@ -1021,8 +1021,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override fun pasteClipboardImageAt(content: Pt) {
-        val bytes = com.xnotes.platform.SystemClipboard.imageBytes(appContext) ?: return
-        insertImage(bytes, content)
+        kotlin.concurrent.thread(name = "xnotes-clip-read", isDaemon = true) {
+            val bytes = com.xnotes.platform.SystemClipboard.imageBytes(appContext) ?: return@thread
+            mainHandler.post { insertImage(bytes, content) }
+        }
     }
 
     // --- crop: a lone picture cut down to part of itself, for good ---
@@ -1646,7 +1648,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override val hostToolbarColors: List<Rgba> get() = toolbarColors
     override val hostActiveColorIndex: Int get() = activeColorIndex
-    override val hostRecentColors: List<Rgba> get() = recentColors
+    override val hostRecentColors: List<Rgba> get() = recentsWith(recentColors, toolbarColors)
+    override val hostPaperColor: Rgba get() = view.paperColor
+    override val hostZoom: Double get() = viewport.zoom
 
     /**
      * Recolour a swatch from the picker. The swatches belong to the host, which owns the settings

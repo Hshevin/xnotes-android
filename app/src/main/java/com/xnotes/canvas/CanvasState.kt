@@ -11,6 +11,9 @@ import com.xnotes.core.audio.InkFade
 import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Rooms
+import com.xnotes.core.model.paintPaperStrips
+import com.xnotes.core.model.paperStrips
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.insets
@@ -35,15 +38,46 @@ import kotlin.math.min
  */
 internal fun CanvasItem.isHighlighterInk(): Boolean = this is Stroke && this.tool == Tool.HIGHLIGHTER
 
-/**
- * A rasterized page cache plus the resolution it was built at and the page-space rect it covers
- * (the page's footprint at build time). A margin edit moves that rect, so the entry is rebuilt on a
- * mismatch — and blitted stretched into the new one meanwhile, like a stale-resolution entry is
- * during a pinch.
- */
-class CacheEntry(val surface: RasterSurface, val res: Double, val cover: Rect = Rect(0.0, 0.0, 0.0, 0.0)) {
-    /** A background layer's last markup edit held (see [CanvasState.rebakeBackground]). Main thread only. */
+/** One band of a page layer: its pixels, and how current they are. Main thread only once published. */
+class Band(val surface: RasterSurface) {
+    /** Out of date: drawn until the rebuild asked for lands, never taken as built. */
+    var stale = false
+
+    /** A background band's last markup edit held (see [CanvasState.rebakeBackground]). */
     var seq: Int = 0
+}
+
+/**
+ * A page layer as cached: the [grid] its raster is cut on, for the footprint and resolution the page
+ * had when it was begun, and the bands of it rasterized so far. A margin edit or a zoom gives the
+ * page another grid, so a new layer is begun, and this one is drawn where that has nothing yet.
+ */
+class PageLayer(val grid: BandGrid) {
+    val bands = arrayOfNulls<Band>(grid.count)
+
+    /** For each band, the frame that last wanted it built (see [CanvasState.prefetchAndPrune]). */
+    val wantedAt = IntArray(grid.count)
+    val cover: Rect get() = grid.cover
+    val res: Double get() = grid.res
+
+    fun built(): Int = bands.count { it != null }
+
+    /** Give band [k]'s pixels back, if it is built: it has left the caches. */
+    fun free(k: Int) {
+        bands[k]?.surface?.recycle()
+        bands[k] = null
+    }
+
+    /** [free] every band: the layer has left the caches. */
+    fun free() {
+        for (k in bands.indices) free(k)
+    }
+
+    fun bytes(): Long {
+        var n = 0L
+        for (k in bands.indices) if (bands[k] != null) n += grid.bytes(k)
+        return n
+    }
 }
 
 /**
@@ -78,6 +112,8 @@ class RoomView(
     val anchored: List<CanvasItem>,
     val cover: Rect,
     val live: Boolean = true,
+    /** The colour room opening here takes, or null for the page's own. */
+    val color: Rgba? = null,
 ) {
     /** Anchored items drawn under the ink: dropped colour, which lies under the lines it fills. */
     val fills: List<CanvasItem> get() = anchored.filter { it is com.xnotes.core.model.ShapeItem && it.isFill }
@@ -172,6 +208,33 @@ class CanvasState(
     val clearW: Double get() = viewportW - insetLeft - insetRight
     val clearH: Double get() = viewportH - insetTop - insetBottom
 
+    /** While true the note is only read, so the view leaves out the affordances that edit it. */
+    var readOnly: Boolean = false
+
+    /** The view's top or left edge about to move by a docked bar's thickness, so the pages can stay put on screen. */
+    private var edgeMove: EdgeMove? = null
+
+    private class EdgeMove(val top: Boolean, val px: Double, val at: Long)
+
+    /** The next resize moves the view's top (else its left) edge by about [px]: scroll with it so the pages keep their place. */
+    fun expectEdgeMove(top: Boolean, px: Double) {
+        edgeMove = EdgeMove(top, px, System.nanoTime() / 1_000_000L)
+    }
+
+    /**
+     * A resize from [oldW] x [oldH] to the viewport now: when it is the edge move expected just
+     * before, scroll by the size change so what shows stays where it was. Any other resize drops it.
+     */
+    fun followEdgeMove(oldW: Int, oldH: Int) {
+        val m = edgeMove ?: return
+        edgeMove = null
+        if (System.nanoTime() / 1_000_000L - m.at > EDGE_MOVE_MS) return
+        val dw = viewportW - oldW
+        val dh = viewportH - oldH
+        if (m.top && dw == 0 && abs(abs(dh) - m.px) <= EDGE_MOVE_SLOP) scrollY -= dh
+        if (!m.top && dh == 0 && abs(abs(dw) - m.px) <= EDGE_MOVE_SLOP) scrollX -= dw
+    }
+
     /** The middle of the clear area, where zoom steps anchor. */
     fun clearCenter(): Pt = Pt(insetLeft + clearW / 2.0, insetTop + clearH / 2.0)
 
@@ -179,11 +242,10 @@ class CanvasState(
     var minZoom: Double = MIN_ZOOM
     var maxZoom: Double = MAX_ZOOM
 
-    /**
-     * Long-edge cap (content px) for the on-screen page caches; zoom past it renders the visible
-     * region live (the sharp viewport) instead of caching the whole page. User-set in preferences.
-     */
-    var maxCachePx: Double = 2048.0
+    /** Bytes the page caches may hold, as the host has it; unset or 0, they are sized from the viewport ([CacheBudget.automatic]). */
+    var cacheLimit: (() -> Long)? = null
+
+    fun cacheBudget(): Long = cacheLimit?.invoke()?.takeIf { it > 0 } ?: CacheBudget.automatic(viewportW, viewportH)
 
     /**
      * Elastic overscroll past the document's **bottom** end (viewport px, already damped). Positive
@@ -214,10 +276,8 @@ class CanvasState(
      *  rows alike — equal to [sideMargin] so spacing always matches the margin preference. */
     val pageGap: Double get() = sideMargin
 
-    /** Margin (content px) above and below the content. Paginated it follows [sideMargin], so a
-     *  0 px preference lets the fit-height magnet fill the viewport; vertical scrolling keeps the
-     *  fixed [MARGIN] that holds the first page clear of the toolbar. */
-    val vertMargin: Double get() = if (verticalScroll) MARGIN else sideMargin
+    /** Margin (content px) above and below the content: [sideMargin] too, so a page is framed evenly. */
+    val vertMargin: Double get() = sideMargin
 
     /** How pages group into layout rows (Single / Double / Cover); see [rowRanges]. */
     var viewingMode: ViewingMode = ViewingMode.SINGLE
@@ -338,31 +398,88 @@ class CanvasState(
         return if (v.live && v.page === page && v.sideways == sideways) v.shift else 0.0
     }
 
-    /** [page]'s ink layer as cached, whatever footprint it was built for, for drawing room through an old one. */
-    fun rawInkCache(page: Page): CacheEntry? = caches[page]
+    /**
+     * The ink layer to draw room [v] through: the one built for the page as it was. Null with none
+     * to draw, and once the page's own layer has every band [seen] (page space) shows.
+     */
+    fun roomInk(page: Page, v: RoomView, seen: Rect): PageLayer? = roomLayer(ink, page, v, seen)
 
-    /** [page]'s background layer as cached, whatever footprint it was built for. */
-    fun rawBackgroundCache(page: Page): CacheEntry? = if (hasPageBackground(page)) bgCaches[page] else null
+    /** [roomInk] for the background layer. */
+    fun roomBackground(page: Page, v: RoomView, seen: Rect): PageLayer? =
+        if (hasPageBackground(page)) roomLayer(bg, page, v, seen) else null
+
+    private fun roomLayer(store: Layers, page: Page, v: RoomView, seen: Rect): PageLayer? {
+        val now = store.now[page]
+        if (now != null && now.cover == v.cover) return now.takeIf { it.built() > 0 }
+        if (now != null && covers(now, seen)) return null
+        return store.before[page]?.takeIf { it.cover == v.cover && it.built() > 0 }
+    }
+
+    private fun covers(layer: PageLayer, seen: Rect): Boolean {
+        for (k in layer.grid.meeting(seen)) if (layer.bands[k] == null) return false
+        return true
+    }
+
+    /** True when [page]'s own ink layer has a band built. */
+    fun hasInkBuilt(page: Page): Boolean = (ink.now[page]?.built() ?: 0) > 0
+
+    /** True when [page]'s own background layer has a band built. */
+    fun hasBackgroundBuilt(page: Page): Boolean = hasPageBackground(page) && (bg.now[page]?.built() ?: 0) > 0
 
     /**
      * The room [view] drew has been made: keep its old caches showing it until rebuilds that hold it
      * land, which the changed footprint schedules, and lay the note out round the page as it now is.
      */
     fun settleRoom(view: RoomView) {
-        roomView = RoomView(view.page, view.sideways, view.split, view.resume, view.shift, view.anchored, view.cover, live = false)
-        staleInk.remove(view.page)
-        cacheGen++
+        roomView = RoomView(view.page, view.sideways, view.split, view.resume, view.shift, view.anchored, view.cover, live = false, color = view.color)
+        ink.gen++
+        bg.gen++
         sharpGen++
         relayout()
     }
 
-    /** True once [page]'s caches hold what a settled [roomView] drew, so it can go. */
+    /** [page] as the room under the pen shows it: grown or shrunk by it, its rooms as the edit will leave them. */
+    fun shownPage(page: Page): Page {
+        val v = roomView ?: return page
+        if (!v.live || v.page !== page || v.shift == 0.0) return page
+        val rooms = if (v.shift > 0.0) {
+            Rooms.opened(page.rooms, v.split, v.shift, v.sideways, v.color)
+        } else {
+            Rooms.at(page.rooms, (v.split + v.resume) / 2, v.sideways)?.let { Rooms.closed(page.rooms, it, v.split, v.resume) } ?: page.rooms
+        }
+        return Page(
+            page.width + if (v.sideways) v.shift else 0.0, page.height + if (v.sideways) 0.0 else v.shift,
+            pdfPage = page.pdfPage, style = page.style, margins = page.margins, pdfTurn = page.pdfTurn, rooms = rooms,
+        ).also { it.cover = page.cover }
+    }
+
+    /** Fill [page]'s paper over [pr]: its own colour, then its margins and room in theirs, laid out as [shown]. */
+    fun fillPaper(r: Renderer, page: Page, pr: Rect, shown: Page = shownPage(page)) {
+        val paper = paperColor(page)
+        r.fillRect(pr, paper)
+        val strips = shown.paperStrips(document, paper)
+        if (strips.isEmpty()) return
+        r.save()
+        r.clipRect(pr)
+        r.translate(pr.left, pr.top)
+        applyPageTransform(r, page)
+        paintPaperStrips(r, strips)
+        r.restore()
+    }
+
+    /** True once [page]'s caches hold what a settled [roomView] drew wherever it shows, so it can go. */
     fun roomSettled(page: Page): Boolean {
-        val f = footprint(page)
-        val ink = caches[page]
-        if (ink != null && ink.cover != f) return false
-        val bg = rawBackgroundCache(page)
-        return bg == null || bg.cover == f
+        val v = roomView ?: return true
+        val seen = seenOf(page) ?: return true
+        return roomInk(page, v, seen) == null && roomBackground(page, v, seen) == null
+    }
+
+    /** The part of [page] on screen, in its page space, or null when none of it is. */
+    fun seenOf(page: Page): Rect? {
+        val pr = pageRects.getOrNull(indexOfPage[page] ?: return null) ?: return null
+        val visible = visibleContentRect()
+        if (!pr.intersects(visible)) return null
+        return displayRectToPage(page, visible.translate(-pr.left, -pr.top))
     }
 
     /** The whole paper in page space, margins included: the rect every page-space painter fills. */
@@ -544,18 +661,73 @@ class CanvasState(
 
     /**
      * Per-page caches, split into two layers so an ink edit never re-rasterizes the
-     * (costly) page background: [caches] holds the transparent **ink** layer (the
-     * strokes/shapes/text), [bgCaches] holds the rendered **background** layer
-     * (PDF/template) and stays empty when there is none. Both are blitted — background
-     * then ink — over the paper fill. Surfaces are intentionally **not** recycled on
-     * eviction; GC reclaims them once nothing holds them. Both maps are touched only on
-     * the main thread.
+     * (costly) page background: [ink] holds the transparent **ink** layer (the
+     * strokes/shapes/text), [bg] holds the rendered **background** layer (PDF/template),
+     * which a page without one never gets. Both are blitted — background then ink — over
+     * the paper fill. A layer is cut into bands ([BandGrid]): a long page is never one huge
+     * bitmap, and an edit touches only the bands it lands on. A band that leaves the caches
+     * gives its pixels back at once ([PageLayer.free]) rather than when the collector comes
+     * round, so what is held never runs far past the budget. Main thread only.
      */
-    private val caches = HashMap<Page, CacheEntry>()
-    private val bgCaches = HashMap<Page, CacheEntry>()
+    private class Layers(val bandPx: Int, val gutter: Int) {
+        /** The layer each page draws from, at the footprint and resolution it shows at. */
+        val now = HashMap<Page, PageLayer>()
+
+        /** The layer a page had before its footprint or resolution moved, drawn where [now] has no band yet. */
+        val before = HashMap<Page, PageLayer>()
+
+        /** Bands with a build in flight, so none is queued twice. */
+        val pending = HashSet<BandKey>()
+
+        /** Where a band was painted on while its build was in flight, to paint again on what the build brings. */
+        val meanwhile = HashMap<BandKey, Rect>()
+
+        /**
+         * Bumped by every invalidation. An in-flight async build captures the value at schedule
+         * time and its result is discarded if the generation has since moved on, so an edit (or
+         * zoom) that lands mid-build never gets overwritten by the stale surface.
+         */
+        var gen = 0
+
+        /** Let go of [page]'s layers. */
+        fun drop(page: Page) {
+            now.remove(page)?.free()
+            before.remove(page)?.free()
+        }
+
+        fun clear() {
+            for (layer in now.values) layer.free()
+            for (layer in before.values) layer.free()
+            now.clear()
+            before.clear()
+        }
+    }
+
+    private data class BandKey(val page: Page, val index: Int)
+
+    private val ink = Layers(INK_BAND_PX, INK_GUTTER_PX)
+    private val bg = Layers(BG_BAND_PX, BG_GUTTER_PX)
+    private val stores = arrayOf(ink, bg)
+
+    /** A band the view wants built: how far it is from the screen (viewport px) and what it costs. */
+    private class Want(val store: Layers, val page: Page, val layer: PageLayer, val index: Int, val distance: Double, val bytes: Long)
+
+    /** The bands wanted as of the last frame, nearest first, and the number that marks them in [PageLayer.wantedAt]. */
+    private var wanted: List<Want> = emptyList()
+    private var stamp = 0
+
+    /** The pages those bands are on: the ones whose ribbons and highlighter bitmaps are kept. */
+    private var near: Set<Page> = emptySet()
+
+    /** True while a build ahead of the screen is in flight; they run one at a time, so a band the screen needs never queues behind many. */
+    private var prefetching = false
+    private var pumping = false
+
+    /** Where each page is in the document, as of the last [relayout]. */
+    private val indexOfPage = HashMap<Page, Int>()
 
     /**
-     * Per-highlighter opaque-ribbon bitmaps. Highlighters can't be baked into [caches] (they
+     * Per-highlighter opaque-ribbon bitmaps. Highlighters can't be baked into the ink layer (they
      * MULTIPLY against the live page, not the transparent ink layer above it), so the draw loop
      * composites them every frame — but re-tessellating a self-overlapping ribbon each frame stalls
      * scrolling. Each entry holds the stroke's ribbon rendered once at full opacity; the frame just
@@ -590,28 +762,6 @@ class CanvasState(
     var postToMain: (work: () -> Unit) -> Unit = { it() }
     var onCacheReady: (() -> Unit)? = null
 
-    /** Pages with a build in flight, so we never queue the same page twice. */
-    private val pendingInk = HashSet<Page>()
-    private val pendingBg = HashSet<Page>()
-
-    /** Where [repairRegion] repainted a page while its build was in flight, to paint again on what the build brings. */
-    private val repairedMeanwhile = HashMap<Page, Rect>()
-
-    /**
-     * Pages whose cached ink is known to be out of date and is being rebuilt off-thread (see
-     * [refreshAllInk]). The surface stays in [caches] and keeps being blitted meanwhile, so the page
-     * shows its pre-edit content for a frame or two rather than blanking; the flag is what makes
-     * [usableFor] say no, since an edit leaves the entry's cover and resolution both matching.
-     */
-    private val staleInk = HashSet<Page>()
-
-    /**
-     * Bumped by every cache invalidation. An in-flight async build captures the value at
-     * schedule time and its result is discarded if the generation has since moved on, so
-     * an edit (or zoom) that lands mid-build never gets overwritten by the stale surface.
-     */
-    private var cacheGen = 0
-
     // --- sharp viewport (past the resolution cap) ---
 
     // Two layers, like the page cache, so an erase can clear ink in a region without
@@ -625,7 +775,7 @@ class CanvasState(
         val z: Double,
         val gen: Int,
         val row: Int,
-        /** The last markup edit its base layer holds, like [CacheEntry.seq]. */
+        /** The last markup edit its base layer holds, like [Band.seq]. */
         val seq: Int,
     )
 
@@ -698,6 +848,7 @@ class CanvasState(
         val pages = document.pages
         if (pages.isEmpty()) {
             pageRects = emptyList()
+            indexOfPage.clear()
             contentW = 2 * sideMargin
             contentH = 2 * vertMargin
             currentRow = 0
@@ -712,7 +863,7 @@ class CanvasState(
         if (verticalScroll) {
             // Rows stack top-down, centred against the widest row.
             val maxW = rowWidths.max()
-            var y = vertMargin // vertical top margin (keeps the page below the toolbar)
+            var y = vertMargin
             for ((ri, row) in rows.withIndex()) {
                 var x = sideMargin + (maxW - rowWidths[ri]) / 2.0
                 for (i in row) {
@@ -739,6 +890,8 @@ class CanvasState(
             contentH = maxH + 2 * vertMargin
         }
         pageRects = rects.map { it!! }
+        indexOfPage.clear()
+        for (i in pages.indices) indexOfPage[pages[i]] = i
         currentRow = currentRow.coerceIn(0, rows.lastIndex)
         clampScroll()
     }
@@ -1288,65 +1441,158 @@ class CanvasState(
 
     // --- page cache ---
 
-    private fun clampedRes(page: Page): Double {
-        var res = zoom * renderScale
-        // The footprint, not the outer size: room still under the pen must not resize the caches it is drawn through.
-        val f = footprint(page)
-        val longEdge = max(f.w, f.h)
-        if (longEdge * res > maxCachePx) res = maxCachePx / longEdge
-        return res.coerceAtLeast(0.01)
-    }
-
-    fun cacheFor(page: Page): CacheEntry {
-        val res = clampedRes(page)
-        caches[page]?.let { if (page !in staleInk && it.usableFor(page, res)) return it }
-        return buildCache(page, res).also { caches[page] = it; staleInk.remove(page) }
-    }
-
-    /** Whether this entry still matches [page]'s footprint and the [target] resolution, and holds
-     *  the page's current content ([staleInk]). */
-    private fun CacheEntry.usableFor(page: Page, target: Double): Boolean =
-        cover == footprint(page) && (zoomingInProgress || abs(res - target) < 1e-6)
+    /** The width [page]'s footprint shows at: its height when the view turns it a quarter. */
+    private fun across(page: Page): Double = footprint(page).let { if (sidewaysBands) it.h else it.w }
 
     /**
-     * Like [cacheFor] but never rasterizes on the calling (UI) thread: returns the ready
-     * surface when one exists, otherwise schedules the build on [runAsync] and returns the
-     * stale-resolution surface to blit meanwhile (or null when the page has never been
-     * cached, in which case the caller draws bare paper until the build lands).
+     * The finest resolution [page] is cached at: where its row fills the viewport's width. A page
+     * however long is then never wider than the screen in its caches, so what they cost follows the
+     * screens of it held, not its size; zoom past this and the sharp viewport renders what shows.
+     * By footprints, not outer sizes: room still under the pen must not resize the caches it is
+     * drawn through.
      */
-    fun cacheForOrSchedule(page: Page): CacheEntry? {
-        val res = clampedRes(page)
-        val existing = caches[page]
-        if (existing != null && page !in staleInk && existing.usableFor(page, res)) return existing
-        scheduleInk(page, res)
-        // Sync scheduler filled it; async leaves the stale entry (or null). A stale *resolution* is
-        // still blitted (scaled) so a pinch never flashes, but a stale *footprint* is not: stretching
-        // a whole page while a margin slider is dragged reads far worse than bare paper does.
-        return caches[page]?.takeIf { it.cover == footprint(page) }
+    private fun capRes(page: Page): Double {
+        if (viewportW <= 0) return Double.MAX_VALUE
+        val pages = document.pages
+        val row = indexOfPage[page]?.takeIf { pages.getOrNull(it) === page }?.let { rowOf(it) }
+        var w = if (row == null) across(page) else (row.last - row.first) * pageGap
+        if (row != null) for (i in row) w += across(pages[i])
+        return if (w <= 0.0) Double.MAX_VALUE else viewportW * renderScale / w
     }
 
-    private fun scheduleInk(page: Page, res: Double) {
-        if (!pendingInk.add(page)) return
-        val gen = cacheGen
-        val items = cacheItems(page) // snapshot on the UI thread
-        val withFlow = !flowLifted // snapshot too; the generation guard discards stale builds
+    private fun clampedRes(page: Page): Double = min(zoom * renderScale, capRes(page)).coerceAtLeast(0.01)
+
+    /** True when the view shows pages a quarter turned, so their bands are cut across the page. */
+    private val sidewaysBands: Boolean get() = rotationDeg == 90 || rotationDeg == 270
+
+    /** Whether this layer is cut for [page]'s footprint and resolution as they now are; any resolution serves a pinch. */
+    private fun PageLayer.fits(page: Page): Boolean =
+        grid.cover == footprint(page) && grid.sideways == sidewaysBands &&
+            (zoomingInProgress || abs(grid.res - clampedRes(page)) < 1e-6)
+
+    /**
+     * [page]'s layer in [store] for the footprint and resolution it shows at. When those have moved
+     * a new layer is begun and the one it had is kept to draw from meanwhile; a size gone back to
+     * finds the layer it left, so a margin slider dragged back shows that page at once.
+     */
+    private fun layerFor(store: Layers, page: Page): PageLayer {
+        val now = store.now[page]
+        if (now != null && now.fits(page)) return now
+        val old = store.before[page]
+        if (old != null && old.fits(page)) {
+            store.now[page] = old
+            if (now != null && now.built() > 0) store.before[page] = now else store.before.remove(page)
+            return old
+        }
+        // One layer is kept to draw from meanwhile: whichever of the two holds more.
+        if (now != null && now.built() > 0 && (old == null || now.built() >= old.built())) {
+            old?.free()
+            store.before[page] = now
+        } else {
+            now?.free()
+        }
+        val grid = BandGrid(footprint(page), clampedRes(page), sidewaysBands, store.bandPx, store.gutter)
+        return PageLayer(grid).also { store.now[page] = it }
+    }
+
+    /**
+     * The layer of [store] to draw [page] from, if one built for its footprint has a band. A stale
+     * *resolution* is still blitted (scaled) so a pinch never flashes, but a stale *footprint* is
+     * not: stretching a whole page while a margin slider is dragged reads far worse than bare paper.
+     */
+    private fun drawable(store: Layers, page: Page): PageLayer? {
+        val f = footprint(page)
+        val now = store.now[page]
+        if (now != null && now.built() > 0) return now.takeIf { it.cover == f }
+        return store.before[page]?.takeIf { it.cover == f && it.grid.sideways == sidewaysBands }
+    }
+
+    /** Ask for every band of [page]'s layer in [store] that is missing or out of date. */
+    private fun request(store: Layers, page: Page) {
+        val layer = layerFor(store, page)
+        for (k in layer.bands.indices) if (layer.bands[k]?.stale != false) schedule(store, page, layer, k)
+    }
+
+    /** [page]'s whole ink layer, rasterizing on the calling thread every band it lacks. */
+    fun cacheFor(page: Page): PageLayer {
+        val layer = layerFor(ink, page)
+        for (k in layer.bands.indices) {
+            if (layer.bands[k]?.stale == false) continue
+            layer.free(k)
+            layer.bands[k] = renderInk(page, layer.grid, k, cacheItems(page), includeFlow = !flowLifted)
+        }
+        return layer
+    }
+
+    /**
+     * Like [cacheFor] but never rasterizes on the calling (UI) thread: asks for the bands [page]'s
+     * ink lacks on [runAsync] and returns the layer to blit meanwhile (see [drawable]), or null, in
+     * which case the caller draws bare paper until a build lands.
+     */
+    fun cacheForOrSchedule(page: Page): PageLayer? {
+        request(ink, page)
+        return drawable(ink, page)
+    }
+
+    /** Rasterize band [k] of [layer] off the calling thread, unless a build of that band of [page] is in flight. */
+    private fun schedule(store: Layers, page: Page, layer: PageLayer, k: Int, ahead: Boolean = false) {
+        val key = BandKey(page, k)
+        if (!store.pending.add(key)) return
+        if (ahead) prefetching = true
+        val gen = store.gen
+        val grid = layer.grid
+        val build: () -> Band
+        if (store === ink) {
+            val items = cacheItems(page) // snapshot on the UI thread
+            val withFlow = !flowLifted // snapshot too; the generation guard discards stale builds
+            build = { renderInk(page, grid, k, items, withFlow) }
+        } else {
+            val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
+            build = { renderBackground(page, grid, k).also { it.seq = seq } }
+        }
         runAsync {
-            val entry = renderInk(page, res, items, withFlow)
+            val band = build()
             postToMain {
-                pendingInk.remove(page)
-                val meanwhile = repairedMeanwhile.remove(page)
-                if (gen == cacheGen) {
-                    caches[page] = entry
-                    staleInk.remove(page)
+                store.pending.remove(key)
+                if (ahead) prefetching = false
+                val meanwhile = store.meanwhile.remove(key)
+                if (gen == store.gen && store.now[page] === layer) {
+                    layer.free(k) // the out-of-date band it replaces
+                    layer.bands[k] = band
                     // The build painted from what it read then; a repair since, as a playhead crossing ink, would be lost.
-                    meanwhile?.let { repaintCached(entry, page, it) }
+                    meanwhile?.let { repaintBand(grid, k, band, page, it) }
+                } else {
+                    band.surface.recycle()
+                    // Thrown away for an edit made since, with the band it was to replace still showing: ask again.
+                    if (store.now[page] === layer && layer.bands[k]?.stale == true) schedule(store, page, layer, k)
                 }
                 // Repaint either way. A build the page outgrew mid-flight (a margin drag bumps the
                 // generation on every tick) is discarded here, and the draw loop is what schedules
                 // its replacement — but every frame while this one was in flight was turned away by
-                // [pendingInk], so without this the page would sit blank until something else drew.
+                // [Layers.pending], so without this the page would sit blank until something else drew.
                 onCacheReady?.invoke()
+                // Made room for before the next is begun, so builds landing between frames never pile up over the budget.
+                if (stamp > 0) prune()
+                pump()
             }
+        }
+    }
+
+    /** Start the build of the nearest wanted band that lacks one, if none ahead of the screen is in flight. */
+    private fun pump() {
+        if (pumping) return
+        pumping = true
+        try {
+            // An inline [runAsync] lands each build before the next is looked for, hence the loop.
+            while (!prefetching && !zoomingInProgress) {
+                val w = wanted.firstOrNull {
+                    it.store.now[it.page] === it.layer && it.layer.bands[it.index]?.stale != false &&
+                        BandKey(it.page, it.index) !in it.store.pending
+                } ?: break
+                schedule(w.store, w.page, w.layer, w.index, ahead = true)
+            }
+        } finally {
+            pumping = false
         }
     }
 
@@ -1393,24 +1639,19 @@ class CanvasState(
         return InkItems(under, over)
     }
 
-    private fun buildCache(page: Page, res: Double): CacheEntry =
-        renderInk(page, res, cacheItems(page), includeFlow = !flowLifted)
-
-    private fun renderInk(page: Page, res: Double, items: InkItems, includeFlow: Boolean): CacheEntry {
-        val cover = footprint(page)
-        val w = ceil(cover.w * res).toInt().coerceAtLeast(1)
-        val h = ceil(cover.h * res).toInt().coerceAtLeast(1)
-        val surface = surfaceFactory.create(w, h, 1.0)
+    /** Rasterize band [k] of [grid] of [page]'s ink: what of [items] and the flow its surface holds. */
+    private fun renderInk(page: Page, grid: BandGrid, k: Int, items: InkItems, includeFlow: Boolean): Band {
+        val surface = surfaceFactory.create(grid.surfaceW(k), grid.surfaceH(k), 1.0)
         surface.fill(TRANSPARENT)
         val r = inkRenderer(page, surface.renderer())
-        r.scale(res, res)
-        r.translate(-cover.left, -cover.top) // the surface covers the margins, so page space starts inset
+        grid.enter(r, k) // the grid covers the margins, so page space starts inset
+        val held = grid.held(k)
         val f = fade
-        InkFade.paint(items.under, r, f) { it.paint(r) }
-        if (includeFlow) paintFlow?.invoke(page, r, cover)
-        InkFade.paint(items.over, r, f) { it.paint(r) }
+        InkFade.paint(items.under, r, f, { it.paintBounds().intersects(held) }) { it.paint(r) }
+        if (includeFlow) paintFlow?.invoke(page, r, held)
+        InkFade.paint(items.over, r, f, { it.paintBounds().intersects(held) }) { it.paint(r) }
         noteGeometryBuilt(page)
-        return CacheEntry(surface, res, cover)
+        return Band(surface)
     }
 
     /** Record that [page]'s strokes now hold ribbon geometry. Called from the cache threads too, so
@@ -1457,6 +1698,7 @@ class CanvasState(
         ) {
             return existing
         }
+        existing?.surface?.recycle()
         return buildHighlighter(stroke, res, g, opaque).also { hlCaches[stroke] = it }
     }
 
@@ -1488,49 +1730,80 @@ class CanvasState(
      * ink edits — rebuilt only when the resolution changes — so erasing/repairing ink
      * never re-rasterizes the (expensive) background.
      */
-    fun backgroundFor(page: Page): CacheEntry? {
+    fun backgroundFor(page: Page): PageLayer? {
         if (!hasPageBackground(page)) return null
-        val res = clampedRes(page)
-        val existing = bgCaches[page]
-        if (existing != null && existing.usableFor(page, res)) return existing
-        return buildBackground(page, res).also { it.seq = markupSeq; bgCaches[page] = it }
+        val layer = layerFor(bg, page)
+        for (k in layer.bands.indices) {
+            if (layer.bands[k]?.stale == false) continue
+            layer.free(k)
+            layer.bands[k] = renderBackground(page, layer.grid, k).also { it.seq = markupSeq }
+        }
+        return layer
     }
 
     /** Non-blocking counterpart to [backgroundFor]; see [cacheForOrSchedule]. */
-    fun backgroundForOrSchedule(page: Page): CacheEntry? {
+    fun backgroundForOrSchedule(page: Page): PageLayer? {
         if (!hasPageBackground(page)) return null
-        val res = clampedRes(page)
-        val existing = bgCaches[page]
-        if (existing != null && existing.usableFor(page, res)) return existing
-        scheduleBg(page, res)
-        return bgCaches[page]?.takeIf { it.cover == footprint(page) }
+        request(bg, page)
+        return drawable(bg, page)
     }
 
-    private fun scheduleBg(page: Page, res: Double) {
-        if (!pendingBg.add(page)) return
-        val gen = cacheGen
-        val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
-        runAsync {
-            val entry = buildBackground(page, res)
-            postToMain {
-                pendingBg.remove(page)
-                if (gen == cacheGen) bgCaches[page] = entry.also { it.seq = seq }
-                onCacheReady?.invoke() // discarded or not; see [scheduleInk]
+    /** Rasterize band [k] of [grid] of [page]'s background. */
+    private fun renderBackground(page: Page, grid: BandGrid, k: Int): Band {
+        val surface = surfaceFactory.create(grid.surfaceW(k), grid.surfaceH(k), 1.0)
+        surface.fill(TRANSPARENT)
+        val r = surface.renderer()
+        grid.enter(r, k)
+        paintPageBackground?.invoke(page, r, grid.res, grid.held(k))
+        return Band(surface)
+    }
+
+    /**
+     * Draw [page]'s ink where it shows in [seen] (page space), asking for the bands missing there.
+     * [r] stands in page space. A band not built yet shows what the layer before it holds there.
+     */
+    fun drawInk(r: Renderer, page: Page, seen: Rect) = drawLayer(ink, r, page, seen)
+
+    /** [drawInk] for the background layer of a page that has one. */
+    fun drawBackground(r: Renderer, page: Page, seen: Rect) {
+        if (hasPageBackground(page)) drawLayer(bg, r, page, seen)
+    }
+
+    private fun drawLayer(store: Layers, r: Renderer, page: Page, seen: Rect) {
+        val layer = layerFor(store, page)
+        val g = layer.grid
+        val old = store.before[page]?.takeIf { it.cover == g.cover && it.grid.sideways == g.sideways }
+        for (k in g.meeting(seen)) {
+            val band = layer.bands[k]
+            if (band == null || band.stale) schedule(store, page, layer, k)
+            if (band != null) {
+                r.drawRaster(band.surface, g.shown(k), g.source(k))
+            } else if (old != null) {
+                r.save()
+                r.clipRect(g.shown(k))
+                drawBands(r, old, seen)
+                r.restore()
             }
         }
     }
 
-    private fun buildBackground(page: Page, res: Double): CacheEntry {
-        val cover = footprint(page)
-        val w = ceil(cover.w * res).toInt().coerceAtLeast(1)
-        val h = ceil(cover.h * res).toInt().coerceAtLeast(1)
-        val surface = surfaceFactory.create(w, h, 1.0)
-        surface.fill(TRANSPARENT)
-        val r = surface.renderer()
-        r.scale(res, res)
-        r.translate(-cover.left, -cover.top)
-        paintPageBackground?.invoke(page, r, res, cover)
-        return CacheEntry(surface, res, cover)
+    /** Draw the built bands of [layer] that show in [seen] (page space), or all of them. [r] stands in page space. */
+    fun drawBands(r: Renderer, layer: PageLayer, seen: Rect? = null) {
+        val g = layer.grid
+        for (k in if (seen == null) layer.bands.indices else g.meeting(seen)) {
+            layer.bands[k]?.let { r.drawRaster(it.surface, g.shown(k), g.source(k)) }
+        }
+    }
+
+    /** Ask for the bands of [page]'s layers that show in [seen] (page space) and are missing, without drawing. */
+    fun askFor(page: Page, seen: Rect) {
+        askFor(ink, page, seen)
+        if (hasPageBackground(page)) askFor(bg, page, seen)
+    }
+
+    private fun askFor(store: Layers, page: Page, seen: Rect) {
+        val layer = layerFor(store, page)
+        for (k in layer.grid.meeting(seen)) if (layer.bands[k]?.stale != false) schedule(store, page, layer, k)
     }
 
     /** Markup edits made so far; each background layer and sharp frame records the last one it holds. */
@@ -1541,55 +1814,52 @@ class CanvasState(
     /** Markups an edit put on a page that a layer on screen may not hold yet, by page. Main thread only. */
     private val unbaked = HashMap<Page, MutableList<Unbaked>>()
 
-    /** Pages whose background is being painted afresh for a markup edit, and those edited again meanwhile. */
-    private val rebaking = HashSet<Page>()
-    private val rebakeAgain = HashSet<Page>()
-
     /** A markup edit came in while a sharp render was under way, which may have read the page before it. */
     private var sharpAgain = false
 
     /**
-     * [page]'s markups changed: its background layer is painted afresh on the cache thread and
-     * swapped in once done, the old one shown meanwhile, and the sharp viewport likewise. Patching
-     * just the region they cover would leave seams: PDFium draws a region's pixels visibly
-     * differently from the same pixels of a whole page, around glyphs and images near its edges.
-     * [added] are the markups the edit put on; [unbakedMarkups] hands them to the overlay until the
-     * layers on screen hold them, so nothing blinks while the new layer renders.
+     * [page]'s markups changed: its background bands are painted afresh on the cache thread and
+     * swapped in as each is done, the old ones shown meanwhile, and the sharp viewport likewise.
+     * Patching just the region they cover would leave seams: PDFium draws a region's pixels visibly
+     * differently from the same pixels of a whole band, around images near its edges. [added] are
+     * the markups the edit put on; [unbakedMarkups] hands them to the overlay until the layers on
+     * screen hold them, so nothing blinks while the new bands render.
      */
     fun rebakeBackground(page: Page, added: List<TextMarkup>) {
         backgroundRevision++
         val seq = ++markupSeq
         if (added.isNotEmpty()) unbaked.getOrPut(page) { ArrayList() }.addAll(added.map { Unbaked(seq, it) })
-        // A whole-layer build under way may have read the markups before the edit.
-        cacheGen++
+        // A build under way may have read the markups before the edit.
+        bg.gen++
         if (pendingSharp) sharpAgain = true else if (sharpFrame?.gen == sharpGen) requestSharpViewport()
-        val entry = bgCaches[page] ?: return
-        if (entry.usableFor(page, clampedRes(page))) scheduleRebake(page) // else the draw loop builds it anew
+        val layer = bg.now[page] ?: return
+        for (band in layer.bands) band?.stale = true
+        askAgain(bg, page, layer)
     }
 
-    private fun scheduleRebake(page: Page) {
-        if (!rebaking.add(page)) {
-            rebakeAgain += page
-            return
+    /** Ask for the out-of-date bands of [layer] on screen at once, and the rest in their turn. */
+    private fun askAgain(store: Layers, page: Page, layer: PageLayer) {
+        if (!layer.fits(page)) return // the draw loop begins a layer anew
+        val seen = seenOf(page)
+        if (seen != null) for (k in layer.grid.meeting(seen)) if (layer.bands[k]?.stale == true) schedule(store, page, layer, k)
+        pump()
+    }
+
+    /** The last markup edit held by every built band of [page]'s background that shows, 0 with none to draw. */
+    private fun heldSeq(page: Page): Int {
+        val layer = bg.now[page]?.takeIf { it.cover == footprint(page) } ?: return 0
+        val seen = seenOf(page)
+        var held = Int.MAX_VALUE
+        for (k in if (seen == null) layer.bands.indices else layer.grid.meeting(seen)) {
+            layer.bands[k]?.let { held = min(held, it.seq) }
         }
-        val res = clampedRes(page)
-        val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
-        runAsync {
-            val fresh = buildBackground(page, res)
-            postToMain {
-                rebaking.remove(page)
-                val shown = bgCaches[page]
-                if (shown != null && shown.seq < seq) bgCaches[page] = fresh.also { it.seq = seq }
-                if (rebakeAgain.remove(page) && bgCaches[page] != null) scheduleRebake(page)
-                onCacheReady?.invoke()
-            }
-        }
+        return if (held == Int.MAX_VALUE) 0 else held
     }
 
     /** [page]'s markups the layers on screen don't hold yet, for the overlay to draw meanwhile. */
     fun unbakedMarkups(page: Page): List<TextMarkup> {
         val list = unbaked[page] ?: return emptyList()
-        var held = bgCaches[page]?.takeIf { it.cover == footprint(page) }?.seq ?: 0
+        var held = heldSeq(page)
         val frame = sharpFrame
         if (frame != null && frame.gen == sharpGen && isPastResolutionCap()) held = min(held, frame.seq)
         val now = page.markups
@@ -1604,17 +1874,29 @@ class CanvasState(
         if (item.isHighlighterInk()) return // composited live over the page, never cached
         appendToSharpInk(page, item) // keep the sharp viewport crisp without a full re-render
         if (pendingSharp) pendingSharpEdits.add(page to item.paintBounds().outset(SHARP_EDIT_PAD))
-        val res = clampedRes(page)
-        val existing = caches[page]
-        if (existing == null || page in staleInk || !existing.usableFor(page, res)) {
-            invalidatePage(page)
-            return
+        val bounds = item.paintBounds()
+        ink.now[page]?.let { appendTo(it, page, item, bounds) }
+        ink.before[page]?.let { appendTo(it, page, item, bounds) }
+    }
+
+    /** Paint [item] onto the bands of [layer] that hold it; a band whose build is in flight gets it again when that lands. */
+    private fun appendTo(layer: PageLayer, page: Page, item: CanvasItem, bounds: Rect) {
+        val g = layer.grid
+        for (k in g.meeting(bounds, held = true)) {
+            layer.bands[k]?.let {
+                val r = it.surface.renderer()
+                r.save()
+                g.enter(r, k)
+                paintItem(item, r, page)
+                r.restore()
+            }
+            noteMeanwhile(page, k, bounds)
         }
-        val cover = existing.cover
-        val r = existing.surface.renderer()
-        r.scale(res, res)
-        r.translate(-cover.left, -cover.top)
-        paintItem(item, r, page)
+    }
+
+    private fun noteMeanwhile(page: Page, k: Int, rect: Rect) {
+        val key = BandKey(page, k)
+        if (key in ink.pending) ink.meanwhile[key] = ink.meanwhile[key]?.union(rect) ?: rect
     }
 
     /**
@@ -1630,23 +1912,29 @@ class CanvasState(
     fun repairRegion(page: Page, dirtyRect: Rect): Boolean {
         repairSharpInk(page, dirtyRect) // erase from the sharp ink layer in place, no re-render
         if (pendingSharp) pendingSharpEdits.add(page to dirtyRect)
-        val entry = caches[page] ?: return false
-        repaintCached(entry, page, dirtyRect)
-        if (page in pendingInk) repairedMeanwhile[page] = repairedMeanwhile[page]?.union(dirtyRect) ?: dirtyRect
-        return true
+        val now = ink.now[page]
+        now?.let { repaintLayer(it, page, dirtyRect) }
+        ink.before[page]?.let { repaintLayer(it, page, dirtyRect) }
+        return now != null
     }
 
-    /** Clear [rect] (page-local) of [entry]'s ink and paint [page]'s items there again. */
-    private fun repaintCached(entry: CacheEntry, page: Page, rect: Rect) {
-        val cover = entry.cover
-        val r = entry.surface.renderer()
+    private fun repaintLayer(layer: PageLayer, page: Page, rect: Rect) {
+        for (k in layer.grid.meeting(rect, held = true)) {
+            layer.bands[k]?.let { repaintBand(layer.grid, k, it, page, rect) }
+            noteMeanwhile(page, k, rect)
+        }
+    }
+
+    /** Clear [rect] (page-local) of [band]'s ink and paint [page]'s items there again. */
+    private fun repaintBand(grid: BandGrid, k: Int, band: Band, page: Page, rect: Rect) {
+        val r = band.surface.renderer()
         r.save()
-        r.scale(entry.res, entry.res)
-        r.translate(-cover.left, -cover.top)
+        grid.enter(r, k)
         r.clipRect(rect)
         r.clear()
         paintInk(page, r, rect)
         r.restore()
+        noteGeometryBuilt(page) // a repaint builds ribbons too, on a page that may be out of reach by now
     }
 
     /** Repaint [page]'s cached ink where it meets [region]: the fills under its typed text, the text, then the rest. */
@@ -1691,16 +1979,15 @@ class CanvasState(
     var paintLiftedUnderText: ((page: Page, r: Renderer) -> Unit)? = null
 
     fun invalidatePage(page: Page) {
-        caches.remove(page)
-        staleInk.remove(page)
+        ink.drop(page)
         if (roomView?.page === page && roomView?.live == false) roomView = null
-        cacheGen++
+        ink.gen++
         sharpGen++
     }
 
     /**
      * Page-style invalidation. The paper colour is filled **live** each frame in [CanvasView] (not
-     * baked into [caches]/[bgCaches]), so a colour-only change just needs the sharp viewport — which
+     * baked into either cached layer), so a colour-only change just needs the sharp viewport — which
      * *does* bake the paper — to re-render: bump [sharpGen]. A ruling, by contrast, lives in the
      * background cache, so a pattern/spacing/pattern-colour change must drop that page's background
      * and let the draw loop rebuild via [backgroundForOrSchedule]. These do **not** early-return on a
@@ -1716,15 +2003,15 @@ class CanvasState(
 
     fun invalidateBackground(page: Page) {
         backgroundRevision++
-        bgCaches.remove(page)
-        cacheGen++
+        bg.drop(page)
+        bg.gen++
         sharpGen++
     }
 
     fun invalidateAllBackgrounds() {
         backgroundRevision++
-        bgCaches.clear()
-        cacheGen++
+        bg.clear()
+        bg.gen++
         sharpGen++
     }
 
@@ -1733,23 +2020,25 @@ class CanvasState(
      * are not drawn while they are the wrong size (see [cacheForOrSchedule]) — the page shows bare
      * paper until its rebuild lands. Keeping them means a slider dragged back to a size already
      * rasterized shows that page again at once, with nothing to rebuild. The size mismatch itself is
-     * what schedules the rebuild (see [usableFor]).
+     * what schedules the rebuild (see [layerFor]).
      */
     fun invalidatePageGeometry() {
-        cacheGen++
+        ink.gen++
+        bg.gen++
         sharpGen++
     }
 
     fun invalidateAllCaches() {
         backgroundRevision++
         roomView = null
-        caches.clear()
-        staleInk.clear()
-        bgCaches.clear()
+        ink.clear()
+        bg.clear()
         unbaked.clear()
+        for (entry in hlCaches.values) entry.surface.recycle()
         hlCaches.clear()
         wetInk.clear()
-        cacheGen++
+        ink.gen++
+        bg.gen++
         sharpGen++
     }
 
@@ -1782,31 +2071,37 @@ class CanvasState(
      * out input — a full page of ink is the same work [renderInk] does on the cache thread, times
      * every cached page, on the thread the tap arrived on.
      *
-     * So it schedules instead: the current surface stays in [caches] and keeps being blitted until
-     * the rebuild lands, so the page shows its pre-edit content for a frame or two rather than
-     * blanking (the flicker [invalidateAllCaches] caused). [staleInk] is what stops [usableFor]
-     * handing that surface back as current — an edit changes neither the cover nor the resolution,
-     * so nothing else would notice.
+     * So it schedules instead: each band stays where it is and keeps being blitted until its
+     * rebuild lands, so the page shows its pre-edit content for a frame or two rather than
+     * blanking (the flicker [invalidateAllCaches] caused). [Band.stale] is what stops a band being
+     * taken as built — an edit changes neither the cover nor the resolution, so nothing else
+     * would notice.
      *
-     * Bumps [cacheGen] so a build scheduled before the edit is discarded on publish rather than
+     * Bumps the ink generation so a build scheduled before the edit is discarded on publish rather than
      * overwriting the page with its pre-edit snapshot, and [sharpGen] because the sharp viewport can
      * only be patched by region ([repairSharpInk]) and there are none: it drops to the soft cache
      * underneath and re-renders once the view settles. The (PDF/template) background layer is left
      * untouched — undo/redo never edits it, so it must not flash either.
      */
     fun refreshAllInk() {
-        refreshInk(caches.keys.toList())
+        refreshInk(ink.now.keys.toList())
     }
 
     /** [refreshAllInk] for just [pages]: rebuilt off-thread, their old surfaces blitted meanwhile. */
     fun refreshInk(pages: Collection<Page>) {
-        cacheGen++
+        ink.gen++
         sharpGen++
-        for (page in pages) {
-            if (page !in caches) continue
-            staleInk.add(page)
-            scheduleInk(page, clampedRes(page))
+        for (page in pages) staleInk(page, null)
+    }
+
+    /** Mark [page]'s ink bands that hold [rect] (all of them when null) out of date, to be built again nearest the screen first. */
+    private fun staleInk(page: Page, rect: Rect?) {
+        ink.before[page]?.let { old ->
+            for (k in if (rect == null) old.bands.indices else old.grid.meeting(rect, held = true)) old.bands[k]?.stale = true
         }
+        val layer = ink.now[page] ?: return
+        for (k in if (rect == null) layer.bands.indices else layer.grid.meeting(rect, held = true)) layer.bands[k]?.stale = true
+        askAgain(ink, page, layer)
     }
 
     /**
@@ -1816,14 +2111,12 @@ class CanvasState(
      */
     fun refreshInkRegions(regions: Map<Page, Rect>) {
         if (regions.isEmpty()) return
-        cacheGen++
+        ink.gen++
         for ((page, rect) in regions) {
             val padded = rect.outset(SHARP_EDIT_PAD)
             repairSharpInk(page, padded)
             if (pendingSharp) pendingSharpEdits.add(page to padded)
-            if (page !in caches) continue
-            staleInk.add(page)
-            scheduleInk(page, clampedRes(page))
+            staleInk(page, padded)
         }
     }
 
@@ -1845,7 +2138,7 @@ class CanvasState(
             }
             for ((page, rect) in byPage) repairRegion(page, rect.outset(SHARP_EDIT_PAD))
         }
-        cacheGen++
+        ink.gen++
     }
 
     /**
@@ -1853,89 +2146,182 @@ class CanvasState(
      * bitmaps stay in the maps, so [cacheForOrSchedule]/[backgroundForOrSchedule] keep
      * blitting them (scaled) for the new zoom until the sharp rebuild lands — avoiding the
      * one-frame empty-canvas flash that clearing would cause when a pinch ends. A page whose
-     * clamped resolution is unchanged (already at the [maxCachePx] cap) matches on res and
+     * clamped resolution is unchanged (already at its cap, see [capRes]) matches on res and
      * is returned as-is, so it is neither flashed nor needlessly rebuilt.
      *
-     * Bumping [cacheGen] discards any in-flight build captured at the previous generation, so
+     * Bumping the generations discards any in-flight build captured at the previous one, so
      * a stale-resolution surface can't be published over the maps after the zoom changed. Use
      * [invalidateAllCaches] instead when page *content* changed — that must rebuild even at the
      * same resolution.
      */
     fun invalidateCachesForZoom() {
-        cacheGen++
+        ink.gen++
+        bg.gen++
     }
 
-    fun dropCachesExcept(visible: Set<Page>) {
-        caches.keys.retainAll(visible)
-        staleInk.retainAll(visible)
-        bgCaches.keys.retainAll(visible)
-        if (hlCaches.isNotEmpty()) {
-            val keep = HashSet<Stroke>()
-            for (p in visible) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
-            hlCaches.keys.retainAll(keep)
+    /** [page]'s ink layer as it stands, built or not. */
+    fun inkLayer(page: Page): PageLayer? = ink.now[page]
+
+    /** [page]'s background layer as it stands, built or not. */
+    fun backgroundLayer(page: Page): PageLayer? = bg.now[page]
+
+    /** The pages with a band wanted as of the last frame, nearest the screen first. */
+    fun wantedPages(): List<Page> = wanted.map { it.page }.distinct()
+
+    /** How far band [k] of [grid], a layer of page [i], is from [view] (content space), in viewport px; 0 when it shows. */
+    private fun distance(i: Int, grid: BandGrid, k: Int, view: Rect): Double {
+        val at = fromPageSpaceRect(i, grid.onPage(k))
+        val dx = max(max(view.left - at.right, at.left - view.right), 0.0)
+        val dy = max(max(view.top - at.bottom, at.top - view.bottom), 0.0)
+        // To an eighth of a pixel, so two bands as far off as each other tie whatever the rounding on the way here.
+        return Math.round(max(dx, dy) * zoom * 8.0) / 8.0
+    }
+
+    /** Every band of the layers of [row]'s pages, each as far from [view] as it lies, plus [extra]. */
+    private fun wantRow(row: IntRange, view: Rect, extra: Double, into: MutableList<Want>) {
+        for (i in row) {
+            val page = document.pages[i]
+            for (store in arrayOf(bg, ink)) {
+                if (store === bg && !hasPageBackground(page)) continue
+                val layer = layerFor(store, page)
+                val g = layer.grid
+                for (k in 0 until g.count) into += Want(store, page, layer, k, distance(i, g, k, view) + extra, g.bytes(k))
+            }
         }
-        releaseGeometryExcept(visible)
     }
-
-    /** Pages to build ahead of the viewport ([prefetch], nearest first) and pages whose caches survive the frame ([keep]). */
-    class CacheBand(val prefetch: List<Page>, val keep: Set<Page>)
 
     /**
-     * Rows within a screenful of the viewport (at least the adjacent one; paginated, one row either side), kept one
-     * row further. Never sized by the visible page count: that flips as page edges cross the viewport, and every
-     * flip evicted the pages just prefetched.
+     * The bands to have built, nearest the screen first: those on it, then outward below and above
+     * until [FILL_SHARE] of the budget is spoken for. Paginated, the row shown and then each
+     * neighbour as a turn to it would show it. Sized in bytes and never by a count of pages, which
+     * flips as page edges cross the screen and used to evict what had just been built. Null while
+     * the note is not laid out.
      */
-    fun cacheBand(): CacheBand {
+    private fun plan(): List<Want>? {
         val pages = document.pages
         val rows = rowRanges()
-        if (rows.isEmpty()) return CacheBand(emptyList(), emptySet())
-        if (pageRects.size != pages.size) return CacheBand(emptyList(), pages.toHashSet()) // not laid out yet
-        // Rows on screen are first..last (last = first - 1 when the view sits in a gap); lo..hi adds the prefetch.
-        var first: Int
-        var last: Int
-        var lo: Int
-        var hi: Int
+        if (rows.isEmpty() || pageRects.size != pages.size || viewportW <= 0 || viewportH <= 0) return null
+        stamp++
+        val view = visibleContentRect()
+        val fill = (cacheBudget() * FILL_SHARE).toLong()
+        val wants = ArrayList<Want>()
         if (verticalScroll) {
-            val v = visibleContentRect()
             fun top(r: Int) = rows[r].minOf { pageRects[it].top }
             fun bottom(r: Int) = rows[r].maxOf { pageRects[it].bottom }
-            first = 0
-            while (first < rows.size && bottom(first) < v.top) first++
-            last = rows.lastIndex
-            while (last >= 0 && top(last) > v.bottom) last--
-            hi = last + 1
-            while (hi < rows.lastIndex && top(hi + 1) <= v.bottom + v.h) hi++
-            lo = first - 1
-            while (lo > 0 && bottom(lo - 1) >= v.top - v.h) lo--
+            // Rows on screen are first..last (last = first - 1 when the view sits in a gap).
+            var first = 0
+            while (first < rows.size && bottom(first) < view.top) first++
+            var last = rows.lastIndex
+            while (last >= 0 && top(last) > view.bottom) last--
+            for (r in first..last) wantRow(rows[r], view, 0.0, wants)
+            var lo = first - 1
+            var hi = last + 1
+            while (lo >= 0 || hi <= rows.lastIndex) {
+                val below = if (hi <= rows.lastIndex) (top(hi) - view.bottom) * zoom else Double.MAX_VALUE
+                val above = if (lo >= 0) (view.top - bottom(lo)) * zoom else Double.MAX_VALUE
+                // A row further out holds only bands further out: stop once the nearer ones take the share.
+                val reach = min(below, above)
+                if (wants.sumOf { if (it.distance <= reach) it.bytes else 0L } >= fill) break
+                if (below <= above) wantRow(rows[hi++], view, 0.0, wants) else wantRow(rows[lo--], view, 0.0, wants)
+            }
         } else {
-            first = currentRow.coerceIn(0, rows.lastIndex)
-            last = first
-            lo = first - 1
-            hi = first + 1
-        }
-        val prefetch = ArrayList<Page>()
-        for (r in first..last) for (i in rows[r]) prefetch += pages[i]
-        for (d in 1..max(hi - last, first - lo)) {
-            for (r in intArrayOf(last + d, first - d)) {
-                if (r in lo..hi && r in rows.indices) for (i in rows[r]) prefetch += pages[i]
+            val shown = currentRow.coerceIn(0, rows.lastIndex)
+            wantRow(rows[shown], view, 0.0, wants)
+            for (r in intArrayOf(shown + 1, shown - 1)) {
+                if (r !in rows.indices) continue
+                // Where a turn to it lands, and a screen further off than the row shown.
+                val landing = visibleFor(rowTargetScroll(r).x, flipLandingScrollY(r), zoom)
+                wantRow(rows[r], landing, viewportH.toDouble(), wants)
             }
         }
-        val keep = HashSet<Page>()
-        for (r in max(lo - 1, 0)..min(hi + 1, rows.lastIndex)) for (i in rows[r]) keep += pages[i]
-        return CacheBand(prefetch, keep)
+        wants.sortBy { it.distance }
+        var held = 0L
+        var n = 0
+        while (n < wants.size && (wants[n].distance <= 0.0 || held + wants[n].bytes <= fill)) held += wants[n++].bytes
+        for (k in 0 until n) wants[k].let { it.layer.wantedAt[it.index] = stamp }
+        return if (n == wants.size) wants else ArrayList(wants.subList(0, n))
     }
 
-    /** Runs after the visible pages are scheduled, so they build first; a pinch moving the zoom keeps the band but prefetches nothing. */
+    /**
+     * Runs after the frame has drawn, and asked for, the bands on screen: builds outward from them
+     * one at a time, and lets go of what the budget cannot hold. A pinch moving the zoom keeps what
+     * is cached but builds nothing ahead.
+     */
     fun prefetchAndPrune() {
-        val band = cacheBand()
+        wanted = plan() ?: return
+        near = wanted.mapTo(HashSet()) { it.page }
+        prune()
         if (!zoomingInProgress) {
-            for (page in band.prefetch) {
-                backgroundForOrSchedule(page)
-                cacheForOrSchedule(page)
-                prefetchMath?.invoke(page, zoom)
+            pump()
+            prefetchMath?.let { fetch -> for (page in near) fetch(page, zoom) }
+        }
+    }
+
+    private class Spare(val layer: PageLayer, val index: Int, val distance: Double, val bytes: Long)
+
+    /**
+     * Let go of what the last [plan] has no use for: the layers of pages that are gone, a page's
+     * old layer once the new one has every band wanted of it, bands out of date and out of reach,
+     * and, over budget, the unwanted bands furthest from the screen. Ribbons and highlighter
+     * bitmaps go with the pages no wanted band is on.
+     */
+    private fun prune() {
+        val unfinished = HashSet<PageLayer>()
+        for (w in wanted) if (w.layer.bands[w.index] == null) unfinished += w.layer
+        var total = 0L
+        for (store in stores) {
+            for (map in arrayOf(store.now, store.before)) {
+                val each = map.entries.iterator()
+                while (each.hasNext()) {
+                    val (page, layer) = each.next()
+                    val done = map === store.before && store.now[page]?.let { it !in unfinished } ?: true
+                    if (done || page !in indexOfPage) {
+                        layer.free()
+                        each.remove()
+                        continue
+                    }
+                    var keep = false
+                    for (k in layer.bands.indices) {
+                        val wantedNow = layer.wantedAt[k] == stamp
+                        val band = layer.bands[k]
+                        if (band != null && band.stale && !wantedNow && map === store.now) layer.free(k)
+                        else if (band != null) total += layer.grid.bytes(k)
+                        if (wantedNow || layer.bands[k] != null) keep = true
+                    }
+                    if (!keep) each.remove()
+                }
             }
         }
-        dropCachesExcept(band.keep)
+        val budget = cacheBudget()
+        if (total > budget) {
+            val view = visibleContentRect()
+            val spare = ArrayList<Spare>()
+            for (store in stores) for (map in arrayOf(store.now, store.before)) for ((page, layer) in map) {
+                val i = indexOfPage[page] ?: continue
+                for (k in layer.bands.indices) {
+                    if (layer.bands[k] == null || layer.wantedAt[k] == stamp) continue
+                    spare += Spare(layer, k, distance(i, layer.grid, k, view), layer.grid.bytes(k))
+                }
+            }
+            spare.sortByDescending { it.distance }
+            for (s in spare) {
+                if (total <= budget || s.distance <= 0.0) break
+                s.layer.free(s.index)
+                total -= s.bytes
+            }
+        }
+        if (hlCaches.isNotEmpty()) {
+            val keep = HashSet<Stroke>()
+            for (p in near) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
+            val each = hlCaches.entries.iterator()
+            while (each.hasNext()) {
+                val (stroke, entry) = each.next()
+                if (stroke in keep) continue
+                entry.surface.recycle()
+                each.remove()
+            }
+        }
+        releaseGeometryExcept(near)
     }
 
     /**
@@ -1960,15 +2346,15 @@ class CanvasState(
 
     // --- sharp viewport ---
 
-    /** True when the current zoom pushes a visible page past [maxCachePx] (its cache is clamped). */
+    /** True when the current zoom shows a visible page finer than it is cached ([capRes]). */
     fun isPastResolutionCap(): Boolean {
         val target = zoom * renderScale
         val visible = visibleContentRect()
         for (i in pageRects.indices) {
             val pr = pageRects.getOrNull(i) ?: continue
             if (!pr.intersects(visible)) continue
-            val page = document.pages[i]
-            if (target * max(outerW(page), outerH(page)) > maxCachePx) return true
+            val page = document.pages.getOrNull(i) ?: continue
+            if (target > capRes(page) * (1 + 1e-9)) return true
         }
         return false
     }
@@ -2088,7 +2474,7 @@ class CanvasState(
         ri.translate(o.x, o.y)
         ri.scale(z, z)
         for (d in draws) {
-            rb.fillRect(d.pr, paperColor(d.page))
+            fillPaper(rb, d.page, d.pr, d.page)
             rb.save()
             rb.clipRect(d.pr)
             rb.translate(d.pr.left, d.pr.top)
@@ -2164,21 +2550,63 @@ class CanvasState(
         )
     }
 
-    /** A read-only count of the live page caches and their bitmap bytes, for the debug overlay. */
-    class CacheSnapshot(
-        val visiblePages: Int,
-        val inkPages: Int,
-        val bgPages: Int,
-        val bytes: Long,
-    )
+    /** One layer's share of the page caches: its bytes, and the screens of it built without a gap above and below the view. */
+    class LayerSnapshot(val bytes: Long, val above: Double, val below: Double)
+
+    /** What the page caches hold, for the debug overlay: each layer, and the bytes held in all against the budget. */
+    class CacheSnapshot(val ink: LayerSnapshot, val background: LayerSnapshot, val bytes: Long, val budget: Long)
 
     fun cacheSnapshot(): CacheSnapshot {
-        var bytes = 0L
-        for (e in caches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
-        for (e in bgCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
+        val layers = stores.map { store ->
+            val held = store.now.values.sumOf { it.bytes() } + store.before.values.sumOf { it.bytes() }
+            LayerSnapshot(held, reach(store, down = false), reach(store, down = true))
+        }
+        var bytes = layers.sumOf { it.bytes }
         for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
-        val visible = visiblePageRange()?.let { it.last - it.first + 1 } ?: 0
-        return CacheSnapshot(visible, caches.size, bgCaches.size, bytes)
+        return CacheSnapshot(layers[0], layers[1], bytes, cacheBudget())
+    }
+
+    /**
+     * Screens of [store]'s layer built without a gap from the view's edge on, downward or upward.
+     * A page with no such layer is no gap, nor is the end of the note; paginated, the row shown.
+     */
+    private fun reach(store: Layers, down: Boolean): Double {
+        if (pageRects.size != document.pages.size || viewportH <= 0) return 0.0
+        val view = visibleContentRect()
+        val edge = if (down) view.bottom else view.top
+        var end = edge
+        val rows = if (verticalScroll) rowRanges() else listOf(drawablePageRange())
+        for (row in if (down) rows else rows.asReversed()) {
+            var gap: Double? = null
+            var far: Double? = null
+            for (i in row) {
+                val pr = pageRects[i]
+                if (if (down) pr.bottom <= edge else pr.top >= edge) continue
+                far = if (down) max(far ?: pr.bottom, pr.bottom) else min(far ?: pr.top, pr.top)
+                val g = gapPast(store, i, edge, down) ?: continue
+                gap = if (gap == null) g else if (down) min(gap, g) else max(gap, g)
+            }
+            end = gap ?: far ?: continue
+            if (gap != null) break
+        }
+        return abs(end - edge) * zoom / viewportH
+    }
+
+    /** Where page [i]'s first unbuilt band of [store] past [edge] begins (content space), or null with none. */
+    private fun gapPast(store: Layers, i: Int, edge: Double, down: Boolean): Double? {
+        val page = document.pages[i]
+        if (store === bg && !hasPageBackground(page)) return null
+        val pr = pageRects[i]
+        val layer = store.now[page]?.takeIf { it.fits(page) } ?: return if (down) max(pr.top, edge) else min(pr.bottom, edge)
+        var gap: Double? = null
+        for (k in layer.bands.indices) {
+            if (layer.bands[k] != null) continue
+            val at = fromPageSpaceRect(i, layer.grid.onPage(k))
+            if (if (down) at.bottom <= edge else at.top >= edge) continue
+            val from = if (down) max(at.top, edge) else min(at.bottom, edge)
+            gap = if (gap == null) from else if (down) min(gap, from) else max(gap, from)
+        }
+        return gap
     }
 
     /** Last note-open timings (ms), for the debug overlay; -1 until the first open. [lastOpenReadMs]
@@ -2224,24 +2652,12 @@ class CanvasState(
      *  "done" or "failed". */
     var autosaveStatus = "idle"
 
-    /**
-     * The pixel dimensions the current page's cache *would* be built at for the current
-     * zoom (i.e. [clampedRes] applied). Tracks live while zooming — unlike the actual
-     * cached surface, which is blitted stale-scaled during a pinch and only rebuilt when
-     * the gesture ends. Used by the debug overlay's `res` line; returns 0×0 with no pages.
-     */
-    fun targetRasterSize(): Pair<Int, Int> {
-        val pages = document.pages
-        if (pages.isEmpty()) return 0 to 0
-        val page = pages[currentPageIndex()]
-        val res = clampedRes(page)
-        val w = ceil(outerW(page) * res).toInt().coerceAtLeast(1)
-        val h = ceil(outerH(page) * res).toInt().coerceAtLeast(1)
-        return w to h
-    }
-
     companion object {
         const val MARGIN = 48.0
+
+        /** How long an expected edge move waits for its resize, and how far off a bar's thickness it may land, in px. */
+        private const val EDGE_MOVE_MS = 1000L
+        private const val EDGE_MOVE_SLOP = 3.0
         const val MIN_ZOOM = 0.12
         const val MAX_ZOOM = 16.0
         const val ZOOM_STEP = 1.25
@@ -2249,6 +2665,20 @@ class CanvasState(
         /** While a pinch's zoom is within this fraction of [fitWidthZoom] it sticks to fit-to-width. */
         const val SNAP_TO_FIT_WIDTH = 0.05
         const val CTRL_WHEEL_BASE = 1.01
+
+        /** Rows in an ink band: few, since a pen lift makes every band it drew on upload again. */
+        const val INK_BAND_PX = 512
+
+        /** Rows in a background band: about a page, since PDFium pays again for every region asked of it. */
+        const val BG_BAND_PX = 2048
+
+        const val INK_GUTTER_PX = 1
+
+        /** The share of the budget built ahead of the screen. The rest is what scrolling back finds still there. */
+        const val FILL_SHARE = 0.75
+
+        /** Wide enough that a picture a PDF enlarges many times over samples the same either side of a seam. */
+        const val BG_GUTTER_PX = 32
 
         /** Padding (content px) around a highlighter's bounds in its cached bitmap, for AA edges. */
         const val HL_PAD = 2.0
