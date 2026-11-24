@@ -1,7 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -243,8 +243,8 @@ private fun LayersPanel(
                     }
                     Text(layer.name.ifEmpty { stringResource(R.string.layers_default, entries.size - index) },
                         Modifier.weight(1f).height(rowHeight)
-                            .combinedClickable(enabled = dragging == null, onClick = { if (!selected) select(layer.id) },
-                                onDoubleClick = { rename = layer.id; name = layer.name })
+                            // A plain click fires on release; a double-tap handler would hold every tap back to rule one out.
+                            .clickable(enabled = dragging == null) { if (!selected) select(layer.id) }
                             .pointerInput(layer.id, ids) {
                                 detectDragGestures(onDragStart = startDrag, onDragEnd = endDrag,
                                     onDragCancel = { dragging = null },
