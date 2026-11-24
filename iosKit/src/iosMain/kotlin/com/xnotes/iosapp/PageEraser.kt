@@ -8,6 +8,7 @@ import com.xnotes.core.pdf.MarkupPainter
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.edit.PageSpace
+import com.xnotes.platform.ios.paperRect
 
 internal class PageEraser(private val document: Document) {
     private val before = mutableMapOf<Page, List<CanvasItem>>()
