@@ -585,13 +585,25 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Publish z order across every layer, and which layers are hidden, as one update. */
     private fun publishLayerOrder() {
         val ordered = document.layers.stacked(document.items + map.parts)
-        val active = document.layers.entries.indexOfFirst { it.id == document.layers.activeId }
-        val belowOrActive = document.layers.entries.take(active + 1).map { it.id }.toSet()
-        val end = ordered.indexOfLast { it.layerId in belowOrActive }
         scene.batch {
             scene.setHiddenLayers(document.layers.hiddenIds)
-            scene.setOrder(ordered, end.takeIf { document.layers.entries.size > 1 })
+            scene.setOrder(ordered, activeLayerEnd(ordered.size))
         }
+    }
+
+    /**
+     * The z of the last item at or under the current layer, where live ink goes; null with one layer.
+     * Items stack in layer blocks ([DrawingLayers.stacked]), so counting them is enough: no order is built.
+     */
+    private fun activeLayerEnd(total: Int = -1): Int? {
+        val layers = document.layers
+        if (layers.entries.size <= 1) return null
+        val active = layers.entries.indexOfFirst { it.id == layers.activeId }
+        val belowOrActive = layers.entries.take(active + 1).mapTo(HashSet()) { it.id }
+        var n = 0
+        for (item in document.items) if ((item.layerId ?: com.xnotes.core.model.DrawingLayers.DEFAULT) in belowOrActive) n++
+        for (item in map.parts) if ((item.layerId ?: com.xnotes.core.model.DrawingLayers.DEFAULT) in belowOrActive) n++
+        return n - 1
     }
 
     /** Repaint the canvas with whatever the model currently says. */
@@ -3094,7 +3106,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Visibility, lock, name, order or a new empty layer: no object changes layer, so only the draw order is republished. */
     fun editLayerStack(change: () -> Unit): Boolean {
         if (!beginLayerChange()) return false
-        record(change)
+        history.push(com.xnotes.core.history.EditLayers.captureStack(document.layers, null, change))
         publishLayerOrder()
         canUndo = history.canUndo
         canRedo = history.canRedo
@@ -3107,8 +3119,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (document.layers.activeId == id || document.layers.entries.none { it.id == id }) return false
         if (!beginLayerChange()) return false
         document.layers.select(id)
-        publishLayerOrder()
-        endLayerChange()
+        scene.setActiveLayerEnd(activeLayerEnd())
+        // The current layer is written with the next real edit: a tap alone does not start a save.
+        endLayerChange(save = false)
         return true
     }
 
@@ -3131,9 +3144,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         ))
     }
 
-    private fun endLayerChange() {
+    private fun endLayerChange(save: Boolean = true) {
         interaction.clearSelection()
-        markDirty()
+        if (save) markDirty()
         layerVersion++
         view.publish()
     }
@@ -3161,7 +3174,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         commitText() // a label being typed is the first thing undo takes back
         map.settleForHistory()
         finishSelectionPreviews()
+        val command = history.nextUndo
         history.undo()
+        if ((command as? com.xnotes.core.history.EditLayers)?.stackOnly == true) publishLayerOrder()
         interaction.clearSelection()
         markDirty()
         refresh()
@@ -3172,7 +3187,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         commitText()
         map.settleForHistory()
         finishSelectionPreviews()
+        val command = history.nextRedo
         history.redo()
+        if ((command as? com.xnotes.core.history.EditLayers)?.stackOnly == true) publishLayerOrder()
         interaction.clearSelection()
         markDirty()
         refresh()

@@ -9873,7 +9873,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (page.layers.activeId == id || page.layers.entries.none { it.id == id }) return false
         if (!beginLayerChange(page)) return false
         page.layers.select(id)
-        layersChanged(page)
+        // The current layer is written with the next real edit: a tap alone does not start a save.
+        layersChanged(page, save = false)
         return true
     }
 
@@ -9885,7 +9886,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** The bookkeeping every layer change shares, in both panes of a shared note. */
-    private fun layersChanged(page: Page) {
+    private fun layersChanged(page: Page, save: Boolean = true) {
         val peer = sharedPeer()
         for (editor in listOfNotNull(this, peer)) {
             editor.controller.clearSelection()
@@ -9893,11 +9894,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             editor.layerVersion++
             editor.view.requestRender()
         }
-        state.document.dirty = true
-        dirty = true
         canUndo = history.canUndo
         canRedo = history.canRedo
-        peer?.let { it.dirty = true; it.canUndo = history.canUndo; it.canRedo = history.canRedo }
+        peer?.let { it.canUndo = history.canUndo; it.canRedo = history.canRedo }
+        if (!save) return
+        state.document.dirty = true
+        dirty = true
+        peer?.dirty = true
         contentTransactionChanged()
         if (autosaveUri != null) scheduleAutosave()
     }

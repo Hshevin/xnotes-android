@@ -97,6 +97,9 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         class Remove(val item: CanvasItem) : Edit()
         class Order(val items: List<CanvasItem>, val activeLayerEnd: Int?) : Edit()
+
+        /** Only the current layer moved: where live ink goes in the z order, with every record left as it is. */
+        class ActiveLayerEnd(val end: Int?) : Edit()
         class SyncChanged(val marks: List<Pair<CanvasItem, SyncMark?>>) : Edit()
 
         /** Layers left out of drawing; their records stay resident, so showing one is one frame. */
@@ -248,6 +251,11 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     /** Publish the document's z order; the scene draws back to front by it. */
     fun setOrder(items: List<CanvasItem>, activeLayerEnd: Int? = null) {
         post(Edit.Order(ArrayList(items), activeLayerEnd))
+    }
+
+    /** Move where live ink is drawn to just above z [end] (null: on top), without restacking anything. */
+    fun setActiveLayerEnd(end: Int?) {
+        post(Edit.ActiveLayerEnd(end))
     }
 
     /**
@@ -1125,6 +1133,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                     is Edit.Lift -> applyLift(edit)
                     is Edit.Remove -> applyRemove(edit.item)
                     is Edit.Order -> { activeLayerEnd = edit.activeLayerEnd; applyOrder(edit.items) }
+                    is Edit.ActiveLayerEnd -> activeLayerEnd = edit.end
                     is Edit.SyncChanged -> {
                         for ((item, mark) in edit.marks) records[item]?.sync = mark
                         // Like every other record change, so a cache keyed on revision sees the fade.

@@ -48,6 +48,35 @@ class DrawingLayersTest {
         assertEquals(listOf(first), page.items)
     }
 
+    @Test fun aStackEditUndoesTheLayerListWithoutTouchingObjects() {
+        val page = Page(100.0, 100.0)
+        val ink = item().also { page.items.add(it) }
+        val items = page.items.toList()
+        val history = History()
+        history.push(EditLayers.captureStack(page.layers, page) {
+            page.layers.create("Top")
+            page.layers.update(DrawingLayers.DEFAULT) { it.copy(visible = false) }
+        })
+        assertEquals(2, page.layers.entries.size)
+        history.undo()
+        assertEquals(listOf(DrawingLayer(DrawingLayers.DEFAULT)), page.layers.entries)
+        assertEquals(DrawingLayers.DEFAULT, page.layers.activeId)
+        assertSame(ink, page.items.single())
+        assertEquals(items, page.items.toList())
+        history.redo()
+        assertFalse(page.layers.entries.first().visible)
+        assertEquals(2, page.layers.entries.size)
+    }
+
+    @Test fun aStackEditMayNotDeleteALayer() {
+        val page = Page(100.0, 100.0)
+        val layer = page.layers.create("Draft")
+        assertThrows(IllegalArgumentException::class.java) {
+            EditLayers.captureStack(page.layers, page) { page.layers.delete(layer.id) }
+        }
+        assertTrue(page.layers.entries.any { it.id == layer.id })
+    }
+
     @Test fun newItemsUseCurrentLayerAndExistingItemsKeepTheirLayer() {
         val page = Page(100.0, 100.0)
         val old = item().also { page.items.add(it) }
