@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.core.template.TemplateCatalog
 import com.xnotes.ui.theme.TextSize
 import com.xnotes.ui.theme.Space
 import androidx.compose.foundation.Canvas
@@ -458,7 +459,7 @@ private fun StylesPage(editor: Editor, s: StylesState, onImportTemplate: () -> U
     val palette = LocalPalette.current
     val style = s.style
     val v = s.view(editor, palette.paper)
-    fun drawing(e: com.xnotes.platform.TemplateLibrary.Entry): TemplateDrawing {
+    fun drawing(e: TemplateCatalog.Entry): TemplateDrawing {
         val kept = if (s.tab == 0) s.memory.recall(null, e.key) else editor.currentPage?.let { s.memory.recall(it, e.key) }
         return TemplateDrawing.inStrip(e, style, v.shownKey, kept, s.docStyle.takeIf { s.tab == 1 }, v.look.paper, editor.documentDpi)
     }

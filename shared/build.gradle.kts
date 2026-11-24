@@ -58,7 +58,16 @@ kotlin {
     }
 }
 
+// The simulator test executable gets the same resource folder beside it as the iPad application.
+val simulatorTestTemplates by tasks.registering(Sync::class) {
+    from(rootProject.file("app/src/main/assets/templates"))
+    include("**/*.xtemplate")
+    into(layout.buildDirectory.dir("bin/iosSimulatorArm64/debugTest/templates"))
+}
+
 tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest>().configureEach {
+    dependsOn(simulatorTestTemplates)
+    inputs.files(simulatorTestTemplates)
     standalone.set(false)
     providers.gradleProperty("iosTestDevice").orNull?.let { device.set(it) }
 }

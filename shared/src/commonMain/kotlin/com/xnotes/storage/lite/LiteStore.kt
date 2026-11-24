@@ -4,6 +4,7 @@ import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.pal.asAssetFile
 import com.xnotes.core.pal.assetPath
+import com.xnotes.core.template.TemplateCatalog
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.BundleSnapshot
 import com.xnotes.kio.Sha256
@@ -42,11 +43,13 @@ class LiteProtectionException internal constructor(saveFailure: Exception, prote
 
 internal class SourceConflict : Exception()
 internal expect fun coordinateLiteWrite(path: Path, publish: () -> Stamp): Stamp
+internal expect fun bundledTemplateDirectory(): Path?
 
 class LiteStore(private val fs: FileSystem, private val documents: Path, private val privateDir: Path,
-                imageCodec: ImageCodec, textMeasurer: TextMeasurer) {
+                imageCodec: ImageCodec, textMeasurer: TextMeasurer, bundledTemplates: Path? = bundledTemplateDirectory()) {
     private val codec = LiteCodec(fs, imageCodec, textMeasurer)
     private val recoveries = LiteRecoveryFiles(fs, privateDir / "recoveries", documents)
+    private val bundled by lazy { bundledTemplates?.let(TemplateCatalog::bundled).orEmpty() }
 
     init {
         require(documents.isAbsolute && privateDir.isAbsolute)
@@ -58,14 +61,20 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
     fun create(directory: Path, baseName: String, kind: LiteKind): LiteOpen =
         create(directory, baseName, kind, pdf = null)
 
+    /** Snapshot the bundled and current top-level imported templates. Call on an IO thread. */
+    fun templates(): TemplateCatalog = TemplateCatalog(bundled + TemplateCatalog.imported(documents))
+
+    fun create(directory: Path, baseName: String, setup: LiteNoteSetup): LiteOpen =
+        create(directory, baseName, LiteKind.NOTE, pdf = null, setup = setup)
+
     /** Imports the selected PDF into a self-contained, editable note. Call on an IO thread. */
     fun importPdf(directory: Path, baseName: String, pdf: Path): LiteOpen =
         create(directory, baseName, LiteKind.NOTE, pdf)
 
-    private fun create(directory: Path, baseName: String, kind: LiteKind, pdf: Path?): LiteOpen = opening {
+    private fun create(directory: Path, baseName: String, kind: LiteKind, pdf: Path?, setup: LiteNoteSetup? = null): LiteOpen = opening {
         require(directory == documents || inDocuments(directory))
         openWithAssets { assets ->
-            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, pdf, assets, ::inDocuments, ::hash)
+            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, pdf, setup, assets, ::inDocuments, ::hash)
         }
     }
 

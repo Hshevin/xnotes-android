@@ -10,3 +10,6 @@ internal actual fun linkNewFile(stage: Path, target: Path): Boolean = try {
 } catch (_: FileAlreadyExistsException) {
     false
 }
+
+// Android's editor supplies its APK resources through AssetManager.
+internal actual fun bundledTemplateDirectory(): Path? = null
