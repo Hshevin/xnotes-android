@@ -22,7 +22,7 @@ enum class LiteKind(internal val extension: String) {
     }
 }
 
-enum class LiteRefusal { NOT_FOUND, UNSUPPORTED_KIND, FUTURE_VERSION, CORRUPT }
+enum class LiteRefusal { NOT_FOUND, UNSUPPORTED_KIND, FUTURE_VERSION, CORRUPT, PDF_UNREADABLE }
 
 sealed interface LiteOpen {
     data class Opened(val session: LiteSession) : LiteOpen
@@ -55,10 +55,17 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
         require(generateSequence(fs.canonicalize(privateDir)) { it.parent }.none { it == docs })
     }
 
-    fun create(directory: Path, baseName: String, kind: LiteKind): LiteOpen = opening {
+    fun create(directory: Path, baseName: String, kind: LiteKind): LiteOpen =
+        create(directory, baseName, kind, pdf = null)
+
+    /** Imports the selected PDF into a self-contained, editable note. Call on an IO thread. */
+    fun importPdf(directory: Path, baseName: String, pdf: Path): LiteOpen =
+        create(directory, baseName, LiteKind.NOTE, pdf)
+
+    private fun create(directory: Path, baseName: String, kind: LiteKind, pdf: Path?): LiteOpen = opening {
         require(directory == documents || inDocuments(directory))
         openWithAssets { assets ->
-            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, assets, ::inDocuments, ::hash)
+            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, pdf, assets, ::inDocuments, ::hash)
         }
     }
 
@@ -95,6 +102,8 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
 
     private inline fun opening(block: () -> LiteOpen): LiteOpen = try {
         block()
+    } catch (_: UnreadablePdf) {
+        LiteOpen.Refused(LiteRefusal.PDF_UNREADABLE)
     } catch (_: FutureVersion) {
         LiteOpen.Refused(LiteRefusal.FUTURE_VERSION)
     } catch (_: Exception) {
