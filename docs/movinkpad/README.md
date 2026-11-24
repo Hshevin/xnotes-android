@@ -205,6 +205,7 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-24 [iPadOS 第四波契约](process/ipados-wave4-contracts-2026-11-24.md)
 - [iPadOS 工具栏图标（2026-11-24）](process/ipados-toolbar-icons-2026-11-24.md)
 - [iPadOS 首页对齐 Android（2026-11-24）](process/ipados-home-plan-2026-11-24.md)
+- [iPadOS 首页 H1 契约（2026-11-24）](process/ipados-home-h1-contracts-2026-11-24.md)
 
 ## 已归档（`archive/`）
 
