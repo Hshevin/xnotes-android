@@ -35,7 +35,7 @@ class DrawingLayersTest {
         val layer = page.layers.create("Draft")
         val second = item().also { page.items.add(it) }
         val history = History()
-        val command = EditLayers.capture(page.layers, page.items) {
+        val command = EditLayers.capture(page) {
             page.items.removeAll { it.layerId == layer.id }
             page.layers.delete(layer.id)
         }
@@ -64,7 +64,7 @@ class DrawingLayersTest {
         val first = item().also { page.items.add(it) }
         val second = item().also { page.items.add(it) }
         val target = page.layers.create("Target")
-        val command = EditLayers.capture(page.layers, page.items) { first.layerId = target.id }
+        val command = EditLayers.capture(page) { first.layerId = target.id }
         assertEquals(listOf(second, first), page.visibleItems)
         command.undo()
         assertEquals(listOf(first, second), page.visibleItems)
@@ -113,7 +113,7 @@ class DrawingLayersTest {
         val top = page.layers.create("Top")
         val original = page.layers.entries
         val history = History()
-        history.push(EditLayers.capture(page.layers, page.items) {
+        history.push(EditLayers.capture(page) {
             page.layers.moveBefore(DrawingLayers.DEFAULT, top.id)
         })
         assertEquals(listOf(DrawingLayers.DEFAULT, top.id, middle.id), page.layers.entries.asReversed().map { it.id })

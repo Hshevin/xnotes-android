@@ -79,6 +79,25 @@ class SplitEditorTest {
         assertEquals(1, page.layers.entries.size)
     }
 
+    @Test fun layerSwitchAndStackEditsLeaveContentAlone() = onMain { editor ->
+        val page = editor.state.document.pages.first()
+        editor.editLayerStack(page) { page.layers.create("Second") }
+        val second = page.layers.activeId
+        val content = editor.contentVersion
+        val layers = editor.layerVersion
+        // Switching only moves where the next stroke lands: no content refresh, no undo step.
+        assertTrue(editor.selectLayer(page, com.xnotes.core.model.DrawingLayers.DEFAULT))
+        assertEquals(content, editor.contentVersion)
+        assertEquals(layers + 1, editor.layerVersion)
+        assertTrue(editor.editLayerStack(page) { page.layers.update(second) { it.copy(visible = false) } })
+        assertEquals(content, editor.contentVersion)
+        assertTrue(editor.dirty)
+        editor.undo()
+        assertTrue(page.layers.entries.single { it.id == second }.visible)
+        editor.undo()
+        assertEquals(1, page.layers.entries.size)
+    }
+
     private fun onMain(test: (Editor) -> Unit) {
         val runner = PenTestRunner.instance
         var error: Throwable? = null

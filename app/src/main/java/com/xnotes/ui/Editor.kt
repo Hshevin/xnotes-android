@@ -9843,23 +9843,77 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The colours a picker offers as recent: the ones used, then the toolbar's own. */
     val recentColors: List<Rgba> get() = recentsWith(settings.recentColors, toolbarColors)
 
-    fun editLayers(page: Page, change: () -> Unit): Boolean = changeLayers(page, true, change)
+    /** Bumped when a page's layer list changes (current layer, visibility, lock, name, order) without its contents changing. */
+    var layerVersion by mutableStateOf(0)
+        private set
 
-    fun selectLayer(page: Page, id: String): Boolean {
-        if (page.layers.activeId == id || page.layers.entries.none { it.id == id }) return false
-        return changeLayers(page, false) { page.layers.select(id) }
+    /** A layer edit that moves objects between layers or deletes them: a content edit like any other. */
+    fun editLayers(page: Page, change: () -> Unit): Boolean {
+        if (!beginLayerChange(page)) return false
+        history.push(com.xnotes.core.history.EditLayers.capture(page, change))
+        layersChanged(page)
+        afterHistory(state.document.pages.toList(), null, null, layerPage = page)
+        return true
     }
 
-    private fun changeLayers(page: Page, recordHistory: Boolean, change: () -> Unit): Boolean {
+    /**
+     * Visibility, lock, name, order or a new empty layer: what is on each layer stays the same, so
+     * layer thumbnails and search keep, and only [page]'s ink is rebuilt.
+     */
+    fun editLayerStack(page: Page, change: () -> Unit): Boolean {
+        if (!beginLayerChange(page)) return false
+        history.push(com.xnotes.core.history.EditLayers.capture(page, change))
+        layersChanged(page)
+        repaintLayerPage(page)
+        return true
+    }
+
+    /** Only where the next stroke lands changes: nothing on screen is rebuilt. */
+    fun selectLayer(page: Page, id: String): Boolean {
+        if (page.layers.activeId == id || page.layers.entries.none { it.id == id }) return false
+        if (!beginLayerChange(page)) return false
+        page.layers.select(id)
+        layersChanged(page)
+        return true
+    }
+
+    private fun beginLayerChange(page: Page): Boolean {
         if (!controller.layerGestureIdle || sharedPeer()?.controller?.layerGestureIdle == false || state.document.pages.none { it === page }) return false
         controller.commitTextEdit()
         flowText.flushBurst()
-        if (recordHistory) history.push(com.xnotes.core.history.EditLayers.capture(page.layers, page.items, change))
-        else change()
-        controller.frontInk?.layersChanged()
-        sharedPeer()?.controller?.let { it.clearSelection(); it.frontInk?.layersChanged() }
-        afterHistory(state.document.pages.toList(), null, null)
         return true
+    }
+
+    /** The bookkeeping every layer change shares, in both panes of a shared note. */
+    private fun layersChanged(page: Page) {
+        val peer = sharedPeer()
+        for (editor in listOfNotNull(this, peer)) {
+            editor.controller.clearSelection()
+            editor.controller.frontInk?.layersChanged()
+            editor.layerVersion++
+            editor.view.requestRender()
+        }
+        state.document.dirty = true
+        dirty = true
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+        peer?.let { it.dirty = true; it.canUndo = history.canUndo; it.canRedo = history.canRedo }
+        contentTransactionChanged()
+        if (autosaveUri != null) scheduleAutosave()
+    }
+
+    /** [page] looks different but holds the same objects: rebuild its ink off-thread and its side-panel thumbnail. */
+    private fun repaintLayerPage(page: Page) {
+        for (editor in listOfNotNull(this, sharedPeer())) {
+            editor.state.refreshInk(listOf(page))
+            editor.forgetPageThumbnail(page)
+            editor.view.requestRender()
+        }
+    }
+
+    private fun forgetPageThumbnail(page: Page) {
+        synchronized(pageThumbs) { pageThumbs.remove(page) }
+        pdfThumbTick++
     }
 
     fun moveSelectionToLayer(page: Page, id: String) = editLayers(page) {
@@ -9881,9 +9935,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val viewed = viewedPage()
         val was = touchedRegions(command)
         history.undo()
-        if (command is com.xnotes.core.history.EditLayers) { controller.frontInk?.layersChanged(); sharedPeer()?.controller?.let { it.clearSelection(); it.frontInk?.layersChanged() } }
+        val layerPage = (command as? com.xnotes.core.history.EditLayers)?.page
+        layerPage?.let(::layersChanged)
         bakeMarkups(command)
-        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty())
+        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty(), layerPage = layerPage)
     }
 
     fun redo() {
@@ -9898,9 +9953,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val viewed = viewedPage()
         val was = touchedRegions(command)
         history.redo()
-        if (command is com.xnotes.core.history.EditLayers) { controller.frontInk?.layersChanged(); sharedPeer()?.controller?.let { it.clearSelection(); it.frontInk?.layersChanged() } }
+        val layerPage = (command as? com.xnotes.core.history.EditLayers)?.page
+        layerPage?.let(::layersChanged)
         bakeMarkups(command)
-        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty())
+        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty(), layerPage = layerPage)
     }
 
     /** Applies a markup edit (built, not yet applied) as one undo step. */
@@ -9958,6 +10014,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         viewed: Pair<Page, Rect>?,
         regions: List<Pair<Page, Rect>>?,
         reshaped: List<Page> = emptyList(),
+        layerPage: Page? = null,
     ) {
         controller.clearSelection()
         val pages = state.document.pages
@@ -9985,12 +10042,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // named its regions repairs just those, here and now; one that couldn't hands every cached
         // page to the cache thread instead, because repainting them all inline is a stall long
         // enough to time out input on a dense note.
-        if (regions == null) state.refreshAllInk() else state.repairInkRegions(regions)
+        when {
+            // A layer edit changes one page as a whole: rebuild that page off-thread, in both panes.
+            layerPage != null -> { repaintLayerPage(layerPage); regions?.let(state::repairInkRegions) }
+            regions == null -> state.refreshAllInk()
+            else -> state.repairInkRegions(regions)
+        }
         controller.dropTypingIfGone() // undo took the box being typed in off its page
         if (flowText.active) flowInput.reconcile() // undone/redone text must reach the IME mirror
         state.document.dirty = true
         state.clampScroll()
-        sharedInkRegions = regions
+        sharedInkRegions = if (layerPage != null) regions.orEmpty() else regions
         refreshContent()
         view.requestRender()
     }

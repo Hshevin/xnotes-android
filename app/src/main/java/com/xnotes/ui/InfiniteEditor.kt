@@ -3077,34 +3077,65 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var layerContentVersion by mutableStateOf(0)
         private set
 
-    fun editLayers(change: () -> Unit): Boolean = changeLayers(true, change)
+    /** Bumped when the layer list changes (current layer, visibility, lock, name, order) without any layer's contents changing. */
+    var layerVersion by mutableStateOf(0)
+        private set
 
-    fun selectLayer(id: String): Boolean {
-        if (document.layers.activeId == id || document.layers.entries.none { it.id == id }) return false
-        return changeLayers(false) { document.layers.select(id) }
+    /** A layer edit that moves objects between layers or deletes them: a content edit like any other. */
+    fun editLayers(change: () -> Unit): Boolean {
+        if (!beginLayerChange()) return false
+        record(change)
+        syncScene()
+        refresh()
+        endLayerChange()
+        return true
     }
 
-    private fun changeLayers(recordHistory: Boolean, change: () -> Unit): Boolean {
+    /** Visibility, lock, name, order or a new empty layer: no object changes layer, so only the draw order is republished. */
+    fun editLayerStack(change: () -> Unit): Boolean {
+        if (!beginLayerChange()) return false
+        record(change)
+        publishLayerOrder()
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+        endLayerChange()
+        return true
+    }
+
+    /** Only where the next stroke lands changes: the scene just moves its live-ink boundary. */
+    fun selectLayer(id: String): Boolean {
+        if (document.layers.activeId == id || document.layers.entries.none { it.id == id }) return false
+        if (!beginLayerChange()) return false
+        document.layers.select(id)
+        publishLayerOrder()
+        endLayerChange()
+        return true
+    }
+
+    private fun beginLayerChange(): Boolean {
         if (interaction.mode != CanvasPointerMode.IDLE) return false
         commitText()
         settleHeld()
         val handoff = handoffGen
         view.publishThen { if (handoff == handoffGen) pad.release() }
         map.settleForHistory()
-        val mapBefore = document.map.state
-        if (recordHistory) {
-            val layers = com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change)
-            val mapAfter = document.map.state
-            history.push(if (mapAfter == mapBefore) layers else com.xnotes.core.history.CompositeCommand(
-                listOf(layers, com.xnotes.map.MapStateCommand(document.map, mapBefore, mapAfter)),
-            ))
-        } else change()
-        interaction.clearSelection()
-        syncScene()
-        markDirty()
-        refresh()
-        view.publish()
         return true
+    }
+
+    private fun record(change: () -> Unit) {
+        val mapBefore = document.map.state
+        val layers = com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change)
+        val mapAfter = document.map.state
+        history.push(if (mapAfter == mapBefore) layers else com.xnotes.core.history.CompositeCommand(
+            listOf(layers, com.xnotes.map.MapStateCommand(document.map, mapBefore, mapAfter)),
+        ))
+    }
+
+    private fun endLayerChange() {
+        interaction.clearSelection()
+        markDirty()
+        layerVersion++
+        view.publish()
     }
 
     /** Inside [editLayers]: delete layer [id] with everything on it, its mind map trees included. */
