@@ -5,6 +5,8 @@ import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.pal.asAssetFile
 import com.xnotes.core.pal.assetPath
 import com.xnotes.core.util.DocumentKind
+import com.xnotes.core.util.CoreLock
+import com.xnotes.core.util.locked
 import com.xnotes.format.BundleSnapshot
 import com.xnotes.kio.Sha256
 import com.xnotes.kio.Uuids
@@ -42,6 +44,9 @@ class LiteProtectionException internal constructor(saveFailure: Exception, prote
 
 internal class SourceConflict : Exception()
 internal expect fun coordinateLiteWrite(path: Path, publish: () -> Stamp): Stamp
+
+// Stores opened by separate windows may refer to the same private recovery directory.
+private val recoveryLock = CoreLock()
 
 class LiteStore(private val fs: FileSystem, private val documents: Path, private val privateDir: Path,
                 imageCodec: ImageCodec, textMeasurer: TextMeasurer) {
@@ -86,6 +91,13 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
 
     fun pendingRecoveries(): List<LiteRecovery> = recoveries.pending()
 
+    internal fun manages(fileSystem: FileSystem, root: Path) = fs === fileSystem && documents == root
+
+    /** A library rename must see a complete recovery index, stable through the filesystem move. */
+    internal fun <T> withRecoveryIndex(action: (List<LiteRecovery>) -> T): T = recoveryLock.locked {
+        action(recoveries.pending(requireComplete = true))
+    }
+
     fun restore(recovery: LiteRecovery): LiteOpen = opening {
         val entry = recoveries.lookup(recovery)
         openWithAssets { assets ->
@@ -98,7 +110,7 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
         }
     }
 
-    fun discard(recovery: LiteRecovery) = recoveries.discard(recovery)
+    fun discard(recovery: LiteRecovery) = recoveryLock.locked { recoveries.discard(recovery) }
 
     private inline fun opening(block: () -> LiteOpen): LiteOpen = try {
         block()
@@ -193,6 +205,7 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
         }
     }
 
-    internal fun protect(path: Path, base: Stamp, body: LiteBody, original: Decoded): Protected =
+    internal fun protect(path: Path, base: Stamp, body: LiteBody, original: Decoded): Protected = recoveryLock.locked {
         recoveries.write(path, original.documentId, base, { codec.write(body, it) }) { file, hash -> verify(file, body, hash, original) }
+    }
 }

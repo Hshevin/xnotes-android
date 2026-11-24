@@ -346,3 +346,7 @@
 ## 2026-11-24 同步上游 0.9.11
 
 - 用户要求「同步原 fork 仓库」：将上游 `shardulvs/xnotes-android` 的 `96357d87`（0.9.11，自 `27e83a07` 起 74 个提交）合入 `master` 并推送 `origin/master`。工具栏的翻页、缩放、视图、样式改为各文档栏末尾的设置面板；夜间模式下 PDF 默认不反色（PDF 属于内容）。不打包、不安装、不发布 GitHub Release。
+
+## 2026-11-24 iPad 文件库 S3 的 Android Debug 构建验收
+
+- 本轮授权在共享模块与 iPad 模拟器测试后运行 `:app:assembleDebug`，用于核对共享代码在 Android ARM64 应用中的集成。交付范围为本地代码提交。见 [S3 实现记录](process/ipados-home-h2-contracts-2026-11-24.md#s3-实现记录)。
