@@ -61,3 +61,66 @@ Android 参照（`app/src/main/java/com/xnotes/ui/Editor.kt`，行为以代码�
 - 侧栏启用：最近（本机记录打开过的文档）、回收站页（还原、永久删除、清空）、颜色分区（有颜色时出现）、固定的文件夹。
 - 搜索：顶栏搜索框，在当前文件夹及子文件夹按名称搜。
 - 颜色分组、颜色筛选。
+
+## S3 实现记录
+
+文件库位于 `com.xnotes.storage.library`。iPad 文件列表按所在目录读取颜色，每个文件夹的 `.xnote` 旁车继续隐藏。复制分页笔记与画布使用 Android 的同一套 `BundleMigration.prepare(copy = true)`，逐个核验文件夹中的副本，保留笔迹采样与 PDF 原件字节。重命名和移动保留原身份，并更新被移动文件夹下各笔记的置顶路径。进入回收站会移除置顶，还原时恢复颜色。
+
+恢复记录保存了原文件路径和来源凭据，打开的恢复会话也持有这条路径。本次采用契约允许的拒绝方式。用户恢复保存或明确放弃记录后，可以再次移动原件。新副本或还原目标也不能占用待恢复的缺失原件路径。最终移动前锁定并核对恢复索引，索引读不全时回滚本项操作。
+
+各项操作独立提交。先准备副本和旁车更改，最后移动文件，失败时撤回本项的旁车写入并清理暂存。永久删除先把完整包装移出回收站，再从磁盘删除；途中遇到写入错误或中断，下次列出回收站会继续清理。原目录找不到时还原至顶层；同名时从 ` (2)` 起编号。
+
+### 公开 API
+
+方法名和返回类型沿用建议形状。构造器的 `clock` 增加系统毫秒时钟默认值，`store` 须管理同一文件系统与顶层目录。以下接口均为同步 IO；批量结果与输入逐项对应。成功路径是操作完成后的绝对路径，回收站项目的 `path` 也是包装内的实际文件或文件夹路径。`originalFolder` 为从顶层到原目录的名称列表，`deleted` 为 Unix 毫秒时间。
+
+```kotlin
+class Library(fs: FileSystem, root: Path, store: LiteStore,
+              clock: () -> Long = { Clock.System.now().toEpochMilliseconds() }) {
+    fun colors(dir: Path): Map<String, Rgba>
+    fun setColors(dir: Path, changes: Map<String, Rgba?>): Boolean
+    fun colorNames(): Map<Rgba, String>
+    fun setColorName(color: Rgba, name: String?): Boolean
+    fun findByColor(color: Rgba): List<Path>
+    fun notePins(): List<Path>
+    fun setNotePinned(doc: Path, pinned: Boolean): Boolean
+    fun rename(item: Path, newName: String): LibraryResult
+    fun moveInto(items: List<Path>, target: Path): List<LibraryResult>
+    fun copyInto(items: List<Path>, target: Path): List<LibraryResult>
+    fun trash(items: List<Path>): List<LibraryResult>
+    fun listTrash(): List<TrashItem>
+    fun restore(item: TrashItem): LibraryResult
+    fun delete(item: TrashItem): Boolean
+    fun emptyTrash(): Int
+    fun purgeExpired(days: Int)
+    fun search(start: Path, query: String): List<Path>
+}
+
+data class TrashItem(val path: Path, val isDir: Boolean, val originalFolder: List<String>,
+                     val deleted: Long, val color: Rgba?)
+
+sealed interface LibraryResult {
+    data class Success(val path: Path) : LibraryResult
+    data class Failure(val reason: LibraryFailure) : LibraryResult
+}
+
+enum class LibraryFailure {
+    INVALID_NAME, NAME_CONFLICT, TARGET_IN_SOURCE, NOT_FOUND, PENDING_RECOVERY, IO_ERROR
+}
+```
+
+`com.xnotes.storage.ios.listIosDocuments(dir: Path): List<IosDocumentEntry>` 沿用原签名。`IosDocumentEntry` 构造器末尾新增 `override val color: Rgba? = null`。
+
+### 验收
+
+JDK 21，iPad Pro 13 英寸（M5）模拟器，iPadOS 27.2。以下计数取自 Gradle 的 JUnit XML 报告。
+
+| 测试任务 | 通过 | 失败／错误／跳过 |
+| --- | ---: | --- |
+| `:shared:testDebugUnitTest` | 2,739 | 0／0／0 |
+| `:shared:iosSimulatorArm64Test` | 2,550 | 0／0／0 |
+| `:iosKit:iosSimulatorArm64Test` | 40 | 0／0／0 |
+
+18 项新增公共用例分别在 JVM 与 iPad 模拟器运行。互通用例读取按 Android 实现编写的颜色、颜色名称、置顶和回收站样例，再用独立的字段解析逻辑检查 iPad 写出的四种文件。文件操作用例覆盖嵌套副本身份、笔迹与 PDF 原件、失效置顶、回收站时限、恢复保护、越界与符号链接、发布失败回滚及清理重试。iOS 另新增 1 项目录列表用例，验证父子文件夹独立取色与旁车隐藏。
+
+三套测试通过后，`:app:assembleDebug` ARM64 构建成功。本轮仅在本地提交，真机文件操作待验。

@@ -51,8 +51,17 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
         }
     }
 
-    fun pending(): List<LiteRecovery> = fs.listOrNull(root).orEmpty().filter { Uuids.isValid(it.name) }
-        .mapNotNull { try { read(it / "record").recovery } catch (_: Exception) { null } }
+    fun pending(requireComplete: Boolean = false): List<LiteRecovery> {
+        val directories = if (requireComplete) {
+            if (fs.metadataOrNull(root) == null) return emptyList()
+            fs.list(root)
+        } else fs.listOrNull(root).orEmpty()
+        return directories.filter { Uuids.isValid(it.name) }.mapNotNull {
+            try { read(it / "record").recovery } catch (failure: Exception) {
+                if (requireComplete) throw failure else null
+            }
+        }
+    }
 
     fun lookup(recovery: LiteRecovery): RecoveryEntry = read(recovery.record).also { require(it.recovery == recovery) }
 

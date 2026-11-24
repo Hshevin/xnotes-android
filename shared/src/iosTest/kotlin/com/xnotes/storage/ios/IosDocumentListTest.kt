@@ -2,6 +2,7 @@
 
 package com.xnotes.storage.ios
 
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.kio.KFiles
 import com.xnotes.kio.Uuids
@@ -16,6 +17,26 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class IosDocumentListTest {
+    @Test
+    fun readsColorsFromEachListedFolderAndHidesTheSidecar() {
+        val root = KFiles.tempDirectory() / Uuids.random()
+        val folder = root / "nested"
+        val fs = KFiles.system
+        fs.createDirectories(root / ".xnote")
+        fs.createDirectories(folder / ".xnote")
+        try {
+            fs.write(root / ".xnote" / "colors.json") { writeUtf8("""{"version":1,"colors":{"nested":"#1122cc"}}""") }
+            fs.write(folder / ".xnote" / "colors.json") { writeUtf8("""{"version":1,"colors":{"ink.xnote":"#345678"}}""") }
+            fs.write(folder / "ink.xnote") { writeUtf8("") }
+            val entry = listIosDocuments(root).single()
+            assertEquals(Rgba(17, 34, 204), entry.color)
+            assertEquals(1, entry.childCount)
+            assertEquals(Rgba(52, 86, 120), listIosDocuments(folder).single().color)
+        } finally {
+            fs.deleteRecursively(root)
+        }
+    }
+
     @Test
     fun reportsFileBytesAndBirthTimeIndependentlyOfModificationTime() {
         val root = KFiles.tempDirectory() / Uuids.random()
