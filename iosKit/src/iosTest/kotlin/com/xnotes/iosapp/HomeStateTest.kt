@@ -7,7 +7,9 @@ import com.xnotes.explorer.ExplorerSortKey
 import com.xnotes.explorer.GroupBy
 import com.xnotes.iosapp.home.DocPreview
 import com.xnotes.iosapp.home.HomeState
+import com.xnotes.iosapp.home.Arranged
 import com.xnotes.iosapp.home.arrange
+import com.xnotes.iosapp.home.entryKey
 import com.xnotes.iosapp.home.fmt
 import com.xnotes.iosapp.home.kindOf
 import com.xnotes.storage.ios.IosDocumentEntry
@@ -75,10 +77,37 @@ class HomeStateTest {
         assertEquals(1, canvases.files)
     }
 
+    @Test fun aPinnedNoteIsOnTheShelfAndInItsGroupWithoutClashingOrCountingTwice() {
+        val state = HomeState(defaults)
+        val entries = listOf(entry("Pinned.xnote", DocumentKind.NOTE, 1), entry("Other.xcanvas", DocumentKind.CANVAS, 2))
+        val plain = arrange(entries, state.view, null, { kindOf(it, null) }, 10)
+        val shelved = Arranged(plain.folders, plain.groups, entries.take(1))
+        val keys = shelved.shown("Pinned").flatMap { g -> g.items.map { entryKey(g, it) } }
+        assertEquals(3, keys.size)
+        assertEquals(keys.size, keys.toSet().size, "every drawn item needs its own key: $keys")
+        assertEquals(plain.files, shelved.files)
+        assertEquals(plain.all, shelved.all)
+    }
+
     @Test fun androidPlaceholdersAreFilledInOrder() {
         // Keys missing from the test bundle come back as themselves, so the key is the pattern.
         assertEquals("a-05", fmt("%1\$s-%2\$02d", "a", 5))
         assertEquals("3 of 7", fmt("%d of %d", 3, 7))
+    }
+
+    @Test fun recentKeepsTheNewestFirstOnceEachAndFollowsMoves() {
+        val state = HomeState(defaults)
+        val a = state.root / "A.xnote"
+        val b = state.root / "Folder" / "B.xnote"
+        state.opened(a, 1); state.opened(b, 2); state.opened(a, 3)
+        assertEquals(listOf(a to 3L, b to 2L), state.recents.map { it.path to it.opened })
+        state.moved(state.root / "Folder", state.root / "Moved")
+        assertEquals(state.root / "Moved" / "B.xnote", state.recents[1].path)
+        state.moved(a, null)
+        val again = HomeState(defaults)
+        assertEquals(listOf(state.root / "Moved" / "B.xnote"), again.recents.map { it.path })
+        repeat(45) { state.opened(state.root / "N$it.xnote", 10L + it) }
+        assertEquals(40, state.recents.size)
     }
 
     private fun entry(name: String, kind: DocumentKind?, modified: Long) =

@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
@@ -31,17 +32,18 @@ import okio.Path
 /** A sidebar destination: what it shows and whether this iPad has it yet. */
 private class Destination(val key: String, val icon: ImageVector, val ready: Boolean, val badge: Int = 0, val chosen: Boolean = false, val go: () -> Unit = {})
 
-private fun destinations(state: HomeState, recoveries: Int): Pair<List<Destination>, List<Destination>> {
-    val home = Destination("home", XnotesIcons.home, true, chosen = state.pane == HomePane.FILES && state.folders.isEmpty()) { state.go(state.root) }
+private fun destinations(state: HomeState, recoveries: Int, trash: Int): Pair<List<Destination>, List<Destination>> {
+    val home = Destination("home", XnotesIcons.home, true, chosen = state.pane == HomePane.FILES && state.folders.isEmpty()
+        && state.colorFilter == null && state.query == null) { state.go(state.root) }
     val top = listOf(
         home,
         Destination("split_workspace", XnotesIcons.split, false),
         Destination("ai_label", XnotesIcons.ai, false),
-        Destination("recovery_materials", XnotesIcons.restore, true, recoveries, state.pane == HomePane.RECOVERY) { state.pane = HomePane.RECOVERY },
-        Destination("recent", XnotesIcons.clock, false),
+        Destination("recovery_materials", XnotesIcons.restore, true, recoveries, state.pane == HomePane.RECOVERY) { state.show(HomePane.RECOVERY) },
+        Destination("recent", XnotesIcons.clock, true, chosen = state.pane == HomePane.RECENT) { state.show(HomePane.RECENT) },
     )
     val bottom = listOf(
-        Destination("trash", XnotesIcons.trash, false),
+        Destination("trash", XnotesIcons.trash, true, trash, state.pane == HomePane.TRASH) { state.show(HomePane.TRASH) },
         Destination("preferences", XnotesIcons.sliders, false),
         Destination("about", XnotesIcons.info, false),
     )
@@ -54,7 +56,8 @@ private fun Destination.press(state: HomeState) = if (ready) go() else state.say
 @Composable
 internal fun HomeSidebar(state: HomeState, recoveries: Int, modifier: Modifier = Modifier) {
     val p = LocalHome.current
-    val (top, bottom) = destinations(state, recoveries)
+    val actions = LocalActions.current
+    val (top, bottom) = destinations(state, recoveries, trashCount(state))
     SidebarSheet(HomeSize.sidebar, modifier) {
         Row(Modifier.fillMaxWidth().height(HomeSize.header).padding(start = Space.s20, end = Space.s8), verticalAlignment = Alignment.CenterVertically) {
             Label(text("app_name"), p.text, TextSize.heading, Modifier.weight(1f).semantics { heading() }, FontWeight.SemiBold)
@@ -66,6 +69,23 @@ internal fun HomeSidebar(state: HomeState, recoveries: Int, modifier: Modifier =
                 SidebarRow(d, state)
                 if (i == 0) FolderTree(state, state.root, 1)
             }
+            val colors = actions.colorNames.entries.sortedBy { it.value.lowercase() }
+            if (colors.isNotEmpty()) {
+                SidebarLabel(text("toolbar_colours"))
+                colors.forEach { (color, name) ->
+                    val chosen = state.pane == HomePane.FILES && state.colorFilter == color
+                    PlaceRow(name, chosen, { Box(Modifier.size(12.dp).clip(CircleShape).background(codeTint(color, p.sheet == Color.Black))) }) {
+                        state.show(HomePane.FILES); state.colorFilter = color
+                    }
+                }
+            }
+            if (state.pinnedFolders.isNotEmpty()) {
+                SidebarLabel(text("pinned"))
+                state.pinnedFolders.forEach { f ->
+                    val chosen = state.pane == HomePane.FILES && state.current == f && state.colorFilter == null && state.query == null
+                    PlaceRow(f.name, chosen, { Icon(XnotesIcons.pin, if (chosen) p.selectionForeground else p.text, HomeSize.navIcon) }) { state.go(f) }
+                }
+            }
         }
         Box(Modifier.padding(horizontal = HomeSize.rowInset).fillMaxWidth().height(HomeSize.hairline).background(p.border))
         Column(Modifier.padding(vertical = Space.s8)) { bottom.forEach { SidebarRow(it, state) } }
@@ -75,7 +95,7 @@ internal fun HomeSidebar(state: HomeState, recoveries: Int, modifier: Modifier =
 /** The sidebar folded to its icons, with a menu button to open it again. */
 @Composable
 internal fun HomeRail(state: HomeState, recoveries: Int, modifier: Modifier = Modifier) {
-    val (top, bottom) = destinations(state, recoveries)
+    val (top, bottom) = destinations(state, recoveries, trashCount(state))
     SidebarSheet(HomeSize.rail, modifier) {
         Box(Modifier.fillMaxWidth().height(HomeSize.header), contentAlignment = Alignment.Center) {
             HomeIconButton(XnotesIcons.menu, text("expand_sidebar")) { state.toggleRail() }
@@ -130,6 +150,30 @@ private fun RailPill(d: Destination, state: HomeState) {
     ) { Icon(d.icon, if (d.chosen) p.selectionForeground else p.text, HomeSize.navIcon + 4.dp) }
 }
 
+/** How many items wait in Trash, for the sidebar's count. */
+@Composable
+private fun trashCount(state: HomeState): Int = produceState(0, state.revision) {
+    value = withContext(Dispatchers.Default) { runCatching { library.listTrash().size }.getOrDefault(0) }
+}.value
+
+@Composable
+private fun SidebarLabel(label: String) =
+    Label(label, LocalHome.current.textDim, TextSize.label, Modifier.padding(start = Space.s20, top = Space.s16, bottom = Space.s6), FontWeight.Medium)
+
+/** A colour or a pinned folder in the sidebar. */
+@Composable
+private fun PlaceRow(name: String, chosen: Boolean, lead: @Composable () -> Unit, onClick: () -> Unit) {
+    val p = LocalHome.current
+    val fg = if (chosen) p.selectionForeground else p.text
+    Row(Modifier.fillMaxWidth().padding(horizontal = HomeSize.rowInset).height(HomeSize.row).clip(RoundedCornerShape(HomeSize.rowCorner))
+        .background(if (chosen) p.selectionBackground else Color.Transparent).clickable(role = Role.Button, onClick = onClick)
+        .semantics { if (chosen) selected = true }.padding(horizontal = Space.s12), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(HomeSize.navIcon + 2.dp), contentAlignment = Alignment.Center) { lead() }
+        Spacer(Modifier.width(Space.s20))
+        Label(name, fg, TextSize.title, Modifier.weight(1f))
+    }
+}
+
 /** The folders inside [dir], each opening its own folders under it when expanded. */
 @Composable
 private fun FolderTree(state: HomeState, dir: Path, depth: Int) {
@@ -138,7 +182,7 @@ private fun FolderTree(state: HomeState, dir: Path, depth: Int) {
     }
     folders.forEach { f ->
         val open = f.path in state.expanded
-        val chosen = state.pane == HomePane.FILES && state.current == f.path
+        val chosen = state.pane == HomePane.FILES && state.current == f.path && state.colorFilter == null && state.query == null
         FolderRow(f.name, depth, open, (f.childCount ?: 0) > 0, chosen,
             onToggle = { state.expanded = if (open) state.expanded - f.path else state.expanded + f.path }) { state.go(f.path) }
         if (open) FolderTree(state, f.path, depth + 1)

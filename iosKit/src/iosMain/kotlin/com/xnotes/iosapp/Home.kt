@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.interop.LocalUIViewController
+import androidx.compose.ui.uikit.LocalUIViewController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.ComposeUIViewController
@@ -69,8 +69,9 @@ private fun DocumentsHome() {
         key(path, recovery) { Viewer(path, recovery, created, dark, background, nameStyle, detailStyle) { selected = null; recovery = null; home.revision++ } }
         return
     }
-    HomeScreen(home, dark, open = { selected = it }, restore = { recovery = it; selected = it.original }) { opened ->
-        if (selected != null) false else { created.adopt(opened); selected = opened.session.path; true }
+    val now = { (NSDate().timeIntervalSince1970 * 1000).toLong() }
+    HomeScreen(home, dark, open = { home.opened(it, now()); selected = it }, restore = { recovery = it; selected = it.original }) { opened ->
+        if (selected != null) false else { created.adopt(opened); home.opened(opened.session.path, now()); selected = opened.session.path; true }
     }
 }
 

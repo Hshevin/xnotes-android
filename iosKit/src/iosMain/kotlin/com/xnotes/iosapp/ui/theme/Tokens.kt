@@ -88,6 +88,8 @@ internal object HomeSize {
     val fabMargin = 24.dp
     val menuRow = 50.dp
     val menuWidth = 240.dp
+    /** Wide enough for Android's thirteen-column swatch grid. */
+    val colorMenuWidth = 320.dp
     val dialogWidth = 360.dp
     val bottomClearance = 88.dp
     val emptyArt = 96.dp

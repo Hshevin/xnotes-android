@@ -25,12 +25,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.explorer.EntryKind
+import com.xnotes.explorer.EntryGroup
 import com.xnotes.explorer.ExplorerLayout
 import com.xnotes.iosapp.store
 import com.xnotes.iosapp.text
 import com.xnotes.iosapp.ui.icons.XnotesIcons
 import com.xnotes.iosapp.ui.theme.HomePalette
 import com.xnotes.iosapp.ui.theme.HomeSize
+import com.xnotes.iosapp.ui.theme.MinTouchTarget
 import com.xnotes.iosapp.ui.theme.Space
 import com.xnotes.iosapp.ui.theme.TextSize
 import com.xnotes.kio.KFiles
@@ -49,7 +51,12 @@ import kotlin.time.Clock
 private sealed interface Listing {
     data object Loading : Listing
     data object Failed : Listing
-    data class Ready(val entries: List<IosDocumentEntry>) : Listing
+    /**
+     * [opened] is set for Recent: when each was opened, in the order to show them. [flat] lists come from many
+     * folders (Recent, search, a colour) and show where each is; [pinned] are the top folder's pinned notes.
+     */
+    data class Ready(val entries: List<IosDocumentEntry>, val opened: Map<Path, Long>? = null, val flat: Boolean = false,
+                     val pinned: List<IosDocumentEntry> = emptyList()) : Listing
 }
 
 /** What the new-item sheet is naming. */
@@ -68,10 +75,26 @@ internal enum class Naming(val title: String, val confirm: String, val placehold
 internal fun HomeScreen(state: HomeState, dark: Boolean, open: (Path) -> Unit, restore: (LiteRecovery) -> Unit, created: (LiteOpen.Opened) -> Boolean) {
     val p = HomePalette.forTheme(dark)
     val current = state.current
-    val listing by key(current) {
-        produceState<Listing>(Listing.Loading, state.revision) {
+    val pane = state.pane
+    val recents = state.recents
+    val query = state.query?.trim()?.takeIf { it.isNotEmpty() }
+    val color = state.colorFilter
+    val scope = rememberCoroutineScope()
+    val actions = remember(state) { HomeActions(state, scope) }
+    LaunchedEffect(state.revision) { actions.reload() }
+    val pins = actions.notePins
+    val listing by key(current, pane, query, color) {
+        produceState<Listing>(Listing.Loading, state.revision, recents, pins) {
+            if (query != null) delay(250)
             value = withContext(Dispatchers.Default) {
-                runCatching { Listing.Ready(listIosDocuments(current)) }.getOrElse { Listing.Failed }
+                runCatching {
+                    when {
+                        pane == HomePane.RECENT -> Listing.Ready(recentEntries(recents), recents.associate { it.path to it.opened }, flat = true)
+                        query != null -> Listing.Ready(entriesAt(library.search(current, query)), flat = true)
+                        color != null -> Listing.Ready(entriesAt(library.findByColor(color)), flat = true)
+                        else -> Listing.Ready(listIosDocuments(current), pinned = if (current == state.root) entriesAt(pins) else emptyList())
+                    }
+                }.getOrElse { Listing.Failed }
             }
         }
     }
@@ -79,7 +102,9 @@ internal fun HomeScreen(state: HomeState, dark: Boolean, open: (Path) -> Unit, r
         value = withContext(Dispatchers.Default) { runCatching { store.pendingRecoveries() }.getOrDefault(emptyList()) }
     }
     val creator = remember { Creator() }
-    CompositionLocalProvider(LocalHome provides p, LocalCreator provides creator, LocalOnCreated provides created) {
+    val sheet = remember { mutableStateOf<HomeSheet?>(null) }
+    CompositionLocalProvider(LocalHome provides p, LocalCreator provides creator, LocalOnCreated provides created,
+        LocalActions provides actions, LocalHomeState provides state, LocalSheet provides sheet) {
         BoxWithConstraints(Modifier.fillMaxSize().background(p.backdrop)) {
             val columns = gridColumns(maxWidth)
             Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -90,14 +115,16 @@ internal fun HomeScreen(state: HomeState, dark: Boolean, open: (Path) -> Unit, r
                         HomeHeader(state)
                         when (state.pane) {
                             HomePane.RECOVERY -> RecoveryPane(state, recoveries, restore)
-                            HomePane.FILES -> Files(state, listing, dark, columns, wide, open)
+                            HomePane.TRASH -> TrashPane(state, wide)
+                            HomePane.FILES, HomePane.RECENT -> Files(state, listing, dark, columns, wide, open)
                         }
                     }
                 }
             }
-            if (state.pane == HomePane.FILES) NewButton(state, Modifier.align(Alignment.BottomEnd).windowInsetsPadding(WindowInsets.safeDrawing))
+            if (state.pane == HomePane.FILES && state.query == null && state.colorFilter == null && !state.selecting) NewButton(state, Modifier.align(Alignment.BottomEnd).windowInsetsPadding(WindowInsets.safeDrawing))
             Notice(state, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing))
             NameSheet(state, current)
+            HomeSheets(state)
         }
     }
 }
@@ -109,14 +136,35 @@ private fun Files(state: HomeState, listing: Listing, dark: Boolean, columns: In
     val clock = remember { clock24() }
     val view = state.view
     val kind = { e: IosDocumentEntry -> kindOf(e, if (e.isFolder) null else HomeThumbs.cached(e, dark)) }
-    val arranged = ready?.let { arrange(it.entries, view, state.kindFilter, kind, now) }
-    val look = EntryLook(view, now, dark, clock)
+    val opened = ready?.opened
+    val names = LocalActions.current.colorNames
+    val arranged = ready?.let {
+        if (opened == null) arrange(it.entries, view, state.kindFilter, kind, now) { c -> names[c] }
+        else Arranged(emptyList(), listOf(EntryGroup("all", "", it.entries.filter { e -> state.kindFilter == null || kind(e) == state.kindFilter })))
+    }?.let { a ->
+        val pinned = ready.pinned.filter { e -> state.kindFilter == null || kind(e) == state.kindFilter }
+        if (pinned.isEmpty() || state.selecting) a else Arranged(a.folders, a.groups, pinned)
+    }
+    val look = EntryLook(view, now, dark, clock, opened, state.root, ready?.flat == true)
     val chips: @Composable () -> Unit = { ChipRow(state, arranged) }
     val pick = { e: IosDocumentEntry -> if (e.isFolder) state.go(e.path) else open(e.path) }
     when {
         listing == Listing.Loading -> EmptyPane(text("loading"), null)
         listing == Listing.Failed -> EmptyPane(text("list_failed"), null)
-        ready!!.entries.isEmpty() -> Column(Modifier.padding(horizontal = HomeSize.gutter)) {
+        ready!!.entries.isEmpty() && opened != null -> Column(Modifier.padding(horizontal = HomeSize.gutter)) {
+            chips()
+            EmptyPane(text("recent_empty"), EmptyArt.RECENT)
+        }
+        ready.entries.isEmpty() && state.query != null -> Column(Modifier.padding(horizontal = HomeSize.gutter)) {
+            chips()
+            val q = state.query.orEmpty().trim()
+            if (q.isEmpty()) EmptyPane(text("search_notes"), EmptyArt.SEARCH) else EmptyPane(fmt("no_notes_match", q), EmptyArt.SEARCH)
+        }
+        ready.entries.isEmpty() && state.colorFilter != null -> Column(Modifier.padding(horizontal = HomeSize.gutter)) {
+            chips()
+            EmptyPane(text("nothing_this_colour"), EmptyArt.SEARCH)
+        }
+        ready.entries.isEmpty() -> Column(Modifier.padding(horizontal = HomeSize.gutter)) {
             chips()
             EmptyPane(text("folder_empty"), EmptyArt.PAGES) { CreateActions(state) }
         }
@@ -196,6 +244,22 @@ private fun rememberImporter(state: HomeState): (Path?) -> Unit {
 private val LocalOnCreated = staticCompositionLocalOf<(LiteOpen.Opened) -> Boolean> { { false } }
 
 /** A PDF's name without its extension, for the note made from it. */
+/** What lies at [paths] now, for the lists that gather items from many folders. */
+private fun entriesAt(paths: List<Path>): List<IosDocumentEntry> {
+    val folders = HashMap<Path, Map<Path, IosDocumentEntry>>()
+    return paths.mapNotNull { path ->
+        val dir = path.parent ?: return@mapNotNull null
+        folders.getOrPut(dir) { runCatching { listIosDocuments(dir) }.getOrDefault(emptyList()).associateBy { it.path } }[path]
+    }
+}
+
+/** Recent's documents as they are now; ones that have gone are left out but kept in the list, as on Android. */
+private fun recentEntries(recents: List<RecentDoc>): List<IosDocumentEntry> = recents.mapNotNull { r ->
+    val info = KFiles.system.metadataOrNull(r.path)?.takeIf { it.isRegularFile && it.symlinkTarget == null } ?: return@mapNotNull null
+    val kind = DocumentKind.ofName(r.path.name)?.takeIf { it != DocumentKind.MIND_MAP } ?: return@mapNotNull null
+    IosDocumentEntry(r.path, kind, info.lastModifiedAtMillis, info.size ?: 0)
+}
+
 private fun pdfStem(name: String) = name.substringBeforeLast('.', name).ifBlank { text("untitled") }
 
 @Composable
@@ -284,11 +348,18 @@ private fun RecoveryPane(state: HomeState, recoveries: List<LiteRecovery>, resto
 @Composable
 private fun Notice(state: HomeState, modifier: Modifier) {
     val p = LocalHome.current
-    val message = state.notice ?: return
-    LaunchedEffect(message) { delay(2600); state.notice = null }
+    val notice = state.notice ?: return
+    LaunchedEffect(notice) { delay(if (notice.action != null) 10_000 else 4_000); if (state.notice === notice) state.notice = null }
     val shape = RoundedCornerShape(HomeSize.tileCorner)
-    Box(modifier.padding(bottom = HomeSize.fabMargin).widthIn(max = 480.dp).clip(shape).background(p.selectionBackground)
-        .clickable { state.notice = null }.semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = Space.s20, vertical = Space.s12)) {
-        Label(message, p.selectionForeground, TextSize.bodyLarge, weight = FontWeight.Medium, lines = 3)
+    Row(modifier.padding(bottom = HomeSize.fabMargin).widthIn(max = 560.dp).clip(shape).background(p.selectionBackground)
+        .semantics { liveRegion = LiveRegionMode.Polite }.padding(start = Space.s20, end = if (notice.action != null) Space.s8 else Space.s20),
+        verticalAlignment = Alignment.CenterVertically) {
+        Label(notice.text, p.selectionForeground, TextSize.bodyLarge, Modifier.padding(vertical = Space.s12).weight(1f, fill = false), FontWeight.Medium, lines = 3)
+        if (notice.action != null) {
+            Spacer(Modifier.width(Space.s12))
+            Box(Modifier.heightIn(min = MinTouchTarget).clip(RoundedCornerShape(HomeSize.rowCorner))
+                .clickable(role = Role.Button) { state.notice = null; notice.run?.invoke() }.padding(horizontal = Space.s12),
+                contentAlignment = Alignment.Center) { Label(notice.action, p.selectionForeground, TextSize.bodyLarge, weight = FontWeight.Bold) }
+        }
     }
 }

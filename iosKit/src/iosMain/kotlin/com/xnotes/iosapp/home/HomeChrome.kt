@@ -170,7 +170,7 @@ internal fun NameDialog(title: String, initial: String, confirm: String, placeho
 }
 
 @Composable
-private fun DialogButton(label: String, primary: Boolean, enabled: Boolean, onClick: () -> Unit) {
+internal fun DialogButton(label: String, primary: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val p = LocalHome.current
     val shape = RoundedCornerShape(HomeSize.chipCorner)
     Box(
