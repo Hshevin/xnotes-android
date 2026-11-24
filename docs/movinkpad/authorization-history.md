@@ -346,3 +346,7 @@
 ## 2026-11-24 同步上游 0.9.11
 
 - 用户要求「同步原 fork 仓库」：将上游 `shardulvs/xnotes-android` 的 `96357d87`（0.9.11，自 `27e83a07` 起 74 个提交）合入 `master` 并推送 `origin/master`。工具栏的翻页、缩放、视图、样式改为各文档栏末尾的设置面板；夜间模式下 PDF 默认不反色（PDF 属于内容）。不打包、不安装、不发布 GitHub Release。
+
+## 2026-11-24 图层切换提速
+
+- 用户要求解决图层切换卡顿并「按那样的分工」开始；放行范围选「推送加打包，不发版」：合并 `perf/layer-switch` 到 `master` 并推送 `origin/master`，打包主线测试版 `com.xnotes.movinkpad.branchtest.master`。不安装到用户设备（当时未连接）、不改动正式版、不发布 GitHub Release。
