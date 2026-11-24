@@ -102,13 +102,13 @@ class LitePdfImportTest {
         assertContentEquals(original, bytes(pick))
     }
 
-    @Test fun tinyPagesInheritA4OrThePreviousSizeAndKeepTheirSourceIndices() {
+    @Test fun tinyPagesInheritA4OrThePreviousSizeAndShowNoPdfPageAsOnAndroid() {
         fs.write(pick) { write(pdf("0.5 72", "216 72", "100 0.25")) }
         imported().use {
             val pages = it.note!!.pages
             val a4 = PageSize.A4.pixels(Orientation.PORTRAIT, PageSize.DEFAULT_DPI)
             assertEquals(listOf(a4, 450.0 to 150.0, 450.0 to 150.0), pages.map { page -> page.width to page.height })
-            assertEquals(listOf(0, 1, 2), pages.map { page -> page.pdfPage })
+            assertEquals(listOf(null, 1, null), pages.map { page -> page.pdfPage })
         }
     }
 

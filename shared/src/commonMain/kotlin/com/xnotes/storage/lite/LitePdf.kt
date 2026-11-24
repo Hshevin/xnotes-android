@@ -19,12 +19,13 @@ internal fun importLitePdf(file: AssetFile): Document {
     doc.pdfFile = file
     doc.created = Clock.System.now().toEpochMilliseconds()
     sizes.forEachIndexed { index, size ->
-        val (width, height) = if (size != null && size.first >= 1 && size.second >= 1) {
-            size.first / 72.0 * doc.dpi to size.second / 72.0 * doc.dpi
+        // As Android's importer: a page that can't be measured takes the previous size and shows no PDF page.
+        doc.pages.add(if (size != null && size.first >= 1 && size.second >= 1) {
+            Page(size.first / 72.0 * doc.dpi, size.second / 72.0 * doc.dpi, pdfPage = index)
         } else {
-            doc.blankPageSize(doc.pages.lastOrNull())
-        }
-        doc.pages.add(Page(width, height, pdfPage = index))
+            val (width, height) = doc.blankPageSize(doc.pages.lastOrNull())
+            Page(width, height)
+        })
     }
     return doc
 }
