@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.core.template.TemplateCatalog
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -80,7 +81,7 @@ private val GRID_THUMB_W = 68.dp
 private sealed interface GridTile {
     data object Default : GridTile
     data object None : GridTile
-    data class Library(val entry: TemplateLibrary.Entry) : GridTile
+    data class Library(val entry: TemplateCatalog.Entry) : GridTile
     data object Import : GridTile
 }
 
@@ -93,13 +94,13 @@ private sealed interface GridTile {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun TemplateGrid(
-    entries: List<TemplateLibrary.Entry>,
+    entries: List<TemplateCatalog.Entry>,
     selected: String?,
     withDefault: Boolean,
     inheritedKey: String,
     paper: Rgba,
     pageMm: Pair<Double, Double>,
-    drawing: (TemplateLibrary.Entry) -> TemplateDrawing,
+    drawing: (TemplateCatalog.Entry) -> TemplateDrawing,
     onSelect: (String?) -> Unit,
     onImport: () -> Unit,
     onRemove: (String) -> Unit,
@@ -145,13 +146,13 @@ internal fun TemplateGrid(
                         is GridTile.Library -> key(t.entry.key) {
                             val e = t.entry
                             var menu by remember { mutableStateOf(false) }
-                            val removable = e.source == TemplateLibrary.Source.IMPORTED || e.source == TemplateLibrary.Source.NOTE
+                            val removable = e.source == TemplateCatalog.Source.IMPORTED || e.source == TemplateCatalog.Source.NOTE
                             Box {
                                 GridCell(e.template.name, isSelected(t), thumbH, onClick = { onSelect(e.key) }, onLongClick = if (removable) ({ menu = true }) else null) {
                                     TemplateThumb(e, pageMm, drawing(e), wPx, thumbH)
                                 }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                    if (e.source == TemplateLibrary.Source.IMPORTED) {
+                                    if (e.source == TemplateCatalog.Source.IMPORTED) {
                                         MenuItem(stringResource(R.string.remove_template), XnotesIcons.trash, danger = true, onClick = { menu = false; onRemove(e.key) })
                                     } else {
                                         MenuItem(stringResource(R.string.keep_template), XnotesIcons.download, onClick = { menu = false; onKeep(e.key) })
@@ -187,7 +188,7 @@ internal fun TemplateGrid(
 }
 
 @Composable
-private fun TemplateThumb(e: TemplateLibrary.Entry, pageMm: Pair<Double, Double>, d: TemplateDrawing, wPx: Int, thumbH: Dp) {
+private fun TemplateThumb(e: TemplateCatalog.Entry, pageMm: Pair<Double, Double>, d: TemplateDrawing, wPx: Int, thumbH: Dp) {
     val bmp = rememberTemplateThumb(e.template, TemplateThumbs.spec(e.key, pageMm, d, wPx), keep = true)
     if (bmp != null) Image(bmp, contentDescription = e.template.name, Modifier.size(GRID_THUMB_W, thumbH))
     else Box(Modifier.size(GRID_THUMB_W, thumbH).background(d.look.paper.toComposeColor()))
@@ -307,7 +308,7 @@ internal object TemplateThumbs {
     }
 
     /** Draw the strip's [tiles] that are not kept yet, one at a time. */
-    suspend fun prewarm(tiles: List<Pair<TemplateLibrary.Entry, TemplateDrawing>>, pageMm: Pair<Double, Double>, wPx: Int) =
+    suspend fun prewarm(tiles: List<Pair<TemplateCatalog.Entry, TemplateDrawing>>, pageMm: Pair<Double, Double>, wPx: Int) =
         withContext(Dispatchers.Default) {
             for ((e, d) in tiles) {
                 ensureActive()
@@ -347,7 +348,7 @@ internal class TemplateDrawing(val look: TemplateLook, val values: TemplateValue
         }
 
         /** How [style] draws [e] in the strip: as it shows it ([shownKey]), else as [kept]; over [below]'s if that shows [e]. */
-        fun inStrip(e: TemplateLibrary.Entry, style: PageStyle, shownKey: String, kept: TemplateSettings?, below: PageStyle?, paper: Rgba, dpi: Int): TemplateDrawing {
+        fun inStrip(e: TemplateCatalog.Entry, style: PageStyle, shownKey: String, kept: TemplateSettings?, below: PageStyle?, paper: Rgba, dpi: Int): TemplateDrawing {
             val own = if (e.key == shownKey) style.settings else kept ?: TemplateSettings()
             val lower = below?.takeIf { (it.template ?: PageTemplates.NONE) == e.key }?.settings
             return of(e.template, own, lower, paper, dpi)

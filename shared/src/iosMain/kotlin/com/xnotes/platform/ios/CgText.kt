@@ -6,6 +6,9 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.*
+import com.xnotes.core.vector.GlyphOutliner
+import com.xnotes.core.vector.GlyphRun
+import com.xnotes.core.vector.GlyphStyle
 import com.xnotes.core.vector.VectorContour
 import com.xnotes.core.vector.VectorSeg
 import kotlinx.cinterop.*
@@ -100,11 +103,14 @@ object CgTextMeasurer : TextMeasurer {
         }
     }
 
-    override fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): List<VectorContour> = buildList {
+    override fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): List<VectorContour> =
+        contours(text, font, wrapWidth, flags, metrics(font).ascent)
+
+    internal fun contours(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags, firstBaseline: Double): List<VectorContour> = buildList {
         val metrics = metrics(font)
         lines(text, font, wrapWidth, flags.wordWrap) { line, index ->
             val left = if (flags.alignLeft) 0.0 else (wrapWidth - CTLineGetTypographicBounds(line, null, null, null)) / 2
-            val baseline = metrics.ascent + index * metrics.height
+            val baseline = firstBaseline + index * metrics.height
             val runs = CTLineGetGlyphRuns(line)
             for (runIndex in 0 until CFArrayGetCount(runs)) memScoped {
                 val run: CTRunRef = checkNotNull(CFArrayGetValueAtIndex(runs, runIndex)).reinterpret()
@@ -160,5 +166,25 @@ object CgTextMeasurer : TextMeasurer {
             CTLineDraw(line, context)
             CGContextRestoreGState(context)
         }
+    }
+}
+
+/** TemplateEval asks for a single, untracked run in glyph units, based at y = 0. */
+object CgTemplateGlyphs : GlyphOutliner {
+    private fun font(style: GlyphStyle): FontSpec {
+        val face = when (style.family) {
+            "serif" -> FontFace.SERIF
+            "monospace" -> FontFace.MONO
+            else -> FontFace.SANS
+        }
+        return FontSpec(style.size * 72 / 150, face, style.bold, style.italic)
+    }
+
+    override fun measure(text: String, style: GlyphStyle): Double = CgTextMeasurer.advances(text, font(style)).sum()
+
+    override fun outline(text: String, style: GlyphStyle): GlyphRun {
+        val font = font(style)
+        val contours = CgTextMeasurer.contours(text, font, 0.0, TextFlags(wordWrap = false), 0.0)
+        return GlyphRun(contours, CgTextMeasurer.advances(text, font).sum())
     }
 }

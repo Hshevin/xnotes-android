@@ -1,5 +1,7 @@
 package com.xnotes.ui
 
+import com.xnotes.storage.lite.LiteNoteSetup
+import com.xnotes.core.template.TemplateCatalog
 import com.xnotes.explorer.explorerComparator
 import com.xnotes.ui.theme.audioLook
 import com.xnotes.core.model.forExport
@@ -7483,20 +7485,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Creates a `.xnote` under [parentDocId] as [setup] describes, a cover first when it has one; returns its URI, or null. IO. */
     fun createNoteFile(treeUri: String, parentDocId: String, rawName: String, setup: NewNoteSetup): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        val dpi = PageSize.DEFAULT_DPI
-        val w = PageSize.mmToPx(setup.widthMm, dpi)
-        val h = PageSize.mmToPx(setup.heightMm, dpi)
-        val doc = Document.blankPixels(Document.DEFAULT_NEW_PAGES, w, h, dpi).also { it.created = System.currentTimeMillis() }
-        doc.style = setup.style
-        TemplateLibrary.embed(doc, setup.style.template, imageDir)
-        (settings.newNoteFlow ?: factoryFlow).applyTo(doc.flow)
-        setup.cover?.let { style ->
-            // The cover's design runs to the paper's edge, whatever margins the pages get later.
-            val cover = Page(w, h, style = style, margins = PageMargins(0.0, 0.0, 0.0, 0.0)).also { it.cover = true }
-            TemplateLibrary.embed(doc, style.template, imageDir)
-            doc.pages.add(0, cover)
+        val doc = LiteNoteSetup(setup.widthMm, setup.heightMm, setup.style, setup.cover).newDocument { note, key ->
+            TemplateLibrary.embed(note, key, imageDir)
         }
-        doc.enableReferenceAnchors()
+        (settings.newNoteFlow ?: factoryFlow).applyTo(doc.flow)
         return createNoteFile(treeUri,parentDocId,name,doc)
     }
 
@@ -12006,7 +11998,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         private set
 
     /** Run [work] off the main thread, then report it and refresh the pickers. */
-    private fun adoptTemplate(work: () -> TemplateLibrary.Entry) {
+    private fun adoptTemplate(work: () -> TemplateCatalog.Entry) {
         autosaveScope.launch {
             val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching(work) }
             result
@@ -12058,14 +12050,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** The templates of [kind] to offer: the library's, then any this note carries that the library lacks. */
-    fun templateChoices(kind: com.xnotes.core.template.TemplateKind = com.xnotes.core.template.TemplateKind.PAGE): List<TemplateLibrary.Entry> {
+    fun templateChoices(kind: com.xnotes.core.template.TemplateKind = com.xnotes.core.template.TemplateKind.PAGE): List<TemplateCatalog.Entry> {
         val lib = TemplateLibrary.all().filter { it.template.kind == kind }
         val known = TemplateLibrary.all().mapTo(HashSet()) { it.key }
         val doc = state.document
         val carried = (doc.templates.keys + doc.templatePackages.keys).mapNotNull { key ->
             if (key in known) return@mapNotNull null
             val t = TemplateLibrary.template(doc, key)?.takeIf { it.kind == kind } ?: return@mapNotNull null
-            TemplateLibrary.Entry(key, t, doc.templates[key].orEmpty(), TemplateLibrary.Source.NOTE, doc.templatePackages[key])
+            TemplateCatalog.Entry(key, t, doc.templates[key].orEmpty(), TemplateCatalog.Source.NOTE, doc.templatePackages[key])
         }
         return lib + carried.sortedBy { it.template.name.lowercase() }
     }

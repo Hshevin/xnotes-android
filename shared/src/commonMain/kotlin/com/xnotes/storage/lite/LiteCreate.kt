@@ -16,7 +16,7 @@ internal expect fun linkNewFile(stage: Path, target: Path): Boolean
 
 internal fun createLiteDocument(
     store: LiteStore, fs: FileSystem, codec: LiteCodec, documents: Path, directory: Path,
-    baseName: String, kind: LiteKind, pdf: Path?, assets: Path, inDocuments: (Path) -> Boolean, hash: (Path) -> String,
+    baseName: String, kind: LiteKind, pdf: Path?, setup: LiteNoteSetup?, assets: Path, inDocuments: (Path) -> Boolean, hash: (Path) -> String,
 ): LiteSession {
     require(baseName.isNotBlank() && !baseName.startsWith('.') && baseName.none { it == '/' || it == '\\' || it.isISOControl() })
     require(fs.metadata(directory).isDirectory)
@@ -31,11 +31,14 @@ internal fun createLiteDocument(
         }
         val (body, digest) = snapshot.use {
             val body = when (kind) {
-                LiteKind.NOTE -> {
-                    val doc = if (it == null) Document.blank() else importLitePdf(it.file)
-                    doc.enableReferenceAnchors()
-                    LiteBody.Note(doc)
-                }
+                LiteKind.NOTE -> LiteBody.Note(when {
+                    setup != null -> {
+                        val templates = store.templates()
+                        setup.newDocument { doc, key -> require(templates.embed(doc, key, staging)) }
+                    }
+                    it != null -> importLitePdf(it.file).apply { enableReferenceAnchors() }
+                    else -> Document.blank().apply { enableReferenceAnchors() }
+                })
                 LiteKind.CANVAS -> LiteBody.Canvas(InfiniteDocument())
             }
             body to codec.write(body.snapshot(), stage)

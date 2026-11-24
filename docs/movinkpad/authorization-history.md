@@ -350,3 +350,7 @@
 ## 2026-11-24 iPad 文件库 S3 的 Android Debug 构建验收
 
 - 本轮授权在共享模块与 iPad 模拟器测试后运行 `:app:assembleDebug`，用于核对共享代码在 Android ARM64 应用中的集成。交付范围为本地代码提交。见 [S3 实现记录](process/ipados-home-h2-contracts-2026-11-24.md#s3-实现记录)。
+
+## 2026-11-24 iPadOS 首页 S4 本地构建
+
+- 按 [S4 验收要求](process/ipados-home-h3-contracts-2026-11-24.md) 执行一次本地 `:app:assembleDebug`，用于验证共享新建笔记和模板库接入 Android 后的构建。

@@ -10,7 +10,11 @@ targets:
   XNotes:
     type: application
     platform: iOS
-    sources: [XNotes]
+    sources:
+      - XNotes
+      - path: ../app/src/main/assets/templates
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xnotes.ipad

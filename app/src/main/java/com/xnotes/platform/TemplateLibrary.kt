@@ -10,31 +10,24 @@ import com.xnotes.core.model.Document
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageTemplates
-import com.xnotes.core.model.Rooms
-import com.xnotes.core.model.sourceHeight
-import com.xnotes.core.model.sourceWidth
-import com.xnotes.core.model.resolvedAccentColor
-import com.xnotes.core.model.resolvedColors
-import com.xnotes.core.model.resolvedParams
-import com.xnotes.core.model.resolvedPatternColor
-import com.xnotes.core.model.resolvedSpacing
 import com.xnotes.core.model.resolvedTemplate
 import com.xnotes.core.pal.Renderer
+import com.xnotes.core.template.PageTemplatePainter
 import com.xnotes.core.template.Template
+import com.xnotes.core.template.TemplateCatalog
+import com.xnotes.core.template.TemplateCatalog.Entry
+import com.xnotes.core.template.TemplateCatalog.Source
 import com.xnotes.core.template.TemplateEval
 import com.xnotes.core.template.TemplateKind
 import com.xnotes.core.template.TemplateLayoutCache
-import com.xnotes.core.template.TemplatePage
-import com.xnotes.core.template.TemplatePainter
-import com.xnotes.core.template.TemplateValues
 import com.xnotes.format.TemplateFormatException
 import com.xnotes.format.TemplatePackage
 import com.xnotes.format.TemplateReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import okio.Path.Companion.toOkioPath
 
 /**
  * The page templates the app knows: the three built-in rulings, the bundled examples, and the
@@ -48,12 +41,6 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object TemplateLibrary {
 
-    /** Where a template comes from; [NOTE] is one a note carries that the library does not have. */
-    enum class Source { BUILT_IN, BUNDLED, IMPORTED, NOTE }
-
-    /** One template: [text] is its JSON, and [file] the package holding its pictures, when it has any. */
-    class Entry(val key: String, val template: Template, val text: String, val source: Source, val file: File? = null)
-
     /** One file in the [Store]: [handle] names it for [Store.delete]. */
     class StoredFile(val handle: String, val name: String, val open: () -> InputStream?)
 
@@ -66,7 +53,7 @@ object TemplateLibrary {
 
     private const val ASSET_DIR = "templates"
     private const val EXAMPLES_DIR = "templates/examples"
-    private const val EXT = ".xtemplate"
+    private const val EXT = TemplateCatalog.EXT
     private const val LEGACY = "legacy:"
     private const val MAX_PICTURE_SIDE = 8192
 
@@ -89,6 +76,8 @@ object TemplateLibrary {
     private var imported: Map<String, Entry> = emptyMap()
     @Volatile
     private var handles: Map<String, String> = emptyMap()
+    @Volatile
+    private var catalog = TemplateCatalog(emptyList())
     private val parsed = ConcurrentHashMap<String, Template>()
     /** Package files seen for a key, the notes' own included, so their pictures can be found again. */
     private val packageFiles = ConcurrentHashMap<String, File>()
@@ -111,33 +100,17 @@ object TemplateLibrary {
         cacheDir = File(app.cacheDir, "template-library").apply { mkdirs() }
         assets = app.assets
         apkStamp = File(app.applicationInfo.sourceDir).lastModified()
+        packagesLoaded = false
         bundled = loadBundled(app.assets)
         readImports(null)
     }
 
     /** Every template to offer, built-ins first, then the bundled examples, then imports. */
-    fun all(): List<Entry> = bundled + imported.values.sortedBy { it.template.name.lowercase() }
+    fun all(): List<Entry> = catalog.all()
+    fun entry(key: String): Entry? = catalog.entry(key)
 
-    fun entry(key: String): Entry? = bundled.firstOrNull { it.key == key } ?: imported[key]
-
-    /** The key of a plain template that is not built in: a hash of its text. */
-    fun keyOf(text: String): String = hex(MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)))
-
-    /** The key of the template in [file]: a hash of its bytes, matching [keyOf] for plain JSON. */
-    fun keyOf(file: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buf = ByteArray(64 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return hex(md.digest())
-    }
-
-    private fun hex(d: ByteArray) = d.take(8).joinToString("") { "%02x".format(it) }
+    fun keyOf(text: String): String = TemplateCatalog.keyOf(text)
+    fun keyOf(file: File): String = TemplateCatalog.keyOf(file.toOkioPath())
 
     /**
      * The template [key] names for [doc]: the note's own embedded copy first, so a note keeps
@@ -158,17 +131,7 @@ object TemplateLibrary {
      * it from the note.
      */
     fun embed(doc: Document, key: String?, dir: File?) {
-        if (key == null || key == PageTemplates.NONE || PageTemplates.isBuiltIn(key)) return
-        if (doc.templates.containsKey(key) || doc.templatePackages.containsKey(key)) return
-        val e = entry(key) ?: return
-        val pkg = e.file
-        if (pkg == null) {
-            doc.templates = doc.templates + (key to e.text)
-            return
-        }
-        val d = dir ?: return
-        val copy = runCatching { File.createTempFile("tpl", EXT, d).also { pkg.copyTo(it, overwrite = true) } }.getOrNull() ?: return
-        doc.templatePackages = doc.templatePackages + (key to copy)
+        runCatching { catalog.embed(doc, key, dir?.toOkioPath()) }
     }
 
     /** Read the bundled packages once, then the store's and the legacy folder's templates as the imports. IO; call off the main thread. */
@@ -199,6 +162,7 @@ object TemplateLibrary {
             }
             imported = found
             handles = foundHandles
+            catalog = TemplateCatalog(bundled + imported.values)
         }
     }
 
@@ -223,6 +187,7 @@ object TemplateLibrary {
             }
             imported = imported + (e.key to e)
             handles = handles + (e.key to handle)
+            catalog = TemplateCatalog(bundled + imported.values)
             parsed[e.key] = e.template
         }
         return e
@@ -245,6 +210,7 @@ object TemplateLibrary {
             val handle = handles[key]
             imported = imported - key
             handles = handles - key
+            catalog = TemplateCatalog(bundled + imported.values)
             if (handle != null) {
                 if (handle.startsWith(LEGACY)) File(handle.removePrefix(LEGACY)).delete()
                 else runCatching { store?.delete(handle) }
@@ -318,21 +284,12 @@ object TemplateLibrary {
 
     /** [file] read as a template entry; a package is kept, or [move]d, into the cache under its key. */
     private fun entryOf(file: File, source: Source, move: Boolean): Entry {
-        if (TemplatePackage.isPackage(file)) {
-            val text = TemplatePackage.readJson(file)
-            val t = TemplateReader.read(text)
-            val key = keyOf(file)
-            val dir = cacheDir ?: throw TemplateFormatException("template storage is unavailable")
-            val kept = File(dir, key + EXT)
-            if (!kept.exists()) {
-                if (!(move && file.renameTo(kept))) file.copyTo(kept, overwrite = true)
-            }
-            return Entry(key, t, text, source, kept)
-        }
-        if (file.length() > TemplateReader.MAX_BYTES) throw TemplateFormatException("template is larger than 1 MiB")
-        val text = file.readText(Charsets.UTF_8)
-        val t = TemplateReader.read(text)
-        return Entry(keyOf(text), t, text, source)
+        val entry = TemplateCatalog.read(file.toOkioPath(), source)
+        if (entry.file == null) return entry
+        val dir = cacheDir ?: throw TemplateFormatException("template storage is unavailable")
+        val kept = File(dir, entry.key + EXT)
+        if (!kept.exists() && !(move && file.renameTo(kept))) file.copyTo(kept, overwrite = true)
+        return entry.copy(file = kept)
     }
 
     /** A stored file copied into the cache, up to the package limit; null when unreadable or too big. */
@@ -408,16 +365,14 @@ object TemplateLibrary {
     private fun loadBundled(am: AssetManager): List<Entry> {
         fun read(path: String) = runCatching { am.open(path).use { String(it.readBytes(), Charsets.UTF_8) } }.getOrNull()
         val out = ArrayList<Entry>()
-        for (id in listOf("lines", "dots", "grid")) {
+        for (id in PageTemplates.BUILT_IN) {
             val text = read("$ASSET_DIR/$id$EXT") ?: continue
-            val t = runCatching { TemplateReader.read(text) }.getOrNull() ?: continue
-            out += Entry(id, t, text, Source.BUILT_IN)
+            runCatching { TemplateCatalog.plain(text, Source.BUILT_IN, id) }.getOrNull()?.let(out::add)
         }
         out += examples(am).filterNot { isPackageAsset(am, it) }.mapNotNull { name ->
             val text = read("$EXAMPLES_DIR/$name") ?: return@mapNotNull null
-            val t = runCatching { TemplateReader.read(text) }.getOrNull() ?: return@mapNotNull null
-            Entry(keyOf(text), t, text, Source.BUNDLED)
-        }.sortedBy { it.template.name.lowercase() }
+            runCatching { TemplateCatalog.plain(text, Source.BUNDLED) }.getOrNull()
+        }
         return out
     }
 
@@ -430,8 +385,8 @@ object TemplateLibrary {
             val dir = cacheDir ?: return
             val found = examples(am).filter { isPackageAsset(am, it) }.mapNotNull { name -> runCatching { bundledPackage(am, dir, name) }.getOrNull() }
             if (found.isEmpty()) return
-            val (builtIn, examples) = bundled.partition { it.source == Source.BUILT_IN }
-            bundled = builtIn + (examples + found).sortedBy { it.template.name.lowercase() }
+            bundled = bundled + found
+            catalog = TemplateCatalog(bundled + imported.values)
         }
     }
 
@@ -442,8 +397,7 @@ object TemplateLibrary {
             ?.takeIf { it.size == 2 && it[0] == apkStamp.toString() && File(dir, it[1] + EXT).exists() }?.get(1)
         val key = known ?: copyOut(am, dir, name).also { marker.writeText("$apkStamp\n$it") }
         val file = File(dir, key + EXT)
-        val text = TemplatePackage.readJson(file)
-        return Entry(key, TemplateReader.read(text), text, Source.BUNDLED, file)
+        return TemplateCatalog.packaged(file.toOkioPath(), Source.BUNDLED, key)
     }
 
     /** Copy bundled package [name] into [dir] under its key, returning the key. */
@@ -478,36 +432,9 @@ object TemplateLibrary {
 
     // --- painting ---
 
-    /** [page]'s parameter values from its style chain, lengths converted to template mm. */
-    fun values(t: Template, doc: Document, page: Page): TemplateValues {
-        val numbers = HashMap(page.resolvedParams(doc))
-        val spacing = t.spacingParam
-        page.resolvedSpacing(doc)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / doc.dpi }
-        return TemplateValues(numbers, page.resolvedColors(doc))
-    }
-
-    /**
-     * Paint [page]'s template into [r] in page-local content px. [cover] is the page's whole paper,
-     * margins included; [region] is the part being painted. A page showing an imported PDF gets its
-     * template in the margins and the room inserted into it only, so the PDF itself is never drawn
-     * over. [minLine] is the thinnest line in content px, so a thumbnail's ruling stays visible.
-     */
     fun paint(r: Renderer, doc: Document, page: Page, cover: Rect, region: Rect, minLine: Double = 0.0) {
         val key = page.resolvedTemplate(doc)
-        val t = template(doc, key) ?: return
-        val mm = doc.dpi / 25.4
-        val papers = if (page.pdfPage == null) listOf(cover) else Rooms.paper(cover, page.rooms, page.sourceWidth, page.sourceHeight)
-        val values = values(t, doc, page)
-        val ink = page.resolvedPatternColor(doc)
-        val accent = page.resolvedAccentColor(doc)
-        for (paper in papers) {
-            if (!paper.intersects(region)) continue
-            val tp = TemplatePage(
-                page.width / mm, page.height / mm,
-                Rect(paper.x / mm, paper.y / mm, paper.w / mm, paper.h / mm),
-                ink, accent, values,
-            )
-            TemplatePainter.paint(r, layouts.layout(t, tp), mm, region, minLine, pictures(doc, key))
-        }
+        val template = template(doc, key) ?: return
+        PageTemplatePainter.paint(r, doc, page, template, cover, region, layouts, minLine, pictures(doc, key))
     }
 }

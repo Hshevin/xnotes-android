@@ -39,3 +39,14 @@ Android 参照：`app/src/main/java/com/xnotes/platform/Pdf.kt` 的 `PdfExporter
 - 新建笔记页（纸张、方向、模板、封面、名称）。
 - 偏好设置（只放 iPad 已有的：用手指绘画、回收站保留天数、日期样式、显示扩展名、侧栏显示项）、关于。
 - 条目菜单：分享（系统分享面板）、导出 PDF。拖动磁贴到文件夹移入。
+
+## S4 实现记录
+
+- 新建入口为 `LiteStore.create(directory: Path, baseName: String, setup: LiteNoteSetup): LiteOpen`。设定类型为 `LiteNoteSetup(widthMm: Double, heightMm: Double, style: PageStyle, cover: PageStyle? = null)`，位于 `com.xnotes.storage.lite`。Android 表单和 LiteStore 都调用 `LiteNoteSetup.newDocument(embed: (Document, String?) -> Unit): Document`。按 150 dpi 将毫米换算成页面像素，保留一张正文页，可在第 0 页加同尺寸、四边距为零的封面。新笔记带创建时间、文档 UUID 和各页永久编号。Android 继续应用已保存的新笔记正文样式，iPad 正文沿用 `Document.blank()` 默认值。
+- `LiteStore.templates(): TemplateCatalog` 从应用资源和文稿根的 `.xnote/templates/` 取得模板。共用的 `com.xnotes.core.template.TemplateCatalog` 提供 `all(): List<Entry>`、`entry(key: String): Entry?`、`embed(doc: Document, key: String?, assets: Path? = KFiles.tempDirectory()): Boolean`。前三项内置键依次为 `lines`、`dots`、`grid`，其余键为 SHA-256 的前 16 个小写十六进制字符。纯 JSON 存入笔记的 `templates`，图片包按原字节复制、核对键后存入 `templatePackages`。显式传入的 `assets` 由文档拥有者清理，省略时调用方负责释放临时包。按设定新建复用已有的重名编号、暂存回读及排他发布。所选模板缺失或包内容已变化时，新建失败并清理暂存。
+- Xcode 的 Copy Bundle Resources 直接引用 `app/src/main/assets/templates`，保留 `examples/` 目录。iPad 从 `NSBundle.mainBundle` 读取同一份三种内置模板、20 种页面示例和 10 种图片封面。Android 保留 AssetManager、SAF、旧目录与图片缓存的适配。
+- iPad 表单可调用 `com.xnotes.iosapp.previewNotePage(setup: LiteNoteSetup, catalog: TemplateCatalog, cover: Boolean, edge: Int, dark: Boolean): UIImage`。长边 `edge` 以像素计，`cover = false` 预览正文。它复用分页编辑器的 `PageImages` 和 `CgSurfaceFactory`，支持纸色、模板参数、文字及包内图片。
+- 4 项公共回归在 JVM 和 iOS 分别验证毫米／像素换算、有无封面、样式继承、永久页编号、创建时间、模板键与来源、去重命名、失效选择的清理，以及删除库来源后的 `DocumentCodec.readComplete` 回读。另有 1 项 Android 宿主测试把同一套 Cornell 页面与 Book Cloth 封面分别交给实际的 `Editor.createNoteFile` 和 `LiteStore.create`，对照写出的页面结构、样式、锚点和模板包字节。iOS 的两项专项测试分别通过应用资源查找入口列出示例、创建并重开含图封面的笔记，以及检查预览的正文纸色、模板文字和封面像素。
+- 使用 JDK 21 与 iPad Pro 13 英寸（M5）iOS 27.2 模拟器，`:shared:testDebugUnitTest` 2725 项、`:app:testDebugUnitTest` 1819 项、`:shared:iosSimulatorArm64Test` 2536 项、`:iosKit:iosSimulatorArm64Test` 41 项，共 7121 项通过，零失败、零错误、零跳过。`app/src/test` 保持原样。
+- Xcode 的 XNotes 模拟器构建通过，产物 `XNotes.app/templates` 中 33 个模板与 Android 资源逐文件一致。
+- `:app:assembleDebug` 通过，调试 APK 中的原生库仅含 arm64-v8a。本轮为本地构建与模拟器验收，真机体验由后续首页界面验收覆盖。
