@@ -14,9 +14,11 @@ androidsvg = "1.4"
 latex = "1.5.0-kt2.1.0"
 commonmark = "0.30.1"
 okio = "3.10.2"
+kotlinxDatetime = "0.7.1"
 
 [libraries]
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
