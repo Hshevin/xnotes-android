@@ -50,7 +50,7 @@ fun rootViewController(): UIViewController = ComposeUIViewController { Documents
 
 internal fun text(key: String) = NSBundle.mainBundle.localizedStringForKey(key, value = null, table = null)
 
-private val store by lazy { LiteStore(KFiles.system, IosStorageLocations.documents, IosStorageLocations.`private`, CgImageCodec, CgTextMeasurer) }
+internal val store by lazy { LiteStore(KFiles.system, IosStorageLocations.documents, IosStorageLocations.`private`, CgImageCodec, CgTextMeasurer) }
 
 private sealed interface Listing {
     data object Loading : Listing

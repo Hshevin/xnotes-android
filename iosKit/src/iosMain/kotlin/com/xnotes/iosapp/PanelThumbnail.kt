@@ -25,7 +25,7 @@ import kotlinx.coroutines.sync.withPermit
 import platform.UIKit.UIImage
 import platform.UIKit.UIImagePNGRepresentation
 
-private fun UIImage.bitmap(): ImageBitmap {
+internal fun UIImage.bitmap(): ImageBitmap {
     val data = requireNotNull(UIImagePNGRepresentation(this))
     val bytes = requireNotNull(data.bytes).reinterpret<ByteVar>().readBytes(data.length.toInt())
     return org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()

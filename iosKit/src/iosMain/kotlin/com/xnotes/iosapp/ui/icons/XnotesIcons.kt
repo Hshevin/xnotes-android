@@ -84,4 +84,50 @@ internal object XnotesIcons {
     val italic = icon("M19 4h-9", "M14 20H5", "M15 4 9 20")
     val listBullet = icon("M3 12h.01", "M3 18h.01", "M3 6h.01", "M8 12h13", "M8 18h13", "M8 6h13")
     val sliders = icon("M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M1 14h6", "M9 8h6", "M17 16h6")
+
+    val home = icon("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z", "M9 22V12h6v10")
+    val folder = icon("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z")
+    val split = icon(rect(3.0, 3.0, 18.0, 18.0), "M12 3v18")
+    val ai = icon(
+        "M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0Z",
+        "M20 3v4", "M22 5h-4", "M4 17v2", "M5 18H3",
+    )
+    val restore = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
+    val clock = icon(circle(12.0, 12.0, 10.0), "M12 6v6l4 2")
+    val info = icon(circle(12.0, 12.0, 10.0), "M12 16v-4", "M12 8h.01")
+    val menu = icon("M4 6h16", "M4 12h16", "M4 18h16")
+    val search = icon(circle(11.0, 11.0, 8.0), "M21 21l-4.35-4.35")
+    val layoutGrid = icon(
+        roundRect(3.0, 3.0, 7.0, 7.0, 1.0), roundRect(14.0, 3.0, 7.0, 7.0, 1.0),
+        roundRect(14.0, 14.0, 7.0, 7.0, 1.0), roundRect(3.0, 14.0, 7.0, 7.0, 1.0),
+    )
+    val list = icon("M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01")
+    val more = icon(circle(12.0, 5.0, 1.0), circle(12.0, 12.0, 1.0), circle(12.0, 19.0, 1.0))
+    val edit = icon("M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z")
+    val canvas = icon(rect(3.0, 3.0, 18.0, 18.0), "M3 9h18", "M3 15h18", "M9 3v18", "M15 3v18")
+    val importDoc = icon("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3")
+    val newFolder = icon("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z", "M12 11v6", "M9 14h6")
+    val arrowDown = icon("M12 5v14", "M19 12l-7 7-7-7")
+    val arrowUp = icon("M12 19V5", "M5 12l7-7 7 7")
+    val chevronDown = icon("M6 9l6 6 6-6")
+    val sort = icon("M21 16l-4 4-4-4", "M17 20V4", "M3 8l4-4 4 4", "M7 4v16")
+    val file = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z", "M14 2v6h6")
+    val pdf = icon(
+        "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", "M14 2v4a2 2 0 0 0 2 2h4",
+        "M10 9H8", "M16 13H8", "M16 17H8",
+    )
+    val pages = icon(
+        "M20 7h-3a2 2 0 0 1-2-2V2",
+        "M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z",
+        "M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8",
+    )
+    val close = icon("M18 6 6 18", "M6 6l12 12")
+    val next = icon("M9 18l6-6-6-6")
+    val gallery = icon(roundRect(3.0, 3.0, 8.0, 14.0, 1.0), roundRect(13.0, 3.0, 8.0, 14.0, 1.0), "M2 21h20")
+    val columns = icon(roundRect(3.0, 3.0, 18.0, 18.0, 2.0), "M9 3v18", "M15 3v18")
+    val timeline = icon(
+        roundRect(3.0, 4.0, 18.0, 18.0, 2.0), "M16 2v4", "M8 2v4", "M3 10h18",
+        "M8 14h.01", "M12 14h.01", "M16 14h.01", "M8 18h.01", "M12 18h.01",
+    )
+    val filter = icon("M3 6h18", "M7 12h10", "M10 18h4")
 }
