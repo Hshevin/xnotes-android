@@ -75,7 +75,7 @@ private fun SidebarFolderBranch(
     }
     if (open) {
         if (children == null) Text(stringResource(R.string.split_loading), color = palette.textDim.toComposeColor(),
-            modifier = Modifier.padding(start = (48 + depth.coerceAtMost(6) * 12).dp, top = 6.dp, bottom = 6.dp))
+            modifier = Modifier.padding(start = (48 + depth.coerceAtMost(6) * 12).dp, top = Space.s6, bottom = Space.s6))
         for (child in children.orEmpty()) key(child.documentUri) {
             SidebarFolderBranch(editor, root, child, selectedId, revision, expanded, onOpen, depth + 1, ancestors + id)
         }

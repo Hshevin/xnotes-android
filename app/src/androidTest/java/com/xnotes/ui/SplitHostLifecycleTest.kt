@@ -548,7 +548,7 @@ class SplitHostLifecycleTest {
     }
 
     private fun noActions() = PaneActions(
-        onToggleFullscreen = {}, onMainMenu = {}, onSaveSplit = {}, onOpenBackstage = {},
+        fullscreen = false, onToggleFullscreen = {}, onMainMenu = {}, onSaveSplit = {}, onOpenBackstage = {},
         onClosePane = {}, onSplitDocument = {}, onPickDocument = {}, onInsertImage = { _, _ -> },
         onInsertCanvasImage = { _, _ -> }, onTakePhoto = {}, onAddStickers = {}, onInsertAudio = {},
         onRecordAudio = {}, onSaveAudio = { _, _ -> }, onShareAudio = { _, _ -> }, onShareImage = {},

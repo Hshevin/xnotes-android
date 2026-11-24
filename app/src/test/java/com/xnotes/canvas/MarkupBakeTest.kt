@@ -33,10 +33,9 @@ class MarkupBakeTest {
         }
     }
 
-    private fun state(page: Page, maxCachePx: Double = 4096.0) = CanvasState(Document(mutableListOf(page)), factory, Palette.DEFAULT).apply {
-        viewportW = 800
+    private fun state(page: Page, viewW: Int = 800) = CanvasState(Document(mutableListOf(page)), factory, Palette.DEFAULT).apply {
+        viewportW = viewW
         viewportH = 1000
-        this.maxCachePx = maxCachePx
         relayout()
         runAsync = { queued += it }
         paintPageBackground = { _, _, _, _ -> paints++ }
@@ -53,14 +52,14 @@ class MarkupBakeTest {
     fun theOldLayerShowsUntilTheNewOneIsPainted() {
         val page = pdfPage()
         val st = state(page)
-        val old = st.backgroundFor(page)!!
+        val old = st.backgroundFor(page)!!.bands[0]
         val m = markup()
         page.markups = listOf(m)
         st.rebakeBackground(page, listOf(m))
-        assertSame(old, st.backgroundForOrSchedule(page))
+        assertSame(old, st.backgroundForOrSchedule(page)!!.bands[0])
         assertEquals(listOf(m), st.unbakedMarkups(page))
         runPending()
-        val fresh = st.backgroundForOrSchedule(page)
+        val fresh = st.backgroundForOrSchedule(page)!!.bands[0]
         assertNotSame(old, fresh)
         assertTrue(st.unbakedMarkups(page).isEmpty())
     }
@@ -129,7 +128,7 @@ class MarkupBakeTest {
     @Test
     fun theSharpViewportIsRenderedAgainWithoutLettingGoOfTheOldOne() {
         val page = pdfPage()
-        val st = state(page, maxCachePx = 100.0) // past the cap at zoom 1
+        val st = state(page, viewW = 100) // a 200px page on a 100px view: past the cap at zoom 1
         st.backgroundFor(page)
         st.requestSharpViewport()
         runPending()
@@ -147,7 +146,7 @@ class MarkupBakeTest {
     @Test
     fun anEditDuringASharpRenderRendersAgainOnceItLands() {
         val page = pdfPage()
-        val st = state(page, maxCachePx = 100.0)
+        val st = state(page, viewW = 100)
         st.backgroundFor(page)
         st.requestSharpViewport() // under way, reading the page as it was
         val m = markup()

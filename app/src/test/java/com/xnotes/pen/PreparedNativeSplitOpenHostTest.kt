@@ -57,12 +57,12 @@ class PreparedNativeSplitOpenHostTest {
         withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"old.xnote");f.editor.view.layout(0,0,1000,1000);f.editor.selectTool(Tool.TEXT_BOX)
             parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(220.0,220.0));parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(220.0,220.0))
-            f.editor.updateEditingText("Still composing old text")
+            f.editor.typeInOpenBox("Still composing old text")
             val model=f.editor.state.document;val revision=model.bodyRevision;val draft=f.editor.controller.activeTextItem()
             var guards=0
             assertNull(f.editor.prepareNativePairOpen(NativeSplitSource(f.targetUri),NativeSplitSource(retry(f)),guardOwners={_,_->guards++;emptySet()}))
             assertEquals(0,guards);assertSame(model,f.editor.state.document);assertEquals(revision,model.bodyRevision)
-            assertSame(draft,f.editor.controller.activeTextItem());assertNotNull(f.editor.editingField);f.editor.commitText()
+            assertSame(draft,f.editor.controller.activeTextItem());assertTrue(f.editor.controller.isEditingText);f.editor.commitText()
         }
         assertEquals(0,f.writes.get())
     }

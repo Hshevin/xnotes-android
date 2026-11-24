@@ -72,7 +72,7 @@ class FixedWriteSnapshotTest {
         val image=ImageItem(ImageData(File(root,"image").apply {writeText("image payload")},64,48),Rect(1.0,2.0,30.0,40.0),orientation=1,angle=.2,part=Rect(.1,.2,.5,.6))
         val peaks=byteArrayOf(1,2,3)
         val audio=AudioItem(AudioData(File(root,"audio").apply {writeText("audio payload")},"aac",123,peaks),Rect(3.0,4.0,50.0,20.0),"captured recording",7,measurer)
-        val text=TextItem(Pt(5.0,6.0),120.0,45.0,"captured text",color,17.0,measurer=measurer)
+        val text=TextItem(Pt(5.0,6.0),120.0,"captured text",color,17.0,measurer=measurer)
         val adj=doubleArrayOf(.2);val segments=mutableListOf<VectorSeg>(VectorSeg.Line(Pt(20.0,30.0)))
         val path=mutableListOf(VectorContour(Pt(1.0,2.0),segments,false))
         val shape=ShapeItem(ShapeKind.GLYPHS,Pt(0.0,0.0),Pt(50.0,60.0),color,5.0,fillRgba=Rgba(80,80,80),path=path,adj=adj).apply {

@@ -183,7 +183,7 @@ class EditorHostParkingTest {
         withContext(Dispatchers.Main) {
             f.editor.selectTool(Tool.TEXT_BOX)
             parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0));parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(100.0,100.0))
-            f.editor.updateEditingText("unconfirmed native text")
+            f.editor.typeInOpenBox("unconfirmed native text")
             assertNotNull(f.editor.controller.activeTextItem())
             val proof=requireNotNull(f.editor.awaitHostParking());assertTrue(proof.current())
             assertEquals("unconfirmed native text",f.editor.state.document.pages.first().items.filterIsInstance<TextItem>().single().text)

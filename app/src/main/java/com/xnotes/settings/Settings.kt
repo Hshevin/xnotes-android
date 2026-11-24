@@ -1,5 +1,7 @@
 package com.xnotes.settings
 
+import com.xnotes.core.model.BoxDefaults
+import com.xnotes.core.model.BoxStyle
 import com.xnotes.core.infinite.CanvasBackground
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
@@ -45,8 +47,9 @@ data class PinnedFolder(val uri: String, val name: String)
 
 /** All persistent non-document state (spec 09 §2). */
 data class Settings(
-    /** Global View-menu defaults; per-note [com.xnotes.canvas.ViewOverrides] shadow them. */
-    val viewDefaults: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings(),
+    /** View-menu defaults while the app is light, and while it is dark or OLED; only their PDF filters differ. */
+    val viewDefaultsLight: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings.factory(dark = false),
+    val viewDefaultsDark: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings.factory(dark = true),
     val tools: Map<Tool, ToolConfig> = emptyMap(),
     val shapeConfig: ShapeConfig = ShapeConfig(),
     /** The toolbar swatches while the app is dark, and while it is light; slot for slot partners. */
@@ -84,6 +87,8 @@ data class Settings(
     val newNoteStyle: PageStyle = PageStyle(),
     /** Flow (text tool) defaults stamped onto every newly created note; null ⇒ none saved (the device's factory). */
     val newNoteFlow: FlowDefaults? = null,
+    /** What a new text box starts as; null is the factory's. */
+    val textBox: BoxDefaults? = null,
     /** Background stamped onto every newly created canvas; null ⇒ none saved. */
     val newCanvasBackground: CanvasBackground? = null,
     /** Size and look the insert-table dialog starts from ("Default for new tables"). */
@@ -97,6 +102,13 @@ data class Settings(
     fun configFor(tool: Tool): ToolConfig = tools[tool] ?: ToolDefaults.configFor(tool)
 
     fun toolbarColors(dark: Boolean): List<Rgba> = if (dark) toolbarColorsDark else toolbarColorsLight
+
+    fun viewDefaults(dark: Boolean): com.xnotes.canvas.ViewSettings = if (dark) viewDefaultsDark else viewDefaultsLight
+
+    /** Save [vs] as the [dark] theme's View defaults; the other theme takes its layout too. */
+    fun withViewDefaults(dark: Boolean, vs: com.xnotes.canvas.ViewSettings): Settings =
+        if (dark) copy(viewDefaultsDark = vs, viewDefaultsLight = viewDefaultsLight.withLayoutOf(vs))
+        else copy(viewDefaultsLight = vs, viewDefaultsDark = viewDefaultsDark.withLayoutOf(vs))
 
     /** Push a colour to the front of recent colours, de-duped, capped at 24. */
     fun rememberColor(c: Rgba): Settings =
@@ -143,10 +155,12 @@ data class Settings(
             .put("render_scale", renderScale)
             .apply { if (!newNoteStyle.isEmpty) put("new_note_style", pageStyleJson(newNoteStyle)) }
             .apply { newNoteFlow?.let { put("new_note_flow", flowDefaultsJson(it)) } }
+            .apply { textBox?.let { put("text_box", boxDefaultsJson(it)) } }
             .apply { newCanvasBackground?.let { put("new_canvas_background", canvasBackgroundJson(it)) } }
             .apply { if (!newTable.isFactory) put("new_table", tableDefaultsJson(newTable)) }
             .put("prefs", prefs.toJson())
-            .put("view_defaults", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaults))
+            .put("view_defaults_light", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaultsLight, com.xnotes.canvas.ViewSettings.factory(dark = false)))
+            .put("view_defaults_dark", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaultsDark, com.xnotes.canvas.ViewSettings.factory(dark = true)))
             .put("finger_draw_auto_checked", fingerDrawAutoChecked)
             .put("pdf_notifications_asked", pdfNotificationsAsked)
     }
@@ -163,11 +177,11 @@ data class Settings(
             val shape = toolsObj?.optJSONObject("shape")?.let { shapeConfig(it) } ?: ShapeConfig()
 
             val (darkColors, lightColors) = toolbarColors(o)
+            val (viewLight, viewDark) = viewDefaults(o)
 
             return Settings(
-                viewDefaults = o.optJSONObject("view_defaults")
-                    ?.let { com.xnotes.platform.ViewSettingsJson.read(it) }
-                    ?: legacyViewDefaults(o.optJSONObject("prefs")),
+                viewDefaultsLight = viewLight,
+                viewDefaultsDark = viewDark,
                 tools = tools,
                 shapeConfig = shape,
                 toolbarColorsDark = darkColors,
@@ -201,6 +215,7 @@ data class Settings(
                 renderScale = o.optDouble("render_scale", 1.0),
                 newNoteStyle = pageStyle(o.optJSONObject("new_note_style")),
                 newNoteFlow = o.optJSONObject("new_note_flow")?.let { flowDefaults(it) },
+                textBox = o.optJSONObject("text_box")?.let { boxDefaults(it) },
                 newCanvasBackground = canvasBackground(o.optJSONObject("new_canvas_background")),
                 newTable = tableDefaults(o.optJSONObject("new_table")),
                 prefs = Preferences.fromJson(o.optJSONObject("prefs")),
@@ -234,6 +249,20 @@ data class Settings(
                 val uri = o.optString("uri", "").ifEmpty { return@mapNotNull null }
                 PinnedFolder(uri, o.optString("name", ""))
             }
+        }
+
+        /** The light and the dark View defaults. Settings from before the split kept one set for
+         *  every theme: unless it held a colour filter, both themes take their factory filters. */
+        private fun viewDefaults(o: JSONObject): Pair<com.xnotes.canvas.ViewSettings, com.xnotes.canvas.ViewSettings> {
+            val light = com.xnotes.canvas.ViewSettings.factory(dark = false)
+            val dark = com.xnotes.canvas.ViewSettings.factory(dark = true)
+            if (o.has("view_defaults_light") || o.has("view_defaults_dark")) return Pair(
+                o.optJSONObject("view_defaults_light")?.let { com.xnotes.platform.ViewSettingsJson.read(it, light) } ?: light,
+                o.optJSONObject("view_defaults_dark")?.let { com.xnotes.platform.ViewSettingsJson.read(it, dark) } ?: dark,
+            )
+            val old = o.optJSONObject("view_defaults")?.let { com.xnotes.platform.ViewSettingsJson.read(it) }
+                ?: legacyViewDefaults(o.optJSONObject("prefs"))
+            return if (old.filtersOn) old to old else light.withLayoutOf(old) to dark.withLayoutOf(old)
         }
 
         /** Settings written before the View menu's Global tab: the old PDF dark-mode
@@ -296,6 +325,30 @@ data class Settings(
                 patternColor = rgba(o.optJSONArray("pattern_color")) ?: d.patternColor,
                 spacing = o.optDouble("spacing", d.spacing),
                 paperColor = rgba(o.optJSONArray("paper_color")),
+            )
+        }
+
+        private fun boxDefaultsJson(d: BoxDefaults) = JSONObject()
+            .put("face", d.face.id)
+            .put("size_pt", d.sizePt)
+            .apply { d.color?.let { put("color", rgbaArr(it)) } }
+            .apply { d.box.fill?.let { put("fill", rgbaArr(it)) } }
+            .apply { d.box.border?.let { put("border", rgbaArr(it)) } }
+            .put("border_width", d.box.borderWidth)
+            .put("corner", d.box.corner)
+
+        private fun boxDefaults(o: JSONObject): BoxDefaults {
+            val d = BoxDefaults()
+            return BoxDefaults(
+                face = FontFace(o.optString("face", d.face.id)),
+                sizePt = o.optDouble("size_pt", d.sizePt),
+                color = rgba(o.optJSONArray("color")),
+                box = BoxStyle(
+                    fill = rgba(o.optJSONArray("fill")),
+                    border = rgba(o.optJSONArray("border")),
+                    borderWidth = o.optDouble("border_width", 0.0).coerceIn(0.0, BoxStyle.MAX_BORDER),
+                    corner = o.optDouble("corner", 0.0).coerceIn(0.0, BoxStyle.MAX_CORNER),
+                ),
             )
         }
 
@@ -398,6 +451,8 @@ data class Settings(
             .put("scale", c.scale)
             .put("highlighter_alpha", c.highlighterAlpha)
             .put("highlighter_inverse", c.highlighterInverse)
+            .put("opacity_enabled", c.opacityEnabled)
+            .put("opacity", c.opacity)
             .put("markup_mode", c.markupMode.id)
             .put("markup_intensity", c.markupIntensity)
             .put("tape_mode", c.tapeMode.id)
@@ -434,6 +489,8 @@ data class Settings(
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),
                 highlighterInverse = o.optBoolean("highlighter_inverse", d.highlighterInverse),
+                opacityEnabled = o.optBoolean("opacity_enabled", d.opacityEnabled),
+                opacity = o.optDouble("opacity", d.opacity).coerceIn(ToolConfig.OPACITY_MIN, 1.0),
                 markupMode = if (o.has("markup_mode")) MarkupMode.fromId(o.optString("markup_mode")) else d.markupMode,
                 markupIntensity = o.optDouble("markup_intensity", d.markupIntensity)
                     .coerceIn(ToolConfig.MARKUP_INTENSITY_MIN, 1.0),

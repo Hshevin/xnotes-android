@@ -1,11 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,10 +45,10 @@ internal fun InsertButton(
     Box {
         ToolbarIcon(XnotesIcons.paperclip, stringResource(R.string.insert), active = expanded) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            InsertGroup(stringResource(R.string.insert_group_image))
+            MenuCaption(stringResource(R.string.insert_group_image))
             for (row in imageRows) InsertMenuRow(row.icon, row.label, row.more) { expanded = false; row.onPick() }
-            HorizontalDivider(Modifier.padding(vertical = Space.s6), color = LocalPalette.current.border.toComposeColor())
-            InsertGroup(stringResource(R.string.insert_group_audio))
+            MenuDivider()
+            MenuCaption(stringResource(R.string.insert_group_audio))
             // One recording at a time, so while one runs, here or in the other pane, this says where.
             InsertMenuRow(
                 XnotesIcons.mic,
@@ -80,16 +76,6 @@ internal fun InsertButton(
 }
 
 @Composable
-private fun InsertGroup(label: String) {
-    Text(
-        label,
-        color = LocalPalette.current.textDim.toComposeColor(),
-        fontSize = TextSize.label,
-        modifier = Modifier.padding(start = Space.s16, end = Space.s20, top = Space.s8, bottom = Space.s4),
-    )
-}
-
-@Composable
 internal fun InsertMenuRow(
     icon: ImageVector,
     label: String,
@@ -114,6 +100,5 @@ internal fun InsertMenuRow(
         trailingIcon = if (more) ({ Icon(XnotesIcons.next, contentDescription = null, modifier = Modifier.size(16.dp)) }) else null,
         enabled = enabled,
         onClick = onClick,
-        contentPadding = PaddingValues(start = Space.s16, end = Space.s20),
     )
 }

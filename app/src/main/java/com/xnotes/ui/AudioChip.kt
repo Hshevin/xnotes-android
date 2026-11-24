@@ -21,10 +21,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,13 +81,17 @@ internal fun PlayGlyph(playing: Boolean, color: Color, size: Dp) {
 
 /**
  * Beside Insert while a recording's player is open in this pane: where playback stands, and a tap
- * opens the player. Down a side rail the time stacks, minutes over seconds.
+ * opens the player, which [onOpenChange] hears. Down a side rail the time stacks, minutes over seconds.
  */
 @Composable
-internal fun PlaybackChip(session: AudioPlayback.Session) {
+internal fun PlaybackChip(session: AudioPlayback.Session, onOpenChange: (Boolean) -> Unit = {}) {
     val palette = LocalPalette.current
     val bar = LocalBar.current
     var open by remember { mutableStateOf(false) }
+    DisposableEffect(open) {
+        onOpenChange(open)
+        onDispose { if (open) onOpenChange(false) }
+    }
     val time = AudioTime.format(session.position, session.duration >= 3_600_000)
     val fg = palette.selectionForeground.toComposeColor()
     val label = stringResource(R.string.audio_chip, time)
@@ -182,7 +188,7 @@ internal fun RecordingChip(session: AudioRecording.Session) {
         if (open) {
             DropdownMenu(expanded = true, onDismissRequest = { open = false }) {
                 Row(
-                    Modifier.padding(start = Space.s16, end = Space.s20, top = Space.s6, bottom = Space.s6).widthIn(min = 200.dp),
+                    Modifier.padding(start = Space.s20, end = Space.s20, top = Space.s6, bottom = Space.s6).widthIn(min = 200.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -199,7 +205,7 @@ internal fun RecordingChip(session: AudioRecording.Session) {
                     InsertMenuRow(XnotesIcons.pause, stringResource(R.string.recording_pause)) { open = false; AudioRecording.pause() }
                 }
                 InsertMenuRow(XnotesIcons.stop, stringResource(R.string.recording_stop_place)) { open = false; AudioRecording.stop() }
-                HorizontalDivider(Modifier.padding(vertical = Space.s6), color = palette.border.toComposeColor())
+                MenuDivider()
                 InsertMenuRow(XnotesIcons.trash, stringResource(R.string.recording_discard), color = palette.danger.toComposeColor()) {
                     open = false
                     AudioRecording.discard()
@@ -305,8 +311,8 @@ private fun PlayerPanel(session: AudioPlayback.Session, onDismiss: () -> Unit) {
                     Modifier
                         .heightIn(min = 32.dp)
                         .widthIn(min = 60.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(8.dp))
+                        .clip(MaterialTheme.shapes.small)
+                        .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
                         .clickable { AudioPlayback.cycleSpeed() }
                         .semantics { contentDescription = speedLabel }
                         .padding(horizontal = Space.s12, vertical = Space.s6),

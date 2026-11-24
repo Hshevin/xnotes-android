@@ -1,6 +1,34 @@
 package com.xnotes.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.AbsoluteAlignment
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.Ease
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import com.xnotes.settings.ToolbarLanding
+import com.xnotes.settings.toolbarLanding
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxScope
@@ -24,6 +52,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.TextUnit
@@ -70,16 +100,24 @@ internal val LocalMenuOffset = compositionLocalOf { DpOffset.Zero }
 internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
 
 /**
- * Lays a pane out with its [bar] along the edge Preferences chose and [content] in the rest. A
+ * Lays a pane out with its [bar] along the edge it was last put on and [content] in the rest. A
  * floating bar is handed to [content] to lay over its canvas instead, and [onCover] learns how many
  * px of each edge (left, top, right, bottom) it covers so the canvas keeps its pages clear of it.
  * [showToolbar] changes only chrome; the editor remains in the same native host.
+ * [strip] runs along the bottom as the bar does, docked or floating, and over a bar that is there
+ * too. A long press on the bar lifts it, and [onPlace] hears where it was put down. While
+ * [reading], the bar fades off toward its edge, its room goes to the pages and [islands] lie over
+ * the canvas in its place, covering nothing.
  */
 @Composable
 internal fun ColumnScope.ToolbarAround(
     bar: @Composable () -> Unit,
     onCover: (Double, Double, Double, Double) -> Unit,
     showToolbar: Boolean = true,
+    onPlace: (ToolbarPosition, floating: Boolean) -> Unit,
+    strip: @Composable () -> Unit = {},
+    reading: Boolean = false,
+    islands: @Composable BoxScope.() -> Unit = {},
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
     PaneChromeLayout(
@@ -87,21 +125,199 @@ internal fun ColumnScope.ToolbarAround(
         showToolbar = showToolbar,
         bar = bar,
         onCover = onCover,
+        onPlace = onPlace,
+        strip = strip,
+        reading = reading,
+        islands = islands,
         modifier = Modifier.weight(1f).fillMaxWidth(),
         content = content,
     )
 }
 
+/** How the bar leaves for read-only and comes back: a fade, and a drift toward its edge. */
+/** How far a floating bar stands off its edge. */
+internal val FLOAT_MARGIN = Space.s8
+
+internal const val BAR_FADE_MS = 200
+internal const val BAR_DRIFT_MS = 260
+internal val BAR_DRIFT = 10.dp
+
+/**
+ * Measures the bar as ever, but while [yielding] takes no room along its edge, so the pages have
+ * it at once; the bar still draws there, over them, as it fades.
+ */
+internal fun Modifier.yieldsRoom(yielding: Boolean, position: ToolbarPosition): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    val across = position.vertical
+    layout(if (yielding && across) 0 else p.width, if (yielding && !across) 0 else p.height) {
+        p.place(
+            if (yielding && position == ToolbarPosition.RIGHT) -p.width else 0,
+            if (yielding && position == ToolbarPosition.BOTTOM) -p.height else 0,
+        )
+    }
+}
+
+/** Takes every touch on what it covers, so a fading bar's buttons can no longer be pressed. */
+@Composable
+internal fun BoxScope.TouchSink() {
+    Box(Modifier.matchParentSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } })
+}
+
+/** Where a bar on [position] sits in its pane. */
+internal fun edgeOf(position: ToolbarPosition): Alignment = when (position) {
+    ToolbarPosition.TOP -> Alignment.TopCenter
+    ToolbarPosition.BOTTOM -> Alignment.BottomCenter
+    ToolbarPosition.LEFT -> AbsoluteAlignment.CenterLeft
+    ToolbarPosition.RIGHT -> AbsoluteAlignment.CenterRight
+}
+
+/** A toolbar lifted by a long press and carried to another edge of its pane. */
+internal class ToolbarMove {
+    /** The pane the bar is carried about, which the finger is placed in. */
+    var area: LayoutCoordinates? = null
+    var onPlace: (ToolbarPosition, Boolean) -> Unit = { _, _ -> }
+
+    /** How long the bar is when it hugs its tools, in px along its edge. */
+    var hug by mutableFloatStateOf(0f)
+
+    /** How tall the strip along the bottom is, docked or floating, in px; 0 while it is hidden. */
+    var strip by mutableIntStateOf(0)
+
+    /** Where the bar would land if put down now; null while it rests. */
+    var landing by mutableStateOf<ToolbarLanding?>(null)
+        private set
+    private var from: ToolbarLanding? = null
+
+    fun lift(look: ToolbarLook) {
+        from = ToolbarLanding(look.position, look.floating)
+        landing = from
+    }
+
+    /** The finger is at [at] in [area]; [thickness] is the bar's, and with [density] gives the bands in px. */
+    fun carry(at: Offset, thickness: Float, density: Float) {
+        val home = from ?: return
+        val size = area?.size ?: return
+        landing = toolbarLanding(
+            at.x, at.y, size.width.toFloat(), size.height.toFloat(), home,
+            pull = thickness + PULL_CLEAR_DP * density, push = PUSH_IN_DP * density, other = OTHER_EDGE_DP * density,
+        )
+    }
+
+    fun drop() {
+        val to = landing
+        val home = from
+        rest()
+        if (to != null && to != home) onPlace(to.position, to.floating)
+    }
+
+    fun rest() {
+        from = null
+        landing = null
+    }
+
+    private companion object {
+        /** A docked bar floats once the finger is this far past its own thickness from the edge. */
+        const val PULL_CLEAR_DP = 24f
+
+        /** A floating bar docks once the finger is pushed this near its edge. */
+        const val PUSH_IN_DP = 12f
+
+        /** On an edge the bar did not come from, it docks within this of it. */
+        const val OTHER_EDGE_DP = 32f
+    }
+}
+
+/** The move a toolbar's long press drives; null where a bar cannot be carried. */
+internal val LocalToolbarMove = staticCompositionLocalOf<ToolbarMove?> { null }
+
+/** The outline of where a carried bar would land: the whole edge docked, or as long as its tools floating. */
+@Composable
+internal fun BoxScope.ToolbarLandingMark(move: ToolbarMove, size: ToolbarSize) {
+    val landing = move.landing ?: return
+    val accent = LocalPalette.current.accent.toComposeColor()
+    val thickness = barMetrics(size).thickness
+    val vertical = landing.position.vertical
+    val length = with(LocalDensity.current) { move.hug.toDp() }
+    val shape = if (landing.floating) MaterialTheme.shapes.large else RectangleShape
+    val frame = when {
+        !landing.floating && vertical -> Modifier.fillMaxHeight().width(thickness)
+        !landing.floating -> Modifier.fillMaxWidth().height(thickness)
+        vertical -> Modifier.padding(FLOAT_MARGIN).height(length).width(thickness)
+        else -> Modifier.padding(FLOAT_MARGIN).width(length).height(thickness)
+    }
+    // A bar docked on another edge stops at the strip docked along the bottom; any other landing has the strip over it.
+    val strip = if (landing.floating || landing.position == ToolbarPosition.BOTTOM) 0.dp else with(LocalDensity.current) { move.strip.toDp() }
+    Box(Modifier.align(edgeOf(landing.position)).padding(bottom = strip).then(frame).background(accent.copy(alpha = 0.22f), shape).border(2.dp, accent, shape))
+}
+
+/** The bordered pill a floating toolbar is drawn as, and the format bar that floats with it. */
+@Composable
+internal fun Modifier.barPill(): Modifier {
+    val palette = LocalPalette.current
+    val shape = MaterialTheme.shapes.large
+    return clip(shape).background(palette.panel.toComposeColor()).border(1.dp, palette.border.toComposeColor(), shape)
+}
+
+/**
+ * A long press on the bar lifts it for [move]; the drag that follows carries it, and it is put down
+ * where the finger leaves. Until the press has lasted, a tap, a scroll and a colour pulled off the
+ * bar are all left alone.
+ */
+private fun Modifier.carriesToolbar(move: ToolbarMove, look: ToolbarLook, thickness: Dp): Modifier {
+    val where = arrayOfNulls<LayoutCoordinates>(1)
+    return this
+        .onGloballyPositioned { where[0] = it }
+        .pointerInput(move, look) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val slop = viewConfiguration.touchSlop
+                val moved = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null || !change.pressed || event.changes.size > 1) break
+                        if ((change.position - down.position).getDistance() > slop) break
+                    }
+                }
+                // The loop ended before the wait did: the press let go, or went somewhere.
+                if (moved != null) return@awaitEachGesture
+                fun inArea(p: Offset): Offset? {
+                    val bar = where[0]?.takeIf { it.isAttached } ?: return null
+                    val area = move.area?.takeIf { it.isAttached } ?: return null
+                    return area.localPositionOf(bar, p)
+                }
+                move.lift(look)
+                try {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        // Nothing under the finger may take this press for its own tap or scroll.
+                        event.changes.forEach { it.consume() }
+                        if (!change.pressed) {
+                            move.drop()
+                            break
+                        }
+                        inArea(change.position)?.let { move.carry(it, thickness.toPx(), density) }
+                    }
+                } finally {
+                    move.rest()
+                }
+            }
+        }
+}
 /** Only the focused pane advertises an active editing tool; view settings stay per document. */
 internal val LocalToolbarFocused = compositionLocalOf { true }
 
 internal val LocalEmbeddedToolbar = compositionLocalOf { false }
 internal val LocalWorkspaceToolbarLayout = compositionLocalOf<com.xnotes.core.tools.ToolbarLayout?> { null }
 
+/** True on a split's shared bar, which carries the tools both panes use and none of either's settings. */
+internal val LocalWorkspaceCommonBar = compositionLocalOf { false }
+
 /**
  * The strip both toolbars are laid out in: a row along the top or bottom, a column down either
- * side. [content] runs along it and scrolls when it runs long, [trailing] stays pinned at the end,
- * and [armed] is the tool the gliding circle sits under.
+ * side. [content] runs along it, centred while it is short and scrolling once it runs long,
+ * [trailing] stays pinned at the end, and [armed] is the tool the gliding circle sits under.
  */
 @Composable
 internal fun ToolbarFrame(
@@ -116,16 +332,8 @@ internal fun ToolbarFrame(
     val glide = remember { ToolGlide() }
     val visibleTool = armed.takeIf { LocalToolbarFocused.current }
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.extraLarge
     // Docked, the strip fills its edge; floating, a pill only as long as its tools, up to that edge.
-    val surface = if (!look.floating) {
-        Modifier.background(palette.panel.toComposeColor())
-    } else {
-        Modifier
-            .clip(shape)
-            .background(palette.panel.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), shape)
-    }
+    val surface = if (!look.floating) Modifier.background(palette.panel.toComposeColor()) else Modifier.barPill()
     val stretch = when {
         look.floating -> Modifier
         bar.vertical -> Modifier.fillMaxHeight()
@@ -140,10 +348,17 @@ internal fun ToolbarFrame(
         ToolbarPosition.LEFT -> TipSide.RIGHT
         ToolbarPosition.RIGHT -> TipSide.LEFT
     }
+    val move = LocalToolbarMove.current
+    // A carried bar fades where it stands, so the mark of where it will land reads over it.
+    val carried by animateFloatAsState(if (move?.landing != null) 0.45f else 1f, tween(150), label = "toolbarCarried")
+    val carry = if (move != null) Modifier.carriesToolbar(move, look, bar.thickness).graphicsLayer { alpha = carried } else Modifier
+    var tools by remember { mutableIntStateOf(0) }
+    var pinned by remember { mutableIntStateOf(0) }
+    if (move != null) SideEffect { move.hug = (tools + pinned).toFloat() }
     CompositionLocalProvider(LocalToolGlide provides glide, LocalBar provides bar, LocalMenuOffset provides menuOffset, LocalTipSide provides tipSide) {
         if (bar.vertical) {
             Column(
-                stretch.width(bar.thickness).then(surface),
+                stretch.width(bar.thickness).then(carry).then(surface),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 leading?.invoke()
@@ -151,15 +366,17 @@ internal fun ToolbarFrame(
                     Modifier
                         .weight(1f, fill = !look.floating)
                         .verticalScroll(rememberScrollState())
+                        .onSizeChanged { tools = it.height }
                         .padding(vertical = Space.s4)
                         .toolGlide(glide, visibleTool),
+                    verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) { content() }
-                trailing?.invoke()
+                if (trailing != null) Column(Modifier.onSizeChanged { pinned = it.height }, horizontalAlignment = Alignment.CenterHorizontally) { trailing() }
             }
         } else {
             Row(
-                stretch.height(bar.thickness).then(surface),
+                stretch.height(bar.thickness).then(carry).then(surface),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 leading?.invoke()
@@ -167,11 +384,13 @@ internal fun ToolbarFrame(
                     Modifier
                         .weight(1f, fill = !look.floating)
                         .horizontalScroll(rememberScrollState())
+                        .onSizeChanged { tools = it.width }
                         .padding(horizontal = Space.s4)
                         .toolGlide(glide, visibleTool),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) { content() }
-                trailing?.invoke()
+                if (trailing != null) Row(Modifier.onSizeChanged { pinned = it.width }, verticalAlignment = Alignment.CenterVertically) { trailing() }
             }
         }
     }

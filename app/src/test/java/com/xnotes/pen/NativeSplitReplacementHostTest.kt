@@ -77,7 +77,7 @@ class NativeSplitReplacementHostTest {
             f.editor.view.layout(0,0,1000,1000);f.editor.selectTool(Tool.TEXT_BOX)
             parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0))
             parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(100.0,100.0))
-            f.editor.updateEditingText("Old source text remains an unconfirmed draft")
+            f.editor.typeInOpenBox("Old source text remains an unconfirmed draft")
             f.stopDebounce();assertNotNull(f.editor.controller.activeTextItem())
         }
         val original=withContext(Dispatchers.Main) {f.editor.state.document}

@@ -21,6 +21,13 @@
     <string name="tool_ruler">Ruler</string>
     <string name="tool_text">Text</string>
     <string name="tool_text_box">Text box</string>
+    <string name="box_defaults_hint">New text boxes start like this.</string>
+    <string name="box_fill">Fill</string>
+    <string name="box_border">Border</string>
+    <string name="box_thickness">Thickness</string>
+    <string name="box_corners">Corners</string>
+    <string name="box_style">Box style</string>
+    <string name="edit_text">Edit text</string>
     <string name="tool_markup">PDF text markup</string>
     <string name="markup_highlight">Highlight</string>
     <string name="markup_squiggly">Squiggly</string>
@@ -35,17 +42,38 @@
     <string name="toolbar_sidebar">Sidebar</string>
     <string name="undo">Undo</string>
     <string name="redo">Redo</string>
-    <string name="toolbar_page_nav">Page nav</string>
-    <string name="toolbar_styles">Styles</string>
-    <string name="toolbar_margins">Margins</string>
     <string name="toolbar_view">View</string>
-    <string name="toolbar_zoom">Zoom</string>
-    <string name="toolbar_fit">Fit</string>
-    <string name="toolbar_zoom_lock">Zoom lock</string>
     <string name="toolbar_fullscreen">Full screen</string>
     <string name="toolbar_colours">Colours</string>
-    <string name="toolbar_waypoints">Saved views</string>
     <string name="toolbar_minimap">Minimap</string>
+    <string name="settings">Settings</string>
+    <string name="back">Back</string>
+    <string name="caption_page">Page</string>
+    <string name="page_of_count">of %1$d</string>
+    <string name="limits_off">Limits off</string>
+    <string name="limits_on">Limits on</string>
+    <string name="title_zoom_limits">Zoom limits</string>
+    <string name="zoom_limits_hint">While a limit is on, pinch, the zoom buttons, keys and every fit stop at it.</string>
+    <string name="fit_page_short">Fit page</string>
+    <string name="fit_width_short">Fit width</string>
+    <string name="fit_height_short">Fit height</string>
+    <string name="rotate">Rotate</string>
+    <string name="read_only">Read-only</string>
+    <string name="on">On</string>
+    <string name="caption_edge">Edge</string>
+    <string name="tap_an_edge">Tap an edge to pick it</string>
+    <string name="margin_edge_value">%1$s %2$d%%</string>
+    <string name="no_template">No template</string>
+    <string name="new_pages_size">new pages %1$s</string>
+    <string name="vertical_scrolling_lower">vertical scrolling</string>
+    <string name="rotated_degrees">rotated %1$d°</string>
+    <string name="filters_on">PDF filters on</string>
+    <string name="filters_hint">Each change applies when you let go, since the whole PDF redraws.</string>
+    <string name="speed_mm_s">%1$s mm/s</string>
+    <plurals name="waypoints_saved">
+        <item quantity="one">%1$d saved view</item>
+        <item quantity="other">%1$d saved views</item>
+    </plurals>
     <string name="edge_left">Left</string>
     <string name="edge_right">Right</string>
     <string name="edge_top">Top</string>
@@ -81,6 +109,7 @@
     <string name="caption_strength">Strength</string>
     <string name="caption_crossover">Crossover</string>
     <string name="caption_neon">Neon</string>
+    <string name="stroke_preview">Stroke preview</string>
     <string name="tape_straight">Straight</string>
     <string name="tape_freehand">Freehand</string>
     <string name="tape_solid">Solid</string>
@@ -100,7 +129,6 @@
     <string name="caption_template">Template</string>
     <string name="caption_accent_colour">Accent colour</string>
     <string name="customize">Customize</string>
-    <string name="back_customize">"‹  Customize"</string>
     <string name="import_template">Import</string>
     <string name="remove_template">Remove from library</string>
     <string name="keep_template">Add to library</string>
@@ -122,7 +150,6 @@
     <string name="caption_autoscroll">Autoscroll</string>
     <string name="caption_autoscroll_speed">Speed</string>
     <string name="caption_pdf_filters">PDF colour filters</string>
-    <string name="adjust">Adjust</string>
     <string name="filter_contrast">Contrast</string>
     <string name="filter_invert">Invert</string>
     <string name="filter_brightness">Brightness</string>
@@ -287,14 +314,13 @@
     <string name="caption_cells">Cells</string>
     <string name="count_fewer">Fewer</string>
     <string name="count_more">More</string>
+    <string name="decrease">Decrease</string>
+    <string name="increase">Increase</string>
     <string name="caption_fill">Fill</string>
     <string name="caption_perfect">Perfect</string>
     <string name="caption_opacity">Opacity</string>
     <string name="caption_dashed">Dashed</string>
     <string name="default_suffix">"  (default)"</string>
-    <string name="caption_opacity_percent">"Opacity  %1$d%%"</string>
-    <string name="caption_value_percent">"%1$s  %2$d%%"</string>
-    <string name="caption_rotate_degrees">"Rotate  %1$d°"</string>
     <string name="caption_glow_intensity">Intensity</string>
 
     <!-- Toolbar -->
@@ -314,9 +340,6 @@
     <string name="no_stickers">No stickers yet.</string>
     <string name="stickers_hint">Tap to insert, hold to remove</string>
     <string name="sticker">Sticker</string>
-    <string name="fit_page">Fit whole page</string>
-    <string name="fit_width">Fit page width</string>
-    <string name="fit_height">Fit page height</string>
     <string name="err_rename_note">Couldn’t rename the note.</string>
     <string name="untitled">Untitled</string>
     <string name="insert_image">Insert image</string>
@@ -390,6 +413,7 @@
     <string name="show_sidebar">Show sidebar</string>
     <string name="preferences">Preferences</string>
     <string name="reset_to_defaults">Reset to defaults</string>
+    <string name="use_default">Use the default</string>
     <string name="pref_general">General</string>
     <string name="pref_ui_theme">UI theme</string>
     <string name="theme_system">System</string>
@@ -423,7 +447,7 @@
     <string name="pref_pdf_export">PDF export</string>
     <string name="pref_pdf_heading_bookmarks">Bookmarks from headings</string>
     <string name="pref_performance">Performance</string>
-    <string name="pref_cache_help">Higher feels smoother when you pan and zoom but uses more memory. Your ink and PDFs look just as crisp either way.</string>
+    <string name="pref_cache_help">More keeps more of a note ready as you scroll. Automatic sizes it to this device.</string>
     <string name="pref_disable_front_buffering">Disable front buffering</string>
     <string name="pref_front_buffering_help">Front buffering paints the pen\'s ink straight into the frame the screen is showing, which is what makes it feel instant. A few panels do not hand that over cleanly, and there the ink can flicker or fall behind the nib. Turn it off on those and every stroke goes through the ordinary canvas.</string>
     <string name="pref_code_highlighting">Code highlighting</string>
@@ -447,15 +471,15 @@
     <string name="toggle_previous">Toggle previous tool</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss expand to the creation date and time. # becomes the number that keeps the name free in its folder.</string>
     <string name="pref_next_note_named">The next note would be named %1$s</string>
-    <string name="pref_side_margin_px">"Side margin  %1$d px"</string>
-    <string name="pref_max_cache_px">"Max cache resolution  %1$d px"</string>
+    <string name="pref_side_margin_px">"Page margin  %1$d px"</string>
+    <string name="pref_cache_memory_auto">"Cache memory  Automatic (%1$d MB)"</string>
+    <string name="pref_cache_memory_mb">"Cache memory  %1$d MB"</string>
     <string name="pref_toolbar_colours_n">"Colours on the toolbar  %1$d"</string>
 
     <!-- Home screen and explorer -->
     <string name="collapse_sidebar">Collapse sidebar</string>
     <string name="home">Home</string>
     <string name="new_note">New note</string>
-    <string name="new_note_in">New note in %1$s</string>
     <string name="close_new_note">Close without creating</string>
     <string name="cover">Cover</string>
     <string name="no_cover">No cover</string>
@@ -464,15 +488,13 @@
     <string name="change_cover">Change cover…</string>
     <string name="change_cover_title">Change cover</string>
     <string name="remove_cover">Remove cover</string>
-    <string name="templates_built_in">Built-in</string>
-    <string name="templates_examples">Examples</string>
     <string name="templates_imported">Imported</string>
-    <string name="templates_imported_help">Stored in your notes folder, so they travel with your notes.</string>
-    <string name="cover_designs">Designs</string>
     <string name="import_template_file">Import template</string>
     <string name="page_from_image">Page template from image</string>
     <string name="cover_from_image">Cover template from image</string>
     <string name="tab_generate_ai">Generate using AI</string>
+    <string name="all_templates">All templates</string>
+    <string name="add_template">Add a template</string>
     <string name="ai_intro">AI assistants such as ChatGPT and Claude can design page templates and cover templates for you. Because the xtemplate format is new to them, provide its specification along with your request.</string>
     <string name="ai_step_copy">Copy the specification</string>
     <string name="ai_guide_name">xtemplate for AI assistants</string>
@@ -496,10 +518,7 @@
     <string name="ai_prompt_cover_pattern">With Python, draw a generative pattern of overlapping translucent circles in deep blues and teal, and make it a cover template with a thin gold frame and a label for the title.</string>
     <string name="ai_prompt_cover_leather">A cover template that looks like a leather notebook: draw a dark leather grain with Python as light and shade over a colour I can change, and add a blind-stamped border and a gold label.</string>
     <string name="tag_all">All</string>
-    <string name="every_page">Every page</string>
     <string name="plain_paper">Plain paper</string>
-    <string name="pick_template_hint">Pick a template to set its lines, colours and spacing.</string>
-    <string name="pick_cover_hint">Pick a design to start the note with a cover.</string>
     <string name="page_size_mm">%1$s × %2$s mm</string>
     <string name="custom_size_range">Each side between %1$s and %2$s mm</string>
     <string name="new_canvas">New canvas</string>
@@ -758,7 +777,7 @@
     <string name="page_size_ellipsis">Page size…</string>
     <string name="apply">Apply</string>
     <string name="pdf_pages_keep_size">PDF pages keep their own size.</string>
-    <string name="back_rotate">"‹  Rotate"</string>
+    <string name="back_rotate">Rotate</string>
     <string name="rotate_right">Right</string>
     <string name="rotate_left">Left</string>
     <string name="rotate_upside_down">Upside down</string>
@@ -783,9 +802,9 @@
     <string name="bookmarks">Bookmarks</string>
     <string name="selected">Selected</string>
     <string name="page_options">Page options</string>
-    <string name="back_share_as">"‹  Share as"</string>
+    <string name="back_share_as">Share as</string>
     <string name="image_png">Image (PNG)</string>
-    <string name="back_save_as">"‹  Save as"</string>
+    <string name="back_save_as">Save as</string>
     <string name="add_page">Add page</string>
     <string name="insert_pdf">Insert PDF</string>
     <string name="erase_page">Erase page</string>
@@ -805,7 +824,8 @@
     <string name="no_bookmarks">— no bookmarks —</string>
     <string name="add">Add</string>
     <string name="page_n">Page %1$d</string>
-    <string name="bookmark_entry">%1$s · p.%2$d</string>
+    <string name="expand_entry">Expand</string>
+    <string name="collapse_entry">Collapse</string>
 
     <!-- Selection and long-press menus -->
     <string name="bring_to_front">Bring to front</string>
@@ -905,7 +925,7 @@
     <string name="table_rows">Rows</string>
     <string name="table_columns">Columns</string>
     <string name="table_padding">Padding</string>
-    <string name="table_lines">Lines</string>
+    <string name="table_lines">Line width</string>
     <string name="table_line_colour">Line colour</string>
     <string name="table_header_row">Header row</string>
     <string name="table_banded_rows">Banded rows</string>
@@ -931,8 +951,9 @@
     <!-- Colour picker -->
     <string name="swatches">Swatches</string>
     <string name="spectrum">Spectrum</string>
-    <string name="caption_recent">Recent</string>
     <string name="eyedropper">Pick a colour from the screen</string>
+    <string name="hex" translatable="false">Hex</string>
+    <string name="previous_colour">Previous colour</string>
     <string name="eyedropper_hint">Touch a colour to pick it</string>
 
     <!-- Canvas and storage -->
@@ -1044,24 +1065,18 @@
     <!-- Explorer -->
     <string name="sort_created">Date created</string>
     <string name="select_all">Select all</string>
-    <string name="close_view_options">Close view options</string>
     <string name="opt_layout">Layout</string>
-    <string name="opt_rows">Rows</string>
-    <string name="rows_comfortable">Comfortable</string>
-    <string name="rows_compact">Compact</string>
+    <string name="opt_compact_rows">Compact rows</string>
     <string name="opt_tile_size">Tile size</string>
-    <string name="pinch_hint">Or pinch the grid to resize tiles</string>
     <string name="opt_place_by">Place files by</string>
-    <string name="opt_thumbnail">Thumbnail</string>
-    <string name="thumb_top">Top of page</string>
-    <string name="thumb_page">Whole page</string>
+    <string name="opt_whole_page_thumbs">Whole-page thumbnails</string>
     <string name="opt_show_on_tiles">Show on tiles</string>
+    <string name="shown_of">%1$d of %2$d</string>
     <string name="show_page_count">Page count</string>
     <string name="show_time">Time</string>
     <string name="colour_code">Colour code</string>
     <string name="opt_group_by">Group by</string>
     <string name="view_every_folder">Use this view in every folder</string>
-    <string name="view_every_folder_hint">Off: each folder remembers its own view</string>
     <string name="sort_z_to_a">Z to A</string>
     <string name="sort_a_to_z">A to Z</string>
     <string name="largest_first">Largest first</string>

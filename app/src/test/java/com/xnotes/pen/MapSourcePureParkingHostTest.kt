@@ -68,23 +68,23 @@ class MapSourcePureParkingHostTest {
             f.editor.selectTool(Tool.TEXT_BOX)
             parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(220.0,220.0))
             parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(220.0,220.0))
-            assertNotNull(f.editor.controller.activeTextItem());assertNotNull(f.editor.editingField)
+            assertNotNull(f.editor.controller.activeTextItem());assertTrue(f.editor.controller.isEditingText)
         }
         coroutineScope {
             val waiting=async(Dispatchers.Main) {f.editor.awaitMapSourceParking()}
             parkingDispatch();assertFalse(waiting.isCompleted)
             val draft=withContext(Dispatchers.Main) {
-                f.editor.updateEditingText("keep the unconfirmed native draft")
+                f.editor.typeInOpenBox("keep the unconfirmed native draft")
                 val model=f.editor.state.document
                 Triple(model.bodyRevision,f.editor.history.nextUndo,f.editor.controller.activeTextItem())
             }
             parkingDispatch();assertFalse(waiting.isCompleted);waiting.cancelAndJoin()
             withContext(Dispatchers.Main) {
-                assertSame(draft.third,f.editor.controller.activeTextItem());assertNotNull(f.editor.editingField)
+                assertSame(draft.third,f.editor.controller.activeTextItem());assertTrue(f.editor.controller.isEditingText)
                 assertEquals(draft.first,f.editor.state.document.bodyRevision);assertSame(draft.second,f.editor.history.nextUndo)
                 // The existing explicit/default parking contract still commits the user's text.
                 assertNotNull(f.editor.awaitHostParking())
-                assertNull(f.editor.controller.activeTextItem())
+                assertFalse(f.editor.controller.isEditingText)
                 assertEquals("keep the unconfirmed native draft",f.editor.state.document.pages.first().items.filterIsInstance<TextItem>().single().text)
                 stopDebounce(f.editor)
             }

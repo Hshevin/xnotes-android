@@ -87,8 +87,9 @@ internal fun Tooltip(
     }
 }
 
+/** Whether a hardware keyboard is there to press the shortcuts chrome names. */
 @Composable
-private fun keyboardAttached(): Boolean {
+internal fun keyboardAttached(): Boolean {
     val c = LocalConfiguration.current
     return c.keyboard != Configuration.KEYBOARD_NOKEYS && c.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
 }
@@ -255,7 +256,7 @@ private fun TipChip(text: String, hint: String?, shortcut: String?) {
         Modifier
             .background(bg, shape)
             .widthIn(max = TIP_MAX_WIDTH)
-            .padding(start = 10.dp, end = if (shortcut != null) 6.dp else 10.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = Space.s12, end = if (shortcut != null) Space.s6 else Space.s12, top = Space.s6, bottom = Space.s6),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(text, color = fg, fontSize = TextSize.body, fontWeight = FontWeight.Medium, lineHeight = 17.sp, modifier = Modifier.weight(1f, fill = false))
