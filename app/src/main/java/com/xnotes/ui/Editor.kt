@@ -9858,11 +9858,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /**
      * Visibility, lock, name, order or a new empty layer: what is on each layer stays the same, so
-     * layer thumbnails and search keep, and only [page]'s ink is rebuilt.
+     * layer thumbnails and search keep, and the page's existing bands change composition.
      */
     fun editLayerStack(page: Page, change: () -> Unit): Boolean {
         if (!beginLayerChange(page)) return false
-        history.push(com.xnotes.core.history.EditLayers.capture(page, change))
+        history.push(com.xnotes.core.history.EditLayers.captureStack(page.layers, page, change))
         layersChanged(page)
         repaintLayerPage(page)
         return true
@@ -9902,10 +9902,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (autosaveUri != null) scheduleAutosave()
     }
 
-    /** [page] looks different but holds the same objects: rebuild its ink off-thread and its side-panel thumbnail. */
-    private fun repaintLayerPage(page: Page) {
+    /** Update each pane's composition or, after a membership edit, its cached ink. */
+    private fun repaintLayerPage(page: Page, stackOnly: Boolean = true) {
         for (editor in listOfNotNull(this, sharedPeer())) {
-            editor.state.refreshInk(listOf(page))
+            if (stackOnly) editor.state.layerStackChanged(page) else editor.state.refreshInk(listOf(page))
             editor.forgetPageThumbnail(page)
             editor.view.requestRender()
         }
@@ -9935,10 +9935,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val viewed = viewedPage()
         val was = touchedRegions(command)
         history.undo()
-        val layerPage = (command as? com.xnotes.core.history.EditLayers)?.page
-        layerPage?.let(::layersChanged)
-        bakeMarkups(command)
-        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty(), layerPage = layerPage)
+        finishUndoRedo(command, pagesBefore, viewed, was)
     }
 
     fun redo() {
@@ -9953,10 +9950,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val viewed = viewedPage()
         val was = touchedRegions(command)
         history.redo()
-        val layerPage = (command as? com.xnotes.core.history.EditLayers)?.page
-        layerPage?.let(::layersChanged)
+        finishUndoRedo(command, pagesBefore, viewed, was)
+    }
+
+    private fun finishUndoRedo(
+        command: Command?, pagesBefore: List<Page>, viewed: Pair<Page, Rect>?, was: List<Pair<Page, Rect>>?,
+    ) {
+        val layerEdit = command as? com.xnotes.core.history.EditLayers
+        val page = layerEdit?.page
+        if (page != null) {
+            layersChanged(page)
+            if (layerEdit.stackOnly) {
+                repaintLayerPage(page)
+                return
+            }
+        }
         bakeMarkups(command)
-        afterHistory(pagesBefore, viewed, regions = spanning(was, touchedRegions(command)), reshaped = command?.reshaped().orEmpty(), layerPage = layerPage)
+        afterHistory(pagesBefore, viewed, spanning(was, touchedRegions(command)), command?.reshaped().orEmpty(), page)
     }
 
     /** Applies a markup edit (built, not yet applied) as one undo step. */
@@ -10044,7 +10054,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // enough to time out input on a dense note.
         when {
             // A layer edit changes one page as a whole: rebuild that page off-thread, in both panes.
-            layerPage != null -> { repaintLayerPage(layerPage); regions?.let(state::repairInkRegions) }
+            layerPage != null -> { repaintLayerPage(layerPage, stackOnly = false); regions?.let(state::repairInkRegions) }
             regions == null -> state.refreshAllInk()
             else -> state.repairInkRegions(regions)
         }

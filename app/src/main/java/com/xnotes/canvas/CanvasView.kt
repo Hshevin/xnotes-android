@@ -16,7 +16,6 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.Stroke
-import com.xnotes.core.model.TapeItem
 import com.xnotes.core.pal.BlendMode
 import com.xnotes.platform.AndroidRenderer
 import com.xnotes.platform.MathRendering
@@ -387,11 +386,13 @@ class CanvasView @JvmOverloads constructor(
         // Paginated mode shows only the current row; neighbours never draw. Iterate the range
         // directly instead of scanning every page on every animation frame in a large document.
         val drawable = st.drawablePageRange()
+        var visibleUserLayers = false
 
         for (i in drawable) {
             val pr = st.pageRects.getOrNull(i) ?: continue
             if (!pr.intersects(visible)) continue
             val page = st.document.pages[i]
+            if (page.layers.entries.size > 1) visibleUserLayers = true
             if (room != null && room.page === page) {
                 drawRoomPage(r, st, page, pr, room, visible)
                 continue
@@ -433,7 +434,7 @@ class CanvasView @JvmOverloads constructor(
         // the strip panning into view; once the view settles we re-render the sharp viewport for
         // the new area. A zoom change drops back to the soft caches until the settle re-render.
         // Room being drawn moves part of a page off what any sharp frame shows, so the soft caches serve until it settles.
-        if (room == null && drawable.none { st.document.pages[it].layers.entries.size > 1 } && st.isPastResolutionCap() && !st.pageFlipAnimating && st.flipOffsetX == 0.0) {
+        if (room == null && !visibleUserLayers && st.isPastResolutionCap() && !st.pageFlipAnimating && st.flipOffsetX == 0.0) {
             val blit = st.sharpViewportBlit()
             if (blit != null) {
                 val dw = blit.base.width * blit.scale
@@ -489,6 +490,7 @@ class CanvasView @JvmOverloads constructor(
                 val page = st.document.pages[i]
                 // Page-space visible rect, so off-band highlighters on a tall page skip the composite.
                 val visLocal = st.displayRectToPage(page, visible.translate(-pr.left, -pr.top))
+                if (page.layers.entries.size > 1) continue
                 if (room != null && room.live && room.page === page) {
                     drawRoomHighlighters(r, st, page, pr, room)
                     continue
@@ -497,22 +499,9 @@ class CanvasView @JvmOverloads constructor(
                     r.clipRect(pr)
                     r.translate(pr.left, pr.top)
                     st.applyPageTransform(r, page)
-                    for ((k, item) in page.visibleItems.withIndex()) {
-                        if (page.layers.entries.size == 1 && item is Stroke && item.isHighlighterInk() && !st.isLiftedItem(item) &&
-                            item.bounds().intersects(visLocal)
-                        ) {
-                            // Blit the pre-rendered opaque ribbon at the ink's alpha and blend,
-                            // instead of re-tessellating the ribbon every frame.
-                            val hc = st.highlighterCacheFor(item, page)
-                            val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
-                            // Composited over the finished page, so tape laid over it has to be cut out by hand.
-                            val covers = coveringTapes(st, page.visibleItems, k, item.bounds())
-                            r.withSave {
-                                if (covers != null) r.clipOutPolygons(covers)
-                                r.drawRasterBlended(hc.surface, hc.cover, item.renderColor.a / 255.0 * faint, item.blendMode)
-                            }
-                        }
-                    }
+                    val items = page.visibleItems
+                    val clipOut = r::clipOutPolygons
+                    for (k in items.indices) st.drawHighlighter(r, page, items, k, visLocal, clipOut)
                 }
             }
         }
@@ -574,13 +563,12 @@ class CanvasView @JvmOverloads constructor(
             r.translate(pr.left, pr.top)
             paintUnderInk(r, st, page, seen)
         }
-        // Several user layers composite live in their order, with the stroke under the pen at the active one.
-        if (page.layers.entries.size > 1) return paintUserLayers(r, st, page, pr, visible)
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
-            st.drawInk(r, page, seen)
+            if (page.layers.entries.size > 1) st.drawUserLayers(r, page, seen, clipOut = r::clipOutPolygons)
+            else st.drawInk(r, page, seen)
         }
     }
 
@@ -595,7 +583,6 @@ class CanvasView @JvmOverloads constructor(
         // Asked for so a settled room's changed footprint schedules the rebuilds that end it.
         st.askFor(page, seen)
         val bg = st.roomBackground(page, v, seen)
-        val ink = st.roomInk(page, v, seen)
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
@@ -604,38 +591,29 @@ class CanvasView @JvmOverloads constructor(
                 bg == null -> st.drawBackground(r, page, seen)
                 // A plain page's ruling is laid for the page, not carried by what is on it.
                 page.pdfPage == null -> st.drawBands(r, bg)
-                else -> drawCut(r, v) { st.drawBands(r, bg) }
+                else -> v.drawCut(r, seen) { st.drawBands(r, bg) }
             }
             if (bg != null || !st.hasBackgroundBuilt(page)) st.paintRoomPaper?.invoke(v, r)
         }
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
-            paintUnderInk(r, st, page, seen)
+            paintUnderInk(r, st, page, seen, v.takeIf { page.layers.entries.size > 1 })
         }
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
+            if (page.layers.entries.size > 1) {
+                st.drawUserLayers(r, page, seen, v, r::clipOutPolygons)
+                return@withSave
+            }
             // What stays put is out of the old ink layer, so it is drawn here until a layer that holds it lands.
+            val ink = st.roomInk(page, v, seen)
             val old = ink != null || !st.hasInkBuilt(page)
             if (old) for (item in v.fills) st.paintItem(item, r, page)
-            if (ink != null) drawCut(r, v) { st.drawBands(r, ink) } else st.drawInk(r, page, seen)
+            if (ink != null) v.drawCut(r, seen) { st.drawBands(r, ink) } else st.drawInk(r, page, seen)
             if (old) for (item in v.over) st.paintItem(item, r, page)
-        }
-    }
-
-    /** A page layer built before [v]'s room, drawn cut at it: what lay before the room in place, what lay past it moved on. */
-    private fun drawCut(r: AndroidRenderer, v: RoomView, draw: () -> Unit) {
-        val far = 1e9
-        r.withSave {
-            r.clipRect(if (v.sideways) Rect.ltrb(-far, -far, v.split, far) else Rect.ltrb(-far, -far, far, v.split))
-            draw()
-        }
-        r.withSave {
-            if (v.sideways) r.translate(v.shift, 0.0) else r.translate(0.0, v.shift)
-            r.clipRect(if (v.sideways) Rect.ltrb(v.resume, -far, far, far) else Rect.ltrb(-far, v.resume, far, far))
-            draw()
         }
     }
 
@@ -665,58 +643,25 @@ class CanvasView @JvmOverloads constructor(
     }
 
     /**
-     * The bodies of the covered tapes laid after item [index] of [items] over [bounds], or null for
-     * none. A lifted tape is drawn over everything with the selection, so it needs no cut.
-     */
-    private fun coveringTapes(st: CanvasState, items: List<com.xnotes.core.model.CanvasItem>, index: Int, bounds: Rect): List<List<Pt>>? {
-        var out: ArrayList<List<Pt>>? = null
-        for (k in index + 1 until items.size) {
-            val t = items[k] as? TapeItem ?: continue
-            if (t.peeled || st.isLiftedItem(t) || !t.bounds().intersects(bounds)) continue
-            (out ?: ArrayList<List<Pt>>().also { out = it }).addAll(t.shape.body)
-        }
-        return out
-    }
-
-    /** Composite user layers with the live stroke at the active layer, including highlighters.
-     * The PDF background remains independently cached. Only viewport-intersecting objects paint.
-     */
-    private fun paintUserLayers(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, visible: Rect) {
-        r.withSave {
-            r.clipRect(pr)
-            r.translate(pr.left, pr.top)
-            st.applyPageTransform(r, page)
-            val local = st.displayRectToPage(page, visible.translate(-pr.left, -pr.top))
-            val painter = st.inkRenderer(page, r)
-            val visibleItems = page.visibleItems
-            val underText = visibleItems.take(com.xnotes.core.model.PageLayers.underText(visibleItems)).toSet()
-            for (item in underText) if (!st.isLiftedItem(item) && item.paintBounds().intersects(local)) st.paintItem(item, r, page)
-            if (!st.flowLifted) st.paintFlow?.invoke(page, painter, local)
-            val items = visibleItems.groupBy { it.layerId }
-            for (layer in page.layers.entries) {
-                if (!layer.visible) continue
-                for (item in items[layer.id].orEmpty()) {
-                    if (item !in underText && !st.isLiftedItem(item) && item.paintBounds().intersects(local)) st.paintItem(item, r, page)
-                }
-                if (layer.id == page.layers.activeId) st.paintLayerPreview?.invoke(page, painter)
-            }
-        }
-    }
-
-    /**
      * What goes live between a page's background and its ink cache: the fills under its typed text
      * that the cache leaves out, a lifted flow, and the formulas. [r] stands at the page's display origin.
      */
-    private fun paintUnderInk(r: AndroidRenderer, st: CanvasState, page: Page, region: Rect) {
+    private fun paintUnderInk(r: AndroidRenderer, st: CanvasState, page: Page, region: Rect, room: RoomView? = null) {
         r.withSave {
             st.applyPageTransform(r, page)
-            st.paintUnderText(page, r, region)
+            drawThroughRoom(r, room, region) { st.paintUnderText(page, r, it) }
+            if (room?.live == true) for (item in room.fills) {
+                if (st.isUnderText(page, item)) st.paintItem(item, r, page)
+            }
         }
         st.paintLiftedUnderText?.invoke(page, r)
         r.withSave {
             st.applyPageTransform(r, page)
-            if (st.flowLifted) st.paintFlow?.invoke(page, r, region)
-            st.paintMath?.invoke(page, r, region)
+            drawThroughRoom(r, room, region) { seen ->
+                if (page.layers.entries.size > 1) st.paintFlow?.invoke(page, st.inkRenderer(page, r), seen)
+                else if (st.flowLifted) st.paintFlow?.invoke(page, r, seen)
+                st.paintMath?.invoke(page, r, seen)
+            }
         }
     }
 

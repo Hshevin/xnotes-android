@@ -47,7 +47,7 @@ class BandedLayerTest {
         val layer = st.cacheFor(st.document.pages[0])
         assertEquals(6, layer.bands.size)
         for (b in layer.bands) {
-            val s = b!!.surface
+            val s = requireNotNull(b!!.surface)
             assertEquals(300, s.width)
             assertTrue("a band and its gutters, never the page", s.height <= band + 2 * CanvasState.INK_GUTTER_PX)
         }
