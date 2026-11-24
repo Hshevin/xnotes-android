@@ -38,3 +38,19 @@
 - 右下角圆形新建按钮，菜单：新建笔记、新建画布、导入 PDF、新建文件夹；空文件夹显示插画与三个大按钮。
 - 新建笔记／画布／文件夹先弹命名框（Android 的新建笔记页含封面、纸张、模板，列入 H3）。
 - 恢复资料页：列出待恢复记录，可恢复或放弃（取代首页顶部的待恢复行）。
+
+## S2 iPad 导入 PDF（gpt-6.2-astra）
+
+目标：iPad 首页「导入 PDF」把用户从「文件」选中的 PDF 变成当前文件夹里的一本 `.xnote` 批注笔记，与 Android `createPdfNoteFile` 产物一致（Android 可直接打开、批注、互通）。
+
+要求：
+
+1. `LiteStore` 增加 `fun importPdf(directory: Path, baseName: String, pdf: Path): LiteOpen`（`shared` 公共代码；PDF 页尺寸的读取走 iOS 现有 PDFium 绑定 `com.xnotes.nativelibs`，必要时以 expect/actual 或参数注入，公共代码不依赖 iOS 类型）。行为：
+   - 页面规则与 Android `app/src/main/java/com/xnotes/platform/Pdf.kt` 的 `PdfImporter.import`/`pages` 完全一致：每个 PDF 页一页，尺寸 = 点数 / 72 × dpi（`PageSize.DEFAULT_DPI`），`pdfPage` 为页序；读不出或小于 1 点的页沿用前一页尺寸（第一页则 A4 竖向）；零页 PDF 返回 `LiteOpen.Refused`（新增 `LiteRefusal.PDF_UNREADABLE`），加密且无法打开的同样拒绝。
+   - 文档开启引用锚点（同 `createLiteDocument`），PDF 原样嵌入（`doc.pdfFile`），由现有 `LiteCodec` 写出；命名、去重（`名称 (2)`）、目录与 Documents 范围检查、暂存再链接的原子发布流程全部复用 `createLiteDocument` 的做法（可重构为共用，不复制粘贴）。`decoded.pdfHash` 校验相应调整为非空且与写入的 PDF 一致。
+   - 源 PDF 只读，不移动不修改；导入失败不留下任何文件（含暂存目录）。
+2. Android 新建笔记的默认样式（`stampNewNoteDefaults`：新笔记页面样式、模板、正文样式）属于 Android 偏好，iPad 暂无，按 `Document.blank()` 的默认处理，记录在实现记录里。
+3. 测试（`shared/src/iosTest` 或 commonTest，按依赖放）：用仓库里已有的测试 PDF（`shared/src/commonTestFixtures` 或 `nativelibs` 测试资源中找；没有就用 PDFium 生成或加入一个很小的 2 页不同尺寸 PDF 作为测试资源）验证：页数、各页尺寸与 `pdfPage`、重名去重、打开后 `LiteSession.note` 的 `pdfFile` 存在且页数一致、关闭后重新 `open` 读回一致、用 `DocumentCodec` 读回与 Android 读取路径一致、零页/损坏 PDF 被拒绝且目录无残留。
+4. 不改 `app/`，不改 `app/src/test`。
+
+验收：`:shared:testDebugUnitTest`、`:shared:iosSimulatorArm64Test`（`-PiosTestDevice=<UDID>`）、`:iosKit:iosSimulatorArm64Test`、`:app:assembleDebug` 通过，零失败零跳过；在本文末尾追加「S2 实现记录」（中文，测试数，不写本机绝对路径）。
