@@ -203,6 +203,7 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-24 [iPadOS 第二波契约](process/ipados-wave2-contracts-2026-11-24.md)
 - 2026-11-24 [iPadOS 第三波契约](process/ipados-wave3-contracts-2026-11-24.md)
 - 2026-11-24 [iPadOS 第四波契约](process/ipados-wave4-contracts-2026-11-24.md)
+- [iPadOS 工具栏图标（2026-11-24）](process/ipados-toolbar-icons-2026-11-24.md)
 
 ## 已归档（`archive/`）
 
