@@ -1,5 +1,13 @@
 package com.xnotes.ui
 
+import com.xnotes.explorer.countsLabel
+import com.xnotes.explorer.explorerComparator
+import com.xnotes.explorer.formatSize
+import com.xnotes.explorer.groupEntries
+import com.xnotes.explorer.hueName
+import com.xnotes.explorer.openedLabel
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toKotlinDayOfWeek
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -133,19 +141,19 @@ import androidx.compose.runtime.mutableIntStateOf
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.WeekFields
-import com.xnotes.settings.ExplorerView
-import com.xnotes.settings.ExplorerLayout
-import com.xnotes.settings.FolderPlacement
-import com.xnotes.settings.GroupBy
-import com.xnotes.settings.ThumbShape
-import com.xnotes.settings.TileSize
+import com.xnotes.explorer.ExplorerView
+import com.xnotes.explorer.ExplorerLayout
+import com.xnotes.explorer.FolderPlacement
+import com.xnotes.explorer.GroupBy
+import com.xnotes.explorer.ThumbShape
+import com.xnotes.explorer.TileSize
 import com.xnotes.core.util.DocumentKind
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.input.pointer.positionChanged
-import com.xnotes.settings.ExplorerSortKey
+import com.xnotes.explorer.ExplorerSortKey
 import com.xnotes.settings.PinnedFolder
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.ColorMath
@@ -1300,7 +1308,7 @@ private fun ExplorerSection(
         { list ->
             list.filter { e -> if (e.isDir) view.folders != FolderPlacement.HIDDEN && kindFilter == null else kindFilter == null || kindOf(e) == kindFilter }
                 .map(withCreated)
-                .sortedWith(explorerComparator(view.sortKey, view.descending, foldersFirst = view.folders != FolderPlacement.MIXED) { it.created })
+                .sortedWith(explorerComparator(view.sortKey, view.descending, foldersFirst = view.folders != FolderPlacement.MIXED))
         }
     }
     // Recent keeps the order things were opened in.
@@ -1312,7 +1320,7 @@ private fun ExplorerSection(
         { list ->
             list.filter { e -> e.isDir || kindFilter == null || kindOf(e) == kindFilter }
                 .map(withCreated)
-                .sortedWith(explorerComparator(view.sortKey, view.descending) { it.created })
+                .sortedWith(explorerComparator(view.sortKey, view.descending))
         }
     }
     val pinned = remember(pinnedRaw, arrange, showPinned) { if (showPinned) arrange(pinnedRaw).filterNot { it.isDir } else emptyList() }
@@ -1325,8 +1333,8 @@ private fun ExplorerSection(
     val groups = remember(pool, view.groupBy, view.sortKey, view.descending, colorNames, metaTick, showRecent) {
         groupEntries(
             words,
-            pool, if (showRecent) GroupBy.NONE else view.groupBy, view.sortKey, view.descending, kindOf, { colorNames[it] }, now, ZoneId.systemDefault(),
-            WeekFields.of(java.util.Locale.getDefault()).firstDayOfWeek,
+            pool, if (showRecent) GroupBy.NONE else view.groupBy, view.sortKey, view.descending, kindOf, { colorNames[it] }, now, TimeZone.currentSystemDefault(),
+            WeekFields.of(java.util.Locale.getDefault()).firstDayOfWeek.toKotlinDayOfWeek(),
         )
     }
     val metas = remember(arranged, metaTick) { arranged.orEmpty().filter { !it.isDir }.associate { it.documentUri to editor.cachedMeta(it) } }

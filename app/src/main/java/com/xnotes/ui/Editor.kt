@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.explorer.explorerComparator
 import com.xnotes.ui.theme.audioLook
 import com.xnotes.core.model.forExport
 import android.content.Context
@@ -137,7 +138,8 @@ import com.xnotes.format.XNoteFormatException
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidSurfaceFactory
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.settings.ExplorerView
+import com.xnotes.explorer.ExplorerEntry
+import com.xnotes.explorer.ExplorerView
 import com.xnotes.settings.LiveSettings
 import com.xnotes.settings.SwatchRole
 import com.xnotes.settings.Preferences
@@ -188,15 +190,15 @@ data class ContextMenuTarget(
  * folder (where colour writes go), and [color] is the item's explorer colour code, if any.
  */
 data class BrowseEntry(
-    val name: String,
+    override val name: String,
     val documentUri: String,
-    val isDir: Boolean,
-    val size: Long = 0,
-    val modified: Long = 0,
-    val created: Long = 0,
+    override val isDir: Boolean,
+    override val size: Long = 0,
+    override val modified: Long = 0,
+    override val created: Long = 0,
     val parentDocId: String = "",
-    val color: Rgba? = null,
-) {
+    override val color: Rgba? = null,
+) : ExplorerEntry {
     internal val storedDocument: Boolean get() = !isDir && when (DocumentKind.ofName(name)) {
         DocumentKind.NOTE, DocumentKind.CANVAS, DocumentKind.PDF -> true
         else -> false
@@ -7313,7 +7315,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Sets the layout every folder without a view of its own opens in (Preferences' default layout). */
-    fun setDefaultLayout(layout: com.xnotes.settings.ExplorerLayout) {
+    fun setDefaultLayout(layout: com.xnotes.explorer.ExplorerLayout) {
         explorerView = explorerView.copy(layout = layout)
         settings = settings.copy(explorerView = explorerView)
         saveSettingsSoon()
@@ -8725,7 +8727,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val withCreated = out.map {
             it.copy(created = createdStore.get(documentKey(it.documentUri)) ?: now, color = colors[it.name])
         }
-        val result = withCreated.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        val result = withCreated.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
         browseCache["$treeUri|$parentDocId"] = result
         return result
     }
@@ -8988,7 +8990,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if (e.isDir) stack.addLast(browseDocId(e.documentUri))
             }
         }
-        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
     }
 
     /** Carries a colour across a rename: moves key [oldName] -> [newName] in [parentDocId]'s sidecar. */
@@ -9092,7 +9094,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }
         }
-        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
     }
 
     // --- Trash (a hidden folder in the top folder's sidecar, so it travels with the notes) ---

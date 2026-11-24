@@ -63,10 +63,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
-import com.xnotes.settings.ExplorerSortKey
-import com.xnotes.settings.ExplorerView
-import com.xnotes.settings.ThumbShape
-import com.xnotes.settings.TileSize
+import com.xnotes.explorer.ExplorerSortKey
+import com.xnotes.explorer.ExplorerView
+import com.xnotes.explorer.ThumbShape
+import com.xnotes.explorer.TileSize
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
