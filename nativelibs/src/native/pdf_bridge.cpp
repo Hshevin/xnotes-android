@@ -11,22 +11,34 @@ struct Document {
     FPDF_DOCUMENT pdf;
 };
 std::once_flag initialized;
-}
 
-void *xn_pdf_open(const void *bytes, int length, const char *password) {
-    if (!bytes || length <= 0) return nullptr;
+template <typename Load>
+Document *openDocument(size_t extraBytes, Load load) {
     std::call_once(initialized, [] {
         FPDF_LIBRARY_CONFIG config{};
         config.version = 2;
         FPDF_InitLibraryWithConfig(&config);
     });
-    auto *doc = static_cast<Document *>(std::malloc(sizeof(Document) + length));
+    auto *doc = static_cast<Document *>(std::malloc(sizeof(Document) + extraBytes));
     if (!doc) return nullptr;
-    std::memcpy(doc + 1, bytes, length);
-    doc->pdf = FPDF_LoadMemDocument64(doc + 1, length, password);
+    doc->pdf = load(doc + 1);
     if (doc->pdf) return doc;
     std::free(doc);
     return nullptr;
+}
+}
+
+void *xn_pdf_open(const void *bytes, int length, const char *password) {
+    if (!bytes || length <= 0) return nullptr;
+    return openDocument(length, [=](void *storage) {
+        std::memcpy(storage, bytes, length);
+        return FPDF_LoadMemDocument64(storage, length, password);
+    });
+}
+
+void *xn_pdf_open_file(const char *path, const char *password) {
+    if (!path) return nullptr;
+    return openDocument(0, [=](void *) { return FPDF_LoadDocument(path, password); });
 }
 
 int xn_pdf_count(void *handle) {

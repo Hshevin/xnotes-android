@@ -215,7 +215,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
                 LiteRefusal.NOT_FOUND -> "open_missing"
                 LiteRefusal.UNSUPPORTED_KIND -> if (DocumentKind.ofName(path.name) == DocumentKind.MIND_MAP) "open_legacy_map" else "open_unsupported"
                 LiteRefusal.FUTURE_VERSION -> "open_future"
-                LiteRefusal.CORRUPT -> "open_corrupt"
+                LiteRefusal.CORRUPT, LiteRefusal.PDF_UNREADABLE -> "open_corrupt"
                 null -> if (renderFailed) "render_failed" else "loading"
             }
             BasicText(text(message), Modifier.padding(Space.s24), style = detailStyle)

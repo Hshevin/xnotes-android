@@ -54,3 +54,11 @@
 4. 不改 `app/`，不改 `app/src/test`。
 
 验收：`:shared:testDebugUnitTest`、`:shared:iosSimulatorArm64Test`（`-PiosTestDevice=<UDID>`）、`:iosKit:iosSimulatorArm64Test`、`:app:assembleDebug` 通过，零失败零跳过；在本文末尾追加「S2 实现记录」（中文，测试数，不写本机绝对路径）。
+
+## S2 实现记录
+
+- 首页可调用 `LiteStore.importPdf(directory: Path, baseName: String, pdf: Path): LiteOpen`。导入成功返回已打开的批注笔记。导入与新建共用名称及 Documents 范围检查、重名编号、暂存回读校验和独占硬链接发布流程。
+- 导入只读所选文件，先取得带 SHA-256 的私有快照。iOS PDFium 按文件读取快照，编解码器把同一份 PDF 原字节嵌入笔记。发布前核对嵌入原件的摘要、文档与页身份。零页、损坏、需要密码的 PDF 返回 `LiteRefusal.PDF_UNREADABLE`。失败后清理会话资产和发布暂存目录。
+- 每个 PDF 页均取得永久页编号，按默认 150 dpi 将点数换算为页面尺寸。读不到尺寸或任一边小于 1 点时沿用前一页尺寸，首页回退为 A4 竖向。此处按 S2 的页序要求保留 `pdfPage`。Android 现有实现将这类回退页的 `pdfPage` 留空。页面样式、模板和正文样式沿用 `Document.blank()` 默认值，iPad 暂无 Android 的新建笔记样式偏好。
+- 新增 6 项 iOS 回归测试，覆盖两页不同尺寸与分数点数、独立身份与重名、回退尺寸、移除所选文件后保存和重开、用共享 `DocumentCodec.readComplete` 读回、零页／损坏／密码保护拒绝，以及嵌入前快照被替换时拒绝发布并清理。
+- JDK 21、iPad Pro 13 英寸（M5）iOS 27.2 模拟器验证通过。`:shared:testDebugUnitTest` 2711 项，`:shared:iosSimulatorArm64Test` 2519 项，`:iosKit:iosSimulatorArm64Test` 34 项，另验 `:nativelibs:iosSimulatorArm64Test` 6 项。均为零失败、零错误、零跳过。`:app:assembleDebug` ARM64 构建通过。首页文件选择器接入属于 H1 界面工作，本次未做真机操作。

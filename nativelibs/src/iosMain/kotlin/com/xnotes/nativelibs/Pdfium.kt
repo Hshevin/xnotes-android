@@ -5,6 +5,7 @@ package com.xnotes.nativelibs
 import com.xnotes.nativelibs.interop.xn_pdf_close
 import com.xnotes.nativelibs.interop.xn_pdf_count
 import com.xnotes.nativelibs.interop.xn_pdf_open
+import com.xnotes.nativelibs.interop.xn_pdf_open_file
 import com.xnotes.nativelibs.interop.xn_pdf_render
 import com.xnotes.nativelibs.interop.xn_pdf_size
 import kotlinx.cinterop.COpaquePointer
@@ -34,6 +35,11 @@ object Pdfium {
         return serialized {
             bytes.usePinned { xn_pdf_open(it.addressOf(0), bytes.size, password) }?.let(::PdfiumDocument)
         }
+    }
+
+    /** Reads on demand. The caller keeps the file stable until the document is closed. */
+    fun openFile(path: String, password: String? = null): PdfiumDocument? = serialized {
+        xn_pdf_open_file(path, password)?.let(::PdfiumDocument)
     }
 }
 

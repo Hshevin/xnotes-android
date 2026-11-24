@@ -51,6 +51,7 @@ kotlin {
         commonMain { kotlin.srcDir(generateEmojiAliases) }
         commonTest { kotlin.srcDir("src/commonTestFixtures/kotlin"); kotlin.srcDir(generateInteropFixtures) }
         commonMain.dependencies { api(libs.okio); api(libs.kotlinx.datetime) }
+        iosMain.dependencies { implementation(project(":nativelibs")) }
         commonTest.dependencies { implementation(kotlin("test")) }
         androidMain.dependencies { implementation(libs.bundles.commonmark) }
         androidUnitTest.dependencies { implementation(libs.junit); implementation(libs.json) }
