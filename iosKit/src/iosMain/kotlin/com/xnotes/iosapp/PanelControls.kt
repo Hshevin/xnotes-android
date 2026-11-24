@@ -29,33 +29,6 @@ internal class CreatedDocument {
 }
 
 @Composable
-internal fun CreateDocuments(store: LiteStore, directory: Path, style: TextStyle, open: (LiteOpen.Opened) -> Boolean) {
-    var creating by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    Row {
-        for ((key, kind) in listOf("new_note" to LiteKind.NOTE, "new_canvas" to LiteKind.CANVAS)) {
-            Action(key, style, enabled = !creating) {
-                if (creating) return@Action
-                creating = true; failed = false
-                val stem = text(if (kind == LiteKind.NOTE) "untitled_note" else "untitled_canvas")
-                scope.launch {
-                    var owned: LiteOpen.Opened? = null
-                    try {
-                        withContext(Dispatchers.Default) { owned = store.create(directory, stem, kind) as? LiteOpen.Opened }
-                        val result = owned
-                        if (result == null) failed = true else if (open(result)) owned = null
-                    } finally {
-                        owned?.session?.close(); creating = false
-                    }
-                }
-            }
-        }
-    }
-    if (failed) BasicText(text("create_failed"), style = style)
-}
-
-@Composable
 internal fun PanelActions(editor: InkEditor, palette: ToolbarPalette) {
     for (panel in Panel.entries) {
         if (panel == Panel.PAGES && editor.session.note == null) continue

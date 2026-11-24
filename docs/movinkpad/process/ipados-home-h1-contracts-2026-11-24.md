@@ -77,3 +77,12 @@
 - 每个 PDF 页均取得永久页编号，按默认 150 dpi 将点数换算为页面尺寸。读不到尺寸或任一边小于 1 点时沿用前一页尺寸，首页回退为 A4 竖向。这类回退页与 Android 一样不带 `pdfPage`（显示为空白页）。页面样式、模板和正文样式沿用 `Document.blank()` 默认值，iPad 暂无 Android 的新建笔记样式偏好。
 - 新增 6 项 iOS 回归测试，覆盖两页不同尺寸与分数点数、独立身份与重名、回退尺寸、移除所选文件后保存和重开、用共享 `DocumentCodec.readComplete` 读回、零页／损坏／密码保护拒绝，以及嵌入前快照被替换时拒绝发布并清理。
 - JDK 21、iPad Pro 13 英寸（M5）iOS 27.2 模拟器验证通过。`:shared:testDebugUnitTest` 2711 项，`:shared:iosSimulatorArm64Test` 2519 项，`:iosKit:iosSimulatorArm64Test` 34 项，另验 `:nativelibs:iosSimulatorArm64Test` 6 项。均为零失败、零错误、零跳过。`:app:assembleDebug` ARM64 构建通过。首页文件选择器接入属于 H1 界面工作，本次未做真机操作。
+
+## H1 界面验收记录
+
+- 首页换成 Android 的结构：浮动侧栏（可收成图标窄栏）带文件夹树；顶栏路径与网格／列表切换；芯片行排序、分组（不分组／日期／类型）、类型筛选和计数；网格文件夹卡片、日期分组、缩略图磁贴与 PDF／画布／页数角标；列表五列表头可点排序；右下角新建菜单（新建笔记、新建画布、导入 PDF、新建文件夹）与命名框；空文件夹插画和三个大按钮；恢复资料页取代旧首页顶部的待恢复行。视图选项与窄栏状态在重启后保留。
+- 分屏、AI、最近、回收站、偏好设置、关于先置灰，点了提示「这项功能即将推出」。条目 ⋮ 菜单属于 H2，H1 不放空按钮。
+- 新增文案由 Gemini 审：采纳 `coming_soon`（原「iPad 版即将推出」会被读成整个 iPad 版未上线）、`recovery_empty`、`list_failed` 三条改写；`import_pdf_failed`、`recovery_unsaved`、`untitled` 保留。旧首页专用的 12 条文案已删除，中英文键一致。
+- 导入 PDF 的页面规则改为与 Android 完全一致：读不出尺寸的页沿用前页尺寸且不带 `pdfPage`（显示为空白页），相应测试与 S2 记录已改。
+- 模拟器走查（iPad Pro 13 英寸，浅色与深色）：网格、列表、窄栏、新建菜单、新建文件夹、在空文件夹新建笔记并打开编辑器、返回仍在原文件夹、置灰提示、恢复资料空页均正常。导入 PDF 的系统文件选择器能弹出并可取消；模拟器的「文件」在本机读不出文件夹内容（系统提示「内容不可用」），未能在模拟器里选中文件，导入流程本身由 S2 的 6 项 iOS 测试覆盖。
+- 测试：`:shared:testDebugUnitTest` 2721、`:app:testDebugUnitTest` 1818、`:shared:iosSimulatorArm64Test` 2531、`:iosKit:iosSimulatorArm64Test` 40（新增首页状态 6 项），零失败零跳过；`:app:assembleDebug` 通过。
