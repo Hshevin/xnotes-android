@@ -1,5 +1,9 @@
 package com.xnotes.ui
 
+import com.xnotes.explorer.clockText
+import com.xnotes.explorer.formatSize
+import com.xnotes.explorer.itemsLabel
+import kotlinx.datetime.toKotlinLocalTime
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -67,9 +71,9 @@ import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.platform.DocMetaStore
-import com.xnotes.settings.ExplorerSortKey
-import com.xnotes.settings.ExplorerView
-import com.xnotes.settings.ThumbShape
+import com.xnotes.explorer.ExplorerSortKey
+import com.xnotes.explorer.ExplorerView
+import com.xnotes.explorer.ThumbShape
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -702,7 +706,7 @@ internal fun GalleryFolderChip(b: ExplorerBody, e: BrowseEntry) {
 internal fun formatClock(w: ExplorerWords, time: Long, clock24: Boolean, zone: ZoneId): String {
     if (time <= 0) return ""
     val t = java.time.Instant.ofEpochMilli(time).atZone(zone).toLocalTime()
-    return clockText(w, t, clock24)
+    return clockText(w, t.toKotlinLocalTime(), clock24)
 }
 
 /**

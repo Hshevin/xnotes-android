@@ -24,23 +24,9 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.explorer.ExplorerView
 import org.json.JSONArray
 import org.json.JSONObject
-
-/**
- * How the in-app explorer orders entries. The chosen key sorts within each group (folders first,
- * then files); [ExplorerView.descending] flips the direction.
- */
-enum class ExplorerSortKey(val id: String) {
-    NAME("name"),
-    MODIFIED("modified"),
-    CREATED("created"),
-    SIZE("size");
-
-    companion object {
-        fun fromId(id: String): ExplorerSortKey = entries.firstOrNull { it.id == id } ?: MODIFIED
-    }
-}
 
 /** A folder pinned to the home sidebar: its tree document uri and the name to show. */
 data class PinnedFolder(val uri: String, val name: String)

@@ -18,9 +18,9 @@ import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.platform.FontCatalog
-import com.xnotes.settings.ExplorerLayout
-import com.xnotes.settings.FolderPlacement
-import com.xnotes.settings.GroupBy
+import com.xnotes.explorer.ExplorerLayout
+import com.xnotes.explorer.FolderPlacement
+import com.xnotes.explorer.GroupBy
 import java.time.DayOfWeek
 import java.time.Month
 

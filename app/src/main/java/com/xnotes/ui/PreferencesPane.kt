@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.explorer.clockText
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -75,7 +76,7 @@ import com.xnotes.R
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
-import com.xnotes.settings.ExplorerLayout
+import com.xnotes.explorer.ExplorerLayout
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
@@ -387,7 +388,7 @@ fun PreferencesPane(
             FieldLabel(stringResource(R.string.pref_dates))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s8), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
                 Chip(words.daysAgo(2), prefs.dateStyle == "relative") { updateHome(prefs.copy(dateStyle = "relative")) }
-                Chip("${words.shortWeekday(java.time.DayOfWeek.WEDNESDAY)} ${clockText(words, java.time.LocalTime.of(17, 30), true)}", prefs.dateStyle == "day") { updateHome(prefs.copy(dateStyle = "day")) }
+                Chip("${words.shortWeekday(java.time.DayOfWeek.WEDNESDAY)} ${clockText(words, kotlinx.datetime.LocalTime(17, 30), true)}", prefs.dateStyle == "day") { updateHome(prefs.copy(dateStyle = "day")) }
                 Chip(words.dayMonthYear(16, java.time.Month.SEPTEMBER, 2026), prefs.dateStyle == "date") { updateHome(prefs.copy(dateStyle = "date")) }
             }
             FieldLabel(stringResource(R.string.pref_tapping_file))

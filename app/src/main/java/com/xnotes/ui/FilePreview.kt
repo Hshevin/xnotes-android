@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.explorer.formatSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

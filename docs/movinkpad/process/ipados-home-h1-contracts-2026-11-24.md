@@ -38,3 +38,18 @@
 - 右下角圆形新建按钮，菜单：新建笔记、新建画布、导入 PDF、新建文件夹；空文件夹显示插画与三个大按钮。
 - 新建笔记／画布／文件夹先弹命名框（Android 的新建笔记页含封面、纸张、模板，列入 H3）。
 - 恢复资料页：列出待恢复记录，可恢复或放弃（取代首页顶部的待恢复行）。
+
+## S1 实现记录
+
+- Android 与 iPad 共用 `com.xnotes.explorer` 的排序、分组、浏览区文字格式和视图选项。两端条目实现 `ExplorerEntry`，排序和分组保留各自的条目类型。
+- Android 继续使用原字符串资源和设置 JSON。实测 14 个已存字段往返一致，缺失及无效设置沿用原默认值。`kotlinx-datetime` 0.7.1 的 JVM 产物将 `Month` 和 `DayOfWeek` 定义为独立类型，Android 适配层使用库提供的转换函数保留原来的 `java.time` 签名。`app/src/test` 无改动。
+- iPad 使用 `lstat` 读取文件字节数、修改时间和创建时间。缺少创建时间时以修改时间参与排序。文件夹按同一可见性规则只计直接子项，目录无法列举时计数留空。模拟器测试分别设置创建与修改时间，并验证嵌套文件夹、隐藏项、未知类型及符号链接。
+- 使用 JDK 21 和指定的 iPad Pro 13 英寸（M5）模拟器。以下测试均为零失败、零跳过。
+
+| Gradle 任务 | 结果 |
+| --- | --- |
+| `:shared:testDebugUnitTest` | 2721 项通过 |
+| `:shared:iosSimulatorArm64Test` | 2525 项通过 |
+| `:app:testDebugUnitTest` | 1818 项通过 |
+| `:iosKit:iosSimulatorArm64Test` | 34 项通过 |
+| `:app:assembleDebug` | 未执行。自动审批要求用户对本次调试 APK 打包单独授权。 |
