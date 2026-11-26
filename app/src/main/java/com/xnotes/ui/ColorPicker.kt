@@ -502,10 +502,22 @@ internal fun NativeField(
     centered: Boolean = false,
     autoFocus: Boolean = false,
     textSp: Float = 13f,
+    placeholder: String = "",
     onDone: (() -> Unit)? = null,
     onBlur: (() -> Unit)? = null,
 ) {
-    val textColor = LocalPalette.current.text.toArgb()
+    val palette = LocalPalette.current
+    val textColor = palette.text.toArgb()
+    val hintColor = palette.textDim.toArgb()
+    val highlightColor = android.graphics.Color.argb(48, palette.text.r, palette.text.g, palette.text.b)
+    val liveOnText = androidx.compose.runtime.rememberUpdatedState(onText)
+    val liveOnDone = androidx.compose.runtime.rememberUpdatedState(onDone)
+    val liveOnBlur = androidx.compose.runtime.rememberUpdatedState(onBlur)
+    val wantedInputType = when {
+        decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        numeric -> InputType.TYPE_CLASS_NUMBER
+        else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    }
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
@@ -517,11 +529,7 @@ internal fun NativeField(
                 includeFontPadding = false
                 isSingleLine = true
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSp)
-                inputType = when {
-                    decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                    numeric -> InputType.TYPE_CLASS_NUMBER
-                    else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                }
+                inputType = wantedInputType
                 imeOptions = EditorInfo.IME_ACTION_DONE
                 gravity = when {
                     centered -> Gravity.CENTER
@@ -541,12 +549,12 @@ internal fun NativeField(
                 }
                 filters = filterList.toTypedArray()
                 onImeBack = { clearFocus() }
-                if (onBlur != null) setOnFocusChangeListener { _, has -> if (!has) onBlur() }
+                setOnFocusChangeListener { _, has -> if (!has) liveOnBlur.value?.invoke() }
                 setOnEditorActionListener { _, actionId, _ ->
-                    if (actionId == EditorInfo.IME_ACTION_DONE) { onDone?.invoke(); clearFocus(); true } else false
+                    if (actionId == EditorInfo.IME_ACTION_DONE) { liveOnDone.value?.invoke(); clearFocus(); true } else false
                 }
                 addTextChangedListener(object : TextWatcher {
-                    override fun afterTextChanged(s: Editable?) { if (hasFocus()) onText(s?.toString().orEmpty()) }
+                    override fun afterTextChanged(s: Editable?) { if (hasFocus()) liveOnText.value(s?.toString().orEmpty()) }
                     override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                     override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 })
@@ -560,7 +568,17 @@ internal fun NativeField(
         },
         update = { et ->
             et.setTextColor(textColor)
-            // Mirror the live colour only while the user isn't typing, so an edit isn't clobbered.
+            et.setHintTextColor(hintColor)
+            et.highlightColor = highlightColor
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                et.textCursorDrawable?.mutate()?.let { it.setTint(textColor); et.textCursorDrawable = it }
+                et.textSelectHandle?.mutate()?.let { it.setTint(textColor); et.setTextSelectHandle(it) }
+                et.textSelectHandleLeft?.mutate()?.let { it.setTint(textColor); et.setTextSelectHandleLeft(it) }
+                et.textSelectHandleRight?.mutate()?.let { it.setTint(textColor); et.setTextSelectHandleRight(it) }
+            }
+            if (et.inputType != wantedInputType) et.inputType = wantedInputType
+            if (et.hint?.toString().orEmpty() != placeholder) et.hint = placeholder
+            // Mirror the live value only while the user isn't typing, so an edit isn't clobbered.
             if (!et.hasFocus() && et.text?.toString() != value) {
                 et.setText(value)
                 et.setSelection(et.text.length)

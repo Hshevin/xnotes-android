@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import com.xnotes.core.template.TemplateCatalog
+import com.xnotes.ui.theme.MinTouchTarget
 import com.xnotes.ui.theme.TextSize
 import com.xnotes.ui.theme.Space
 import androidx.compose.foundation.Canvas
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -33,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,7 +89,7 @@ import kotlin.math.roundToInt
  * control their popups had.
  */
 
-private enum class NotePage(val depth: Int) { HOME(0), STYLES(1), MARGINS(1), VIEW(1), LIMITS(1), CUSTOMIZE(2), FILTERS(2) }
+private enum class NotePage(val depth: Int) { HOME(0), JUMP(1), STYLES(1), MARGINS(1), VIEW(1), LIMITS(1), CUSTOMIZE(2), FILTERS(2) }
 
 /** The gear and its panel; [onOpenChange] hears it open and shut, as the reading islands must to stay up meanwhile. */
 @Composable
@@ -121,6 +124,7 @@ private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: (
     PanelPages(page, { it.depth }) { p ->
         when (p) {
             NotePage.HOME -> HomePage(editor, fullscreen, onToggleFullscreen, ::go, close)
+            NotePage.JUMP -> PageJumpPage(editor, onBack = { page = NotePage.HOME }, onJumped = close)
             NotePage.STYLES -> StylesPage(editor, styles, onImportTemplate, onBack = { page = NotePage.HOME }, onCustomize = { page = NotePage.CUSTOMIZE })
             NotePage.CUSTOMIZE -> CustomizePage(editor, styles) { page = NotePage.STYLES }
             NotePage.MARGINS -> MarginsPage(editor, margins) { page = NotePage.HOME }
@@ -136,7 +140,7 @@ private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: (
 @Composable
 private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, go: (NotePage) -> Unit, close: () -> Unit) {
     val vs = editor.viewSettings
-    PageCard(editor)
+    PageCard(editor) { go(NotePage.JUMP) }
     Spacer(Modifier.height(Space.s12))
     PanelCard {
         val prefs = editor.preferences
@@ -212,43 +216,356 @@ internal fun LimitsLink(on: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * Prev and next round a "3 of 12" over where the page sits in the note. Tapping the count opens the
- * page jump, which also sets where the body's own page numbers begin.
+ * Prev and next round a "3 of 12" over where the page sits in the note. Tapping the count slides
+ * into [PageJumpPage], which jumps by page number and configures body numbering.
  */
 @Composable
-private fun PageCard(editor: Editor) {
+private fun PageCard(editor: Editor, onJump: () -> Unit) {
     val palette = LocalPalette.current
-    var jumping by remember { mutableStateOf(false) }
+    val numbering = editor.pageNumbering
+    val absNum = editor.pageIndex + 1
+    val bodyLabel = if (editor.pageCount > 0) numbering.label(editor.pageIndex) else "$absNum"
     PanelCard {
         val keys = keyboardAttached()
         PanelCaption(stringResource(R.string.caption_page)) {
-            if (keys) CaptionHint("${Keys.PREV_PAGE} · ${Keys.NEXT_PAGE}")
+            if (bodyLabel != "$absNum") {
+                CaptionValue(stringResource(R.string.number_body_badge, bodyLabel))
+            } else if (keys) {
+                CaptionHint("${Keys.PREV_PAGE} · ${Keys.NEXT_PAGE}")
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-            RoundButton(XnotesIcons.prev, stringResource(R.string.previous_page)) { editor.prevPage() }
+            RoundButton(XnotesIcons.prev, stringResource(R.string.previous_page), enabled = editor.pageIndex > 0) { editor.prevPage() }
             val shape = MaterialTheme.shapes.small
-            Box(Modifier.weight(1f)) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .clip(shape)
-                        .background(palette.bg.toComposeColor())
-                        .border(1.dp, palette.border.toComposeColor(), shape)
-                        .clickable(role = Role.Button) { jumping = true },
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("${editor.pageIndex + 1}", color = palette.text.toComposeColor(), fontSize = TextSize.headline, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.width(Space.s8))
-                    Text(stringResource(R.string.page_of_count, editor.pageCount), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
-                }
-                if (jumping) PageJumpPopup(editor) { jumping = false }
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(44.dp)
+                    .clip(shape)
+                    .background(palette.bg.toComposeColor())
+                    .border(1.dp, palette.border.toComposeColor(), shape)
+                    .clickable(role = Role.Button, onClickLabel = stringResource(R.string.title_go_to_page), onClick = onJump),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("$absNum", color = palette.text.toComposeColor(), fontSize = TextSize.headline, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(Space.s8))
+                Text(stringResource(R.string.page_of_count, editor.pageCount), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
             }
-            RoundButton(XnotesIcons.next, stringResource(R.string.next_page)) { editor.nextPage() }
+            RoundButton(XnotesIcons.next, stringResource(R.string.next_page), enabled = editor.pageIndex < editor.pageCount - 1) { editor.nextPage() }
         }
         Spacer(Modifier.height(Space.s12))
         PagePosition(editor.pageIndex, editor.pageCount)
+    }
+}
+
+/**
+ * Go to page + body numbering sub-page inside the settings panel.
+ *
+ * Keeps jumping primary (with live destination mapping when body numbering differs from absolute)
+ * and puts body-start numbering into its own clean card below without a nested popup.
+ */
+@Composable
+private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Unit) {
+    val palette = LocalPalette.current
+    val numbering = editor.pageNumbering
+    val pageCount = editor.pageCount
+    val hasOffset = numbering.hasBodyOffset
+    var byBody by remember { mutableStateOf(hasOffset) }
+    var jumpText by remember { mutableStateOf("") }
+    var jumpSync by remember { mutableIntStateOf(0) }
+    var startText by remember { mutableStateOf("${numbering.start + 1}") }
+    var startSync by remember { mutableIntStateOf(0) }
+    var startInvalid by remember { mutableStateOf(false) }
+
+    LaunchedEffect(hasOffset) {
+        if (!hasOffset) {
+            if (byBody) {
+                byBody = false
+                jumpText = ""
+                jumpSync++
+            }
+        } else if (jumpText.isBlank()) {
+            byBody = true
+        }
+    }
+    LaunchedEffect(numbering.start) {
+        val synced = "${numbering.start + 1}"
+        if (startText != synced) startText = synced
+    }
+
+    val activeByBody = hasOffset && byBody
+    val trimmed = jumpText.trim()
+    val resolvedIndex = if (trimmed.isEmpty()) null else if (activeByBody) numbering.resolve(trimmed) else numbering.resolveAbsolute(trimmed)
+    val jumpInvalid = trimmed.isNotEmpty() && resolvedIndex == null
+    val rangeLabel = numbering.validRangeLabel(activeByBody)
+
+    fun commitJump() {
+        val target = resolvedIndex ?: return
+        editor.goToPage(target)
+        onJumped()
+    }
+
+    fun applyStart(index: Int?) {
+        if (index != null && index !in 0 until pageCount) return
+        editor.setBodyStartPage(index)
+        startText = "${editor.pageNumbering.start + 1}"
+        startInvalid = false
+        startSync++
+    }
+
+    PanelHeader(stringResource(R.string.title_go_to_page), onBack)
+
+    PanelCard {
+        if (hasOffset) {
+            PanelSegmented(
+                listOf(stringResource(R.string.number_body), stringResource(R.string.number_absolute)),
+                selected = if (activeByBody) 0 else 1,
+                onSelect = { idx ->
+                    val nextBody = idx == 0
+                    if (nextBody != byBody) {
+                        byBody = nextBody
+                        jumpText = ""
+                        jumpSync++
+                    }
+                },
+            )
+            Spacer(Modifier.height(Space.s12))
+        }
+
+        PanelCaption(stringResource(R.string.number_jump_target)) {
+            when {
+                jumpInvalid -> CaptionValue(stringResource(R.string.number_range_hint, rangeLabel))
+                resolvedIndex != null && hasOffset -> CaptionValue(
+                    if (activeByBody) stringResource(R.string.number_preview_absolute, resolvedIndex + 1)
+                    else stringResource(R.string.number_preview_body, numbering.label(resolvedIndex)),
+                )
+                else -> CaptionHint(rangeLabel)
+            }
+        }
+
+        val shape = MaterialTheme.shapes.small
+        val goEnabled = resolvedIndex != null
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(MinTouchTarget)
+                    .clip(shape)
+                    .background(palette.bg.toComposeColor())
+                    .border(1.dp, (if (jumpInvalid) palette.accent else palette.border).toComposeColor(), shape)
+                    .padding(horizontal = Space.s12),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                key(jumpSync) {
+                    NativeField(
+                        value = jumpText,
+                        onText = { jumpText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        numeric = !activeByBody,
+                        maxLen = 16,
+                        textSp = 15f,
+                        placeholder = stringResource(
+                            if (activeByBody && numbering.start > 0) R.string.number_input_placeholder_roman
+                            else R.string.number_input_placeholder,
+                        ),
+                        onDone = ::commitJump,
+                    )
+                }
+            }
+            Box(
+                Modifier
+                    .height(MinTouchTarget)
+                    .widthIn(min = 76.dp)
+                    .clip(shape)
+                    .background(if (goEnabled) palette.selectionBackground.toComposeColor() else panelColors().raised)
+                    .clickable(enabled = goEnabled, role = Role.Button, onClick = ::commitJump)
+                    .padding(horizontal = Space.s16),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.go),
+                    color = (if (goEnabled) palette.selectionForeground else palette.disabled).toComposeColor(),
+                    fontSize = TextSize.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+
+    if (!editor.readOnly && pageCount > 0) {
+        val isManual = editor.state.document.bodyStartPage != null
+        Spacer(Modifier.height(Space.s16))
+        PanelCaption(stringResource(R.string.number_body_section)) {
+            if (isManual) {
+                Row(
+                    Modifier
+                        .clip(MaterialTheme.shapes.extraSmall)
+                        .clickable(role = Role.Button) { applyStart(null) }
+                        .padding(horizontal = Space.s6),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.number_auto),
+                        color = palette.accent.toComposeColor(),
+                        fontSize = TextSize.label,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            } else {
+                CaptionHint(stringResource(R.string.number_mode_auto))
+            }
+        }
+
+        val startOneBased = numbering.start + 1
+        val canDec = startOneBased > 1
+        val canInc = startOneBased < pageCount
+        val stepperShape = MaterialTheme.shapes.small
+        val currentIsBodyFirst = numbering.isBodyFirst(editor.pageIndex)
+
+        PanelCard(padding = PaddingValues(vertical = Space.s2)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .padding(start = Space.s16, end = Space.s12),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.number_start),
+                    color = palette.text.toComposeColor(),
+                    fontSize = TextSize.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(
+                    Modifier
+                        .height(44.dp)
+                        .clip(stepperShape)
+                        .background(palette.bg.toComposeColor())
+                        .border(1.dp, (if (startInvalid) palette.accent else palette.border).toComposeColor(), stepperShape),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .width(44.dp)
+                            .fillMaxHeight()
+                            .clickable(enabled = canDec, role = Role.Button) { applyStart(numbering.start - 1) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            XnotesIcons.minus,
+                            null,
+                            tint = (if (canDec) palette.text else palette.disabled).toComposeColor(),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+                    Box(Modifier.width(52.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        key(startSync) {
+                            NativeField(
+                                value = startText,
+                                onText = { raw ->
+                                    startText = raw
+                                    val cleaned = raw.trim()
+                                    if (cleaned.isEmpty()) {
+                                        startInvalid = false
+                                    } else {
+                                        val parsed = cleaned.toIntOrNull()
+                                        if (parsed != null && parsed in 1..pageCount) {
+                                            startInvalid = false
+                                            if (parsed - 1 != numbering.start || !numbering.isBodyFirst(parsed - 1)) {
+                                                editor.setBodyStartPage(parsed - 1)
+                                            }
+                                        } else {
+                                            startInvalid = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                numeric = true,
+                                maxLen = 6,
+                                centered = true,
+                                textSp = 14f,
+                                onBlur = {
+                                    startText = "${editor.pageNumbering.start + 1}"
+                                    startInvalid = false
+                                },
+                            )
+                        }
+                    }
+                    Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+                    Box(
+                        Modifier
+                            .width(44.dp)
+                            .fillMaxHeight()
+                            .clickable(enabled = canInc, role = Role.Button) { applyStart(numbering.start + 1) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            XnotesIcons.plus,
+                            null,
+                            tint = (if (canInc) palette.text else palette.disabled).toComposeColor(),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+            CardDivider()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clickable(enabled = !currentIsBodyFirst, role = Role.Button) { applyStart(editor.pageIndex) }
+                    .padding(horizontal = Space.s16),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(if (currentIsBodyFirst) R.string.number_current_is_start else R.string.number_use_current),
+                    color = (if (currentIsBodyFirst) palette.textDim else palette.text).toComposeColor(),
+                    fontSize = TextSize.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                if (currentIsBodyFirst) {
+                    Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                } else {
+                    Text(
+                        stringResource(R.string.number_current_page_badge, editor.pageIndex + 1),
+                        color = palette.textDim.toComposeColor(),
+                        fontSize = TextSize.label,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(Space.s12))
+        val footerText = if (startInvalid) {
+            stringResource(R.string.number_start_invalid, pageCount)
+        } else {
+            bodyNumberingSummary(numbering, pageCount)
+        }
+        Text(
+            footerText,
+            color = (if (startInvalid) palette.text else palette.textDim).toComposeColor(),
+            fontSize = TextSize.label,
+            lineHeight = 17.sp,
+            modifier = Modifier.padding(horizontal = Space.s4),
+        )
+    }
+}
+
+@Composable
+private fun bodyNumberingSummary(numbering: com.xnotes.core.model.PageNumbering, pageCount: Int): String {
+    val start = numbering.start
+    val body = numbering.bodyRange().orEmpty()
+    val front = numbering.frontRange().orEmpty()
+    return when {
+        start == 0 && !numbering.hasBodyOffset -> stringResource(R.string.number_hint_default)
+        start == 0 -> stringResource(R.string.number_hint_pdf_labels, body)
+        start == 1 && pageCount == 2 -> stringResource(R.string.number_hint_front_one_body_one, body)
+        start == 1 -> stringResource(R.string.number_hint_front_one_body_many, pageCount, body)
+        start == pageCount - 1 -> stringResource(R.string.number_hint_front_many_body_one, start, front, pageCount, body)
+        else -> stringResource(R.string.number_hint_front_many_body_many, start, front, start + 1, pageCount, body)
     }
 }
 

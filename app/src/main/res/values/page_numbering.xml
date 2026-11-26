@@ -1,11 +1,25 @@
 <resources>
     <string name="number_absolute">Absolute page</string>
     <string name="number_body">Body page</string>
-    <string name="number_start">Body starts at absolute page</string>
-    <string name="number_set">Set start</string>
-    <string name="number_auto">Restore automatic</string>
-    <string name="number_invalid">Enter a valid page in range</string>
-    <string name="number_current">Absolute %1$d / %2$d · Body %3$s</string>
-    <string name="number_hint">Before the body: i, ii, iii…</string>
-    <string name="number_use_current">Use current page as body start</string>
+    <string name="number_body_badge">Body %1$s</string>
+    <string name="number_jump_target">Page number</string>
+    <string name="number_input_placeholder">Enter page</string>
+    <string name="number_input_placeholder_roman">e.g. 1 or iv</string>
+    <string name="number_preview_absolute">→ Page %1$d</string>
+    <string name="number_preview_body">→ Body %1$s</string>
+    <string name="number_range_hint">Range %1$s</string>
+    <string name="number_body_section">Body numbering</string>
+    <string name="number_mode_auto">Auto</string>
+    <string name="number_auto">Restore auto</string>
+    <string name="number_start">Body starts at</string>
+    <string name="number_use_current">Set current page as body 1</string>
+    <string name="number_current_is_start">Current page is body 1</string>
+    <string name="number_current_page_badge">Page %1$d</string>
+    <string name="number_start_invalid">Enter a page between 1 and %1$d</string>
+    <string name="number_hint_default">Pages before the body start are numbered with Roman numerals (i, ii, iii…).</string>
+    <string name="number_hint_front_one_body_one">Page 1 is i; page 2 is %1$s.</string>
+    <string name="number_hint_front_one_body_many">Page 1 is i; pages 2–%1$d are %2$s.</string>
+    <string name="number_hint_front_many_body_one">Pages 1–%1$d are %2$s; page %3$d is %4$s.</string>
+    <string name="number_hint_front_many_body_many">Pages 1–%1$d are %2$s; pages %3$d–%4$d are %5$s.</string>
+    <string name="number_hint_pdf_labels">Using PDF page labels (%1$s).</string>
 </resources>

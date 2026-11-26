@@ -1,11 +1,25 @@
 <resources>
     <string name="number_absolute">绝对页码</string>
     <string name="number_body">正文页码</string>
-    <string name="number_start">正文起始绝对页码</string>
-    <string name="number_set">设置起始页</string>
+    <string name="number_body_badge">正文 %1$s</string>
+    <string name="number_jump_target">目标页码</string>
+    <string name="number_input_placeholder">输入页码</string>
+    <string name="number_input_placeholder_roman">如 1 或 iv</string>
+    <string name="number_preview_absolute">→ 第 %1$d 页</string>
+    <string name="number_preview_body">→ 正文 %1$s</string>
+    <string name="number_range_hint">范围 %1$s</string>
+    <string name="number_body_section">正文页码</string>
+    <string name="number_mode_auto">自动</string>
     <string name="number_auto">恢复自动</string>
-    <string name="number_invalid">请输入范围内的有效页码</string>
-    <string name="number_current">绝对 %1$d / %2$d · 正文 %3$s</string>
-    <string name="number_hint">正文前：i、ii、iii…</string>
-    <string name="number_use_current">设当前页为正文起始页</string>
+    <string name="number_start">正文起始页</string>
+    <string name="number_use_current">设当前页为正文第 1 页</string>
+    <string name="number_current_is_start">当前页已是正文第 1 页</string>
+    <string name="number_current_page_badge">第 %1$d 页</string>
+    <string name="number_start_invalid">请输入 1–%1$d 之间的页码</string>
+    <string name="number_hint_default">设置起始页后，正文前的页面会以罗马数字（i、ii、iii…）编号。</string>
+    <string name="number_hint_front_one_body_one">第 1 页为 i，第 2 页为 %1$s。</string>
+    <string name="number_hint_front_one_body_many">第 1 页为 i，第 2–%1$d 页为 %2$s。</string>
+    <string name="number_hint_front_many_body_one">第 1–%1$d 页为 %2$s，第 %3$d 页为 %4$s。</string>
+    <string name="number_hint_front_many_body_many">第 1–%1$d 页为 %2$s，第 %3$d–%4$d 页为 %5$s。</string>
+    <string name="number_hint_pdf_labels">当前使用 PDF 页码标签（%1$s）。</string>
 </resources>
