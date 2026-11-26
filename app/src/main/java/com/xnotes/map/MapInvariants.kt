@@ -7,6 +7,7 @@ object MapInvariants {
         val roots = state.roots.toSet()
         if (roots.size != state.roots.size) add("Duplicate entries in roots")
         for ((id, node) in state.nodes) {
+            if (node.width != null && (!node.width.isFinite() || node.width <= 0.0)) add("Invalid width on node $id")
             if (id != node.id) add("Node ${node.id} is stored under $id")
             if (id in roots && id in state.parent) add("Root $id also has a parent")
             if (id !in roots && id !in state.parent) add("Node $id has no parent and is not a root")

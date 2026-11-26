@@ -302,7 +302,7 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
             fill?.let { parts += MapPiece.Fill(r, it) }
             parts += MapPiece.Item(ShapeItem(ShapeKind.LINE, Pt(r.left, r.bottom), Pt(r.right, r.bottom), style.border, style.borderWidth))
         }
-        if (look.titleShown) frame.title?.let { t -> parts += titlePiece(node, t) }
+        if (look.titleShown) frame.title?.let { t -> parts += titlePiece(node, t, metrics.titleWrap(node, look.root)) }
         frame.ink?.let { area ->
             for (stroke in node.ink.strokes) {
                 val placed = stroke.copyForWrite().also { it.translate(area.left, area.top) }
@@ -320,8 +320,8 @@ class MapProjection(private val titles: MapTitles, private val labels: TextMeasu
         return parts to bounds
     }
 
-    private fun titlePiece(node: MapNode, title: Rect): MapPiece =
-        MapPiece.Glyphs(titles.outline(node.title, node.style.textSize, node.style.bold, NodeMetrics.MAX_TITLE_W), node.style.text, title.left, title.top)
+    private fun titlePiece(node: MapNode, title: Rect, wrap: Double): MapPiece =
+        MapPiece.Glyphs(titles.outline(node.title, node.style.textSize, node.style.bold, wrap), node.style.text, title.left, title.top)
 
     /** Source chips across [row], as many as fit, then "+N" for the rest. */
     private fun chipParts(node: MapNode, row: Rect): List<MapPiece> {

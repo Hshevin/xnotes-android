@@ -239,6 +239,18 @@ class MapEditorTest {
         assertTrue(ink.strokes.single().bounds().right <= ink.width + 1e-6)
     }
 
+    @Test fun shorteningATitleNeverNarrowsTheAreaUnderInkWrittenBesideIt() {
+        val r = f.root("x".repeat(30))
+        e.addInk(r, pen(30.0 to 60.0, 50.0 to 70.0))
+        // written out where only the long title made room
+        assertTrue(e.addInk(r, pen(250.0 to 60.0, 300.0 to 70.0)))
+        e.setTitle(r, "Hi")
+        val node = f.state.nodes.getValue(r)
+        val area = f.metrics.frame(node, true, Pt(0.0, 0.0)).ink!!
+        for (s in node.ink.strokes) assertTrue("${s.bounds()} inside ${area.w}", s.bounds().right <= area.w + 1e-6)
+        assertEquals(300.0, area.w, 1e-9)
+    }
+
     @Test fun firstStrokeInAResizedNodeKeepsItsWidthAndIsCutSideways() {
         val r = rootForInk()
         assertTrue(e.resize(r, Size(200.0, 10.0)))
@@ -320,6 +332,7 @@ class MapEditorTest {
 
     @Test fun resizingAChildReflowsItsTree() {
         val r = f.root("root")
+        e.setLayout(r, LayoutKind.RIGHT)
         val a = f.child(r, "a")
         val b = f.child(r, "b")
         val bTop = e.layout().rectOf(b)!!.top

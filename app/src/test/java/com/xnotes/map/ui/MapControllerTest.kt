@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -163,7 +164,7 @@ class MapControllerTest {
         assertEquals(24.0, child.radius, 1e-9)
 
         c.select(r)
-        assertEquals("a root has no sibling handle", listOf(MapController.HandleKind.CHILD), c.chrome(1.0, 48.0)!!.handles.map { it.kind })
+        assertEquals("a root has no sibling handle", listOf(MapController.HandleKind.RESIZE, MapController.HandleKind.CHILD), c.chrome(1.0, 48.0)!!.handles.map { it.kind })
 
         e.setLayout(r, LayoutKind.ORG)
         c.select(a)
@@ -193,7 +194,7 @@ class MapControllerTest {
         val r = root()
         val a = x.f.child(r, "a")
         c.select(r)
-        val handle = c.chrome(0.25, 48.0)!!.handles.single()
+        val handle = c.chrome(0.25, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }
         val onChild = Pt(x.rect(a).left + 2.0, x.rect(a).centerY)
         assertTrue("the target reaches the child", handle.center.distanceTo(onChild) <= handle.radius)
         c.press(onChild, 0.25, 48.0, finger = true, eraser = false, tool = Tool.PAN, connector = false, fingerDraws = false)
@@ -208,7 +209,7 @@ class MapControllerTest {
         x.f.model.setCollapsed(r, true)
         c.refresh()
         c.select(r)
-        val handle = c.chrome(1.0, 48.0)!!.handles.single()
+        val handle = c.chrome(1.0, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }
         val box = x.rect(r)
         assertTrue(handle.center.x - handle.radius >= box.right + MapProjection.BADGE)
     }
@@ -216,13 +217,78 @@ class MapControllerTest {
     @Test fun handlesKeepTheirScreenSizeAtAnyZoom() {
         val r = root()
         c.select(r)
-        assertEquals(12.0, c.chrome(2.0, 48.0)!!.handles.single().radius, 1e-9)
+        assertEquals(12.0, c.chrome(2.0, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }.radius, 1e-9)
+    }
+
+    // ---- resizing ----
+
+    private fun grip() = c.chrome(1.0, 48.0)!!.handles.single { it.kind == MapController.HandleKind.RESIZE }
+
+    @Test fun theResizeGripSitsAtTheSelectedNodesBottomRightCorner() {
+        val r = root()
+        c.select(r)
+        val box = x.rect(r)
+        val g = grip()
+        assertTrue(g.center.x > box.right && g.center.y > box.bottom)
+        assertTrue(g.center.distanceTo(Pt(box.right, box.bottom)) < g.radius)
+    }
+
+    @Test fun draggingTheGripPreviewsThenResizesInOneStep() {
+        val r = root()
+        // counted first: counting undoes everything, which clears the selection
+        val undo = x.f.undoCount()
+        c.select(r)
+        val start = x.rect(r)
+        val g = grip().center
+        // pressed just inside the node's own corner: the grip wins over the node it belongs to
+        val at = Pt(start.right - 2.0, start.bottom - 2.0)
+        val before = x.state
+        assertTrue(c.press(at, 1.0, 48.0, finger = false, eraser = false, tool = Tool.PEN, connector = false, fingerDraws = false))
+        c.move(Pt(at.x + 150.0, at.y + 120.0), 1.0)
+        assertEquals("the preview is shown", start.w + 150.0, x.rect(r).w, 1e-6)
+        assertEquals(start.h + 120.0, x.rect(r).h, 1e-6)
+        assertEquals("only the grip shows while resizing", listOf(MapController.HandleKind.RESIZE), c.chrome(1.0, 48.0)!!.handles.map { it.kind })
+        assertSame("nothing is committed yet", before, x.state)
+        c.release(Pt(at.x + 150.0, at.y + 120.0))
+        assertEquals(r, c.selected)
+        assertTrue(g != grip().center)
+        assertEquals(start.w + 150.0, x.rect(r).w, 1e-6)
+        assertEquals(start.h + 120.0, x.rect(r).h, 1e-6)
+        assertEquals(undo + 1, x.f.undoCount())
+    }
+
+    @Test fun aCancelledResizeLeavesTheNodeAsItWas() {
+        val r = root()
+        c.select(r)
+        val start = x.rect(r)
+        val g = grip().center
+        val before = x.state
+        c.press(g, 1.0, 48.0, finger = true, eraser = false, tool = Tool.PAN, connector = false, fingerDraws = false)
+        c.move(Pt(g.x + 200.0, g.y + 200.0), 1.0)
+        c.cancel()
+        assertEquals(before, x.state)
+        assertEquals(start, x.rect(r))
+    }
+
+    @Test fun aPenStrokeInANodeIsCutAtItsInkArea() {
+        val r = root()
+        assertTrue(c.inkCuts(x.center(r)).isEmpty())
+        e.resize(r, com.xnotes.map.Size(300.0, 220.0))
+        c.refresh()
+        val box = x.rect(r)
+        val cuts = c.inkCuts(Pt(box.centerX, box.bottom - 20.0))
+        assertEquals(4, cuts.size)
+        val area = x.f.metrics.frame(x.state.nodes.getValue(r), true, box.topLeft).ink!!
+        assertTrue(com.xnotes.core.model.CutEdges.keeps(cuts, area.centerX, area.centerY))
+        assertFalse(com.xnotes.core.model.CutEdges.keeps(cuts, area.right + 1.0, area.centerY))
+        assertFalse(com.xnotes.core.model.CutEdges.keeps(cuts, area.centerX, area.top - 1.0))
+        assertTrue(c.inkCuts(Pt(5000.0, 5000.0)).isEmpty())
     }
 
     @Test fun theChildHandleStartsASubtopicReadyToType() {
         val r = root()
         c.select(r)
-        val handle = c.chrome(1.0, 48.0)!!.handles.single()
+        val handle = c.chrome(1.0, 48.0)!!.handles.single { it.kind == MapController.HandleKind.CHILD }
         assertTrue(x.gesture(handle.center, finger = false, tool = Tool.PEN))
         assertNotNull(e.draft)
         val draft = e.draft!!.node

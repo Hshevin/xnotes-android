@@ -784,6 +784,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     class MapFieldState(
         val x: Double, val y: Double, val width: Double, val height: Double, val zoom: Double,
         val text: String, val textPx: Double, val bold: Boolean, val color: Rgba, val node: com.xnotes.map.NodeId, val isNew: Boolean,
+        /** The width the title wraps at, in canvas units. */
+        val wrap: Double,
     )
 
     private fun refreshMapField() {
@@ -792,7 +794,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             val at = viewport.contentToViewport(it.rect.topLeft)
             MapFieldState(
                 at.x, at.y, it.rect.w, it.rect.h, viewport.zoom, it.text, it.style.textSize, it.style.bold,
-                com.xnotes.core.pal.NightInk.displayColor(it.style.text, view.lightBlackInk), it.node, it.isDraft,
+                com.xnotes.core.pal.NightInk.displayColor(it.style.text, view.lightBlackInk), it.node, it.isDraft, it.wrap,
             )
         }
     }
@@ -850,17 +852,22 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             map.clearSelection()
         }
         override fun tapBlank(at: Pt, tool: Tool): Boolean = map.tapBlank(at, tool == Tool.MAP)
+        override fun inkCuts(at: Pt, tool: Tool) =
+            if (!tool.isStroke || wandEnabled) emptyList() else map.inkCuts(at)
     }
 
     init {
         interaction.mapInput = mapInput
     }
 
-    /** Write a finished stroke into the node it started in, if it started in one; false otherwise. */
+    /**
+     * Write a finished stroke into the node it started in, if it started in one; false otherwise.
+     * A stroke cut to a node that shows nothing inside it is used up too: it never reaches the canvas.
+     */
     private fun writeIntoNode(stroke: Stroke): Boolean {
         if (!stroke.tool.isStroke || stroke.sampleCount == 0) return false
         val node = map.inkTarget(Pt(stroke.xAt(0), stroke.yAt(0))) ?: return false
-        return map.writeInk(node, stroke)
+        return map.writeInk(node, stroke) || !stroke.showsInk()
     }
 
     /** Everything drawn: the items and the mind maps. */
@@ -2189,9 +2196,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             bounds = bounds?.union(b) ?: b
         }
         map.chrome(zoom, com.xnotes.ui.theme.MinTouchTarget.value * devicePxPerDp)?.let { c ->
+            val grip = c.handles.firstOrNull { it.kind == com.xnotes.map.ui.MapController.HandleKind.RESIZE }
             parts += OverlayTessellator.mapChrome(
-                c.outline, c.handles.map { it.center }, c.dropTarget, c.relationLine, c.relation,
-                zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp,
+                c.outline, c.handles.filter { it !== grip }.map { it.center }, c.dropTarget, c.relationLine, c.relation,
+                zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp, resize = grip?.center,
             )
             val pad = (OverlayTessellator.MAP_OUTLINE_GAP_PX + OverlayTessellator.MAP_HANDLE_PX) / zoom
             val boxes = listOfNotNull(c.outline, c.dropTarget) +
