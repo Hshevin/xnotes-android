@@ -64,6 +64,7 @@
 - 2026-11-24 [主线独立测试版 test15：图层切换提速](test-builds/master-test15-2026-11-24.md)
 - 2026-11-24 [主线测试版 test16：点选图层不再等待](test-builds/master-test16-2026-11-24.md)
 - 2026-11-26 [Zotero 测试版 test1](test-builds/zotero-test1-2026-11-26.md)
+- 2026-11-26 [Zotero 测试版 test2：分类侧栏与按分类存放](test-builds/zotero-test2-2026-11-26.md)
 
 ## 编辑器（`editor/`）
 

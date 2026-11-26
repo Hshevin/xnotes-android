@@ -358,3 +358,4 @@
 
 - 用户要求「自己打包一个测试版给我看看」：打包 Zotero 测试版 test1（`com.xnotes.movinkpad.branchtest.zotero`，源码 `d8bf02f9`）。未安装、未推送、未发布，正式版未动。
 - 用户随后要求「装上去」：test1 新安装到 MovinkPad Pro 14，正式版与其他测试版未动。未推送。
+- 用户要求「打包并覆盖」：test2（分类侧栏与按分类存放，源码 `686386cc`）覆盖安装到 MovinkPad（原 test1）。未推送。
