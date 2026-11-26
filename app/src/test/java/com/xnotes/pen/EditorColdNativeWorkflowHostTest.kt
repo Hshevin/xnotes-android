@@ -27,10 +27,8 @@ import org.robolectric.annotation.Config
 class EditorColdNativeWorkflowHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
     private fun directory(editor:Editor)=field(editor,"sessionDir") as File
-    private fun owner(editor:Editor)=field(editor,"sessionOwner") as LegacySessionQueue.Owner
     private fun canvasCodec()=CanvasCodec(AndroidImageCodec(),AndroidTextMeasurer())
     private suspend fun note(f:EditorPageCopyFixture,editor:Editor,path:String?=null):Document {
-        owner(editor).awaitAccepted()
         val document=Document.blank().apply {this.path=path;dirty=false}
         withContext(Dispatchers.IO) {
             if(path==f.sourceUri) f.source.outputStream().use {f.codec.write(document,it)}
@@ -46,11 +44,10 @@ class EditorColdNativeWorkflowHostTest {
             withContext(Dispatchers.Main) {
                 assertTrue(coordinator.bootstrap())
                 f.editor.onPresentationIntent={coordinator.retireIntent()}
-                f.editor.preparePresentationDeparture={coordinator.prepareDeparture(it)}
             }
             block(coordinator)
         } finally {withContext(NonCancellable+Dispatchers.Main) {
-            f.editor.onPresentationIntent=null;f.editor.preparePresentationDeparture=null
+            f.editor.onPresentationIntent=null
             coordinator.close()
         }}
     }
@@ -71,13 +68,12 @@ class EditorColdNativeWorkflowHostTest {
             }
             val saved=f.target.inputStream().use {f.codec.read(it)}
             assertTrue(saved.pages.single().items.isEmpty())
-            assertTrue(LastPresentationStore(f.context.filesDir).observe().read is LastPresentationRead.Ready)
+            assertSame(LastPresentationRead.Absent,LastPresentationStore(f.context.filesDir).observe().read)
         }
         assertArrayEquals(original,f.source.readBytes())
     }
 
     @Test fun aProtectedCanvasCanSaveAnIndependentCopyWithoutWritingItsRememberedSource()=runParkingScenario {f->
-        owner(f.editor).awaitAccepted()
         val document=InfiniteDocument(path=f.sourceUri)
         val codec=canvasCodec()
         withContext(Dispatchers.IO) {
@@ -125,7 +121,6 @@ class EditorColdNativeWorkflowHostTest {
 
     @Test fun anAbsentLegacySplitWithOnlyMissingPanesCanLeaveForHomeANewNoteOrAnActualFile() {
         for(action in listOf("home","new","open")) runParkingScenario {f->
-            owner(f.editor).awaitAccepted()
             val missingId=UUID.randomUUID().toString()
             withContext(Dispatchers.IO) {
                 f.seed()
@@ -155,8 +150,7 @@ class EditorColdNativeWorkflowHostTest {
                 withContext(Dispatchers.Main) {
                     if(action=="home") assertFalse(File(directory(f.editor),"document.xnote").exists())
                     else assertNotEquals(missingId,f.editor.visibleDocumentId)
-                    val marker=LastPresentationStore(f.context.filesDir).observe().read as LastPresentationRead.Ready
-                    assertEquals(LastPresentation.Home,marker.value)
+                    assertSame(LastPresentationRead.Absent,LastPresentationStore(f.context.filesDir).observe().read)
                 }
             }
             assertEquals(0,f.writes.get())

@@ -585,13 +585,25 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Publish z order across every layer, and which layers are hidden, as one update. */
     private fun publishLayerOrder() {
         val ordered = document.layers.stacked(document.items + map.parts)
-        val active = document.layers.entries.indexOfFirst { it.id == document.layers.activeId }
-        val belowOrActive = document.layers.entries.take(active + 1).map { it.id }.toSet()
-        val end = ordered.indexOfLast { it.layerId in belowOrActive }
         scene.batch {
             scene.setHiddenLayers(document.layers.hiddenIds)
-            scene.setOrder(ordered, end.takeIf { document.layers.entries.size > 1 })
+            scene.setOrder(ordered, activeLayerEnd(ordered.size))
         }
+    }
+
+    /**
+     * The z of the last item at or under the current layer, where live ink goes; null with one layer.
+     * Items stack in layer blocks ([DrawingLayers.stacked]), so counting them is enough: no order is built.
+     */
+    private fun activeLayerEnd(total: Int = -1): Int? {
+        val layers = document.layers
+        if (layers.entries.size <= 1) return null
+        val active = layers.entries.indexOfFirst { it.id == layers.activeId }
+        val belowOrActive = layers.entries.take(active + 1).mapTo(HashSet()) { it.id }
+        var n = 0
+        for (item in document.items) if ((item.layerId ?: com.xnotes.core.model.DrawingLayers.DEFAULT) in belowOrActive) n++
+        for (item in map.parts) if ((item.layerId ?: com.xnotes.core.model.DrawingLayers.DEFAULT) in belowOrActive) n++
+        return n - 1
     }
 
     /** Repaint the canvas with whatever the model currently says. */
@@ -772,6 +784,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     class MapFieldState(
         val x: Double, val y: Double, val width: Double, val height: Double, val zoom: Double,
         val text: String, val textPx: Double, val bold: Boolean, val color: Rgba, val node: com.xnotes.map.NodeId, val isNew: Boolean,
+        /** The width the title wraps at, in canvas units. */
+        val wrap: Double,
     )
 
     private fun refreshMapField() {
@@ -780,7 +794,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             val at = viewport.contentToViewport(it.rect.topLeft)
             MapFieldState(
                 at.x, at.y, it.rect.w, it.rect.h, viewport.zoom, it.text, it.style.textSize, it.style.bold,
-                com.xnotes.core.pal.NightInk.displayColor(it.style.text, view.lightBlackInk), it.node, it.isDraft,
+                com.xnotes.core.pal.NightInk.displayColor(it.style.text, view.lightBlackInk), it.node, it.isDraft, it.wrap,
             )
         }
     }
@@ -838,17 +852,22 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             map.clearSelection()
         }
         override fun tapBlank(at: Pt, tool: Tool): Boolean = map.tapBlank(at, tool == Tool.MAP)
+        override fun inkCuts(at: Pt, tool: Tool) =
+            if (!tool.isStroke || wandEnabled) emptyList() else map.inkCuts(at)
     }
 
     init {
         interaction.mapInput = mapInput
     }
 
-    /** Write a finished stroke into the node it started in, if it started in one; false otherwise. */
+    /**
+     * Write a finished stroke into the node it started in, if it started in one; false otherwise.
+     * A stroke cut to a node that shows nothing inside it is used up too: it never reaches the canvas.
+     */
     private fun writeIntoNode(stroke: Stroke): Boolean {
         if (!stroke.tool.isStroke || stroke.sampleCount == 0) return false
         val node = map.inkTarget(Pt(stroke.xAt(0), stroke.yAt(0))) ?: return false
-        return map.writeInk(node, stroke)
+        return map.writeInk(node, stroke) || !stroke.showsInk()
     }
 
     /** Everything drawn: the items and the mind maps. */
@@ -2177,9 +2196,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             bounds = bounds?.union(b) ?: b
         }
         map.chrome(zoom, com.xnotes.ui.theme.MinTouchTarget.value * devicePxPerDp)?.let { c ->
+            val grip = c.handles.firstOrNull { it.kind == com.xnotes.map.ui.MapController.HandleKind.RESIZE }
             parts += OverlayTessellator.mapChrome(
-                c.outline, c.handles.map { it.center }, c.dropTarget, c.relationLine, c.relation,
-                zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp,
+                c.outline, c.handles.filter { it !== grip }.map { it.center }, c.dropTarget, c.relationLine, c.relation,
+                zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp, resize = grip?.center,
             )
             val pad = (OverlayTessellator.MAP_OUTLINE_GAP_PX + OverlayTessellator.MAP_HANDLE_PX) / zoom
             val boxes = listOfNotNull(c.outline, c.dropTarget) +
@@ -3077,34 +3097,66 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var layerContentVersion by mutableStateOf(0)
         private set
 
-    fun editLayers(change: () -> Unit): Boolean = changeLayers(true, change)
+    /** Bumped when the layer list changes (current layer, visibility, lock, name, order) without any layer's contents changing. */
+    var layerVersion by mutableStateOf(0)
+        private set
 
-    fun selectLayer(id: String): Boolean {
-        if (document.layers.activeId == id || document.layers.entries.none { it.id == id }) return false
-        return changeLayers(false) { document.layers.select(id) }
+    /** A layer edit that moves objects between layers or deletes them: a content edit like any other. */
+    fun editLayers(change: () -> Unit): Boolean {
+        if (!beginLayerChange()) return false
+        record(change)
+        syncScene()
+        refresh()
+        endLayerChange()
+        return true
     }
 
-    private fun changeLayers(recordHistory: Boolean, change: () -> Unit): Boolean {
+    /** Visibility, lock, name, order or a new empty layer: no object changes layer, so only the draw order is republished. */
+    fun editLayerStack(change: () -> Unit): Boolean {
+        if (!beginLayerChange()) return false
+        history.push(com.xnotes.core.history.EditLayers.captureStack(document.layers, null, change))
+        publishLayerOrder()
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+        endLayerChange()
+        return true
+    }
+
+    /** Only where the next stroke lands changes: the scene just moves its live-ink boundary. */
+    fun selectLayer(id: String): Boolean {
+        if (document.layers.activeId == id || document.layers.entries.none { it.id == id }) return false
+        if (!beginLayerChange()) return false
+        document.layers.select(id)
+        scene.setActiveLayerEnd(activeLayerEnd())
+        // The current layer is written with the next real edit: a tap alone does not start a save.
+        endLayerChange(save = false)
+        return true
+    }
+
+    private fun beginLayerChange(): Boolean {
         if (interaction.mode != CanvasPointerMode.IDLE) return false
         commitText()
         settleHeld()
         val handoff = handoffGen
         view.publishThen { if (handoff == handoffGen) pad.release() }
         map.settleForHistory()
-        val mapBefore = document.map.state
-        if (recordHistory) {
-            val layers = com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change)
-            val mapAfter = document.map.state
-            history.push(if (mapAfter == mapBefore) layers else com.xnotes.core.history.CompositeCommand(
-                listOf(layers, com.xnotes.map.MapStateCommand(document.map, mapBefore, mapAfter)),
-            ))
-        } else change()
-        interaction.clearSelection()
-        syncScene()
-        markDirty()
-        refresh()
-        view.publish()
         return true
+    }
+
+    private fun record(change: () -> Unit) {
+        val mapBefore = document.map.state
+        val layers = com.xnotes.core.history.EditLayers.capture(document.layers, { document.items }, document::replaceAll, change)
+        val mapAfter = document.map.state
+        history.push(if (mapAfter == mapBefore) layers else com.xnotes.core.history.CompositeCommand(
+            listOf(layers, com.xnotes.map.MapStateCommand(document.map, mapBefore, mapAfter)),
+        ))
+    }
+
+    private fun endLayerChange(save: Boolean = true) {
+        interaction.clearSelection()
+        if (save) markDirty()
+        layerVersion++
+        view.publish()
     }
 
     /** Inside [editLayers]: delete layer [id] with everything on it, its mind map trees included. */
@@ -3130,7 +3182,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         commitText() // a label being typed is the first thing undo takes back
         map.settleForHistory()
         finishSelectionPreviews()
+        val command = history.nextUndo
         history.undo()
+        if ((command as? com.xnotes.core.history.EditLayers)?.stackOnly == true) publishLayerOrder()
         interaction.clearSelection()
         markDirty()
         refresh()
@@ -3141,7 +3195,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         commitText()
         map.settleForHistory()
         finishSelectionPreviews()
+        val command = history.nextRedo
         history.redo()
+        if ((command as? com.xnotes.core.history.EditLayers)?.stackOnly == true) publishLayerOrder()
         interaction.clearSelection()
         markDirty()
         refresh()

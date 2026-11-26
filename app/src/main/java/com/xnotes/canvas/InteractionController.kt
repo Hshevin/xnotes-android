@@ -636,8 +636,9 @@ class InteractionController(
     init {
         state.paintLayerPreview = { page, r ->
             for (sel in selection) {
-                if (state.document.pages.getOrNull(sel.pageIndex) !== page || sel.item in followed) continue
-                r.withSave { r.translate(moveOffset.x, moveOffset.y); state.paintItem(sel.item, r, page) }
+                if (state.document.pages.getOrNull(sel.pageIndex) !== page || sel.item in followed || state.isUnderText(page, sel.item)) continue
+                val offset = state.vectorToPageSpace(moveOffset)
+                r.withSave { r.translate(offset.x, offset.y); state.paintItem(sel.item, r, page) }
             }
 
             if (strokePageIndex?.let { state.document.pages.getOrNull(it) } === page)
@@ -653,7 +654,7 @@ class InteractionController(
         // A selected fill under the typed text stays under the ink, moving with the drag.
         state.paintLiftedUnderText = { page, r ->
             for (sel in selection) {
-                if (page.layers.entries.size > 1 || sel.item in followed || state.document.pages.getOrNull(sel.pageIndex) !== page) continue
+                if (sel.item in followed || state.document.pages.getOrNull(sel.pageIndex) !== page) continue
                 if (!state.isUnderText(page, sel.item)) continue
                 r.withSave {
                     r.translate(moveOffset.x, moveOffset.y)

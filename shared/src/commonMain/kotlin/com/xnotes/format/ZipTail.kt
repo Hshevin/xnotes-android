@@ -60,7 +60,7 @@ object ZipTail {
     }
 
     /** Read [ch]'s central directory, or null when this is not a zip worth patching. */
-    fun read(ch: PositionedFile): Directory? {
+    fun read(ch: PositionedFile, allowComment: Boolean = false): Directory? {
         val size = ch.size()
         if (size < EOCD_LEN) return null
         // The end record sits last, after a comment of up to 64K that this never writes.
@@ -68,7 +68,7 @@ object ZipTail {
         val tail = ch.bytesAt(size - span, span) ?: return null
         var at = -1
         for (i in span - EOCD_LEN downTo 0) {
-            if (tail.getInt(i) == EOCD_SIG) {
+            if (tail.getInt(i) == EOCD_SIG && i + EOCD_LEN + (tail.getShort(i + 20).toInt() and 0xffff) == span) {
                 at = i
                 break
             }
@@ -79,7 +79,7 @@ object ZipTail {
         val cdOffset = tail.getInt(at + 16).toLong() and MAX_U32
         val commentLen = tail.getShort(at + 20)
         if (count == 0xFFFF || cdSize == MAX_U32 || cdOffset == MAX_U32) return null // zip64
-        if (commentLen != 0 || cdOffset + cdSize > size) return null
+        if ((!allowComment && commentLen != 0) || cdOffset + cdSize != size - commentLen - EOCD_LEN || cdSize > Int.MAX_VALUE) return null
         val cd = ch.bytesAt(cdOffset, cdSize.toInt()) ?: return null
         val entries = ArrayList<Entry>(count)
         var p = 0
@@ -108,10 +108,16 @@ object ZipTail {
     /** Hand [reader] entry [name] of [ch], inflated when it was deflated, seeking straight to it; null when there is no such entry. */
     fun <T> readEntry(ch: PositionedFile, name: String, reader: (Source) -> T): T? {
         val entry = read(ch)?.entries?.firstOrNull { it.name == name } ?: return null
+        return readEntry(ch, entry, reader)
+    }
+
+    fun <T> readEntry(ch: PositionedFile, entry: Entry, reader: (Source) -> T): T? {
         val head = ch.bytesAt(entry.localOffset, LOCAL_HEADER) ?: return null
         if (head.getInt(0) != LOCAL_SIG) return null
         val start = entry.localOffset + LOCAL_HEADER + head.getShort(26) + head.getShort(28)
-        val raw = ch.sourceAt(start)
+        val length = entry.record.u32(20)
+        require(start + length <= ch.size() && entry.method in setOf(0, 8))
+        val raw = FileRegion(ch, start, length).sourceAt(0)
         return (if (entry.method == 8) InflaterSource(raw, Inflater(true)) else raw).use(reader)
     }
 

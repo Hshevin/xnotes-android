@@ -5,6 +5,7 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.DrawingLayers
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageInsets
 import com.xnotes.core.audio.InkFade
@@ -14,6 +15,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Rooms
 import com.xnotes.core.model.paintPaperStrips
 import com.xnotes.core.model.paperStrips
+import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.insets
@@ -38,8 +40,8 @@ import kotlin.math.min
  */
 internal fun CanvasItem.isHighlighterInk(): Boolean = this is Stroke && this.tool == Tool.HIGHLIGHTER
 
-/** One band of a page layer: its pixels, and how current they are. Main thread only once published. */
-class Band(val surface: RasterSurface) {
+/** A completed band. An empty user-layer band owns no surface. Main thread only once published. */
+class Band(val surface: RasterSurface?) {
     /** Out of date: drawn until the rebuild asked for lands, never taken as built. */
     var stale = false
 
@@ -75,7 +77,7 @@ class PageLayer(val grid: BandGrid) {
 
     fun bytes(): Long {
         var n = 0L
-        for (k in bands.indices) if (bands[k] != null) n += grid.bytes(k)
+        for (k in bands.indices) if (bands[k]?.surface != null) n += grid.bytes(k)
         return n
     }
 }
@@ -431,9 +433,15 @@ class CanvasState(
      * land, which the changed footprint schedules, and lay the note out round the page as it now is.
      */
     fun settleRoom(view: RoomView) {
+        if (view.page.layers.entries.size > 1) {
+            // Only grids of the page immediately before this cut can stand in for its new geometry.
+            orders.remove(view.page)
+            for (store in heldInkStores(view.page)) for (map in listOf(store.now, store.before)) {
+                if (map[view.page]?.cover != view.cover) map.remove(view.page)?.free()
+            }
+        }
         roomView = RoomView(view.page, view.sideways, view.split, view.resume, view.shift, view.anchored, view.cover, live = false, color = view.color)
-        ink.gen++
-        bg.gen++
+        for (store in stores) store.gen++
         sharpGen++
         relayout()
     }
@@ -471,6 +479,12 @@ class CanvasState(
     fun roomSettled(page: Page): Boolean {
         val v = roomView ?: return true
         val seen = seenOf(page) ?: return true
+        if (page.layers.entries.size > 1) {
+            val ready = isPastResolutionCap() || inkStores(page).all { store ->
+                store.now[page]?.let { it.fits(page) && covers(it, seen) } == true
+            }
+            return ready && roomBackground(page, v, seen) == null
+        }
         return roomInk(page, v, seen) == null && roomBackground(page, v, seen) == null
     }
 
@@ -669,7 +683,7 @@ class CanvasState(
      * gives its pixels back at once ([PageLayer.free]) rather than when the collector comes
      * round, so what is held never runs far past the budget. Main thread only.
      */
-    private class Layers(val bandPx: Int, val gutter: Int) {
+    private class Layers(val bandPx: Int, val gutter: Int, val part: InkPart? = null) {
         /** The layer each page draws from, at the footprint and resolution it shows at. */
         val now = HashMap<Page, PageLayer>()
 
@@ -707,7 +721,30 @@ class CanvasState(
 
     private val ink = Layers(INK_BAND_PX, INK_GUTTER_PX)
     private val bg = Layers(BG_BAND_PX, BG_GUTTER_PX)
-    private val stores = arrayOf(ink, bg)
+    private val userStores = HashMap<InkPart, Layers>()
+    private val stores get() = listOf(ink, bg) + userStores.values
+    private val orders = HashMap<Page, UserLayerInk>()
+    private fun order(page: Page) = orders.getOrPut(page) { UserLayerInk(page) }
+
+    private fun storeFor(part: InkPart) = userStores.getOrPut(part) { Layers(INK_BAND_PX, INK_GUTTER_PX, part) }
+
+    private fun inkStores(page: Page): List<Layers> {
+        if (page.layers.entries.size == 1) return listOf(ink)
+        return order(page).layers.values.flatMap { layer -> layer.parts.map(::storeFor) }
+    }
+
+    private fun heldInkStores(page: Page) =
+        if (page.layers.entries.size == 1) listOf(ink) else userStores.values.filter { page in it.now || page in it.before }
+
+    /** An abandoned grid can still have a build in flight. Publication checks the grid's identity. */
+    private fun forgetObsoleteInk(page: Page, dropHidden: Boolean) {
+        if (page.layers.entries.size > 1) ink.drop(page)
+        for (store in userStores.values) {
+            if (page !in store.now && page !in store.before) continue
+            val entry = page.layers.entries.find { it.id == store.part?.layerId }
+            if (page.layers.entries.size == 1 || entry == null || (dropHidden && !entry.visible)) store.drop(page)
+        }
+    }
 
     /** A band the view wants built: how far it is from the screen (viewport px) and what it costs. */
     private class Want(val store: Layers, val page: Page, val layer: PageLayer, val index: Int, val distance: Double, val bytes: Long)
@@ -1537,19 +1574,24 @@ class CanvasState(
     /** Rasterize band [k] of [layer] off the calling thread, unless a build of that band of [page] is in flight. */
     private fun schedule(store: Layers, page: Page, layer: PageLayer, k: Int, ahead: Boolean = false) {
         val key = BandKey(page, k)
-        if (!store.pending.add(key)) return
-        if (ahead) prefetching = true
+        if (key in store.pending) return
         val gen = store.gen
         val grid = layer.grid
         val build: () -> Band
-        if (store === ink) {
-            val items = cacheItems(page) // snapshot on the UI thread
-            val withFlow = !flowLifted // snapshot too; the generation guard discards stale builds
-            build = { renderInk(page, grid, k, items, withFlow) }
+        if (store !== bg) {
+            val items = cacheItems(page, store.part) // snapshot on the UI thread
+            if (store.part != null && items.over.isEmpty() && layer.bands[k] == null) {
+                layer.bands[k] = Band(null)
+                return
+            }
+            val withFlow = store === ink && !flowLifted // snapshot too; the generation guard discards stale builds
+            build = { renderInk(page, grid, k, items, withFlow, sparse = store.part != null) }
         } else {
             val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
             build = { renderBackground(page, grid, k).also { it.seq = seq } }
         }
+        store.pending.add(key)
+        if (ahead) prefetching = true
         runAsync {
             val band = build()
             postToMain {
@@ -1560,11 +1602,11 @@ class CanvasState(
                     layer.free(k) // the out-of-date band it replaces
                     layer.bands[k] = band
                     // The build painted from what it read then; a repair since, as a playhead crossing ink, would be lost.
-                    meanwhile?.let { repaintBand(grid, k, band, page, it) }
+                    meanwhile?.let { repaintBand(store, layer, k, page, it) }
                 } else {
-                    band.surface.recycle()
+                    band.surface?.recycle()
                     // Thrown away for an edit made since, with the band it was to replace still showing: ask again.
-                    if (store.now[page] === layer && layer.bands[k]?.stale == true) schedule(store, page, layer, k)
+                    if (store.now[page] === layer && layer.bands[k]?.stale == true && canRequest(store, page)) schedule(store, page, layer, k)
                 }
                 // Repaint either way. A build the page outgrew mid-flight (a margin drag bumps the
                 // generation on every tick) is discarded here, and the draw loop is what schedules
@@ -1578,6 +1620,13 @@ class CanvasState(
         }
     }
 
+    private fun canRequest(store: Layers, page: Page): Boolean {
+        if (store === bg) return true
+        if (store === ink) return page.layers.entries.size == 1
+        val part = requireNotNull(store.part)
+        return page.layers.entries.size > 1 && order(page).layers[part.layerId]?.parts?.contains(part) == true && !isPastResolutionCap()
+    }
+
     /** Start the build of the nearest wanted band that lacks one, if none ahead of the screen is in flight. */
     private fun pump() {
         if (pumping) return
@@ -1587,7 +1636,7 @@ class CanvasState(
             while (!prefetching && !zoomingInProgress) {
                 val w = wanted.firstOrNull {
                     it.store.now[it.page] === it.layer && it.layer.bands[it.index]?.stale != false &&
-                        BandKey(it.page, it.index) !in it.store.pending
+                        BandKey(it.page, it.index) !in it.store.pending && canRequest(it.store, it.page)
                 } ?: break
                 schedule(w.store, w.page, w.layer, w.index, ahead = true)
             }
@@ -1631,7 +1680,11 @@ class CanvasState(
      * — those composite live so they MULTIPLY against the background). While the flow is lifted, so
      * are the fills under it, which the view then paints live beneath it.
      */
-    private fun cacheItems(page: Page): InkItems {
+    private fun cacheItems(page: Page, part: InkPart? = null): InkItems {
+        if (part != null) {
+            val items = order(page).layers[part.layerId]?.itemsFor(part).orEmpty()
+            return InkItems(emptyList(), items.filterNot { isLiftedItem(it) || it.isHighlighterInk() })
+        }
         val visible = page.visibleItems
         val n = PageLayers.underText(visible)
         val under = if (flowLifted) emptyList() else visible.subList(0, n).filter { !isLiftedItem(it) }
@@ -1640,12 +1693,16 @@ class CanvasState(
     }
 
     /** Rasterize band [k] of [grid] of [page]'s ink: what of [items] and the flow its surface holds. */
-    private fun renderInk(page: Page, grid: BandGrid, k: Int, items: InkItems, includeFlow: Boolean): Band {
+    private fun renderInk(page: Page, grid: BandGrid, k: Int, items: InkItems, includeFlow: Boolean, sparse: Boolean = false): Band {
+        val held = grid.held(k)
+        if (sparse && items.over.none { it.paintBounds().intersects(held) }) {
+            noteGeometryBuilt(page) // computing the bounds of an off-band stroke can build its ribbon
+            return Band(null)
+        }
         val surface = surfaceFactory.create(grid.surfaceW(k), grid.surfaceH(k), 1.0)
         surface.fill(TRANSPARENT)
         val r = inkRenderer(page, surface.renderer())
         grid.enter(r, k) // the grid covers the margins, so page space starts inset
-        val held = grid.held(k)
         val f = fade
         InkFade.paint(items.under, r, f, { it.paintBounds().intersects(held) }) { it.paint(r) }
         if (includeFlow) paintFlow?.invoke(page, r, held)
@@ -1764,6 +1821,61 @@ class CanvasState(
      */
     fun drawInk(r: Renderer, page: Page, seen: Rect) = drawLayer(ink, r, page, seen)
 
+    /** Composite in page space, keeping each highlighter and the wet stroke at its layer depth. */
+    internal fun drawUserLayers(
+        r: Renderer, page: Page, seen: Rect, room: RoomView? = null,
+        clipOut: (List<List<Pt>>) -> Unit,
+    ) {
+        val order = order(page)
+        val live = isPastResolutionCap()
+        val painter = inkRenderer(page, r)
+        for (layer in order.layers.values) {
+            if (live) {
+                drawThroughRoom(r, room, seen) { region ->
+                    for (i in maxOf(0, order.under - layer.start) until layer.items.size) {
+                        val item = layer.items[i]
+                        if (!isLiftedItem(item) && item.paintBounds().intersects(region)) paintItem(item, r, page)
+                    }
+                }
+                if (room?.live == true) for (item in room.anchored) {
+                    if (item.layerId == layer.id && item !in order.underText && item.paintBounds().intersects(seen))
+                        paintItem(item, r, page)
+                }
+            } else {
+                for (part in layer.parts) drawUserPart(r, page, seen, layer, part, room)
+                drawThroughRoom(r, room, seen) { region ->
+                    for (i in layer.highlighters) drawHighlighter(r, page, order.visible, layer.start + i, region, clipOut)
+                }
+            }
+            if (layer.id == page.layers.activeId) paintLayerPreview?.invoke(page, painter)
+        }
+        if (live) noteGeometryBuilt(page)
+    }
+
+    private fun drawUserPart(r: Renderer, page: Page, seen: Rect, layer: UserLayerInk.Layer, part: InkPart, room: RoomView?) {
+        val store = storeFor(part)
+        if (room == null) return drawLayer(store, r, page, seen)
+        val old = if (room.live) null else roomLayer(store, page, room, seen)
+        if (old != null) room.drawCut(r, seen) { drawBands(r, old, it) }
+        else drawThroughRoom(r, room, seen) { drawLayer(store, r, page, it) }
+
+        // Anchors were lifted out of the old pixels. The resized bands already include them.
+        val items = layer.itemsFor(part)
+        fun anchors(region: Rect) {
+            for (item in room.anchored) {
+                if (item in items && (room.live || !item.isHighlighterInk()) && item.paintBounds().intersects(region))
+                    paintItem(item, r, page)
+            }
+        }
+        if (room.live || old != null) anchors(seen)
+        else if (room.anchored.isNotEmpty()) store.now[page]?.let { current ->
+            for (k in current.grid.meeting(seen)) if (current.bands[k] == null) {
+                val stripe = current.grid.shown(k)
+                r.withSave { r.clipRect(stripe); anchors(stripe) }
+            }
+        }
+    }
+
     /** [drawInk] for the background layer of a page that has one. */
     fun drawBackground(r: Renderer, page: Page, seen: Rect) {
         if (hasPageBackground(page)) drawLayer(bg, r, page, seen)
@@ -1774,10 +1886,10 @@ class CanvasState(
         val g = layer.grid
         val old = store.before[page]?.takeIf { it.cover == g.cover && it.grid.sideways == g.sideways }
         for (k in g.meeting(seen)) {
+            if (layer.bands[k]?.stale != false) schedule(store, page, layer, k)
             val band = layer.bands[k]
-            if (band == null || band.stale) schedule(store, page, layer, k)
             if (band != null) {
-                r.drawRaster(band.surface, g.shown(k), g.source(k))
+                band.surface?.let { r.drawRaster(it, g.shown(k), g.source(k)) }
             } else if (old != null) {
                 r.save()
                 r.clipRect(g.shown(k))
@@ -1791,13 +1903,14 @@ class CanvasState(
     fun drawBands(r: Renderer, layer: PageLayer, seen: Rect? = null) {
         val g = layer.grid
         for (k in if (seen == null) layer.bands.indices else g.meeting(seen)) {
-            layer.bands[k]?.let { r.drawRaster(it.surface, g.shown(k), g.source(k)) }
+            layer.bands[k]?.surface?.let { r.drawRaster(it, g.shown(k), g.source(k)) }
         }
     }
 
     /** Ask for the bands of [page]'s layers that show in [seen] (page space) and are missing, without drawing. */
     fun askFor(page: Page, seen: Rect) {
-        askFor(ink, page, seen)
+        if (page.layers.entries.size == 1 || !isPastResolutionCap())
+            for (store in inkStores(page)) askFor(store, page, seen)
         if (hasPageBackground(page)) askFor(bg, page, seen)
     }
 
@@ -1839,7 +1952,7 @@ class CanvasState(
 
     /** Ask for the out-of-date bands of [layer] on screen at once, and the rest in their turn. */
     private fun askAgain(store: Layers, page: Page, layer: PageLayer) {
-        if (!layer.fits(page)) return // the draw loop begins a layer anew
+        if (!layer.fits(page) || !canRequest(store, page)) return // the draw loop begins a layer anew
         val seen = seenOf(page)
         if (seen != null) for (k in layer.grid.meeting(seen)) if (layer.bands[k]?.stale == true) schedule(store, page, layer, k)
         pump()
@@ -1870,33 +1983,59 @@ class CanvasState(
 
     /** Append a single just-committed stroke into an existing cache (cheap), else rebuild. */
     fun appendToCache(page: Page, item: CanvasItem) {
-        if (page.layers.entries.size > 1) { repairInkRegions(listOf(page to item.paintBounds())); return }
-        if (item.isHighlighterInk()) return // composited live over the page, never cached
-        appendToSharpInk(page, item) // keep the sharp viewport crisp without a full re-render
-        if (pendingSharp) pendingSharpEdits.add(page to item.paintBounds().outset(SHARP_EDIT_PAD))
+        val store = if (page.layers.entries.size > 1) {
+            orders.remove(page)
+            if (!page.layers.visible(item)) {
+                forgetObsoleteInk(page, dropHidden = true)
+                return
+            }
+            if (item.isHighlighterInk() || isLiftedItem(item)) return
+            val id = item.layerId ?: DrawingLayers.DEFAULT
+            val part = if (item is ShapeItem && item.isFill) {
+                val layer = order(page).layers.getValue(id)
+                if (item in layer.items.subList(0, layer.prefix)) {
+                    if (!layer.cacheFills) {
+                        userStores[layer.fills]?.drop(page)
+                        return
+                    }
+                    layer.fills
+                } else layer.body
+            } else InkPart(id)
+            userStores[part] ?: return
+        } else {
+            if (item.isHighlighterInk()) return
+            appendToSharpInk(page, item)
+            if (pendingSharp) pendingSharpEdits.add(page to item.paintBounds().outset(SHARP_EDIT_PAD))
+            ink
+        }
         val bounds = item.paintBounds()
-        ink.now[page]?.let { appendTo(it, page, item, bounds) }
-        ink.before[page]?.let { appendTo(it, page, item, bounds) }
+        store.now[page]?.let { appendTo(store, it, page, item, bounds) }
+        store.before[page]?.let { appendTo(store, it, page, item, bounds) }
     }
 
-    /** Paint [item] onto the bands of [layer] that hold it; a band whose build is in flight gets it again when that lands. */
-    private fun appendTo(layer: PageLayer, page: Page, item: CanvasItem, bounds: Rect) {
+    /** Paint [item] onto its built bands, allocating pixels on the first write to an empty band. */
+    private fun appendTo(store: Layers, layer: PageLayer, page: Page, item: CanvasItem, bounds: Rect) {
         val g = layer.grid
         for (k in g.meeting(bounds, held = true)) {
-            layer.bands[k]?.let {
-                val r = it.surface.renderer()
+            layer.bands[k]?.let { band ->
+                if (!bounds.intersects(g.held(k))) return@let
+                val surface = band.surface ?: surfaceFactory.create(g.surfaceW(k), g.surfaceH(k), 1.0).also {
+                    it.fill(TRANSPARENT)
+                    layer.bands[k] = Band(it).apply { stale = band.stale }
+                }
+                val r = surface.renderer()
                 r.save()
                 g.enter(r, k)
                 paintItem(item, r, page)
                 r.restore()
             }
-            noteMeanwhile(page, k, bounds)
+            noteMeanwhile(store, page, k, bounds)
         }
     }
 
-    private fun noteMeanwhile(page: Page, k: Int, rect: Rect) {
+    private fun noteMeanwhile(store: Layers, page: Page, k: Int, rect: Rect) {
         val key = BandKey(page, k)
-        if (key in ink.pending) ink.meanwhile[key] = ink.meanwhile[key]?.union(rect) ?: rect
+        if (key in store.pending) store.meanwhile[key] = store.meanwhile[key]?.union(rect) ?: rect
     }
 
     /**
@@ -1912,27 +2051,63 @@ class CanvasState(
     fun repairRegion(page: Page, dirtyRect: Rect): Boolean {
         repairSharpInk(page, dirtyRect) // erase from the sharp ink layer in place, no re-render
         if (pendingSharp) pendingSharpEdits.add(page to dirtyRect)
-        val now = ink.now[page]
-        now?.let { repaintLayer(it, page, dirtyRect) }
-        ink.before[page]?.let { repaintLayer(it, page, dirtyRect) }
-        return now != null
+        val rect = repairBounds(page, dirtyRect)
+        var held = false
+        for (store in heldInkStores(page)) {
+            store.now[page]?.let { repaintLayer(store, it, page, rect); held = true }
+            store.before[page]?.let { repaintLayer(store, it, page, rect) }
+        }
+        return held
     }
 
-    private fun repaintLayer(layer: PageLayer, page: Page, rect: Rect) {
+    // Removing the first non-fill in a layer can move surviving fills between its two parts,
+    // even when those fills are outside the erased region.
+    private fun repairBounds(page: Page, dirty: Rect): Rect {
+        val old = orders.remove(page)
+        if (old == null && userStores.isEmpty()) return dirty
+        forgetObsoleteInk(page, dropHidden = true)
+        if (old == null) return dirty
+        if (page.layers.entries.size == 1) return dirty
+        val current = order(page)
+        var rect = dirty
+        for ((id, layer) in current.layers) {
+            val before = old.layers[id] ?: continue
+            if (before.prefix == 0 && layer.prefix == 0) continue
+            val previous = before.items.take(before.prefix).toSet()
+            val next = layer.items.take(layer.prefix).toSet()
+            for (item in previous - next) rect = rect.union(item.paintBounds())
+            for (item in next - previous) rect = rect.union(item.paintBounds())
+        }
+        return rect
+    }
+
+    private fun repaintLayer(store: Layers, layer: PageLayer, page: Page, rect: Rect) {
         for (k in layer.grid.meeting(rect, held = true)) {
-            layer.bands[k]?.let { repaintBand(layer.grid, k, it, page, rect) }
-            noteMeanwhile(page, k, rect)
+            if (layer.bands[k] != null) repaintBand(store, layer, k, page, rect)
+            noteMeanwhile(store, page, k, rect)
         }
     }
 
-    /** Clear [rect] (page-local) of [band]'s ink and paint [page]'s items there again. */
-    private fun repaintBand(grid: BandGrid, k: Int, band: Band, page: Page, rect: Rect) {
-        val r = band.surface.renderer()
+    /** Clear and repaint an edit in this part only. A now-empty band can give all its pixels back. */
+    private fun repaintBand(store: Layers, layer: PageLayer, k: Int, page: Page, rect: Rect) {
+        val grid = layer.grid
+        val band = layer.bands[k] ?: return
+        val items = store.part?.let { cacheItems(page, it) }
+        val held = grid.held(k)
+        if (items != null && (band.surface == null || items.over.none { it.paintBounds().intersects(held) })) {
+            layer.free(k)
+            layer.bands[k] = renderInk(page, grid, k, items, includeFlow = false, sparse = true)
+            return
+        }
+        val r = requireNotNull(band.surface).renderer()
         r.save()
         grid.enter(r, k)
         r.clipRect(rect)
         r.clear()
-        paintInk(page, r, rect)
+        if (items == null) paintInk(page, r, rect) else {
+            val painter = inkRenderer(page, r)
+            InkFade.paint(items.over, painter, fade, { it.paintBounds().intersects(rect) && it.paintBounds().intersects(held) }) { it.paint(painter) }
+        }
         r.restore()
         noteGeometryBuilt(page) // a repaint builds ribbons too, on a page that may be out of reach by now
     }
@@ -1958,14 +2133,15 @@ class CanvasState(
      */
     fun paintUnderText(page: Page, target: Renderer, region: Rect) {
         val r = inkRenderer(page, target)
-        if (!flowLifted) return
-        val visible = page.visibleItems
-        val n = PageLayers.underText(visible)
-        InkFade.paint(visible.subList(0, n), r, fade, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
+        val multi = page.layers.entries.size > 1
+        if (!flowLifted && !multi) return
+        val fills = if (multi) order(page).underText else page.visibleItems.let { it.subList(0, PageLayers.underText(it)) }
+        InkFade.paint(fills, r, fade, { !isLiftedItem(it) && it.paintBounds().intersects(region) }) { it.paint(r) }
     }
 
     /** True when [item] is one of the fills under [page]'s typed text. */
     fun isUnderText(page: Page, item: CanvasItem): Boolean {
+        if (page.layers.entries.size > 1) return item in order(page).underText
         val visible = page.visibleItems
         val n = PageLayers.underText(visible)
         for (i in 0 until n) if (visible[i] === item) return true
@@ -1980,6 +2156,8 @@ class CanvasState(
 
     fun invalidatePage(page: Page) {
         ink.drop(page)
+        for (store in userStores.values) store.drop(page)
+        orders.remove(page)
         if (roomView?.page === page && roomView?.live == false) roomView = null
         ink.gen++
         sharpGen++
@@ -2023,22 +2201,23 @@ class CanvasState(
      * what schedules the rebuild (see [layerFor]).
      */
     fun invalidatePageGeometry() {
-        ink.gen++
-        bg.gen++
+        for (store in stores) store.gen++
         sharpGen++
     }
 
     fun invalidateAllCaches() {
         backgroundRevision++
         roomView = null
-        ink.clear()
-        bg.clear()
+        for (store in stores) {
+            store.clear()
+            store.gen++
+        }
+        userStores.clear()
+        orders.clear()
         unbaked.clear()
         for (entry in hlCaches.values) entry.surface.recycle()
         hlCaches.clear()
         wetInk.clear()
-        ink.gen++
-        bg.gen++
         sharpGen++
     }
 
@@ -2084,24 +2263,43 @@ class CanvasState(
      * untouched — undo/redo never edits it, so it must not flash either.
      */
     fun refreshAllInk() {
-        refreshInk(ink.now.keys.toList())
+        refreshInk((ink.now.keys + userStores.values.flatMap { it.now.keys } + orders.keys).toSet())
+    }
+
+    private fun invalidateInkBuilds(pages: Collection<Page>) {
+        ink.gen++
+        for (store in userStores.values) if (pages.any { it in store.now }) store.gen++
     }
 
     /** [refreshAllInk] for just [pages]: rebuilt off-thread, their old surfaces blitted meanwhile. */
     fun refreshInk(pages: Collection<Page>) {
-        ink.gen++
+        invalidateInkBuilds(pages)
         sharpGen++
-        for (page in pages) staleInk(page, null)
+        for (page in pages) {
+            orders.remove(page)
+            forgetObsoleteInk(page, dropHidden = true)
+            for (store in heldInkStores(page)) {
+                staleInk(store, page, null)
+            }
+        }
+    }
+
+    /** Visibility, order, name, lock and active layer change composition, not the band's contents. */
+    fun layerStackChanged(page: Page) {
+        orders.remove(page)
+        wanted = wanted.filterNot { it.page === page && it.store !== bg }
+        forgetObsoleteInk(page, dropHidden = false)
+        if (page.layers.entries.size == 1) refreshInk(listOf(page)) else sharpGen++
     }
 
     /** Mark [page]'s ink bands that hold [rect] (all of them when null) out of date, to be built again nearest the screen first. */
-    private fun staleInk(page: Page, rect: Rect?) {
-        ink.before[page]?.let { old ->
+    private fun staleInk(store: Layers, page: Page, rect: Rect?) {
+        store.before[page]?.let { old ->
             for (k in if (rect == null) old.bands.indices else old.grid.meeting(rect, held = true)) old.bands[k]?.stale = true
         }
-        val layer = ink.now[page] ?: return
+        val layer = store.now[page] ?: return
         for (k in if (rect == null) layer.bands.indices else layer.grid.meeting(rect, held = true)) layer.bands[k]?.stale = true
-        askAgain(ink, page, layer)
+        askAgain(store, page, layer)
     }
 
     /**
@@ -2111,12 +2309,15 @@ class CanvasState(
      */
     fun refreshInkRegions(regions: Map<Page, Rect>) {
         if (regions.isEmpty()) return
-        ink.gen++
+        invalidateInkBuilds(regions.keys)
         for ((page, rect) in regions) {
             val padded = rect.outset(SHARP_EDIT_PAD)
             repairSharpInk(page, padded)
             if (pendingSharp) pendingSharpEdits.add(page to padded)
-            staleInk(page, padded)
+            val dirty = repairBounds(page, padded)
+            for (store in heldInkStores(page)) {
+                staleInk(store, page, dirty)
+            }
         }
     }
 
@@ -2155,8 +2356,7 @@ class CanvasState(
      * same resolution.
      */
     fun invalidateCachesForZoom() {
-        ink.gen++
-        bg.gen++
+        for (store in stores) store.gen++
     }
 
     /** [page]'s ink layer as it stands, built or not. */
@@ -2177,19 +2377,6 @@ class CanvasState(
         return Math.round(max(dx, dy) * zoom * 8.0) / 8.0
     }
 
-    /** Every band of the layers of [row]'s pages, each as far from [view] as it lies, plus [extra]. */
-    private fun wantRow(row: IntRange, view: Rect, extra: Double, into: MutableList<Want>) {
-        for (i in row) {
-            val page = document.pages[i]
-            for (store in arrayOf(bg, ink)) {
-                if (store === bg && !hasPageBackground(page)) continue
-                val layer = layerFor(store, page)
-                val g = layer.grid
-                for (k in 0 until g.count) into += Want(store, page, layer, k, distance(i, g, k, view) + extra, g.bytes(k))
-            }
-        }
-    }
-
     /**
      * The bands to have built, nearest the screen first: those on it, then outward below and above
      * until [FILL_SHARE] of the budget is spoken for. Paginated, the row shown and then each
@@ -2197,14 +2384,31 @@ class CanvasState(
      * flips as page edges cross the screen and used to evict what had just been built. Null while
      * the note is not laid out.
      */
-    private fun plan(): List<Want>? {
+    private fun plan(visibleUncached: MutableSet<Page>): List<Want>? {
         val pages = document.pages
         val rows = rowRanges()
+        val pastCap by lazy { isPastResolutionCap() }
         if (rows.isEmpty() || pageRects.size != pages.size || viewportW <= 0 || viewportH <= 0) return null
         stamp++
         val view = visibleContentRect()
         val fill = (cacheBudget() * FILL_SHARE).toLong()
         val wants = ArrayList<Want>()
+        fun wantRow(row: IntRange, view: Rect, extra: Double) {
+            for (i in row) {
+                val page = document.pages[i]
+                val inkLayers = if (page.layers.entries.size == 1 || !pastCap) inkStores(page) else emptyList()
+                if (inkLayers.isEmpty() && extra == 0.0 && pageRects[i].intersects(view)) visibleUncached.add(page)
+                for (store in if (hasPageBackground(page)) listOf(bg) + inkLayers else inkLayers) {
+                    val layer = layerFor(store, page)
+                    val g = layer.grid
+                    for (k in 0 until g.count) {
+                        val band = layer.bands[k]
+                        val bytes = if (band != null && band.surface == null && !band.stale) 0 else g.bytes(k)
+                        wants += Want(store, page, layer, k, distance(i, g, k, view) + extra, bytes)
+                    }
+                }
+            }
+        }
         if (verticalScroll) {
             fun top(r: Int) = rows[r].minOf { pageRects[it].top }
             fun bottom(r: Int) = rows[r].maxOf { pageRects[it].bottom }
@@ -2213,7 +2417,7 @@ class CanvasState(
             while (first < rows.size && bottom(first) < view.top) first++
             var last = rows.lastIndex
             while (last >= 0 && top(last) > view.bottom) last--
-            for (r in first..last) wantRow(rows[r], view, 0.0, wants)
+            for (r in first..last) wantRow(rows[r], view, 0.0)
             var lo = first - 1
             var hi = last + 1
             while (lo >= 0 || hi <= rows.lastIndex) {
@@ -2222,16 +2426,16 @@ class CanvasState(
                 // A row further out holds only bands further out: stop once the nearer ones take the share.
                 val reach = min(below, above)
                 if (wants.sumOf { if (it.distance <= reach) it.bytes else 0L } >= fill) break
-                if (below <= above) wantRow(rows[hi++], view, 0.0, wants) else wantRow(rows[lo--], view, 0.0, wants)
+                if (below <= above) wantRow(rows[hi++], view, 0.0) else wantRow(rows[lo--], view, 0.0)
             }
         } else {
             val shown = currentRow.coerceIn(0, rows.lastIndex)
-            wantRow(rows[shown], view, 0.0, wants)
+            wantRow(rows[shown], view, 0.0)
             for (r in intArrayOf(shown + 1, shown - 1)) {
                 if (r !in rows.indices) continue
                 // Where a turn to it lands, and a screen further off than the row shown.
                 val landing = visibleFor(rowTargetScroll(r).x, flipLandingScrollY(r), zoom)
-                wantRow(rows[r], landing, viewportH.toDouble(), wants)
+                wantRow(rows[r], landing, viewportH.toDouble())
             }
         }
         wants.sortBy { it.distance }
@@ -2248,9 +2452,11 @@ class CanvasState(
      * is cached but builds nothing ahead.
      */
     fun prefetchAndPrune() {
-        wanted = plan() ?: return
-        near = wanted.mapTo(HashSet()) { it.page }
-        prune()
+        val visibleUncached = HashSet<Page>()
+        wanted = plan(visibleUncached) ?: return
+        val wantedPages = wanted.mapTo(HashSet()) { it.page }
+        near = if (visibleUncached.isEmpty()) wantedPages else wantedPages + visibleUncached
+        prune(wantedPages)
         if (!zoomingInProgress) {
             pump()
             prefetchMath?.let { fetch -> for (page in near) fetch(page, zoom) }
@@ -2265,7 +2471,7 @@ class CanvasState(
      * and, over budget, the unwanted bands furthest from the screen. Ribbons and highlighter
      * bitmaps go with the pages no wanted band is on.
      */
-    private fun prune() {
+    private fun prune(wantedPages: Set<Page>? = null) {
         val unfinished = HashSet<PageLayer>()
         for (w in wanted) if (w.layer.bands[w.index] == null) unfinished += w.layer
         var total = 0L
@@ -2275,7 +2481,11 @@ class CanvasState(
                 while (each.hasNext()) {
                     val (page, layer) = each.next()
                     val done = map === store.before && store.now[page]?.let { it !in unfinished } ?: true
-                    if (done || page !in indexOfPage) {
+                    val part = store.part
+                    val unused = part != null && (page.layers.entries.size == 1 ||
+                        page.layers.entries.none { it.id == part.layerId && it.visible } ||
+                        (wantedPages != null && (page !in wantedPages || (part.leadingFills && order(page).layers[part.layerId]?.cacheFills != true))))
+                    if (done || unused || page !in indexOfPage || (store === ink && page.layers.entries.size > 1)) {
                         layer.free()
                         each.remove()
                         continue
@@ -2285,7 +2495,7 @@ class CanvasState(
                         val wantedNow = layer.wantedAt[k] == stamp
                         val band = layer.bands[k]
                         if (band != null && band.stale && !wantedNow && map === store.now) layer.free(k)
-                        else if (band != null) total += layer.grid.bytes(k)
+                        else if (band?.surface != null) total += layer.grid.bytes(k)
                         if (wantedNow || layer.bands[k] != null) keep = true
                     }
                     if (!keep) each.remove()
@@ -2299,7 +2509,7 @@ class CanvasState(
             for (store in stores) for (map in arrayOf(store.now, store.before)) for ((page, layer) in map) {
                 val i = indexOfPage[page] ?: continue
                 for (k in layer.bands.indices) {
-                    if (layer.bands[k] == null || layer.wantedAt[k] == stamp) continue
+                    if (layer.bands[k]?.surface == null || layer.wantedAt[k] == stamp) continue
                     spare += Spare(layer, k, distance(i, layer.grid, k, view), layer.grid.bytes(k))
                 }
             }
@@ -2310,9 +2520,19 @@ class CanvasState(
                 total -= s.bytes
             }
         }
+        if (wantedPages != null) {
+            userStores.entries.removeAll { (_, store) -> store.now.isEmpty() && store.before.isEmpty() }
+            orders.keys.retainAll(near)
+        }
         if (hlCaches.isNotEmpty()) {
             val keep = HashSet<Stroke>()
-            for (p in near) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
+            for (p in near) {
+                if (p.layers.entries.size == 1) {
+                    for (item in p.visibleItems) if (item is Stroke && item.isHighlighterInk()) keep.add(item)
+                } else {
+                    for (layer in order(p).layers.values) for (i in layer.highlighters) keep.add(layer.items[i] as Stroke)
+                }
+            }
             val each = hlCaches.entries.iterator()
             while (each.hasNext()) {
                 val (stroke, entry) = each.next()
@@ -2422,6 +2642,7 @@ class CanvasState(
             val pr = pageRects.getOrNull(i) ?: continue
             if (!pr.intersects(visible)) continue
             val page = document.pages[i]
+            if (page.layers.entries.size > 1) return
             // The visible slice in page-local display coords, mapped to page space for the painters.
             val displayRegion = Rect.fromPoints(
                 Pt(max(pr.left, visible.left) - pr.left, max(pr.top, visible.top) - pr.top),
@@ -2557,13 +2778,11 @@ class CanvasState(
     class CacheSnapshot(val ink: LayerSnapshot, val background: LayerSnapshot, val bytes: Long, val budget: Long)
 
     fun cacheSnapshot(): CacheSnapshot {
-        val layers = stores.map { store ->
-            val held = store.now.values.sumOf { it.bytes() } + store.before.values.sumOf { it.bytes() }
-            LayerSnapshot(held, reach(store, down = false), reach(store, down = true))
-        }
-        var bytes = layers.sumOf { it.bytes }
-        for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
-        return CacheSnapshot(layers[0], layers[1], bytes, cacheBudget())
+        fun bytes(store: Layers) = store.now.values.sumOf { it.bytes() } + store.before.values.sumOf { it.bytes() }
+        val inks = LayerSnapshot(bytes(ink) + userStores.values.sumOf(::bytes), reach(ink, false), reach(ink, true))
+        val background = LayerSnapshot(bytes(bg), reach(bg, false), reach(bg, true))
+        val highlights = hlCaches.values.sumOf { it.surface.width.toLong() * it.surface.height * 4L }
+        return CacheSnapshot(inks, background, inks.bytes + background.bytes + highlights, cacheBudget())
     }
 
     /**
@@ -2597,6 +2816,17 @@ class CanvasState(
         val page = document.pages[i]
         if (store === bg && !hasPageBackground(page)) return null
         val pr = pageRects[i]
+        if (store === ink && page.layers.entries.size > 1) {
+            if (isPastResolutionCap()) return null
+            val order = orders[page] ?: return if (down) max(pr.top, edge) else min(pr.bottom, edge)
+            val gaps = order.layers.values.flatMap { layer ->
+                layer.parts.mapNotNull { part ->
+                    val partStore = userStores[part] ?: return if (down) max(pr.top, edge) else min(pr.bottom, edge)
+                    gapPast(partStore, i, edge, down)
+                }
+            }
+            return if (down) gaps.minOrNull() else gaps.maxOrNull()
+        }
         val layer = store.now[page]?.takeIf { it.fits(page) } ?: return if (down) max(pr.top, edge) else min(pr.bottom, edge)
         var gap: Double? = null
         for (k in layer.bands.indices) {

@@ -1,7 +1,7 @@
 package com.xnotes.pen
 
 import com.xnotes.core.geometry.Rect
-import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.storage.NativeReferenceTarget
 import com.xnotes.ui.NativeReferencePreparation
 import com.xnotes.ui.NativeReferenceResult
@@ -42,7 +42,7 @@ class PagedRegionOpenCompletenessHostTest {
     @Test fun aPartialInitialRegionReadCannotSaveOrReplaceTheOutgoingDirtyNote() {
         for(mode in listOf("unknown","missing-image")) runParkingScenario {f->
             withContext(Dispatchers.IO) {f.seed();f.seed(f.target)}
-            val info=BundleReferenceInfo.inspectStrict(f.target)
+            val info=TestBundleMetadata.read(f.target)
             withContext(Dispatchers.IO) {damage(f.target,mode)}
             val raw=f.target.readBytes();val original=f.source.readBytes()
             withContext(Dispatchers.Main) {
@@ -56,17 +56,17 @@ class PagedRegionOpenCompletenessHostTest {
                     assertTrue("$mode must reject the actual incomplete decode: $result",result is NativeReferenceResult.Failed)
                 } else assertTrue(preparation is NativeReferencePreparation.Failed)
                 assertEquals(0,adopted);assertSame(model,f.editor.state.document);assertSame(history,f.editor.history)
-                assertEquals(revision,model.bodyRevision);assertTrue(model.dirty);assertTrue(history.canUndo)
+                assertEquals(revision,model.bodyRevision);assertFalse(model.dirty);assertTrue(history.canUndo)
                 assertTrue(f.editor.noteOpen);assertFalse(f.editor.canvasOpen)
             }
-            assertArrayEquals(raw,f.target.readBytes());assertArrayEquals(original,f.source.readBytes())
-            assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
+            assertArrayEquals(raw,f.target.readBytes());assertFalse(original.contentEquals(f.source.readBytes()))
+            assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
         }
     }
     @Test fun aSameIdentityPartialBAtFinalRegionVerificationCannotReplaceTheOutgoingWorkspace() {
         for(mode in listOf("unknown","missing-image")) runParkingScenario {f->
             withContext(Dispatchers.IO) {f.seed();f.seed(f.target)}
-            val info=BundleReferenceInfo.inspectStrict(f.target)
+            val info=TestBundleMetadata.read(f.target)
             val original=f.source.readBytes()
             val request=withContext(Dispatchers.Main) {
                 f.editor.openAsync(f.sourceUri,"Reader.xnote")

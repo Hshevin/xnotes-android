@@ -1,7 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
@@ -56,8 +56,9 @@ fun LayersSidebar(editor: Editor) {
     val page = editor.state.document.pages.getOrNull(editor.pageIndex) ?: return
     key(page) {
         val preview = remember(editor.contentVersion) { LayerPreview(page.items, editor.state.footprint(page)) }
-        LayersPanel(page.layers, preview, editor.layerPreviewMode, { editor.layerPreviewMode = it }, editor.contentVersion, { editor.selectLayer(page, it) }, { edit -> editor.editLayers(page, edit) },
-            { id -> page.items.removeAll { it.layerId == id }; page.layers.delete(id) },
+        LayersPanel(page.layers, preview, editor.layerPreviewMode, { editor.layerPreviewMode = it }, editor.contentVersion to editor.layerVersion,
+            { editor.selectLayer(page, it) }, { edit -> editor.editLayerStack(page, edit) },
+            { id -> editor.editLayers(page) { page.items.removeAll { it.layerId == id }; page.layers.delete(id) } },
             { id -> editor.moveSelectionToLayer(page, id) },
             editor.hasSelection && editor.controller.layerSelection(page).isNotEmpty(), { editor.sidebarVisible = false })
     }
@@ -67,28 +68,33 @@ fun LayersSidebar(editor: Editor) {
 fun LayersSidebar(editor: InfiniteEditor) {
     key(editor.document) {
         val preview = remember(editor.layerContentVersion) { LayerPreview(editor.document.items) }
-        LayersPanel(editor.document.layers, preview, editor.layerPreviewMode, { editor.layerPreviewMode = it }, editor.layerContentVersion, editor::selectLayer, editor::editLayers,
-            { id -> editor.deleteLayerContent(id) },
+        LayersPanel(editor.document.layers, preview, editor.layerPreviewMode, { editor.layerPreviewMode = it }, editor.layerContentVersion to editor.layerVersion,
+            editor::selectLayer, editor::editLayerStack,
+            { id -> editor.editLayers { editor.deleteLayerContent(id) } },
             editor::moveSelectionToLayer, editor.hasSelection, { editor.layersSidebarVisible = false })
     }
 }
 
-/** Docked, nonmodal layer stack. Dragging previews a destination; only dropping edits the model. */
+/**
+ * Docked, nonmodal layer stack. Dragging previews a destination; only dropping edits the model.
+ * [edit] is for changes that leave every layer's contents alone (visibility, lock, name, order, a new
+ * empty layer); [delete] and [moveSelection] move objects and go through the content path themselves.
+ */
 @Composable
 private fun LayersPanel(
     layers: DrawingLayers,
     preview: LayerPreview,
     previewMode: LayerPreviewMode,
     onPreviewMode: (LayerPreviewMode) -> Unit,
-    version: Int,
+    version: Any,
     select: (String) -> Boolean,
     edit: (() -> Unit) -> Boolean,
-    delete: (String) -> Unit,
+    delete: (String) -> Boolean,
     moveSelection: (String) -> Boolean,
     hasSelection: Boolean,
     dismiss: () -> Unit,
 ) {
-    val thumbnails = remember(preview, previewMode) {
+    val thumbnails = remember(previewMode) {
         if (previewMode == LayerPreviewMode.NONE) null else LayerThumbnailCache()
     }
     var previewMenu by remember { mutableStateOf(false) }
@@ -237,8 +243,8 @@ private fun LayersPanel(
                     }
                     Text(layer.name.ifEmpty { stringResource(R.string.layers_default, entries.size - index) },
                         Modifier.weight(1f).height(rowHeight)
-                            .combinedClickable(enabled = dragging == null, onClick = { if (!selected) select(layer.id) },
-                                onDoubleClick = { rename = layer.id; name = layer.name })
+                            // A plain click fires on release; a double-tap handler would hold every tap back to rule one out.
+                            .clickable(enabled = dragging == null) { if (!selected) select(layer.id) }
                             .pointerInput(layer.id, ids) {
                                 detectDragGestures(onDragStart = startDrag, onDragEnd = endDrag,
                                     onDragCancel = { dragging = null },
@@ -294,7 +300,7 @@ private fun LayersPanel(
     deleting?.let { id ->
         AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.layers_delete), fontSize = TextSize.heading) },
             text = { Text(stringResource(R.string.layers_delete_confirm), fontSize = TextSize.body) },
-            confirmButton = { TextButton(onClick = { if (layers.entries.size > 1 && layers.entries.any { it.id == id && it.visible && !it.locked }) change { delete(id) }; deleting = null }) { Text(stringResource(R.string.layers_delete), fontSize = TextSize.body) } },
+            confirmButton = { TextButton(onClick = { if (layers.entries.size > 1 && layers.entries.any { it.id == id && it.visible && !it.locked }) delete(id); deleting = null }) { Text(stringResource(R.string.layers_delete), fontSize = TextSize.body) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.layers_cancel), fontSize = TextSize.body) } })
     }
 }

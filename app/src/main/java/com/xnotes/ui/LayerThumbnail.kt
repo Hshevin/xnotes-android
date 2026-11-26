@@ -35,9 +35,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-/** Per-open-sidebar cache; only visible rows render, and stale generations cannot publish. */
+/**
+ * Per-open-sidebar cache by layer id; only visible rows render, and stale generations cannot publish.
+ * Each image remembers the [LayerPreview] it was drawn from: a layer change that leaves contents alone
+ * keeps the preview and so the image, and a content change shows the old image until the new one lands.
+ */
 internal class LayerThumbnailCache {
-    val images = android.util.LruCache<String, ImageBitmap>(32)
+    val images = android.util.LruCache<String, Pair<LayerPreview, ImageBitmap>>(32)
     val workers = Semaphore(2)
     val measurer = AndroidTextMeasurer()
 }
@@ -46,8 +50,9 @@ internal class LayerThumbnailCache {
 internal fun LayerThumbnail(preview: LayerPreview, id: String, mode: LayerPreviewMode, cache: LayerThumbnailCache, modifier: Modifier = Modifier) {
     val frame = remember(preview, id, mode) { preview.frameFor(id, mode) } ?: return
     var failed by remember(preview, id, mode) { mutableStateOf(false) }
-    val bitmap by produceState<ImageBitmap?>(cache.images.get(id), preview, id, mode, cache) {
-        cache.images.get(id)?.let { value = it; return@produceState }
+    val bitmap by produceState(cache.images.get(id)?.second, preview, id, mode, cache) {
+        val held = cache.images.get(id)
+        held?.let { value = it.second; if (it.first === preview) return@produceState }
         // Coalesce successive pen-up/content notifications; never rasterize in composition.
         delay(150)
         try {
@@ -58,7 +63,7 @@ internal fun LayerThumbnail(preview: LayerPreview, id: String, mode: LayerPrevie
                     LayerThumbnailRenderer.render(items, frame, active = { isActive })?.asImageBitmap()
                 }
                 if (isActive && rendered != null) {
-                    cache.images.put(id, rendered)
+                    cache.images.put(id, preview to rendered)
                     value = rendered
                 }
             }

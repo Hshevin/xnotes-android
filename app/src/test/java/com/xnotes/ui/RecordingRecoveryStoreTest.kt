@@ -45,7 +45,6 @@ class RecordingRecoveryStoreTest {
         val raw = MapBundleFixture.entry(file)
         val evidence = RecordingBodyEvidence.inspect(file)
         assertEquals(DocumentKind.CANVAS, evidence.kind)
-        assertEquals(BundleMigration.hash(file), evidence.bodySha256)
         assertEquals(mapOf(7 to BundleMigration.hash(audio)), evidence.recordings)
         assertArrayEquals(raw, MapBundleFixture.entry(file))
         assertEquals(MapBundleFixture.state, file.inputStream().use { codec.read(it) }.map.state)

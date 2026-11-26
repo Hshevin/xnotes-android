@@ -20,7 +20,9 @@ internal fun FileChannel.borrow(): PositionedFile = object : PositionedFile {
     override fun truncate(size: Long) { this@borrow.truncate(size) }
 }
 
-internal fun ZipTail.read(channel: FileChannel) = read(channel.borrow())
+internal fun ZipTail.read(channel: FileChannel, allowComment: Boolean = false) = read(channel.borrow(), allowComment)
+internal fun <T> ZipTail.readEntry(channel: FileChannel, entry: ZipTail.Entry, reader: (InputStream) -> T) =
+    readEntry(channel.borrow(), entry) { reader(it.buffer().inputStream()) }
 internal fun ZipTail.splice(dest: FileChannel, tailStart: Long, keep: List<ZipTail.Entry>, tail: FileChannel, tailDir: ZipTail.Directory) =
     splice(dest.borrow(), tailStart, keep, tail.borrow(), tailDir)
 internal fun <T> ZipTail.readEntry(channel: FileChannel, name: String, reader: (InputStream) -> T) =

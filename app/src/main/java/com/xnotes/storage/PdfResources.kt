@@ -1,7 +1,6 @@
 package com.xnotes.storage
 
 import android.content.Context
-import com.xnotes.format.BundleMigration
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -17,7 +16,7 @@ class PdfResources internal constructor(private val context: Context,val registr
     private val admitted = java.util.concurrent.ConcurrentHashMap<String,File>()
     fun isOwned(file: File) = file.canonicalFile.parentFile == directory.canonicalFile && file.name.matches(Regex("[a-f0-9]{64}\\.pdf"))
     fun admit(file: File, name: String): File {
-        if (isOwned(file)) { register(file,name); return file }
+        if (isOwned(file)) return resolve(file.nameWithoutExtension)
         val key = "${file.canonicalPath}:${file.length()}:${file.lastModified()}"
         admitted[key]?.takeIf { it.isFile }?.let { return it }
         return file.inputStream().use { admit(it,name) }.also { if(admitted.size>=256) admitted.clear(); admitted[key]=it }
@@ -34,7 +33,7 @@ class PdfResources internal constructor(private val context: Context,val registr
             val id = digest.digest().joinToString("") { "%02x".format(it) }
             val dest = File(directory,"$id.pdf")
             if (dest.exists()) {
-                check(dest.length() == temp.length() && BundleMigration.hash(dest) == id) { StorageText.t(StorageMsg.PDF_RESOURCE_VERIFY_FAILED) }
+                check(dest.isFile && dest.length() == temp.length()) { StorageText.t(StorageMsg.PDF_RESOURCE_VERIFY_FAILED) }
             } else Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.ATOMIC_MOVE)
             register(dest,name); dest
         } finally { temp.delete() }
@@ -52,31 +51,18 @@ class PdfResources internal constructor(private val context: Context,val registr
             }
             check(digest.digest().joinToString("") { "%02x".format(it) } == id) { StorageText.t(StorageMsg.PDF_RESOURCE_MISMATCH) }
             val dest = File(directory,"$id.pdf")
-            if (!(dest.isFile && BundleMigration.hash(dest) == id)) Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
-            verified.remove(id)
+            Files.move(temp.toPath(),dest.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
             register(dest,name); dest
         } finally { temp.delete() }
     }
-    // Private immutable objects are hashed on first use and whenever their disk stamp changes.
-    // Do not re-read a hundreds-of-MB scan on every autosave/thumbnail.
-    private val verified = HashMap<String, Pair<Long, Long>>()
-    fun resolve(id:String):File=resolveChecked(id) {}
-    internal fun resolveChecked(id: String,checkActive:()->Unit): File = synchronized(gate) {
+    fun resolve(id: String): File = resolveChecked(id) {}
+
+    internal fun resolveChecked(id: String, checkActive: () -> Unit): File = synchronized(gate) {
         checkActive()
         require(id.matches(Regex("[a-f0-9]{64}"))) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
         val file = File(directory, "$id.pdf")
-        if(!file.isFile) throw Unavailable()
-        val stamp = file.length() to file.lastModified()
-        if (verified[id] != stamp) {
-            val hash=try {BundleMigration.hash(file) {checkActive();false}}
-                catch(error:java.io.IOException) {throw Unavailable(error)}
-                catch(error:SecurityException) {throw Unavailable(error)}
-            if(hash!=id) throw Unavailable()
-            checkActive()
-            if (verified.size >= 256) verified.clear()
-            verified[id] = stamp
-        }
-        checkActive();register(file, "PDF")
+        if (!file.isFile || file.length() == 0L) throw Unavailable()
+        if (registry.resource(id) == null) register(file, "PDF")
         file
     }
     fun register(file: File, name: String) {
@@ -88,63 +74,17 @@ class PdfResources internal constructor(private val context: Context,val registr
             require(id.matches(Regex("[a-f0-9]{64}")))
             val file = File(directory,"$id.pdf")
             if (registry.resource(id) == null) {
-                check(file.isFile && BundleMigration.hash(file) == id) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
+                check(file.isFile && file.length() > 0) { StorageText.t(StorageMsg.PDF_RESOURCE_CORRUPT) }
                 register(file,"附件.pdf")
             }
         }
-        registry.references(owner,ids)
-    }
-    /** Resolve and persist protection under the same gate used by collection, without a GC gap. */
-    internal fun protect(owner:String,ids:Set<String>) = synchronized(gate) {
-        ids.forEach {resolve(it)}
-        val previous=references(owner)
-        if(!previous.containsAll(ids)) pin(owner,previous+ids)
+        if (registry.referenceIds(owner) != ids) registry.references(owner,ids)
     }
     fun references(owner: String): Set<String> = registry.referenceIds(owner)
     /** Validate and acquire under the collection gate; there is no resolve-to-lease GC gap. */
     internal fun holdResolved(ids:Set<String>,checkActive:()->Unit={}):AutoCloseable = synchronized(gate) {
         checkActive();ids.forEach {resolveChecked(it,checkActive)};checkActive()
         hold(ids)
-    }
-    internal class HeldPdf(val file:File,val lease:AutoCloseable)
-    /** Decoder adoption of an embedded original cannot expose an unleased managed object. */
-    internal fun admitHeld(input:InputStream,name:String,expectedHash:String):HeldPdf = synchronized(gate) {
-        val file=admit(input,name)
-        if(file.nameWithoutExtension!=expectedHash) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
-        HeldPdf(file,holdResolved(setOf(expectedHash)))
-    }
-    /** Working snapshots may start with an immutable pdfsrc temp, not yet a managed original. IO-only. */
-    internal fun admitHeld(file:File,name:String,checkActive:()->Unit={}):HeldPdf = synchronized(gate) {
-        checkActive()
-        val expected=BundleMigration.hash(file) {checkActive();false}
-        if(isOwned(file) && expected!=file.nameWithoutExtension) throw Unavailable()
-        val key="${file.canonicalPath}:${file.length()}:${file.lastModified()}"
-        fun readCurrent():File=file.inputStream().use {input->
-            val guarded=object:java.io.FilterInputStream(input) {
-                override fun read():Int {checkActive();return super.read()}
-                override fun read(bytes:ByteArray,offset:Int,length:Int):Int {checkActive();return `in`.read(bytes,offset,length)}
-            }
-            admit(guarded,name)
-        }
-        val stored=if(isOwned(file)) {register(file,name);file}
-            else admitted[key]?.takeIf {it.isFile} ?: readCurrent().also {
-                if(admitted.size>=256) admitted.clear();admitted[key]=it
-            }
-        val current=if(stored.nameWithoutExtension!=expected) {
-            // A private temp should be immutable, but a matching disk stamp is not byte identity.
-            readCurrent().also {
-                if(it.nameWithoutExtension!=expected) throw ReferenceContractViolation(StorageMsg.PDF_RESOURCE_MISMATCH)
-                admitted[key]=it
-            }
-        } else stored
-        // An admission-cache hit may point at a damaged managed copy with the same stamp.
-        // The source hash proves the temp, not this second file; resolve's stamp cache is
-        // insufficient at this publication boundary.
-        if(current.canonicalFile!=file.canonicalFile && BundleMigration.hash(current) {checkActive();false}!=expected)
-            throw Unavailable()
-        val held=HeldPdf(current,holdResolved(setOf(expected)))
-        try {checkActive();held}
-        catch(error:Throwable) {try {held.lease.close()} catch(close:Throwable) {error.addSuppressed(close)};throw error}
     }
     fun hold(ids: Set<String>): AutoCloseable = synchronized(gate) {
         val tokens = mutableListOf<String>()

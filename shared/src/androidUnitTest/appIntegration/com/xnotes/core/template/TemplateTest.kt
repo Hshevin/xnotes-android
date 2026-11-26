@@ -17,7 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-class TemplateTest {
+class AndroidTemplateTest {
 
     private val ink = Rgba(10, 20, 30, 255)
     private val accent = Rgba(200, 0, 0, 128)

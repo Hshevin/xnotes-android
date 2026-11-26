@@ -109,7 +109,7 @@ internal class EditorMapSourceOpener(
     private suspend fun canvasIdAt(location: String): String? = withContext(Dispatchers.IO) {
         val coroutine = currentCoroutineContext()
         try {
-            NotebookStorage.get(editor.view.context).referenceCatalog(location, DocumentKind.CANVAS) { coroutine.ensureActive() }.documentId
+            AndroidSourceCatalogs(editor.view.context).read(location)?.takeIf { it.kind == SourceCatalog.Kind.CANVAS }?.documentId
         } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
     }
 

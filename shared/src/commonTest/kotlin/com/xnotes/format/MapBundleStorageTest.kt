@@ -62,7 +62,7 @@ class MapBundleStorageTest : BundleTestFiles() {
         val upgrade = BundleMigration.prepare(source, folder)
         assertArrayEquals(original, source.fileBytes())
         assertArrayEquals(SharedMapBundleFixture.raw, SharedMapBundleFixture.entry(upgrade.file))
-        val info = BundleReferenceInfo.inspectStrict(upgrade.file)
+        val info = TestBundleMetadata.read(upgrade.file)
         assertEquals(CanvasCodec.FORMAT_WITH_MAP, info.format)
         assertEquals(DocumentKind.CANVAS, info.kind)
         val copy = BundleMigration.prepareCopy(upgrade.file, folder, BundleIdentity().documentId)

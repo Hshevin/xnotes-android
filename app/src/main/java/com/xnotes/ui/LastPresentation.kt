@@ -28,5 +28,3 @@ internal sealed interface LastPresentationRead {
     data object Invalid:LastPresentationRead
     data class Ready(val value:LastPresentation):LastPresentationRead
 }
-internal enum class LastPresentationPrepare {Ready,PreservedInvalid,Changed,Failed}
-internal enum class LastPresentationWrite {Written,Changed,PreservedInvalid,Failed}

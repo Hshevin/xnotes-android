@@ -354,3 +354,30 @@
 ## 2026-11-24 iPadOS 首页 S4 本地构建
 
 - 按 [S4 验收要求](process/ipados-home-h3-contracts-2026-11-24.md) 执行一次本地 `:app:assembleDebug`，用于验证共享新建笔记和模板库接入 Android 后的构建。
+## 2026-11-24 图层切换提速
+
+- 用户要求解决图层切换卡顿并「按那样的分工」开始；放行范围选「推送加打包，不发版」：合并 `perf/layer-switch` 到 `master` 并推送 `origin/master`，打包主线测试版 `com.xnotes.movinkpad.branchtest.master`。不安装到用户设备（当时未连接）、不改动正式版、不发布 GitHub Release。
+- 用户随后要求「安装到设备上，覆盖更新」：test15 覆盖安装到 MovinkPad Pro 14 上的主线测试版（原 test14 / code 14），正式版未动。
+- 用户反馈点选仍卡并要求去掉双击改名；修复后 test16 覆盖安装到 MovinkPad（原 test15）。本次未推送。
+- 用户随后要求「推送到主分支吧」：将 test15 安装记录、点选修复（`68428def`）、test16 记录连同本条推送到 `origin/master`。
+- 用户随后要求「打包正式版我用用」，版本名定为 `0.9.9beta2`：本地打包 `com.xnotes.movinkpad` code 103 并覆盖安装到 MovinkPad。不推送、不发布 GitHub Release。
+
+## 2026-11-26 拆除事务存储合入主线并推送
+
+- 用户要求「直接拆掉吧，你指定计划，然后交给gpt6.2astra去做就好」：将 `t3/remove-transaction-storage`（`478c1457`：拆除重型事务存储、版本见证与恢复预览，恢复单遍流式打开、`PdfResources` 零重复全量哈希与分页笔记 `ZipTail` 原地尾部快存）快进合入本地 `master`，并提交主代理复核修正与文档（`987e2480`）。全量 Debug JVM／Robolectric 测试 379 套件 3,879 项通过、仪器测试源码编译通过；保留本地 `t3/remove-transaction-storage` 分支，真机待验。见 [记录](storage/direct-storage-2026-11-26.md)。
+- 用户随后要求「推送到远端」：将本地 `master`（含此前未推送的 `0.9.9beta2` 本地打包记录 `97b07d01`、`e1245252`，以及本轮 `478c1457`、`987e2480` 与本条记录）推送到 `origin/master`；不新建远端分支，不打包 APK、不安装、不发布 GitHub Release。
+
+## 2026-11-26 Zotero 文献库
+
+- 用户要求「自己打包一个测试版给我看看」：打包 Zotero 测试版 test1（`com.xnotes.movinkpad.branchtest.zotero`，源码 `d8bf02f9`）。未安装、未推送、未发布，正式版未动。
+- 用户随后要求「装上去」：test1 新安装到 MovinkPad Pro 14，正式版与其他测试版未动。未推送。
+- 用户要求「打包并覆盖」：test2（分类侧栏与按分类存放，源码 `686386cc`）覆盖安装到 MovinkPad（原 test1）。未推送。
+- 用户要求「推送到远端并合并到主分支」：推送 `t3/zotero-document-integration` 到远端，合入 `origin/master`（解决与拆除事务存储的冲突：侧栏去掉已删除的「恢复资料」、保留 Zotero）后合并到 `master` 并推送 `origin/master`。不打包、不发布 GitHub Release；保留功能分支。
+
+## 2026-11-26 导图节点手动调整大小
+
+- 用户要求「推送到远端并合并进主分支」：将 `t3/mind-map-node-resize-bounds`（接口与测试、实现两个提交，已接到最新 `master` 上，JVM 3,936 项通过、仪器测试编译通过）快进合并入 `master`，推送 `origin/master` 与同名远端分支。不打包、不安装、不发布 GitHub Release；书写中的实时裁切与拖角手感待真机确认。
+
+## 2026-11-26 主分支正式版 0.9.9beta3
+
+- 用户要求「打包最新版并覆盖更新到平板上」。基于主分支 `22942eec` 将正式版递增至 `0.9.9beta3`（versionCode 104），沿用原签名构建 ARM64 Release APK。已核验包名、签名、ABI 和 16 KiB 对齐，并通过 ADB 在 MovinkPad Pro 14 上覆盖更新原 `0.9.9beta2`（103）。安装后系统报告新版本，首次安装时间保持一致。本轮仅本地打包和安装。

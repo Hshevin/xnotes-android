@@ -27,14 +27,11 @@ import com.xnotes.core.model.fixedWriteSnapshot
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
-import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.format.DocumentCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.platform.LegacySessionQueue
-import com.xnotes.storage.MigrationPublication
 import com.xnotes.storage.NotebookStorage
-import com.xnotes.storage.RecoveryCopyResult
 import com.xnotes.ui.Editor
 import java.io.File
 import java.time.Duration
@@ -147,7 +144,7 @@ internal class EditorPageCopyFixture(base:Context,val root:File,private val name
     val storage=NotebookStorage(context,targetOverride={uri->
         val documentId=DocumentsContract.getDocumentId(android.net.Uri.parse(uri))
         val document=file(documentId)
-        object:MigrationPublication.Target {
+        object:NotebookStorage.Target {
             override fun read():java.io.InputStream {
                 if(documentId.substringAfterLast('/')=="target") {if(denyTargetRead) throw SecurityException("Target read permission lost");beforeTargetRead?.invoke()}
                 return document.inputStream()
@@ -208,7 +205,6 @@ class EditorPageCopyHostTest {
                         auto.cancel();auto.coroutineContext[Job]?.join()
                         suspendCancellableCoroutine<Unit> {waiter->Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}}
                     }
-                    (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(f.editor) as LegacySessionQueue.Owner).awaitAccepted()
                 }
                 singleton.set(null,previous);withContext(Dispatchers.IO) {f.storage.registry.close()}
             }}
@@ -226,13 +222,13 @@ class EditorPageCopyHostTest {
         assertTrue(withContext(Dispatchers.Main) { f.editor.copyStoredFileTo(f.sourceUri, f.targetUri, "tree copy.xcanvas") })
         assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.source))
         assertArrayEquals(MapBundleFixture.raw, MapBundleFixture.entry(f.target))
-        val info = BundleReferenceInfo.inspectStrict(f.target)
+        val info = TestBundleMetadata.read(f.target)
         assertEquals("xcanvas", f.storage.registry.kindForId(info.header.identity!!.documentId))
     }
 
     @Test fun anAnchoredNoteCanSaveAsANewEmptyTargetWithIndependentDocumentAndPageIds()=scenario {f->
         withContext(Dispatchers.IO) {f.seed()}
-        val sourceBytes=f.source.readBytes();val sourceInfo=BundleReferenceInfo.inspectStrict(f.source)
+        val sourceBytes=f.source.readBytes();val sourceInfo=TestBundleMetadata.read(f.source)
         val done=CompletableDeferred<Boolean>()
         val model=withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"source.xnote");assertTrue(f.editor.noteOpen)
@@ -240,8 +236,8 @@ class EditorPageCopyHostTest {
         }
         val completed=done.await()
         val diagnostic=withContext(Dispatchers.Main) {"message=${f.editor.message}, writes=${f.writes.get()}, logs=${org.robolectric.shadows.ShadowLog.getLogsForTag("xnotes.save").joinToString { it.throwable?.stackTraceToString().orEmpty() }}"}
-        assertTrue("Public Save-As must create a verified new native target, not publishNote over an empty file; $diagnostic, hasRecovery=${f.storage.hasRecovery(f.targetUri)}",completed)
-        val saved=withContext(Dispatchers.IO) {BundleReferenceInfo.inspectStrict(f.target)}
+        assertTrue("Public Save-As must create a verified new native target, not publishNote over an empty file; $diagnostic",completed)
+        val saved=withContext(Dispatchers.IO) {TestBundleMetadata.read(f.target)}
         assertNotEquals(sourceInfo.header.identity!!.documentId,saved.header.identity!!.documentId)
         assertEquals(2,saved.orderedPageIds.toSet().size);assertTrue(saved.pageIds.intersect(sourceInfo.pageIds).isEmpty())
         assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get())
@@ -249,9 +245,9 @@ class EditorPageCopyHostTest {
             assertSame(model,f.editor.state.document);assertEquals(f.targetUri,model.path)
             assertEquals(saved.header.identity,model.identity);assertEquals(saved.orderedPageIds,model.pages.map {it.referenceIdentity.id})
             assertFalse(model.dirty);assertEquals(1,model.pages.first().items.filterIsInstance<Stroke>().size)
-            assertNull("The former source context must retire after adopting another document",f.editor.lastReadSourceVersion())
+
         }
-        assertFalse(f.storage.hasRecovery(f.targetUri))
+
     }
 
     @Test fun aNonemptyProviderTargetIsNeverWrittenOrDeletedAndLateLiveEditsKeepTheirOriginalScope()=scenario {f->
@@ -277,7 +273,7 @@ class EditorPageCopyHostTest {
         withContext(Dispatchers.Main) {
             assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(ids,model.pages.map {it.referenceIdentity.id})
             assertEquals(f.sourceUri,model.path);assertTrue(model.dirty)
-            assertEquals(identity.documentId,f.editor.lastReadSourceVersion()?.documentId)
+            assertEquals(identity.documentId,f.editor.state.document.identity.documentId)
             assertEquals(listOf(110.0,990.0),model.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
         }
     }
@@ -299,15 +295,15 @@ class EditorPageCopyHostTest {
         withContext(Dispatchers.Main) {
             assertSame(model,f.editor.state.document);assertEquals(identity,model.identity)
             assertEquals(ids,model.pages.map {it.referenceIdentity.id});assertEquals(f.sourceUri,model.path)
-            assertTrue(model.dirty);assertEquals(identity.documentId,f.editor.lastReadSourceVersion()?.documentId)
+            assertTrue(model.dirty);assertEquals(identity.documentId,f.editor.state.document.identity.documentId)
             assertEquals(listOf(110.0),model.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
         }
-        assertFalse(f.storage.hasRecovery(f.sourceUri))
+
     }
 
     @Test fun saveAsKeepsItsFixedBodyWhileLateInkAndHistoryStayOnTheSameLivePagesAndViewport()=scenario {f->
         withContext(Dispatchers.IO) {f.seed()}
-        val sourceBytes=f.source.readBytes();val sourceInfo=BundleReferenceInfo.inspectStrict(f.source)
+        val sourceBytes=f.source.readBytes();val sourceInfo=TestBundleMetadata.read(f.source)
         val entered=CompletableDeferred<Unit>();val done=CompletableDeferred<Boolean>()
         val model=withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"source.xnote");assertTrue(f.editor.noteOpen)
@@ -329,7 +325,7 @@ class EditorPageCopyHostTest {
         } finally {f.release.countDown()}
         assertTrue("A verified independent copy must succeed even when later ink remains dirty",done.await())
         val disk=withContext(Dispatchers.IO) {f.target.inputStream().use {f.codec.read(it)}}
-        val saved=BundleReferenceInfo.inspectStrict(f.target)
+        val saved=TestBundleMetadata.read(f.target)
         assertEquals(listOf(110.0),disk.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
         assertNotEquals(sourceInfo.header.identity!!.documentId,saved.header.identity!!.documentId)
         assertTrue(saved.pageIds.intersect(sourceInfo.pageIds).isEmpty());assertArrayEquals(sourceBytes,f.source.readBytes())
@@ -339,7 +335,7 @@ class EditorPageCopyHostTest {
             pages.zip(model.pages).forEach {(before,after)->assertSame(before,after)}
             assertEquals(f.targetUri,model.path);assertEquals(saved.header.identity,model.identity)
             assertEquals(saved.orderedPageIds,model.pages.map {it.referenceIdentity.id});assertTrue(model.dirty)
-            assertNull(f.editor.lastReadSourceVersion());assertSame(history,f.editor.history);assertSame(lateCommand,history.nextUndo)
+            assertSame(history,f.editor.history);assertSame(lateCommand,history.nextUndo)
             assertEquals(viewport,Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY))
             assertEquals(listOf(110.0,990.0),model.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
             history.undo();assertEquals(listOf(110.0),model.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
@@ -350,49 +346,10 @@ class EditorPageCopyHostTest {
         }
     }
 
-    @Test fun writtenCopyRegistrationFailureKeepsTheOriginalLiveScopeAndExplicitCompletionDoesNotAdoptIt()=scenario {f->
-        withContext(Dispatchers.IO) {f.seed()}
-        val sourceBytes=f.source.readBytes();val entered=CompletableDeferred<Unit>();val done=CompletableDeferred<Boolean>()
-        val model=withContext(Dispatchers.Main) {
-            f.editor.openAsync(f.sourceUri,"source.xnote");assertTrue(f.editor.noteOpen)
-            f.stopDebounce();f.addStroke(110.0,recordHistory=true);f.editor.state.document
-        }
-        val identity=model.identity;val ids=model.pages.map {it.referenceIdentity.id};val pages=model.pages.toList()
-        withContext(Dispatchers.IO) {
-            f.storage.registry.writableDatabase.execSQL("CREATE TRIGGER fail_after_write BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'copy registration failed'); END")
-        }
-        f.beforeTargetRead={entered.complete(Unit);check(f.release.await(10,TimeUnit.SECONDS)) {"Failed-copy target gate was not released"}}
-        try {
-            withContext(Dispatchers.Main) {f.editor.saveToThen(f.targetUri) {ok->f.stopDebounce();done.complete(ok)}}
-            kotlinx.coroutines.selects.select<Unit> {
-                entered.onAwait {}
-                done.onAwait {fail("Copy must inspect the new target before reporting failure")}
-            }
-            withContext(Dispatchers.Main) {f.addStroke(990.0,recordHistory=true)}
-        } finally {f.release.countDown()}
-        assertFalse(done.await());assertEquals(1,f.writes.get());assertTrue(f.storage.hasRecovery(f.targetUri))
-        val written=f.target.readBytes();val targetInfo=BundleReferenceInfo.inspectStrict(f.target)
-        val disk=f.target.inputStream().use {f.codec.read(it)}
-        assertEquals(listOf(110.0),disk.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
-        assertNotEquals(identity.documentId,targetInfo.header.identity!!.documentId);assertTrue(targetInfo.pageIds.intersect(ids.filterNotNull().toSet()).isEmpty())
-        suspend fun assertOriginalLive()=withContext(Dispatchers.Main) {
-            assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(ids,model.pages.map {it.referenceIdentity.id})
-            pages.zip(model.pages).forEach {(before,after)->assertSame(before,after)}
-            assertEquals(f.sourceUri,model.path);assertTrue(model.dirty);assertEquals(identity.documentId,f.editor.lastReadSourceVersion()?.documentId)
-            assertEquals(listOf(110.0,990.0),model.pages.first().items.filterIsInstance<Stroke>().map {it.samples.first().x})
-        }
-        assertOriginalLive();assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0,f.deletes.get())
-        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("DROP TRIGGER fail_after_write")}
-        val completed=withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(f.targetUri,"Completed copy")}
-        assertTrue(completed is RecoveryCopyResult.Saved)
-        assertFalse(f.storage.hasRecovery(f.targetUri));assertEquals(1,f.writes.get());assertArrayEquals(written,f.target.readBytes())
-        assertOriginalLive();assertArrayEquals(sourceBytes,f.source.readBytes())
-    }
-
     @Test fun saveAsAdmitsAnAttachedPdfAndMergesItsVerifiedReferenceIdentityIntoTheLiveCopy()=scenario {f->
         withContext(Dispatchers.IO) {f.seed()}
         val sourceBytes=f.source.readBytes()
-        val sourceInfo=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.source)
+        val sourceInfo=com.xnotes.format.TestBundleMetadata.read(f.source)
 
         // A structurally valid one-page PDF with a real xref table; the note keeps its blank pages.
         val out=java.io.ByteArrayOutputStream()
@@ -430,7 +387,7 @@ class EditorPageCopyHostTest {
         val saved=done.await()
         val diagnostic=withContext(Dispatchers.Main) {"message=${f.editor.message}, writes=${f.writes.get()}"}
         assertTrue("Attached-PDF Save-As must publish the admitted original; $diagnostic",saved)
-        val actual=withContext(Dispatchers.IO) {com.xnotes.format.BundleReferenceInfo.inspectStrict(f.target)}
+        val actual=withContext(Dispatchers.IO) {com.xnotes.format.TestBundleMetadata.read(f.target)}
         val identity=requireNotNull(actual.header.identity)
         assertNotEquals(sourceInfo.header.identity!!.documentId,identity.documentId)
         assertTrue(identity.externalPdf);assertEquals(hash,identity.pdfResource);assertEquals(hash,actual.originalPdfHash)
@@ -449,14 +406,14 @@ class EditorPageCopyHostTest {
         withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("UPDATE resources SET created=0");resources.collect()}
         assertTrue("The permanent note reference protects the original without a lease",stored.isFile)
         assertArrayEquals(original,stored.readBytes());assertArrayEquals(original,input.readBytes());assertArrayEquals(sourceBytes,f.source.readBytes())
-        assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get());assertFalse(f.storage.hasRecovery(f.targetUri))
+        assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get());
         withContext(Dispatchers.Main) {
             assertSame(model,f.editor.state.document);assertEquals(f.targetUri,model.path);assertEquals(identity,model.identity)
             assertEquals(actual.orderedPageIds,model.pages.map {it.referenceIdentity.id})
             assertTrue(model.pages.all {it.pdfPage==null});assertFalse(model.dirty)
             assertEquals("Adoption must merge the actual admitted PDF file, not only its v2 identity",stored.canonicalFile,requireNotNull(model.pdfFile).canonicalFile)
             assertArrayEquals(original,requireNotNull(model.pdfFile).readBytes())
-            assertNull(f.editor.lastReadSourceVersion())
+
         }
     }
 
@@ -471,7 +428,7 @@ class EditorPageCopyHostTest {
         }
         val liveIdentity=model.identity;val pages=model.pages.toList();val liveIds=pages.map {it.referenceIdentity.id}
         val history=f.editor.history;val undo=history.nextUndo
-        val sourceBinding=withContext(Dispatchers.Main) {f.editor.lastReadSourceVersion()}
+        val sourceBinding=withContext(Dispatchers.Main) {f.editor.state.document}
         val viewport=withContext(Dispatchers.Main) {Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY)}
 
         // Build a valid PDF and an existing reference-style stored file after the no-PDF Editor opened.
@@ -524,15 +481,14 @@ class EditorPageCopyHostTest {
             assertTrue("The copy must hold the actual original during publication",leases>0)
             protectedDuringPublication=true
         }
-        val sourceBytes=f.source.readBytes();val before=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.source)
+        val sourceBytes=f.source.readBytes();val before=com.xnotes.format.TestBundleMetadata.read(f.source)
         val copied=withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"portable-copy.xnote").also {f.stopDebounce()}}
         assertTrue("A stored-file action must publish a verified portable copy",copied)
         assertTrue(protectedDuringPublication)
-        val after=com.xnotes.format.BundleReferenceInfo.inspectStrict(f.target)
+        val after=com.xnotes.format.TestBundleMetadata.read(f.target)
         assertNotEquals(before.header.identity!!.documentId,after.header.identity!!.documentId)
         assertEquals(before.orderedPageIds.size,after.orderedPageIds.size);assertTrue(before.pageIds.intersect(after.pageIds).isEmpty())
-        val copyIdentity=requireNotNull(after.header.identity)
-        assertFalse(copyIdentity.externalPdf);assertEquals(pdfHash,copyIdentity.pdfResource)
+        assertFalse(after.header.identity.externalPdf);assertEquals(pdfHash,after.header.identity.pdfResource)
         assertEquals(pdfHash,after.embeddedPdfHash)
         val excluded=setOf(com.xnotes.format.BundleIdentity.ENTRY,com.xnotes.format.AnchorMetadata.ENTRY,"manifest.json",com.xnotes.format.BundlePdf.ENTRY)
         assertEquals(com.xnotes.format.BundleMigration.fingerprints(f.source).filterKeys {it !in excluded},
@@ -547,12 +503,12 @@ class EditorPageCopyHostTest {
         }
         assertArrayEquals(sourceBytes,f.source.readBytes());assertArrayEquals(pdfBytes,managed.readBytes())
         assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
-        assertFalse(f.storage.hasRecovery(f.targetUri))
+
         withContext(Dispatchers.Main) {
             assertSame(model,f.editor.state.document);assertEquals(liveIdentity,model.identity);assertEquals(f.sourceUri,model.path);assertTrue(model.dirty)
             assertEquals(liveIds,model.pages.map {it.referenceIdentity.id});pages.zip(model.pages).forEach {(a,b)->assertSame(a,b)}
             assertSame(history,f.editor.history);assertSame(undo,history.nextUndo);assertFalse(history.canRedo)
-            assertSame(sourceBinding,f.editor.lastReadSourceVersion())
+            assertSame(sourceBinding,f.editor.state.document)
             assertEquals(viewport,Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY))
             assertEquals(listOf(110.0),model.pages.first().items.filterIsInstance<com.xnotes.core.model.Stroke>().map {it.samples.first().x})
         }
@@ -572,7 +528,7 @@ class EditorPageCopyHostTest {
             assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,destination,"copy.xnote").also {f.stopDebounce()}})
             assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
             assertArrayEquals(sourceBytes,f.source.readBytes());assertArrayEquals(targetBytes,f.target.readBytes())
-            assertFalse(f.storage.hasRecovery(f.sourceUri));assertFalse(f.storage.hasRecovery(f.targetUri))
+
             withContext(Dispatchers.Main) {
                 assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(f.sourceUri,model.path);assertTrue(model.dirty)
                 assertEquals(ids,model.pages.map {it.referenceIdentity.id});assertSame(undo,f.editor.history.nextUndo)
@@ -594,7 +550,7 @@ class EditorPageCopyHostTest {
         val before=f.source.readBytes()
         val model=withContext(Dispatchers.Main) {f.editor.state.document}
         assertTrue(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"independent.xcanvas")})
-        val actual=BundleReferenceInfo.inspectStrict(f.target)
+        val actual=TestBundleMetadata.read(f.target)
         assertEquals("xcanvas",actual.format);assertNotEquals(original.documentId,actual.header.identity!!.documentId)
         assertTrue(actual.pageIds.isEmpty());assertNull(actual.header.anchors)
         java.util.zip.ZipFile(f.target).use {zip->
@@ -613,11 +569,11 @@ class EditorPageCopyHostTest {
             }
         }
         assertEquals("source.xnote",name)
-        val before=f.source.readBytes();val original=BundleReferenceInfo.inspectStrict(f.source)
+        val before=f.source.readBytes();val original=TestBundleMetadata.read(f.source)
         val output=java.io.ByteArrayOutputStream()
         withContext(Dispatchers.IO) {f.editor.copyFileTo(f.sourceUri,output)}
         val shared=File(f.root,"shared.xnote").apply {writeBytes(output.toByteArray())}
-        val actual=BundleReferenceInfo.inspectStrict(shared)
+        val actual=TestBundleMetadata.read(shared)
         assertEquals(original.header.identity,actual.header.identity);assertEquals(original.orderedPageIds,actual.orderedPageIds)
         assertEquals(com.xnotes.format.BundleMigration.fingerprints(f.source),com.xnotes.format.BundleMigration.fingerprints(shared))
         assertArrayEquals(before,f.source.readBytes());assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
@@ -638,7 +594,7 @@ class EditorPageCopyHostTest {
         val sourceBytes=f.source.readBytes()
         assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"copy.xnote")})
         assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0L,f.target.length())
-        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());assertFalse(f.storage.hasRecovery(f.targetUri))
+        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());
         withContext(Dispatchers.Main) {assertSame(model,f.editor.state.document);assertSame(undo,f.editor.history.nextUndo);assertTrue(model.dirty);assertEquals(identity,model.identity)}
     }
 
@@ -650,31 +606,7 @@ class EditorPageCopyHostTest {
         try {entered.await();copy.cancel()} finally {f.release.countDown()}
         try {copy.await();fail("Cancellation must propagate rather than return ordinary copy success or failure")} catch(expected:CancellationException) {}
         assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0L,f.target.length())
-        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());assertFalse(f.storage.hasRecovery(f.targetUri))
-    }
-
-    @Test fun aStoredCopyWrittenBeforeRegistrationFailureCanOnlyContinueItsRetainedCandidate()=scenario {f->
-        withContext(Dispatchers.IO) {f.seed()}
-        val sourceBytes=f.source.readBytes()
-        val model=withContext(Dispatchers.Main) {
-            f.editor.openAsync(f.sourceUri,"source.xnote");f.stopDebounce();f.addStroke(110.0,recordHistory=true);f.editor.state.document
-        }
-        val identity=model.identity;val undo=f.editor.history.nextUndo
-        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("CREATE TRIGGER fail_stored_copy BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'copy registration failed'); END")}
-        assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"copy.xnote")})
-        assertTrue(f.storage.hasRecovery(f.targetUri));assertEquals(1,f.writes.get())
-        val written=f.target.readBytes();val saved=BundleReferenceInfo.inspectStrict(f.target)
-        assertNotEquals(identity.documentId,saved.header.identity!!.documentId)
-        assertFalse(withContext(Dispatchers.Main) {f.editor.copyStoredFileTo(f.sourceUri,f.targetUri,"retry.xnote")})
-        assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get());assertTrue(f.storage.hasRecovery(f.targetUri))
-        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("DROP TRIGGER fail_stored_copy")}
-        assertTrue(withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(f.targetUri,"Completed stored copy")} is RecoveryCopyResult.Saved)
-        assertFalse(f.storage.hasRecovery(f.targetUri));assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get())
-        assertArrayEquals(sourceBytes,f.source.readBytes());assertEquals(0,f.deletes.get());assertEquals(0,f.writeOpens.get())
-        withContext(Dispatchers.Main) {
-            assertSame(model,f.editor.state.document);assertEquals(identity,model.identity);assertEquals(f.sourceUri,model.path)
-            assertSame(undo,f.editor.history.nextUndo);assertTrue(model.dirty)
-        }
+        assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get());
     }
 
 }

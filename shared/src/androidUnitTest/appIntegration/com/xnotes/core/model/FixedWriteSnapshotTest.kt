@@ -24,7 +24,7 @@ import java.util.zip.ZipInputStream
 import org.junit.Assert.*
 import org.junit.Test
 
-class FixedWriteSnapshotTest {
+class AndroidFixedWriteSnapshotTest {
     private val measurer=FakeTextMeasurer()
     private val noteCodec=DocumentCodec(FakeImageCodec(),measurer)
     private val canvasCodec=CanvasCodec(FakeImageCodec(),measurer)

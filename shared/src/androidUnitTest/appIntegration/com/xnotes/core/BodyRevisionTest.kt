@@ -9,7 +9,7 @@ import com.xnotes.format.BundleIdentity
 import org.junit.Assert.*
 import org.junit.Test
 
-class BodyRevisionTest {
+class AndroidBodyRevisionTest {
     @Test fun dirtyTrueCountsEveryOwnerEditEvenBeforeTheBooleanChanges() {
         val doc=Document.blank();val initial=doc.bodyRevision
         doc.dirty=true;val first=doc.bodyRevision;assertTrue(first>initial)

@@ -25,12 +25,3 @@ internal fun AnchorManifest.inspectActivation(input: () -> InputStream, orderedP
 internal fun AnchorManifest.inspectCopy(input: () -> InputStream, cancelled: () -> Boolean = { false }) = inspectCopySource({ input().source() }, cancelled)
 internal fun AnchorManifest.write(input: () -> InputStream, out: OutputStream, plan: AnchorManifest.Plan, cancelled: () -> Boolean = { false }) =
     write({ input().source() }, out.sink(), plan, cancelled)
-
-internal fun BundleEntries.cancellable(input:InputStream,cancelled:()->Boolean):InputStream = object:java.io.FilterInputStream(input) {
-        override fun read():Int {check(!cancelled());return super.read()}
-        override fun read(b:ByteArray,off:Int,len:Int):Int {check(!cancelled());return super.read(b,off,len)}
-        override fun skip(n:Long):Long {check(!cancelled());return super.skip(n)}
-    }
-internal fun BundleEntries.copy(input: InputStream, out: OutputStream, cancelled: () -> Boolean = { false }) = copy(input.source(), out.sink(), cancelled)
-
-internal fun BundleCopyPlan.Companion.validateLegacyFormat(input: InputStream, cancelled: () -> Boolean = { false }) = validateLegacyFormat(input.source(),cancelled)

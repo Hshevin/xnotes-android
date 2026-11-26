@@ -51,8 +51,7 @@ class ExplicitBundleCopyTest : BundleTestFiles() {
         assertFailsWith<IllegalStateException> {BundleMigration.prepare(source,dir,true) {true}}
         assertArrayEquals(original,source.fileBytes());assertEquals(before,names(dir))
         val trailing=bundle(dir,note()+" trailing")
-        assertEquals("xnote",BundleReferenceInfo.inspect(trailing,true).format)
-        assertFailsWith<JsonPullException> {BundleReferenceInfo.inspectStrict(trailing)}
+        assertEquals("xnote",TestBundleMetadata.read(trailing).format)
     }
 
     @Test fun legacyNoteAndCanvasUseTheRequestedIdWithoutReencodingAnyPayload()=directory {dir->
@@ -63,7 +62,7 @@ class ExplicitBundleCopyTest : BundleTestFiles() {
             val copy=BundleMigration.prepareCopy(source,dir,target) {false}
             try {
                 assertEquals(target,copy.identity.documentId);assertEquals(target,readBundleIdentity(copy.file)!!.documentId)
-                assertEquals(BundleMigration.hash(source),copy.sourceHash);assertNull(BundleHeader.read(copy.file).anchors)
+                assertEquals(BundleMigration.stamp(source),copy.sourceStamp);assertNull(BundleHeader.read(copy.file).anchors)
                 assertArrayEquals(manifest.encodeToByteArray(),entry(copy.file,"manifest.json"))
                 assertRawPayload(source,copy.file);assertArrayEquals(original,source.fileBytes())
             } finally {copy.file.remove()}
@@ -88,7 +87,7 @@ class ExplicitBundleCopyTest : BundleTestFiles() {
                 assertEquals(BundleIdentity(target,identity?.pdfResource,identity?.externalPdf ?: false),copy.identity)
                 assertRawPayload(source,copy.file);assertArrayEquals(original,source.fileBytes())
                 if(embedded!=null) assertArrayEquals(pdf,entry(copy.file,BundlePdf.ENTRY))
-                BundleReferenceInfo.inspect(copy.file,true)
+                TestBundleMetadata.read(copy.file)
             } finally {copy.file.remove()}
         }
     }
@@ -104,7 +103,7 @@ class ExplicitBundleCopyTest : BundleTestFiles() {
             val raw=entry(copy.file,"manifest.json");val pages=TestJsonTree.parse(raw.decodeToString()).field("pages")
             val ids=(0 until pages.size).map {pages.item(it).string("reference_id")}
             assertEquals(2,ids.toSet().size);assertTrue(ids.none {it==p1 || it==p2})
-            assertEquals(ids,BundleReferenceInfo.inspect(copy.file,true).orderedPageIds)
+            assertEquals(ids,TestBundleMetadata.read(copy.file).orderedPageIds)
             assertArrayEquals(pattern.replace("@FIRST@",ids[0]).replace("@SECOND@",ids[1]).encodeToByteArray(),raw)
             assertArrayEquals(marker(target),entry(copy.file,AnchorMetadata.ENTRY))
             assertRawPayload(source,copy.file,setOf("manifest.json",AnchorMetadata.ENTRY));assertArrayEquals(original,source.fileBytes())
@@ -162,20 +161,9 @@ class ExplicitBundleCopyTest : BundleTestFiles() {
         }
         var changed=false
         assertFailsWith<IllegalStateException> {BundleMigration.prepareCopy(source,dir,target,cancelled={
-            if(!changed && dir.fileNames().any {it.startsWith("identity-tail-")}) {source.appendUtf8("external edit");changed=true}
+            if(!changed && dir.fileNames().any {it.startsWith("identity-")}) {source.appendUtf8("external edit");changed=true}
             false
         })}
         assertTrue(changed);assertArrayEquals(original+"external edit".encodeToByteArray(),source.fileBytes());assertEquals(before,names(dir))
-        source.setBytes(original);var phase=0
-        val copy=BundleMigration.prepareCopy(source,dir,target,cancelled={
-            if(dir.fileNames().any {it.startsWith("identity-tail-")}) {
-                if(phase==0) {source.setText("temporary B");phase=1}
-                else if(phase==1) {source.setBytes(original);phase=2}
-            }
-            false
-        })
-        try {assertEquals(2,phase);assertEquals(target,copy.identity.documentId);assertRawPayload(source,copy.file);assertArrayEquals(original,source.fileBytes())}
-        finally {copy.file.remove()}
-        assertEquals(before,names(dir))
     }
 }

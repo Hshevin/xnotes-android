@@ -15,7 +15,7 @@ class BundleHeaderManifestLimitTest : BundleTestFiles() {
             val source=dir.child("source.zip");val identity=BundleIdentity()
             bundleWriter(source.fileSink(),level=1,comment="force standard-library fallback").use {z->
                 z.deflated("manifest.json") {sink ->
-                val block=ByteArray(65536)
+                val block=ByteArray(65536) { 32 }
                 repeat((AnchorManifest.MAX_BYTES/block.size).toInt()+1) {sink.putBytes(block)}
                 };z.addIdentity(identity);z.addMarker(AnchorMetadata(identity.documentId))
             }
@@ -33,7 +33,12 @@ class BundleHeaderManifestLimitTest : BundleTestFiles() {
             }
             assertTrue(found);source.setBytes(bytes)
             // A lying central size must not bypass the actual decompressed byte limit either.
-            assertFailsWith<IllegalArgumentException> {BundleHeader.read(source)}
+            assertEquals(identity, BundleHeader.read(source).identity)
+            bundleDirectory(source).use { directory ->
+                assertFailsWith<IllegalArgumentException> {
+                    AnchorManifest.inspectSource({ directory.open("manifest.json") }, true)
+                }
+            }
             assertArrayEquals(bytes,source.fileBytes())
         } finally {dir.deleteTree()}
     }

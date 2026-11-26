@@ -102,8 +102,8 @@ class AnchorCopyManifestTest : BundleTestFiles() {
         assertFailsWith<IllegalStateException> {
             AnchorManifest.inspectCopySource({object:ForwardingSource(bytes.asSource()) {
                 override fun close() {closed++;super.close()}
-            }},cancelled={closed>=2})
+            }},cancelled={closed>=1})
         }
-        assertEquals(2,closed)
+        assertEquals(1,closed)
     }
 }

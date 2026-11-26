@@ -97,7 +97,7 @@ class CanvasMapCodecTest : BundleTestFiles() {
             SourceRef("s2", SourceKind.CANVAS, "canvas-uuid", null, "草稿"),
         )
         return s.copy(
-            nodes = s.nodes + (a to s.nodes.getValue(a).copy(title = "监督学习", style = styled, ink = ink, sources = sources)) +
+            nodes = s.nodes + (a to s.nodes.getValue(a).copy(title = "监督学习", style = styled, ink = ink, sources = sources, width = 236.5)) +
                 (c to s.nodes.getValue(c).copy(title = "")),
             relations = mapOf(RelationId("rel") to Relation(RelationId("rel"), a1, f, "依赖于", RelationArrow.BACKWARD, Rgba(1, 2, 3, 4))),
             layers = mapOf(f to "L2"),
@@ -124,6 +124,7 @@ class CanvasMapCodecTest : BundleTestFiles() {
             assertEquals(n.title, m.title)
             assertEquals(n.style, m.style)
             assertEquals(n.sources, m.sources)
+            assertEquals(n.width, m.width)
             assertEquals(n.ink.width, m.ink.width, 0.0)
             assertEquals(n.ink.height, m.ink.height, 0.0)
             assertEquals(n.ink.strokes.size, m.ink.strokes.size)
@@ -179,7 +180,7 @@ class CanvasMapCodecTest : BundleTestFiles() {
 
     @Test fun legacyFormatValidationAcceptsCanvasesWithMaps() {
         val manifest = entries(bytesOf(docWith(richState()))).getValue("manifest.json")
-        BundleCopyPlan.validateLegacyFormat(Buffer().write(manifest))
+        bundleFormat(Buffer().write(manifest))
     }
 
     // ---- round trip ----
@@ -201,6 +202,34 @@ class CanvasMapCodecTest : BundleTestFiles() {
         // and saving again never drifts: no re-encoding on later saves
         val twice = roundTrip(once).map.state.nodes.getValue(NodeId("a")).ink.strokes.single()
         assertEquals(back.samples, twice.samples)
+    }
+
+    @Test fun nodeInkKeepsItsCutEdges() {
+        val cut = stroke(Sample(-10.0, 5.0, 0.5, 0.0), Sample(300.0, 40.0, 0.5, 8.0)).apply {
+            cuts = listOf(
+                com.xnotes.core.model.CutEdge(0.0, 0.0, -1.0, 0.0),
+                com.xnotes.core.model.CutEdge(170.0, 0.0, 1.0, 0.0),
+            )
+        }
+        val s = richState()
+        val a = NodeId("a")
+        val state = s.copy(nodes = s.nodes + (a to s.nodes.getValue(a).copy(ink = NodeInk(170.0, 95.0, listOf(cut)))))
+        val back = roundTrip(docWith(state)).map.state.nodes.getValue(a).ink.strokes.single()
+        assertEquals(cut.cuts, back.cuts)
+        assertEquals(cut.samples.size, back.samples.size)
+    }
+
+    @Test fun aNodeWithoutAWidthWritesNoWidthField() {
+        val json = entries(bytesOf(docWith(StateBuilder().apply { root("r") }.build()))).getValue(MapJson.ENTRY).decodeToString()
+        assertFalse(json.contains("\"width\""))
+        assertEquals(null, read(withMapJson(minimal)).map.state.nodes.getValue(NodeId("r")).width)
+    }
+
+    @Test fun aBadNodeWidthIsRefused() {
+        for (bad in listOf("0", "-3.5", "\"wide\"")) {
+            val json = minimal.replace("\"layout\":\"right\"", "\"layout\":\"right\",\"width\":$bad")
+            kotlin.test.assertFailsWith<XCanvasFormatException> { read(withMapJson(json)) }
+        }
     }
 
     @Test fun onlyPrunedCollapsedNodesAreSaved() {

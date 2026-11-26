@@ -4,7 +4,6 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
 import com.xnotes.ui.*
@@ -24,7 +23,6 @@ class ColdPresentationClassificationHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
     private fun directory(editor:Editor)=field(editor,"sessionDir") as File
     private suspend fun seed(f:EditorPageCopyFixture):Document {
-        (field(f.editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         val document=Document.blank().apply {dirty=false}
         withContext(Dispatchers.IO) {
             val store=SessionStore(directory(f.editor),f.codec,File(f.root,"pdf").apply {mkdirs()},File(f.root,"assets").apply {mkdirs()})
@@ -35,18 +33,13 @@ class ColdPresentationClassificationHostTest {
     }
     private suspend fun write(f:EditorPageCopyFixture,value:LastPresentation) {
         val store=LastPresentationStore(f.context.filesDir)
-        val attempt=store.begin(store.reserve(),value)
-        try {
-            assertEquals(LastPresentationPrepare.Ready,attempt.prepare())
-            assertEquals(LastPresentationWrite.Written,withContext(Dispatchers.Main) {attempt.commit {true}})
-        } finally {attempt.close()}
+        assertTrue(store.write(value))
     }
     private suspend fun newEditor(f:EditorPageCopyFixture) {
         withContext(Dispatchers.Main) {
             val scope=field(f.editor,"autosaveScope") as CoroutineScope
             scope.cancel();scope.coroutineContext[Job]?.join()
         }
-        (field(f.editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         withContext(Dispatchers.Main) {f.editor=Editor(f.context)}
     }
 
@@ -109,9 +102,8 @@ class ColdPresentationClassificationHostTest {
                     withContext(Dispatchers.Main) {
                         val first=ColdPresentationCoordinator(f.editor,bootstrap)
                         try {
-                            assertFalse(first.bootstrap());assertFalse(f.editor.noteOpen)
-                            assertEquals(ColdPresentationProblem.INVALID,bootstrap.problem)
-                            assertNull(first.prepareDeparture {true})
+                            assertTrue(first.bootstrap());assertFalse(f.editor.noteOpen)
+                            assertEquals(LastPresentation.Home,bootstrap.presentation)
                         } finally {first.close()}
                     }
                     newEditor(f)
@@ -119,7 +111,7 @@ class ColdPresentationClassificationHostTest {
                         val rebound=ColdPresentationCoordinator(f.editor,bootstrap)
                         try {
                             rebound.bootstrap();assertFalse(f.editor.noteOpen)
-                            assertEquals(ColdPresentationProblem.INVALID,bootstrap.problem)
+                            assertEquals(LastPresentation.Home,bootstrap.presentation)
                         } finally {rebound.close()}
                     }
                 }
@@ -139,7 +131,7 @@ class ColdPresentationClassificationHostTest {
                 val first=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {
                     assertFalse(first.bootstrap());assertFalse(f.editor.noteOpen)
-                    assertEquals(ColdPresentationProblem.UNAVAILABLE,bootstrap.problem)
+                    assertEquals(LastPresentation.Home,bootstrap.presentation)
                 } finally {first.close()}
             }
             newEditor(f)
@@ -147,7 +139,7 @@ class ColdPresentationClassificationHostTest {
                 val rebound=ColdPresentationCoordinator(f.editor,bootstrap)
                 try {
                     rebound.bootstrap();assertFalse(f.editor.noteOpen)
-                    assertEquals(ColdPresentationProblem.UNAVAILABLE,bootstrap.problem)
+                    assertEquals(LastPresentation.Home,bootstrap.presentation)
                     write(f,value(document.identity.documentId))
                     assertTrue(rebound.bootstrap(retry=true))
                     assertTrue(f.editor.noteOpen);assertTrue(f.editor.requiresIndependentSave)

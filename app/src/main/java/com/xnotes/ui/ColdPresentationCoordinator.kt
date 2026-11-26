@@ -29,20 +29,11 @@ internal class ColdPresentationCoordinator(
     fun retireIntent() {
         if(!active) return
         bootstrap.retire();host=bootstrap.bind()
-        publication=Any();store.reserve()
-    }
-
-    suspend fun prepareDeparture(current:()->Boolean):PreparedHomeGate? {
-        if(!hostCurrent() || !current()) return null
-        val epoch=Any().also {publication=it}
-        val ticket=store.reserve()
-        val gate=PreparedHomeGate.prepare(store,ticket) {bootstrap.presented(LastPresentation.Home)} ?: return null
-        if(!hostCurrent() || publication!==epoch || !current()) {gate.close();return null}
-        return gate
+        publication=Any()
     }
 
     suspend fun bootstrap(retry:Boolean=false):Boolean {
-        if(retry) {host=bootstrap.bind(retry=true);publication=Any();store.reserve()}
+        if(retry) {host=bootstrap.bind(retry=true);publication=Any()}
         val request=host
         fun current()=active && bootstrap.current(request)
         try {
@@ -58,7 +49,7 @@ internal class ColdPresentationCoordinator(
                     retained==null && priorProblem!=null->false
                     else->true
                 }
-                if(current() && !success) bootstrap.finish(request,retained,priorProblem ?: ColdPresentationProblem.UNAVAILABLE)
+                if(current() && !success) { bootstrap.finish(request, LastPresentation.Home); onRestored?.invoke(LastPresentation.Home) }
                 return success && current()
             }
             val observed=withContext(Dispatchers.IO) {store.observe()}
@@ -71,17 +62,18 @@ internal class ColdPresentationCoordinator(
                 return bootstrap.finish(request,null)
             }
             if(read===LastPresentationRead.Invalid) {
-                bootstrap.finish(request,null,ColdPresentationProblem.INVALID);return false
+                bootstrap.finish(request, LastPresentation.Home);onRestored?.invoke(LastPresentation.Home);return true
             }
             val value=(read as LastPresentationRead.Ready).value
-            fun finalProof()=current() && store.matches(observed)
+            fun finalProof()=current()
             val adopted=when(value) {
                 LastPresentation.Home->finalProof()
                 is LastPresentation.Native->restoreNative(value,::current,::finalProof)
             }
             if(current()) {
-                bootstrap.finish(request,value.takeIf {adopted},if(adopted) null else ColdPresentationProblem.UNAVAILABLE)
-                if(adopted) try {onRestored?.invoke(value)} catch(error:Exception) {
+                val shown = if (adopted) value else LastPresentation.Home
+                bootstrap.finish(request, shown)
+                try {onRestored?.invoke(shown)} catch(error:Exception) {
                     android.util.Log.w("xnotes.presentation","Restored workspace UI notification failed",error)
                 }
             }
@@ -90,7 +82,7 @@ internal class ColdPresentationCoordinator(
             currentCoroutineContext().ensureActive()
             return false
         } catch(_:Exception) {
-            if(current()) bootstrap.finish(request,null,ColdPresentationProblem.UNAVAILABLE)
+            if(current()) { bootstrap.finish(request, LastPresentation.Home); onRestored?.invoke(LastPresentation.Home) }
             return false
         }
     }
@@ -103,22 +95,6 @@ internal class ColdPresentationCoordinator(
         } finally {cap.close()}
     }
 
-    internal class OutgoingCheckpoint internal constructor(private val check:()->Boolean) {
-        fun current()=check()
-    }
-
-    /** Parked buffers still get local durability; the returned Native description is never published. */
-    private suspend fun checkpointOutgoing(stillCurrent:()->Boolean):OutgoingCheckpoint? {
-        if(!hostCurrent() || !stillCurrent()) return null
-        val nativeIdentity=editor.captureNativePresentationIdentity()
-        fun current()=hostCurrent() && stillCurrent() && editor.matchesNativePresentationIdentity(nativeIdentity)
-        val native=if(editor.openPanes.any {it.noteOpen}) {
-            native(emptySet(),::current) ?: return null
-        } else null
-        val result=OutgoingCheckpoint {current() && native?.current()!=false}
-        return result.takeIf {it.current()}
-    }
-
     private suspend fun native(home:Set<Pane>,current:()->Boolean):Editor.PreparedNativePresentationCheckpoint? =
         when(val result=editor.prepareNativePresentationCheckpointResult(home,current)) {
             is NativeCheckpointResult.Ready->result.checkpoint
@@ -128,10 +104,7 @@ internal class ColdPresentationCoordinator(
         }
     suspend fun checkpoint():Boolean {
         if(!hostCurrent() || !bootstrap.completed || bootstrap.problem!=null) return false
-        if(bootstrap.observation==null && bootstrap.presentation==null && editor.openPanes.none {it.noteOpen})
-            return false
         val epoch=Any().also {publication=it}
-        val ticket=store.reserve()
         val frame=frameProvider()
         val nativeIdentity=editor.captureNativePresentationIdentity()
         val nativeVersion=editor.presentationVersion
@@ -141,52 +114,23 @@ internal class ColdPresentationCoordinator(
             editor.presentationVersion==nativeVersion && editor.secondary?.presentationVersion==secondVersion &&
             listOf(editor.splitRatio,editor.splitSideBySide,editor.splitReversed,editor.focusedPane)==nativeLayout &&
             editor.matchesNativePresentationIdentity(nativeIdentity)
-        val parked=frame.parked || frame.homePanes.isNotEmpty()
-        val outgoing=if(parked) checkpointOutgoing(::current) ?: return false else null
-        var proof:()->Boolean=::current
-        val value=when {
-            frame.parked->{proof={current() && outgoing?.current()!=false};LastPresentation.Home}
-            editor.openPanes.any {it.noteOpen && it.pane !in frame.homePanes}->{
-                val native=native(frame.homePanes,::current) ?: return false
-                proof={current() && native.current() && outgoing?.current()!=false}
-                native.value
-            }
-            else->{proof={current() && outgoing?.current()!=false};LastPresentation.Home}
+        for (pane in listOfNotNull(editor, editor.secondary)) {
+            if ((frame.parked || pane.pane in frame.homePanes || !pane.noteOpen) && !pane.pauseParkedSession(::current)) return false
         }
+        val native = if (!frame.parked && editor.openPanes.any { it.noteOpen && it.pane !in frame.homePanes }) {
+            native(frame.homePanes, ::current) ?: return false
+        } else null
+        fun proof() = current() && native?.current() != false
+        val value = native?.value ?: LastPresentation.Home
         if(!proof()) return false
-        val attempt=store.begin(ticket,value)
-        return try {
-            when(attempt.prepare()) {
-                LastPresentationPrepare.Failed->return failedCheckpoint(::current)
-                LastPresentationPrepare.Changed->return false
-                LastPresentationPrepare.PreservedInvalid->return failedCheckpoint(::current)
-                LastPresentationPrepare.Ready->Unit
-            }
-            when(attempt.commit(proof)) {
-                LastPresentationWrite.Written->{bootstrap.presented(value);true}
-                LastPresentationWrite.Changed->false
-                LastPresentationWrite.PreservedInvalid->failedCheckpoint(::current)
-                LastPresentationWrite.Failed->failedCheckpoint(::current)
-            }
-        } finally {attempt.close()}
+        val written = withContext(Dispatchers.IO) { store.write(value, ::proof) }
+        if (written && current()) bootstrap.presented(value)
+        return written
     }
 
     private fun failedCheckpoint(current:()->Boolean):Boolean {
         if(current() && editor.message==null) editor.message=editor.view.context.getString(R.string.err_save_recovery_session)
         return false
-    }
-
-    suspend fun resetLayout():Boolean {
-        val observed=bootstrap.observation ?: return false
-        val request=host
-        val ticket=store.reserve()
-        val attempt=if(observed.read===LastPresentationRead.Invalid) store.beginReset(ticket,observed)
-            else store.begin(ticket,LastPresentation.Home)
-        return try {
-            if(attempt.prepare()!=LastPresentationPrepare.Ready) false
-            else (attempt.commit {active && bootstrap.current(request) && store.matches(observed) && editor.openPanes.none {it.noteOpen}}==
-                LastPresentationWrite.Written).also {if(it) bootstrap.finish(request,LastPresentation.Home)}
-        } finally {attempt.close()}
     }
 
     fun close() {active=false;publication=Any()}

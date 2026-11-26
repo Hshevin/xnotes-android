@@ -37,6 +37,7 @@
 - 2026-11-23 [0.9.9beta 发布](releases/release-0.9.9beta-2026-11-23.md)
 - 2026-11-23 [主线正式覆盖更新 APK 100](releases/release100-2026-11-23.md)
 - 2026-11-23 [主线正式覆盖更新 APK 101](releases/release101-2026-11-23.md)
+- 2026-11-24 [0.9.9beta2 本地正式版](releases/release-0.9.9beta2-2026-11-24.md)
 
 ## 测试版（`test-builds/`）
 
@@ -61,6 +62,10 @@
 - 2026-11-22 [导图 v2 test1 打包与真机测试](test-builds/mindmapv2-test1-2026-11-22.md)
 - 2026-11-22 [导图 v2 test2 打包与真机测试](test-builds/mindmapv2-test2-2026-11-22.md)
 - 2026-11-22 [导图 v2 test3 打包与真机复验](test-builds/mindmapv2-test3-2026-11-22.md)
+- 2026-11-24 [主线独立测试版 test15：图层切换提速](test-builds/master-test15-2026-11-24.md)
+- 2026-11-24 [主线测试版 test16：点选图层不再等待](test-builds/master-test16-2026-11-24.md)
+- 2026-11-26 [Zotero 测试版 test1](test-builds/zotero-test1-2026-11-26.md)
+- 2026-11-26 [Zotero 测试版 test2：分类侧栏与按分类存放](test-builds/zotero-test2-2026-11-26.md)
 
 ## 编辑器（`editor/`）
 
@@ -156,6 +161,8 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-22 [系统选择器与工作目录的同文件位置](storage/same-file-locations-2026-11-22.md)
 - 2026-11-22 [保存步骤简化：只让文件保存编码](storage/save-slim-2026-11-22.md)
 - 2026-11-23 [恢复记录只在离开应用时写入](storage/pause-only-recovery-2026-11-23.md)
+- 2026-11-26 [拆除事务存储，回归直接流式打开与尾部快速保存](storage/direct-storage-2026-11-26.md)
+- 2026-11-26 [Zotero 文献库：浏览并打开为批注笔记](storage/zotero-library-2026-11-26.md)
 
 ## 显示与渲染（`rendering/`）
 

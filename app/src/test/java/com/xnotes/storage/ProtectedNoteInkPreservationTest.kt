@@ -23,13 +23,13 @@ class ProtectedNoteInkPreservationTest {
                 zip.write(("""{"format":"xnote","version":1,"pages":[{"width":100,"height":100,"items":[{"kind":"stroke","tool":"pen","config":{"speed_strength":1},"samples":[$samples]}]}]}""").toByteArray())
                 zip.closeEntry()
             }}.toByteArray()
-            val restored=codec.readComplete(raw.inputStream(),root,root,preserveInkSamples=true).document
+            val restored=codec.readSession(raw.inputStream(),root,root)
             assertFalse(restored.compactedOnLoad)
             val ink=restored.pages.single().items.single() as Stroke
             assertEquals(100,ink.samples.size)
             val before=ink.samples.toList()
             val bytes=ByteArrayOutputStream().also {codec.write(restored.fixedWriteSnapshot(),it)}.toByteArray()
-            val written=codec.readComplete(bytes.inputStream(),root,root,preserveInkSamples=true).document
+            val written=codec.readSession(bytes.inputStream(),root,root)
             val saved=(written.pages.single().items.single() as Stroke).samples
             assertEquals(before.size,saved.size)
             for(index in before.indices) {

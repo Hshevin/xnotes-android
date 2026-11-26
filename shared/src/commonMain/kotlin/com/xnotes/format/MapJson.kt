@@ -57,6 +57,7 @@ import com.xnotes.map.walkTrees
  *         "border": [r, g, b, a], "fill": [r, g, b, a] | null, "text": [r, g, b, a],
  *         "borderWidth": 2.0, "textSize": 18.0, "bold": false
  *       },
+ *       "width": 240.0,                              // optional positive manual node width
  *       "ink": { "w": 160.0, "h": 80.0, "strokes": [ <stroke> ... ] },   // omitted when NodeInk.NONE
  *       "sources": [ { "id": "...", "kind": "note_page" | "pdf_page" | "canvas",
  *                      "document": "<uuid>", "page": "<page id>" (omitted when null), "label": "..." } ],  // omitted when empty
@@ -113,6 +114,7 @@ object MapJson {
             j.name("text").color(style.text)
             j.name("borderWidth").value(style.borderWidth).name("textSize").value(style.textSize)
             j.name("bold").value(style.bold).endObject()
+            node.width?.let { j.name("width").value(it) }
             if (!node.ink.isEmpty) {
                 j.name("ink").beginObject().name("w").value(node.ink.width).name("h").value(node.ink.height)
                 j.name("strokes").beginArray()
@@ -204,6 +206,7 @@ object MapJson {
             var id: NodeId? = null
             var title = ""
             var style = NodeStyle.TOPIC
+            var width: Double? = null
             var ink = NodeInk.NONE
             var sources = emptyList<SourceRef>()
             var kids = emptyList<NodeId>()
@@ -217,6 +220,7 @@ object MapJson {
                     "id" -> id = NodeId(p.nextString())
                     "title" -> title = p.nextString()
                     "style" -> style = readStyle(p)
+                    "width" -> width = number(p)
                     "ink" -> ink = readInk(p, readStroke)
                     "sources" -> sources = p.array { readSource(p) }
                     "children" -> kids = p.array { NodeId(p.nextString()) }
@@ -229,7 +233,7 @@ object MapJson {
                 }
             }
             val key = id ?: missing("node id")
-            if (nodes.put(key, MapNode(key, title, style, ink, sources)) != null) invalid("Duplicate node id")
+            if (nodes.put(key, MapNode(key, title, style, ink, sources, width)) != null) invalid("Duplicate node id")
             if (kids.isNotEmpty()) children[key] = kids
             for (child in kids) if (parent.put(child, key) != null) invalid("Child listed more than once")
             origin?.let { origins[key] = it }

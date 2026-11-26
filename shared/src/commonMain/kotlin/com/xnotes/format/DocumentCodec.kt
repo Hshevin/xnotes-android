@@ -772,7 +772,7 @@ class DocumentCodec(
         val document=readDocument(input,pdfDir,imageDir,timing,pdfStore,false,onRead={doc,survived->
             if(survived) complete=CompleteRead.capture(doc)
         })
-        return ObservedRead(document,complete)
+        return ObservedRead(document,complete != null)
     }
     fun readComplete(input:Source,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
         pdfStore:((Source)->File)?=null,preserveInkSamples:Boolean=false):CompleteRead {
@@ -782,7 +782,7 @@ class DocumentCodec(
         })
         return requireNotNull(complete)
     }
-    class ObservedRead internal constructor(val document:Document,val complete:CompleteRead?)
+    class ObservedRead internal constructor(val document:Document,val complete:Boolean)
     /** Drawing-item provenance plus explicit XML parse failures; not a proof of every future XML extension. */
     class CompleteRead private constructor(val document:Document) {
         private val pages=document.pages.toList()

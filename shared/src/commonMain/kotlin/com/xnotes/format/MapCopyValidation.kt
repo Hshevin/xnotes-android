@@ -8,7 +8,7 @@ internal fun MapJson.validateForCopy(zip: BundleDirectory, cancelled: () -> Bool
     val map = zip.open(ENTRY).use {
         CanvasCodec.readMapEntry(it.cancellable(cancelled))
     }
-    val layers = zip.open(BundleCopyPlan.MANIFEST).use { input ->
+    val layers = zip.open("manifest.json").use { input ->
         val reader = jsonChars(input.cancellable(cancelled), strict=true)
         val p = JsonPull(reader, strict = true, tokenLimit = Int.MAX_VALUE)
         readLayers(p)

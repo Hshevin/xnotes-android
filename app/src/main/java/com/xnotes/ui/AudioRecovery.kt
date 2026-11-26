@@ -4,7 +4,6 @@ import android.content.Context
 import com.xnotes.core.model.AudioItem
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.format.RecordingBodyEvidence
-import com.xnotes.storage.NativeSourceVersion
 import java.io.File
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,10 +50,8 @@ internal object AudioRecovery {
                 Published(ownerToken,evidence,store?.matches(ownerToken,evidence).orEmpty(),store)
         }
     }
-    fun published(ownerToken:Any,evidence:RecordingBodyEvidence,version:NativeSourceVersion):Published? {
-        if(evidence.kind!=version.kind || evidence.documentId!=version.documentId || evidence.bodySha256!=version.sha256) return null
-        return Published.issue(ownerToken,evidence,store)
-    }
+    fun published(ownerToken: Any, evidence: RecordingBodyEvidence): Published =
+        Published.issue(ownerToken, evidence, store)
     fun bodyCommitted(publication:Published) {
         if(publication.consumed || publication.issuedBy!==store) return
         publication.consumed=true

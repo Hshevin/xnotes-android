@@ -13,7 +13,6 @@ import com.xnotes.pen.runParkingScenario
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
 import com.xnotes.platform.CanvasSessionStore
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.ui.Editor
 import java.io.File
@@ -41,7 +40,6 @@ import org.robolectric.annotation.Config
 class NativeSavePickerRouteHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
     private suspend fun protectedCanvas(f:EditorPageCopyFixture):InfiniteDocument {
-        (field(f.editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         val original=InfiniteDocument(path=f.sourceUri)
         val codec=CanvasCodec(AndroidImageCodec(),AndroidTextMeasurer())
         withContext(Dispatchers.IO) {

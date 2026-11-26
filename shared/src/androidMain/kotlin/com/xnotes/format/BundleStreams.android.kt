@@ -13,8 +13,6 @@ import okio.*
 actual abstract class PdfStreamAdapters actual constructor() {
     fun write(source:File,out:OutputStream,identity:BundleIdentity,pdf:File?,external:Boolean,cancelled:()->Boolean={false}) =
         BundlePdf.write(source,out.sink(),identity,pdf,external,cancelled)
-    fun write(snapshot:BundleSnapshot,out:OutputStream,identity:BundleIdentity,pdf:File?,external:Boolean,cancelled:()->Boolean={false}) =
-        BundlePdf.write(snapshot,out.sink(),identity,pdf,external,cancelled)
 }
 
 actual abstract class SnapshotInputAdapters actual constructor() {
@@ -82,6 +80,7 @@ actual abstract class DocumentStreamAdapters actual constructor() {
     fun read(input: InputStream, pdfDir: File? = null, imageDir: File? = null, timing: DocumentCodec.ReadTiming? = null, pdfStore: ((InputStream) -> File)? = null) = codec.read(input.source(), pdfDir, imageDir, timing, pdfAdapter(pdfStore))
     fun readObserved(input: InputStream, pdfDir: File, imageDir: File, timing: DocumentCodec.ReadTiming? = null, pdfStore: ((InputStream) -> File)? = null) = codec.readObserved(input.source(), pdfDir, imageDir, timing, pdfAdapter(pdfStore))
     fun readComplete(input: InputStream, pdfDir: File, imageDir: File, timing: DocumentCodec.ReadTiming? = null, pdfStore: ((InputStream) -> File)? = null, preserveInkSamples: Boolean = false) = codec.readComplete(input.source(), pdfDir, imageDir, timing, pdfAdapter(pdfStore), preserveInkSamples)
+    fun readSession(input: InputStream, pdfDir: File, imageDir: File) = codec.readComplete(input.source(), pdfDir, imageDir, preserveInkSamples = true).document
     fun readInkCopy(input: InputStream, imageDir: File? = null) = codec.readInkCopy(input.source(), imageDir)
     fun peek(input: InputStream) = codec.peek(input.source())
     fun peekManifest(json: InputStream) = codec.peekManifest(json.source())

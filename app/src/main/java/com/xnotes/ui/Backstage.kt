@@ -172,10 +172,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, RECOVERY;
-    /** A sidebar tool whose pane belongs to a host-owned presentation: the host decides when it shows and releases it. */
-    val tool: Boolean get() = this == RECOVERY
-}
+enum class BackstageView { AI, ZOTERO, HOME, SPLIT, PREFERENCES, ABOUT, TRASH }
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
 private enum class CreateMode { NONE, FILE, CANVAS, FOLDER }
@@ -241,10 +238,6 @@ fun Backstage(
     onImportTemplate: () -> Unit = {},
     /** The New note screen asked to make a cover or page template from a picture. */
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
-    /** Preview historical recovery material from this physical pane without replacing its workspace. */
-    onPreviewRecovery: () -> Unit = {},
-    /** The host's pane for a tool view ([BackstageView.tool]), shown beside the sidebar; null falls back to Home. */
-    toolPane: (@Composable (sidebarOpen: Boolean, onShowSidebar: () -> Unit) -> Unit)? = null,
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -270,7 +263,7 @@ fun Backstage(
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (EditorActivity.applyFullscreen).
     androidx.compose.runtime.CompositionLocalProvider(LocalHomeBackEnabled provides backEnabled) {
-        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument, onPreviewRecovery, toolPane)
+        BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup, initialDocument)
     }
 }
 
@@ -314,8 +307,6 @@ private fun BackstageContent(
     onImportFont: () -> Unit,
     onBackup: (Boolean) -> Unit,
     initialDocument: String?,
-    onPreviewRecovery: () -> Unit,
-    toolPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
 ) {
     val palette = LocalPalette.current
     var createMode by remember { mutableStateOf(CreateMode.NONE) }
@@ -328,31 +319,11 @@ private fun BackstageContent(
     val dismissDrawer = { animateClose = true; drawerOpen = false }
     val setRailed: (Boolean) -> Unit = { editor.showRail(it) }
 
-    var pendingTool by remember { mutableStateOf<Pair<BackstageView, () -> Unit>?>(null) }
     val selectView: (BackstageView) -> Unit = { v ->
-        pendingTool = null
         if (v == BackstageView.HOME) createMode = CreateMode.NONE
         onSelectView(v)
         animateClose = false
         drawerOpen = false
-    }
-    // Network closure parks the host asynchronously. Open the requested tool only after Home
-    // confirms the old presentation has left; another sidebar selection cancels this request.
-    LaunchedEffect(view, pendingTool) {
-        if (!view.tool) pendingTool?.let { request ->
-            pendingTool = null
-            request.second()
-        }
-    }
-    val openTool: (BackstageView, () -> Unit) -> Unit = { tool, open ->
-        if (view != tool && view.tool) {
-            selectView(BackstageView.HOME)
-            pendingTool = tool to open
-        } else {
-            pendingTool = null
-            if (view != tool) open()
-        }
-        animateClose = false; drawerOpen = false
     }
     // A sidebar pick the explorer has yet to act on, and the folder or colour filter it is showing.
     var explorerNav by remember { mutableStateOf<ExplorerNav?>(null) }
@@ -411,7 +382,7 @@ private fun BackstageContent(
     LaunchedEffect(editor.browseRoot) { editor.browseRoot?.let { r -> withContext(Dispatchers.IO) { editor.purgeExpiredTrash(r, prefs.trashDays) } } }
     // Kept while its inputs hold, so folding the sidebar never recomposes the rail or the sidebar.
     val showRecent = prefs.sidebarRecent && editor.browseRoot != null
-    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder, onPreviewRecovery) {
+    val nav = remember(view, shownColors, activeColor, pins, activePin, trashCount, showRecent, recentActive, explorerFolder) {
         SidebarNav(
             allowSplits = calls.allowSplits,
             view = view,
@@ -432,7 +403,6 @@ private fun BackstageContent(
             onUnpin = { editor.unpinFolder(it.uri) },
             // Another tool's pane is left first, so its host releases it before this presentation starts;
             // picking the tool already shown only closes the drawer.
-            onPreviewRecovery = { openTool(BackstageView.RECOVERY, onPreviewRecovery) },
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -458,7 +428,6 @@ private fun BackstageContent(
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
-                toolPane,
             )
             AnimatedVisibility(
                 visible = drawerOpen,
@@ -497,7 +466,6 @@ private fun BackstageContent(
                 },
                 editor, view, compact, true, { setRailed(false) }, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
-                toolPane,
             )
             // Both stay composed so a fold never pays to build one; only the current one is measured and placed.
             Layout(
@@ -556,7 +524,6 @@ private class SidebarNav(
     val onForgetColor: (Rgba) -> Unit,
     val onOpenPin: (PinnedFolder) -> Unit,
     val onUnpin: (PinnedFolder) -> Unit,
-    val onPreviewRecovery: () -> Unit,
 )
 
 /** The full sidebar, drawn on the surface its caller gives it: a floating sheet on wide screens, a slide-over drawer on phones. */
@@ -585,7 +552,7 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-                Command(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
+                Command(XnotesIcons.library, stringResource(R.string.zotero_label), selected = nav.view == BackstageView.ZOTERO) { nav.onSelectView(BackstageView.ZOTERO) }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.colors.isNotEmpty()) {
                     SidebarLabel(stringResource(R.string.toolbar_colours))
@@ -640,7 +607,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
-                RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
+                RailItem(XnotesIcons.library, stringResource(R.string.zotero_label), selected = nav.view == BackstageView.ZOTERO) { nav.onSelectView(BackstageView.ZOTERO) }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
                 nav.pins.forEachIndexed { i, pin ->
@@ -680,7 +647,6 @@ private fun BackstageMain(
     onBackup: (Boolean) -> Unit,
     link: ExplorerLink,
     onOpenPreferences: () -> Unit,
-    toolPane: (@Composable (Boolean, () -> Unit) -> Unit)?,
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
@@ -757,11 +723,10 @@ private fun BackstageMain(
                     }
                 }
                 BackstageView.AI -> AiHistoryPane(sidebarOpen, onShowSidebar, calls.openFile)
+                BackstageView.ZOTERO -> ZoteroPane(editor, sidebarOpen, onShowSidebar, calls.openFile)
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
-                BackstageView.RECOVERY -> if (toolPane != null) toolPane(sidebarOpen, onShowSidebar)
-                    else HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
             }
         }
     }

@@ -28,7 +28,10 @@ class PhysicalBundleHeaderTest : BundleTestFiles() {
         val legacy=fixture(dir,withIdentity=false,withMarker=false)
         openRead(legacy.assetPath()).use {val h=BundleHeader.read(it)!!;assertNull(h.identity);assertNull(h.anchors)}
         val commented=fixture(dir,comment=true)
-        openRead(commented.assetPath()).use {assertNull(BundleHeader.read(it))}
+        openRead(commented.assetPath()).use {
+            assertNull(ZipTail.read(it))
+            assertEquals(id, BundleHeader.read(it)!!.identity)
+        }
         assertEquals(id,BundleHeader.read(commented).identity)
         val orphan=fixture(dir,withIdentity=false)
         try {BundleHeader.read(orphan);fail("marker cannot supply a guessed identity")} catch(_:IllegalArgumentException) {}

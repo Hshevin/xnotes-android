@@ -8,7 +8,7 @@ import com.xnotes.core.text.FlowPos
 import com.xnotes.core.text.FlowRange
 import com.xnotes.core.text.Paragraph
 import com.xnotes.core.tools.Tool
-import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.storage.NativeReferenceTarget
 import com.xnotes.ui.Pane
 import com.xnotes.ui.NativeReferencePreparation
@@ -59,7 +59,7 @@ class NativeReferenceSplitSlotHostTest {
         val retryUri=DocumentsContract.buildDocumentUri(f.authority,"retry").toString()
         val target=withContext(Dispatchers.IO) {
             f.seed(f.retry)
-            val info=BundleReferenceInfo.inspectStrict(f.retry)
+            val info=TestBundleMetadata.read(f.retry)
             NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1])
         }
         withContext(Dispatchers.Main) {
@@ -93,7 +93,7 @@ class NativeReferenceSplitSlotHostTest {
 
     @Test fun aChangedActualRootSlotDuringTheLastReadCannotAdoptThePreparedSecondary()=runParkingScenario {f->
         withContext(Dispatchers.IO) {f.seed();f.seed(f.target);f.seed(f.retry)}
-        val info=BundleReferenceInfo.inspectStrict(f.target)
+        val info=TestBundleMetadata.read(f.target)
         val target=NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1])
         val destination=withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"source.xnote");f.editor.secondaryPane()

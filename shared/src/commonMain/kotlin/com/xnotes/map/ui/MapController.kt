@@ -2,6 +2,8 @@ package com.xnotes.map.ui
 
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.infinite.OverlayTessellator
+import com.xnotes.core.model.CutEdge
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.tools.Tool
@@ -22,6 +24,7 @@ import com.xnotes.map.NodeShape
 import com.xnotes.map.NodeStyle
 import com.xnotes.map.RelationArrow
 import com.xnotes.map.RelationId
+import com.xnotes.map.Size
 import com.xnotes.map.Vec
 import com.xnotes.map.nudged
 import kotlin.math.min
@@ -64,8 +67,8 @@ class MapController(
         fun sourceTapped(node: NodeId, sourceId: String?) {}
     }
 
-    /** A "+" handle beside the selected node. */
-    enum class HandleKind { CHILD, SIBLING }
+    /** A handle of the selected node: a "+" beside it, or the resize grip at its bottom-right corner. */
+    enum class HandleKind { CHILD, SIBLING, RESIZE }
 
     class Handle(val kind: HandleKind, val center: Pt, val radius: Double)
 
@@ -82,7 +85,7 @@ class MapController(
     )
 
     /** The title field over a node: where it sits, what it holds, and how it sets. */
-    data class TitleField(val node: NodeId, val rect: Rect, val text: String, val style: NodeStyle, val isDraft: Boolean)
+    data class TitleField(val node: NodeId, val rect: Rect, val text: String, val style: NodeStyle, val isDraft: Boolean, val wrap: Double)
 
     private val model: MapModel get() = editor.model
     private val metrics: NodeMetrics get() = editor.metrics
@@ -102,6 +105,7 @@ class MapController(
         class OnHandle(val node: NodeId, val kind: HandleKind, override val at: Pt) : Press
         class OnRelation(val id: RelationId, override val at: Pt) : Press
         class Relating(val from: NodeId, override val at: Pt) : Press
+        class Resizing(val node: NodeId, override val at: Pt, val start: Size) : Press
     }
 
     private var press: Press? = null
@@ -110,6 +114,8 @@ class MapController(
     private var drop: DropAction = DropAction.None
     private var dragDelta = Vec.ZERO
     private var relationTarget: NodeId? = null
+    /** The size a resize drag asks for, or null while none is moving. */
+    private var resizeTarget: Size? = null
 
     /** The layout drawn last: of the model, or of the drag or typing preview over it. */
     var shown: MapLayoutResult = MapLayoutResult(emptyMap(), emptyList(), emptySet(), emptyMap())
@@ -149,6 +155,7 @@ class MapController(
                 is Press.OnHandle -> p.node !in state.nodes
                 is Press.Relating -> p.from !in state.nodes
                 is Press.OnRelation -> p.id !in state.relations
+                is Press.Resizing -> p.node !in state.nodes
             }
             if (gone) abandonGesture()
         }
@@ -164,6 +171,12 @@ class MapController(
         }
         val p = press
         if (dragging && p is Press.OnNode) state = state.nudged(p.node, dragDelta)
+        val target = resizeTarget
+        if (p is Press.Resizing && target != null) {
+            state.nodes[p.node]?.let { n ->
+                state = state.copy(nodes = state.nodes + (p.node to metrics.resized(n, p.node !in state.parent, target)))
+            }
+        }
         shownState = state
         shown = if (state === base) editor.layout() else MapLayout.compute(state, model.collapsed, metrics)
         projection.update(state, shown, sink, untitled = editing?.node, night = host.night(), layerFor = host::drawingLayer)
@@ -186,8 +199,29 @@ class MapController(
     /** The node a pen stroke starting at [p] writes into: an editable node whose box holds [p]. */
     fun inkTarget(p: Pt): NodeId? = nodeAt(p)
 
+    /**
+     * The edges a pen stroke starting at [p] is cut along while it is drawn, in canvas coordinates,
+     * matching what [MapEditor.addInk] keeps: the node's ink area, or for a resized node that has
+     * none yet only its sides (the first stroke still sets the area's height). Empty when the
+     * stroke does not write into a node or nothing bounds it yet.
+     */
+    fun inkCuts(p: Pt): List<CutEdge> {
+        val id = inkTarget(p) ?: return emptyList()
+        val node = shownState.nodes[id] ?: return emptyList()
+        val box = shown.rectOf(id) ?: return emptyList()
+        val frame = metrics.frame(node, id !in shownState.parent, box.topLeft)
+        val area = frame.ink
+        val left = CutEdge(area?.left ?: (box.left + NodeMetrics.PAD_X), 0.0, -1.0, 0.0)
+        val right = CutEdge(area?.right ?: (box.right - NodeMetrics.PAD_X), 0.0, 1.0, 0.0)
+        return when {
+            area != null -> listOf(left, right, CutEdge(0.0, area.top, 0.0, -1.0), CutEdge(0.0, area.bottom, 0.0, 1.0))
+            node.width != null -> listOf(left, right)
+            else -> emptyList()
+        }
+    }
+
     fun handleAt(p: Pt, zoom: Double, touchPx: Double): Handle? =
-        handles(zoom, touchPx).firstOrNull { it.center.distanceTo(p) <= it.radius }
+        handles(zoom, touchPx).filter { it.center.distanceTo(p) <= it.radius }.minByOrNull { it.center.distanceTo(p) }
 
     private fun relationAt(p: Pt, reach: Double): RelationId? =
         projection.relationAt(p, reach)?.takeIf { id ->
@@ -209,9 +243,19 @@ class MapController(
     fun press(p: Pt, zoom: Double, touchPx: Double, finger: Boolean, eraser: Boolean, tool: Tool, connector: Boolean, fingerDraws: Boolean): Boolean {
         abandonGesture()
         if (eraser) return false
-        // A node under the press beats a handle whose target spills over it.
-        handleAt(p, zoom, touchPx)?.takeIf { shown.placements.values.none { it.rect.contains(p) } }?.let { h ->
-            press = Press.OnHandle(checkNotNull(selected), h.kind, p)
+        // A node under the press beats a handle whose target spills over it; the resize grip sits on
+        // the selected node's own corner, so only another node beats that one.
+        handleAt(p, zoom, touchPx)?.takeIf { h ->
+            shown.placements.values.none { it.rect.contains(p) && (h.kind != HandleKind.RESIZE || it.id != selected) }
+        }?.let { h ->
+            val id = checkNotNull(selected)
+            if (h.kind == HandleKind.RESIZE) {
+                commitTitle()
+                val rect = shown.rectOf(id) ?: return false
+                press = Press.Resizing(id, p, Size(rect.w, rect.h))
+            } else {
+                press = Press.OnHandle(id, h.kind, p)
+            }
             return true
         }
         val grabs = if (finger) !fingerDraws || tool == Tool.MAP || tool == Tool.SELECT
@@ -258,6 +302,11 @@ class MapController(
                 relationTarget = nodeAt(p)?.takeIf { it != pr.from }
                 refreshChrome()
             }
+            is Press.Resizing -> {
+                if (editor.draft != null) return
+                resizeTarget = Size(pr.start.w + p.x - pr.at.x, pr.start.h + p.y - pr.at.y)
+                refresh()
+            }
             else -> Unit
         }
     }
@@ -272,6 +321,7 @@ class MapController(
                 if (editor.draft == null) when (pr.kind) {
                     HandleKind.CHILD -> editor.beginChild(pr.node)
                     HandleKind.SIBLING -> editor.beginSibling(pr.node)
+                    HandleKind.RESIZE -> null
                 }?.let { startEditing(it.node, draft = true) }
             }
             is Press.OnNode -> if (dragging) {
@@ -297,6 +347,11 @@ class MapController(
                 commitTitle()
                 selectRelation(pr.id)
             }
+            is Press.Resizing -> {
+                val target = resizeTarget
+                resizeTarget = null
+                if (target == null || !editor.resize(pr.node, target)) refresh()
+            }
             is Press.Relating -> {
                 val target = nodeAt(p)?.takeIf { it != pr.from }
                 relationTarget = null
@@ -314,6 +369,7 @@ class MapController(
     private fun abandonGesture() {
         press = null
         relationTarget = null
+        resizeTarget = null
         if (dragging) {
             dragging = false
             drop = DropAction.None
@@ -374,7 +430,7 @@ class MapController(
             val rect = shown.rectOf(e.node) ?: return null
             val frame = metrics.frame(node, e.node !in shownState.parent, rect.topLeft)
             val title = frame.title ?: Rect(rect.left + NodeMetrics.PAD_X, rect.top + NodeMetrics.PAD_Y, rect.w - 2 * NodeMetrics.PAD_X, node.style.textSize)
-            return TitleField(e.node, title, e.text, node.style, e.isDraft)
+            return TitleField(e.node, title, e.text, node.style, e.isDraft, metrics.titleWrap(node, e.node !in shownState.parent))
         }
 
     fun editTitle(id: NodeId) {
@@ -437,6 +493,7 @@ class MapController(
         val draft = when (kind) {
             HandleKind.CHILD -> editor.beginChild(id)
             HandleKind.SIBLING -> editor.beginSibling(id) ?: editor.beginChild(id)
+            HandleKind.RESIZE -> null
         } ?: return
         startEditing(draft.node, draft = true)
     }
@@ -623,7 +680,10 @@ class MapController(
             GrowSide.DOWN -> Pt(r.centerX, r.bottom + reach(kids.minOfOrNull { it.top - r.bottom }, badge))
             GrowSide.INDENT -> Pt(r.right + clear, r.centerY)
         }
-        val out = arrayListOf(Handle(HandleKind.CHILD, child, radius))
+        val gap = OverlayTessellator.MAP_OUTLINE_GAP_PX / zoom
+        val grip = Handle(HandleKind.RESIZE, Pt(r.right + gap, r.bottom + gap), radius)
+        if (press is Press.Resizing) return listOf(grip)
+        val out = arrayListOf(grip, Handle(HandleKind.CHILD, child, radius))
         val parent = shownState.parent[id]
         if (parent != null) {
             val across = shown.placements[parent]?.side

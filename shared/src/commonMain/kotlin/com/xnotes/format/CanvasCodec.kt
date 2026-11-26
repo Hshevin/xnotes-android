@@ -507,9 +507,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     /** Preserve ordinary tolerance while reporting whether this actual decode lost any items. */
     fun readObserved(input:Source,imageDir:File):ObservedRead = readDocument(input,imageDir,false).let {
-        ObservedRead(it.document,if(it.complete) CompleteRead.capture(it.document,it.items) else null)
+        ObservedRead(it.document,it.complete)
     }
-    class ObservedRead internal constructor(val document:InfiniteDocument,val complete:CompleteRead?)
+    class ObservedRead internal constructor(val document:InfiniteDocument,val complete:Boolean)
 
     /** Every manifest item must survive this decode before a reference may become an editable source. */
     fun readComplete(input:Source,imageDir:File):CompleteRead = readDocument(input,imageDir,true).let {
@@ -620,7 +620,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 doc.map = it
             }
             doc.addAll(items)
-            return DecodedDocument(doc,items,m.completeItems && dropped==0)
+            return DecodedDocument(doc,doc.items.toList(),m.completeItems && dropped==0)
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
             created.forEach {runCatching {it.remove()}}

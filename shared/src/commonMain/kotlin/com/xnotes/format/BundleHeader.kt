@@ -54,39 +54,15 @@ class BundleHeader private constructor(
                     check(!cancelled())
                     if(entry.name=="manifest.json") require(entry.size<0 || entry.size<=AnchorManifest.MAX_BYTES) {"ZIP declared manifest limit exceeded"}
                 }
-                val seen=hashSetOf<String>()
-                bundleReader(KFiles.system.source(file.assetPath()).cancellable(cancelled)).use {local->
-                    var entry=local.next()
-                    while(entry!=null) {
-                        check(!cancelled())
-                        if(entry.name==BundleIdentity.ENTRY || entry.name==AnchorMetadata.ENTRY) {
-                            require(seen.add(entry.name)) {"Duplicate local metadata"}
-                            val expected=requireNotNull(metadata[entry.name]) {"Local metadata is absent from directory"}
-                            // Reading to EOF validates ordinary/ZIP64 descriptors and populates their sizes.
-                            val bytes=readBytes(entry.data,expected.first.size,expected.first.crc)
-                            val sizes=entry.finish()
-                            require(entry.method==expected.first.method && sizes.size==expected.first.size && sizes.packed==expected.first.compressedSize && sizes.crc==expected.first.crc && bytes.contentEquals(expected.second)) {"Local metadata disagrees with directory"}
-                        } else if(anchored && entry.name=="manifest.json") {
-                            require(entry.size<0 || entry.size<=AnchorManifest.MAX_BYTES) {"ZIP declared manifest limit exceeded"}
-                            val buffer=ByteArray(65536);var total=0L
-                            while(true) {
-                                check(!cancelled())
-                                val n=entry.data.read(buffer);if(n<0) break
-                                total+=n;require(total<=AnchorManifest.MAX_BYTES) {"ZIP actual manifest limit exceeded"}
-                            }
-                        }
-                        entry=local.next()
-                    }
-                }
-                require(seen==metadata.keys) {"Directory metadata is absent from local entries"}
                 header
             }
         }
         /** Does not own or reposition the channel. Unsupported directory layouts require the File API. */
         fun read(channel:PositionedFile,cancelled:()->Boolean={false}):BundleHeader? {
             check(!cancelled()) {"Bundle header cancelled"}
-            val directory=ZipTail.read(channel) ?: return null
+            val directory=ZipTail.read(channel, allowComment = true) ?: return null
             check(!cancelled())
+            if (directory.entries.any { it.name == AnchorMetadata.ENTRY }) require(directory.entries.none { it.name == "manifest.json" && it.size > AnchorManifest.MAX_BYTES })
             val identities=directory.entries.filter {it.name==BundleIdentity.ENTRY}
             val anchors=directory.entries.filter {it.name==AnchorMetadata.ENTRY}
             require(identities.size<=1 && anchors.size<=1) {"Duplicate bundle metadata"}

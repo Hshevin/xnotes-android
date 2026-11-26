@@ -380,7 +380,7 @@ object OverlayTessellator {
 
     /**
      * Mind map chrome: the ring round the selected node ([outline], drawn outside it so the node
-     * keeps its own colours), its "+" handles, the node a drop or a relation line would land on
+     * keeps its own colours), its "+" handles and resize grip, the node a drop or a relation line would land on
      * (dashed), a relation line being drawn (dashed), and the selected relation line (a band along
      * it). Everything in content coordinates.
      */
@@ -394,9 +394,11 @@ object OverlayTessellator {
         accent: Rgba,
         tolerance: Double,
         devicePxPerDp: Double = 1.0,
+        /** The selected node's resize grip: a square like a selection's corner handle. */
+        resize: Pt? = null,
     ): List<MeshPart> {
         if (zoom <= 0.0) return emptyList()
-        val parts = ArrayList<MeshPart>(6)
+        val parts = ArrayList<MeshPart>(7)
         val lines = Haloed(HALO_PX / zoom)
         fun ring(r: Rect): List<Pt> = listOf(Pt(r.left, r.top), Pt(r.right, r.top), Pt(r.right, r.bottom), Pt(r.left, r.bottom))
         outline?.let { lines.ribbon(ring(it.outset(MAP_OUTLINE_GAP_PX / zoom)), MAP_OUTLINE_PX / zoom / 2.0, closed = true, tolerance = tolerance) }
@@ -410,6 +412,12 @@ object OverlayTessellator {
             lines.ribbon(listOf(a, b), MAP_OUTLINE_PX / zoom, closed = false, tolerance = tolerance)
         }
         lines.addTo(parts, accent)
+        resize?.let { c ->
+            val grip = Haloed(HALO_PX / zoom)
+            val half = HANDLE_PX / zoom / 2.0
+            grip.rect(c.x - half, c.y - half, half * 2, half * 2)
+            grip.addTo(parts, accent)
+        }
         if (handles.isNotEmpty()) {
             val dots = Haloed(HALO_PX / zoom)
             val r = MAP_HANDLE_PX / zoom / 2.0

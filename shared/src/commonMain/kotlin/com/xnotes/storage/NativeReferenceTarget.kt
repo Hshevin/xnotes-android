@@ -11,16 +11,6 @@ data class NativeReferenceTarget(val documentId:String,val pageId:String?=null,v
         ReferenceIdentity.requireUuid(documentId);pageId?.let(ReferenceIdentity::requireUuid)
         require(requiredKind==null || requiredKind==DocumentKind.NOTE || requiredKind==DocumentKind.CANVAS)
     }
-    fun verify(kind:DocumentKind,observedId:String,pageIds:Set<String>?) {
-        if(requiredKind!=null && kind!=requiredKind) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
-        if(kind !in setOf(DocumentKind.NOTE,DocumentKind.CANVAS) ||
-            kind==DocumentKind.CANVAS && pageId!=null) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
-        if(observedId!=documentId) throw NativeReferenceFailure(NativeReferenceIssue.CHANGED)
-        pageId?.let {id->
-            if(pageIds==null) throw NativeReferenceFailure(NativeReferenceIssue.UNAVAILABLE)
-            if(id !in pageIds) throw NativeReferenceFailure(NativeReferenceIssue.DELETED)
-        }
-    }
     fun canvas(document:InfiniteDocument) {
         if(requiredKind!=null && requiredKind!=DocumentKind.CANVAS) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)
         if(pageId!=null) throw NativeReferenceFailure(NativeReferenceIssue.UNSUPPORTED)

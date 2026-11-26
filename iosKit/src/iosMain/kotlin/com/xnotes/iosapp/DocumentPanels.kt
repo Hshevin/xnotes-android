@@ -58,7 +58,7 @@ internal class DocumentPanels(private val editor: InkEditor) {
         val target = page
         if (target != null && doc?.pages?.contains(target) != true) return
         editor.editPanel {
-            if (target != null) EditLayers.capture(target.layers, target.items, change) else {
+            if (target != null) EditLayers.capture(target, change) else {
                 val model = checkNotNull(canvas)
                 val before = model.map.state
                 val layersEdit = EditLayers.capture(model.layers, { model.items }, model::replaceAll, change)

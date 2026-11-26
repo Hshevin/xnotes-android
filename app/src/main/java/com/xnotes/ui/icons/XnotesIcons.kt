@@ -284,6 +284,8 @@ object XnotesIcons {
     // "Save as" / save-to-device uses the download glyph (a tray with a down arrow) so it reads
     // distinctly from Share's up-and-out arrow; same picture as importDoc, named for the action.
     val download = importDoc
+    /** Books on a shelf: the Zotero library. */
+    val library = icon("m16 6 4 14", "M12 6v14", "M8 8v12", "M4 4v16")
     val sliders = icon("M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M1 14h6", "M9 8h6", "M17 16h6")
     // Page margins: the sheet, with L brackets marking where the content area starts on each edge.
     val margins = icon(
