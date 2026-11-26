@@ -366,3 +366,7 @@
 - 用户随后要求「装上去」：test1 新安装到 MovinkPad Pro 14，正式版与其他测试版未动。未推送。
 - 用户要求「打包并覆盖」：test2（分类侧栏与按分类存放，源码 `686386cc`）覆盖安装到 MovinkPad（原 test1）。未推送。
 - 用户要求「推送到远端并合并到主分支」：推送 `t3/zotero-document-integration` 到远端，合入 `origin/master`（解决与拆除事务存储的冲突：侧栏去掉已删除的「恢复资料」、保留 Zotero）后合并到 `master` 并推送 `origin/master`。不打包、不发布 GitHub Release；保留功能分支。
+
+## 2026-11-26 导图节点手动调整大小
+
+- 用户要求「推送到远端并合并进主分支」：将 `t3/mind-map-node-resize-bounds`（接口与测试、实现两个提交，已接到最新 `master` 上，JVM 3,936 项通过、仪器测试编译通过）快进合并入 `master`，推送 `origin/master` 与同名远端分支。不打包、不安装、不发布 GitHub Release；书写中的实时裁切与拖角手感待真机确认。
