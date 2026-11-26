@@ -353,3 +353,7 @@
 - 用户随后要求「安装到设备上，覆盖更新」：test15 覆盖安装到 MovinkPad Pro 14 上的主线测试版（原 test14 / code 14），正式版未动。
 - 用户反馈点选仍卡并要求去掉双击改名；修复后 test16 覆盖安装到 MovinkPad（原 test15）。本次未推送。
 - 用户随后要求「推送到主分支吧」：将 test15 安装记录、点选修复（`68428def`）、test16 记录连同本条推送到 `origin/master`。
+
+## 2026-11-26 Zotero 文献库
+
+- 用户要求「自己打包一个测试版给我看看」：打包 Zotero 测试版 test1（`com.xnotes.movinkpad.branchtest.zotero`，源码 `d8bf02f9`）。未安装、未推送、未发布，正式版未动。
