@@ -3,15 +3,14 @@ package com.xnotes.format
 import com.xnotes.core.pal.AssetFile
 import com.xnotes.core.pal.assetPath
 import com.xnotes.kio.Crc32
-import com.xnotes.kio.KFiles
 import com.xnotes.kio.PositionedFile
 import com.xnotes.kio.openRead
 import okio.*
 
 /** Metadata only. Absence is a header with null fields; null from the channel API means use fallback. */
 class BundleHeader private constructor(
-    override val identity:BundleIdentity?,override val anchors:AnchorMetadata?,private val rawAnchors:ByteArray?,
-) : com.xnotes.storage.ReferenceHeader {
+    val identity:BundleIdentity?,val anchors:AnchorMetadata?,private val rawAnchors:ByteArray?,
+) {
     init {require(anchors==null || identity?.documentId==anchors.documentId) {"Anchor metadata has no matching document identity"}}
     fun anchorBytesFor(target:BundleIdentity):ByteArray? = anchors?.let {
         if(identity!!.documentId==target.documentId) requireNotNull(rawAnchors).copyOf() else AnchorMetadata(target.documentId).bytes()
@@ -20,23 +19,12 @@ class BundleHeader private constructor(
         private const val MAX_BYTES=4096L
         private const val MAX_COMPRESSED=65536L
         private const val U32=0xffffffffL
-        fun read(file:AssetFile,cancelled:()->Boolean={false}):BundleHeader = readFile(file,cancelled,null)
-        /**
-         * Protection hints only, not source identity authority. A fallback invokes protect after
-         * bounded directory metadata is parsed, before validating the potentially large local view.
-         * A failure afterwards still rejects the header; the caller must release temporary leases.
-         */
-        fun readWithPdfProtection(file:AssetFile,protect:(Set<String>)->Unit,cancelled:()->Boolean={false}):BundleHeader =
-            readFile(file,cancelled,protect)
-        private fun dependencies(header:BundleHeader):Set<String> = header.identity?.takeIf {it.externalPdf}
-            ?.pdfResource?.let {setOf(it)} ?: emptySet()
-        private fun readFile(file:AssetFile,cancelled:()->Boolean,protect:((Set<String>)->Unit)?):BundleHeader {
+        fun read(file:AssetFile,cancelled:()->Boolean={false}):BundleHeader {
             check(!cancelled()) {"Bundle header cancelled"}
             openRead(file.assetPath()).use {input->read(input,cancelled)?.let {header->
-                protect?.invoke(dependencies(header));return header
+                return header
             }}
-            // Standard-library fallback for commented/ZIP64 layouts. Read local metadata too,
-            // so a permissive central-directory reader cannot accept conflicting physical entries.
+            // ZIP64 fallback reads the directory and the two metadata entries.
             return bundleDirectory(file).use {zip->
                 val metadata=linkedMapOf<String,Pair<DirectoryEntry,ByteArray>>()
                 for(entry in zip.entries) {
@@ -48,7 +36,6 @@ class BundleHeader private constructor(
                     }
                 }
                 val header=parse(metadata[BundleIdentity.ENTRY]?.second,metadata[AnchorMetadata.ENTRY]?.second)
-                protect?.invoke(dependencies(header))
                 val anchored=AnchorMetadata.ENTRY in metadata
                 if(anchored) for(entry in zip.entries) {
                     check(!cancelled())

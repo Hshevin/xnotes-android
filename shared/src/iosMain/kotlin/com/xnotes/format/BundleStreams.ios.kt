@@ -4,7 +4,6 @@ import okio.*
 
 actual abstract class PdfStreamAdapters actual constructor()
 
-actual abstract class SnapshotInputAdapters actual constructor()
 
 actual abstract class CanvasStreamAdapters actual constructor()
 actual abstract class DocumentStreamAdapters actual constructor()

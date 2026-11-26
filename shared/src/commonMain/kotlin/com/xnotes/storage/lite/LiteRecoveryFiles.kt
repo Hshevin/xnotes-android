@@ -11,14 +11,15 @@ import okio.Path.Companion.toPath
 
 data class LiteRecovery(val original: Path, val documentId: String, val record: Path)
 
-internal data class Stamp(val identity: FileIdentity, val hash: String)
-internal data class RecoveryEntry(val recovery: LiteRecovery, val stamp: Stamp, val body: Path, val hash: String)
+internal data class Stamp(val identity: FileIdentity, val size: Long, val modifiedNanos: Long)
+internal expect fun fileStamp(path: Path): Stamp?
+internal data class RecoveryEntry(val recovery: LiteRecovery, val stamp: Stamp, val body: Path, val legacyBodyHash: String?, val legacySourceHash: String?)
 internal data class Protected(val body: Path, val recovery: LiteRecovery?, val problem: Exception? = null)
 
 internal fun Path.recoveryBody(kind: LiteKind) = this / "body.${kind.extension}"
 
 internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: Path, private val documents: Path) {
-    fun write(path: Path, id: String, stamp: Stamp, writeBody: (Path) -> String, verifyBody: (Path, String) -> Unit): Protected {
+    fun write(path: Path, id: String, stamp: Stamp, writeBody: (Path) -> Unit, checkAssets: () -> Unit): Protected {
         fs.createDirectories(root)
         val token = Uuids.random()
         val stage = root / "unclaimed-$token"
@@ -28,18 +29,17 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
         var written = false
         try {
             val file = stage.recoveryBody(kind)
-            val hash = writeBody(file)
+            writeBody(file)
             written = true
             try {
-                verifyBody(file, hash)
+                checkAssets()
                 atomicWrite(fs, stage / "record") { out ->
                     out.writeUtf8(MAGIC)
                     out.writeInt(VERSION)
                     out.field(path.relativeTo(documents).toString())
                     out.field(id)
                     out.writeLong(stamp.identity.device).writeLong(stamp.identity.inode)
-                    out.field(stamp.hash)
-                    out.field(hash)
+                    out.writeLong(stamp.size).writeLong(stamp.modifiedNanos)
                 }
                 fs.atomicMove(stage, ready)
             } catch (failure: Exception) {
@@ -78,19 +78,20 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
             require(readUtf8(MAGIC.length.toLong()) == MAGIC)
             val version = readInt()
             if (version > VERSION) throw FutureVersion()
-            require(version == VERSION)
+            require(version in 1..VERSION)
             val relative = field().toPath()
             require(relative.isRelative && relative.segments.isNotEmpty() && relative.segments.none { it.startsWith('.') })
             val path = documents / relative
             val kind = requireNotNull(LiteKind.of(path))
             val id = field().also { require(Uuids.isValid(it)) }
             val identity = FileIdentity(readLong(), readLong())
-            val stamp = Stamp(identity, digestField())
-            val hash = digestField()
+            val sourceHash = if (version == 1) digestField() else null
+            val bodyHash = if (version == 1) digestField() else null
+            val stamp = if (version == 1) Stamp(identity, -1, 0) else Stamp(identity, readLong(), readLong())
             require(exhausted())
             val body = dir.recoveryBody(kind)
             require(fs.metadata(body).isRegularFile)
-            RecoveryEntry(LiteRecovery(path, id, record), stamp, body, hash)
+            RecoveryEntry(LiteRecovery(path, id, record), stamp, body, bodyHash, sourceHash)
         }
     }
 
@@ -110,6 +111,6 @@ internal class LiteRecoveryFiles(private val fs: FileSystem, private val root: P
 
     private companion object {
         const val MAGIC = "XNotesLite\n"
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

@@ -768,37 +768,37 @@ class DocumentCodec(
     /** Observe actual page/item survival without changing the ordinary tolerant reader. */
     fun readObserved(input:Source,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
         pdfStore:((Source)->File)?=null):ObservedRead {
-        var complete:CompleteRead?=null
-        val document=readDocument(input,pdfDir,imageDir,timing,pdfStore,false,onRead={doc,survived->
-            if(survived) complete=CompleteRead.capture(doc)
-        })
-        return ObservedRead(document,complete != null)
+        var complete = false
+        val document = readDocument(input, pdfDir, imageDir, timing, pdfStore, false,
+            onRead = { _, survived -> complete = survived })
+        return ObservedRead(document, complete)
     }
-    fun readComplete(input:Source,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
-        pdfStore:((Source)->File)?=null,preserveInkSamples:Boolean=false):CompleteRead {
-        var complete:CompleteRead?=null
-        readDocument(input,pdfDir,imageDir,timing,pdfStore,false,requireCompleteItems=true,simplifyOnLoad=!preserveInkSamples,onRead={doc,survived->
-            if(survived) complete=CompleteRead.capture(doc)
-        })
-        return requireNotNull(complete)
+    fun readComplete(input: Source, pdfDir: File, imageDir: File, timing: ReadTiming? = null,
+                     pdfStore: ((Source) -> File)? = null, preserveInkSamples: Boolean = false): ObservedRead {
+        var complete = false
+        val document = readDocument(input, pdfDir, imageDir, timing, pdfStore, false,
+            requireCompleteItems = true, simplifyOnLoad = !preserveInkSamples,
+            onRead = { _, survived -> complete = survived })
+        require(complete)
+        return ObservedRead(document, complete)
     }
+
     class ObservedRead internal constructor(val document:Document,val complete:Boolean)
-    /** Drawing-item provenance plus explicit XML parse failures; not a proof of every future XML extension. */
-    class CompleteRead private constructor(val document:Document) {
-        private val pages=document.pages.toList()
-        private val items=pages.map {it.items.toList()}
-        fun matches(actual:Document)=actual===document && actual.pages.size==pages.size && pages.indices.all {index->
-            actual.pages[index]===pages[index] && pages[index].items.size==items[index].size &&
-                items[index].indices.all {pages[index].items[it]===items[index][it]}
-        }
-        companion object {internal fun capture(document:Document)=CompleteRead(document)}
-    }
 
     /** Explicit recovery copy: validate the source first, then mint independent identities without cloning sample arrays. */
     fun readInkCopy(input:Source,imageDir:File?=null):Document = readDocument(input,null,imageDir,null,null,true)
 
+    /** Open entries independently so a cached PDF can be skipped without inflating it. */
+    internal fun readNote(directory: BundleDirectory, assets: File, pdfStore: (Source) -> File): Document {
+        var complete = false
+        val note = readDocument(null, assets, assets, null, pdfStore, false, requireCompleteItems = true,
+            simplifyOnLoad = false, directory = directory, onRead = { _, survived -> complete = survived })
+        require(complete)
+        return note
+    }
+
     private fun readDocument(
-        input: Source,
+        input: Source?,
         pdfDir: File? = null,
         imageDir: File? = null,
         timing: ReadTiming? = null,
@@ -807,6 +807,7 @@ class DocumentCodec(
         requireCompleteItems:Boolean=false,
         simplifyOnLoad:Boolean=true,
         onRead:((Document,Boolean)->Unit)?=null,
+        directory: BundleDirectory? = null,
     ): Document {
         val created=ArrayList<File>()
         try {
@@ -823,7 +824,7 @@ class DocumentCodec(
             val audioFiles = HashMap<String, File>()
             var pdfFile: File? = null
             var embeddedPdfSeen=false
-            bundleReader(input).use { archive ->
+            (directory?.reader() ?: bundleReader(requireNotNull(input))).use { archive ->
                 var entry = archive.next()
                 while (entry != null) {
                     if(!entryNames.add(entry.name)) duplicateEntry=true
@@ -930,6 +931,9 @@ class DocumentCodec(
             doc.newPageSize = m.newPageSize
 
             require(identity?.externalPdf != true || m.hasPdf) { com.xnotes.storage.StorageText.t(com.xnotes.storage.StorageMsg.PDF_RESOURCE_CORRUPT) }
+            if (requireCompleteItems && identity?.externalPdf != true) {
+                require(m.hasPdf == embeddedPdfSeen) { "Embedded PDF and manifest disagree" }
+            }
             if (m.hasPdf) {
                 if (identity?.externalPdf == true && pdfFile == null && pdfDir != null) {
                     val id = requireNotNull(identity?.pdfResource)

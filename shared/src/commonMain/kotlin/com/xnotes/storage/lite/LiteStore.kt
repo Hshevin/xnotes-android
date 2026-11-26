@@ -3,19 +3,15 @@ package com.xnotes.storage.lite
 import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.pal.asAssetFile
-import com.xnotes.core.pal.assetPath
 import com.xnotes.core.template.TemplateCatalog
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.CoreLock
 import com.xnotes.core.util.locked
-import com.xnotes.format.BundleSnapshot
-import com.xnotes.kio.Sha256
+import com.xnotes.format.BundleMigration
 import com.xnotes.kio.Uuids
-import com.xnotes.kio.fileIdentity
 import okio.FileSystem
 import okio.IOException
 import okio.Path
-import okio.use
 
 enum class LiteKind(internal val extension: String) {
     NOTE(DocumentKind.NOTE.extension), CANVAS(DocumentKind.CANVAS.extension);
@@ -79,22 +75,19 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
     private fun create(directory: Path, baseName: String, kind: LiteKind, pdf: Path?, setup: LiteNoteSetup? = null): LiteOpen = opening {
         require(directory == documents || inDocuments(directory))
         openWithAssets { assets ->
-            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, pdf, setup, assets, ::inDocuments, ::hash)
+            createLiteDocument(this, fs, codec, documents, directory, baseName, kind, pdf, setup, assets, ::inDocuments)
         }
     }
 
     fun open(path: Path): LiteOpen = opening {
         val kind = LiteKind.of(path) ?: return@opening LiteOpen.Refused(LiteRefusal.UNSUPPORTED_KIND)
         if (!inDocuments(path)) return@opening LiteOpen.Refused(LiteRefusal.UNSUPPORTED_KIND)
-        val identity = fileIdentity(path) ?: return@opening LiteOpen.Refused(LiteRefusal.NOT_FOUND)
+        val stamp = fileStamp(path) ?: return@opening LiteOpen.Refused(LiteRefusal.NOT_FOUND)
         require(fs.metadata(path).isRegularFile)
         openWithAssets { assets ->
-            BundleSnapshot.fromInput(fs.source(path), assets.asAssetFile()).use { snapshot ->
-                val decoded = codec.read(snapshot.file.assetPath(), kind, assets)
-                val stamp = Stamp(identity, snapshot.sourceHash)
-                checkSource(path, stamp)
-                LiteSession(this, path, assets, decoded, stamp, null)
-            }
+            val decoded = codec.read(path, kind, assets)
+            checkSource(path, stamp)
+            LiteSession(this, path, assets, decoded, stamp, null)
         }
     }
 
@@ -110,12 +103,18 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
     fun restore(recovery: LiteRecovery): LiteOpen = opening {
         val entry = recoveries.lookup(recovery)
         openWithAssets { assets ->
-            BundleSnapshot.fromInput(fs.source(entry.body), assets.asAssetFile()).use { snapshot ->
-                require(snapshot.sourceHash == entry.hash)
-                val decoded = codec.read(snapshot.file.assetPath(), requireNotNull(LiteKind.of(recovery.original)), assets)
-                require(decoded.body.documentId == recovery.documentId)
-                LiteSession(this, recovery.original, assets, decoded, entry.stamp, recovery)
+            entry.legacyBodyHash?.let { require(BundleMigration.hash(entry.body.asAssetFile()) == it) }
+            val decoded = codec.read(entry.body, requireNotNull(LiteKind.of(recovery.original)), assets)
+            require(decoded.documentId == recovery.documentId)
+            var stamp = entry.stamp
+            if (entry.legacySourceHash != null && inDocuments(recovery.original)) {
+                val current = fileStamp(recovery.original)
+                if (current?.identity == stamp.identity && runCatching {
+                    BundleMigration.hash(recovery.original.asAssetFile()) == entry.legacySourceHash &&
+                        fileStamp(recovery.original) == current
+                }.getOrDefault(false)) stamp = current
             }
+            LiteSession(this, recovery.original, assets, decoded, stamp, recovery)
         }
     }
 
@@ -155,66 +154,34 @@ class LiteStore(private val fs: FileSystem, private val documents: Path, private
         return true
     }
 
-    private fun hash(path: Path): String = fs.read(path) {
-        val digest = Sha256()
-        val buffer = ByteArray(65536)
-        while (true) {
-            val count = read(buffer)
-            if (count < 0) break
-            digest.update(buffer, 0, count)
-        }
-        digest.hex()
-    }
-
     private fun checkSource(path: Path, stamp: Stamp) {
-        if (!inDocuments(path) || fileIdentity(path) != stamp.identity) throw SourceConflict()
-        val current = try { hash(path) } catch (failure: IOException) {
-            if (fileIdentity(path) != stamp.identity) throw SourceConflict()
-            throw failure
-        }
-        if (current != stamp.hash || fileIdentity(path) != stamp.identity) throw SourceConflict()
+        if (!inDocuments(path) || fileStamp(path) != stamp) throw SourceConflict()
     }
 
-    private fun verify(path: Path, body: LiteBody, hash: String, original: Decoded) {
-        require(this.hash(path) == hash)
-        val assets = assets()
-        try {
-            val decoded = codec.read(path, body.kind, assets)
-            require(decoded.documentId == original.documentId && decoded.pdfHash == original.pdfHash &&
-                decoded.anchored == original.anchored)
-            body.checkDecoded(decoded.body)
-        } finally {
-            release(assets)
-        }
-    }
-
-    internal fun publish(path: Path, base: Stamp, body: LiteBody, original: Decoded, beforePublish: ((Path) -> Unit)?): Stamp {
+    internal fun publish(path: Path, base: Stamp, body: LiteBody, original: Decoded,
+                         previous: List<StoredAsset>, beforePublish: ((Path) -> Unit)?): Pair<Stamp, List<StoredAsset>> {
         checkSource(path, base)
-        require(fileIdentity(documents)?.device == base.identity.device)
-        val stage = documents / ".${Uuids.random()}.tmp"
-        var published = false
+        original.checkPdf()
+        val current = codec.stored(body)
+        val probe = beforePublish?.let { privateDir / "candidate-${Uuids.random()}" }
         try {
-            val expected = codec.write(body, stage)
-            val identity = requireNotNull(fileIdentity(stage))
-            beforePublish?.invoke(stage)
-            require(fs.metadata(stage).isRegularFile && fileIdentity(stage) == identity)
-            verify(stage, body, expected, original)
-            require(fileIdentity(stage) == identity && fs.metadata(stage).isRegularFile && hash(stage) == expected)
-            if (!inDocuments(path) || fileIdentity(path) != base.identity) throw SourceConflict()
-            return coordinateLiteWrite(path) {
-                checkSource(path, base)
-                require(fileIdentity(stage) == identity && fs.metadata(stage).isRegularFile)
-                val stamp = Stamp(identity, expected)
-                fs.atomicMove(stage, path)
-                published = true
-                stamp
+            if (probe != null) {
+                codec.write(body, probe)
+                val stamp = requireNotNull(fileStamp(probe))
+                beforePublish(probe)
+                require(fileStamp(probe) == stamp)
             }
-        } finally {
-            if (!published) fs.delete(stage)
-        }
+            val receipt = coordinateLiteWrite(path) {
+                checkSource(path, base)
+                val patched = current == previous && try { codec.splice(path, privateDir, body, current) } catch (_: Exception) { false }
+                if (!patched) codec.write(body, path)
+                requireNotNull(fileStamp(path))
+            }
+            return receipt to current
+        } finally { probe?.let { fs.delete(it) } }
     }
 
     internal fun protect(path: Path, base: Stamp, body: LiteBody, original: Decoded): Protected = recoveryLock.locked {
-        recoveries.write(path, original.documentId, base, { codec.write(body, it) }) { file, hash -> verify(file, body, hash, original) }
+        recoveries.write(path, original.documentId, base, { codec.write(body, it) }, original::checkPdf)
     }
 }

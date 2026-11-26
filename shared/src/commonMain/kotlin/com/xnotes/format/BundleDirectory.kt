@@ -46,3 +46,49 @@ internal fun Source.cancellable(cancelled: () -> Boolean): Source = object : For
 
 internal fun ByteArray.u16(at: Int): Int = (this[at].toInt() and 255) or ((this[at + 1].toInt() and 255) shl 8)
 internal fun ByteArray.u32(at: Int): Long = u16(at).toLong() or (u16(at + 2).toLong() shl 16)
+
+/** Borrows the directory. Closing the current entry never drains the rest of its payload. */
+internal fun BundleDirectory.reader(): BundleReader = object : BundleReader {
+    init { require(entries.map { it.name }.toSet().size == entries.size) { "Duplicate ZIP entries" } }
+    private val iterator = entries.iterator()
+    private var current: okio.BufferedSource? = null
+
+    private var isPdf = false
+
+    override fun next(): BundleEntry? {
+        if (!isPdf) current?.readAll(okio.blackholeSink())
+        close()
+        if (!iterator.hasNext()) return null
+        val entry = iterator.next()
+        isPdf = entry.name == BundlePdf.ENTRY
+        // On a miss the cache verifies the PDF as it writes it. On a hit it needs no payload bytes.
+        val source = if (isPdf) entry.open().buffer() else entry.checkedSource()
+        current = source
+        return BundleEntry(entry.name, source, entry.method, entry.size) {
+            EntrySizes(entry.size, entry.compressedSize, entry.crc)
+        }
+    }
+
+    override fun close() { current?.close(); current = null }
+}
+
+private fun DirectoryEntry.checkedSource(): okio.BufferedSource {
+    val raw = open().buffer()
+    val sum = com.xnotes.kio.Crc32()
+    return object : Source by raw {
+        private val bytes = ByteArray(8192)
+        private var count = 0L
+        override fun read(sink: Buffer, byteCount: Long): Long {
+            val n = raw.read(bytes, 0, minOf(bytes.size.toLong(), byteCount).toInt())
+            if (n < 0) {
+                require(count == size && sum.value == crc) { "Corrupt ZIP entry: $name" }
+                return -1
+            }
+            count += n
+            require(count <= size)
+            sum.update(bytes, 0, n)
+            sink.write(bytes, 0, n)
+            return n.toLong()
+        }
+    }.buffer()
+}

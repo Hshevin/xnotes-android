@@ -4,7 +4,8 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.pal.asAssetFile
-import com.xnotes.format.BundleSnapshot
+import com.xnotes.core.pal.assetPath
+import com.xnotes.kio.atomicWrite
 import com.xnotes.kio.Uuids
 import com.xnotes.kio.fileIdentity
 import okio.FileSystem
@@ -16,7 +17,7 @@ internal expect fun linkNewFile(stage: Path, target: Path): Boolean
 
 internal fun createLiteDocument(
     store: LiteStore, fs: FileSystem, codec: LiteCodec, documents: Path, directory: Path,
-    baseName: String, kind: LiteKind, pdf: Path?, setup: LiteNoteSetup?, assets: Path, inDocuments: (Path) -> Boolean, hash: (Path) -> String,
+    baseName: String, kind: LiteKind, pdf: Path?, setup: LiteNoteSetup?, assets: Path, inDocuments: (Path) -> Boolean,
 ): LiteSession {
     require(baseName.isNotBlank() && !baseName.startsWith('.') && baseName.none { it == '/' || it == '\\' || it.isISOControl() })
     require(fs.metadata(directory).isDirectory)
@@ -25,28 +26,28 @@ internal fun createLiteDocument(
     fs.createDirectory(staging, mustCreate = true)
     try {
         val stage = staging / "body.${kind.extension}"
-        val snapshot = pdf?.let {
-            val input = try { fs.source(it) } catch (_: IOException) { throw UnreadablePdf() }
-            BundleSnapshot.fromInput(input, assets.asAssetFile())
+        val imported = pdf?.let { source ->
+            val copy = assets / "source.pdf"
+            val input = try { fs.source(source) } catch (_: IOException) { throw UnreadablePdf() }
+            input.use { atomicWrite(fs, copy) { sink -> sink.writeAll(it) } }
+            copy.asAssetFile()
         }
-        val (body, digest) = snapshot.use {
-            val body = when (kind) {
-                LiteKind.NOTE -> LiteBody.Note(when {
-                    setup != null -> {
-                        val templates = store.templates()
-                        setup.newDocument { doc, key -> require(templates.embed(doc, key, staging)) }
-                    }
-                    it != null -> importLitePdf(it.file).apply { enableReferenceAnchors() }
-                    else -> Document.blank().apply { enableReferenceAnchors() }
-                })
-                LiteKind.CANVAS -> LiteBody.Canvas(InfiniteDocument())
-            }
-            body to codec.write(body.snapshot(), stage)
+        val measured = imported?.let { requireNotNull(fileStamp(it.assetPath())) }
+        val body = when (kind) {
+            LiteKind.NOTE -> LiteBody.Note(when {
+                setup != null -> {
+                    val templates = store.templates()
+                    setup.newDocument { doc, key -> require(templates.embed(doc, key, assets)) }
+                }
+                imported != null -> importLitePdf(imported).apply { enableReferenceAnchors() }
+                else -> Document.blank().apply { enableReferenceAnchors() }
+            })
+            LiteKind.CANVAS -> LiteBody.Canvas(InfiniteDocument())
         }
-        val stamp = Stamp(requireNotNull(fileIdentity(stage)), digest)
-        val decoded = codec.read(stage, kind, assets)
-        body.checkDecoded(decoded.body)
-        require(decoded.anchored == (kind == LiteKind.NOTE) && decoded.pdfHash == snapshot?.sourceHash && hash(stage) == digest)
+        val decoded = codec.decoded(body)
+        codec.write(body, stage)
+        require(imported == null || fileStamp(imported.assetPath()) == measured)
+        val stamp = requireNotNull(fileStamp(stage))
         var number = 1
         while (true) {
             val stem = if (number == 1) baseName else "$baseName ($number)"
@@ -57,7 +58,7 @@ internal fun createLiteDocument(
             var linked = false
             coordinateLiteWrite(path) {
                 require(fileIdentity(directory) == parent && (directory == documents || inDocuments(directory)))
-                require(fs.metadata(stage).isRegularFile && hash(stage) == stamp.hash && fileIdentity(stage) == stamp.identity)
+                require(fs.metadata(stage).isRegularFile && fileStamp(stage) == stamp)
                 linked = linkNewFile(stage, path)
                 stamp
             }

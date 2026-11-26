@@ -3,6 +3,9 @@ package com.xnotes.storage.lite
 import com.xnotes.core.FakeImageCodec
 import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.infinite.Waypoint
+import com.xnotes.core.pal.asAssetFile
+import com.xnotes.format.ZipTail
+import com.xnotes.kio.openRead
 import com.xnotes.core.pal.assetPath
 import com.xnotes.format.BundleIdentity
 import com.xnotes.format.MapJson
@@ -261,4 +264,122 @@ class LiteStoreEdgeTest {
         }
         assertContentEquals(interopFixture(note), bytes(path))
     }
+
+    @Test fun cacheReusesTheExtractedPdfAndOpenRetainsNoBundleCopy() {
+        val path = place("note-pdf-annotated.xnote")
+        val first = opened(path).use { session ->
+            val pdf = session.note!!.pdfFile!!.assetPath()
+            assertEquals(listOf(pdf), fs.list(pdf.parent!!))
+            requireNotNull(fileStamp(pdf))
+        }
+        opened(path).use { assertEquals(first, fileStamp(it.note!!.pdfFile!!.assetPath())) }
+    }
+
+    @Test fun largePrefixSurvivesSpliceAndImageChangesForceReplacement() {
+        val path = place(note)
+        val pdf = root / "large.pdf"
+        fs.write(pdf) { write(ByteArray(1024 * 1024 + 32) { (it * 17).toByte() }) }
+        opened(path).use { session ->
+            session.note!!.pdfFile = pdf.asAssetFile()
+            session.markEdited()
+            assertEquals(LiteSave.Saved, session.save())
+        }
+        val offset = openRead(path).use { ZipTail.read(it)!!.entries.first { e -> e.method != 0 }.localOffset.toInt() }
+        assertTrue(offset >= 1024 * 1024)
+        val prefix = bytes(path).copyOf(offset)
+        val original = fileIdentity(path)
+        val sample = com.xnotes.core.stroke.Sample(17.0, 11.0, 0.6)
+        opened(path).use { session ->
+            val tool = com.xnotes.core.tools.Tool.PEN
+            val stroke = com.xnotes.core.model.Stroke(tool, com.xnotes.core.tools.ToolDefaults.configFor(tool), listOf(sample))
+            session.note!!.pages.first().items.add(stroke)
+            session.markEdited()
+            assertEquals(LiteSave.Saved, session.save())
+        }
+        assertEquals(original, fileIdentity(path))
+        assertContentEquals(prefix, bytes(path).copyOf(offset))
+        opened(path).use { session ->
+            val page = session.note!!.pages.first()
+            assertEquals(sample.x, (page.items.last() as com.xnotes.core.model.Stroke).samples.single().x)
+            page.items.add(com.xnotes.core.model.ImageItem(com.xnotes.core.model.ImageData(pdf.asAssetFile(), 16, 16),
+                com.xnotes.core.geometry.Rect(0.0, 0.0, 16.0, 16.0)))
+            session.markEdited()
+            assertEquals(LiteSave.Saved, session.save())
+        }
+        val withImage = fileIdentity(path)
+        assertNotEquals(original, withImage)
+        opened(path).use { session ->
+            assertIs<com.xnotes.core.model.ImageItem>(session.note!!.pages.first().items.removeAt(session.note!!.pages.first().items.lastIndex))
+            session.markEdited()
+            assertEquals(LiteSave.Saved, session.save())
+        }
+        assertNotEquals(withImage, fileIdentity(path))
+        opened(path).use { assertIs<com.xnotes.core.model.Stroke>(it.note!!.pages.first().items.last()) }
+    }
+
+    @Test fun capturedJobsRunOffThreadAndLeaveNewerEditsDirty() {
+        val path = place(note)
+        opened(path).use { session ->
+            val page = session.note!!.pages.first()
+            page.width++
+            session.markEdited()
+            val width = page.width
+            val job = requireNotNull(session.beginSave())
+            page.width++
+            session.markEdited()
+            assertFailsWith<IllegalStateException> { session.beginSave() }
+            assertEquals(LiteSave.Saved, runOffThread { job.run() })
+            assertFailsWith<IllegalStateException> { job.run() }
+            assertTrue(session.dirty)
+            opened(path).use { assertEquals(width, it.note!!.pages.first().width) }
+            val recovery = requireNotNull(session.beginRecovery())
+            assertTrue(runOffThread { recovery.run() })
+            assertEquals(2, fs.read(store.pendingRecoveries().single().record) { skip(11); readInt() })
+            val restored = assertIs<LiteOpen.Opened>(store.restore(store.pendingRecoveries().single())).session
+            restored.use { assertEquals(width + 1, it.note!!.pages.first().width) }
+        }
+    }
+
+    @Test fun sameSizeExternalWriteConflictsAndKeepsPrivateCopy() {
+        val path = place(note)
+        val before = requireNotNull(fileStamp(path))
+        val changed = bytes(path).also { it[it.lastIndex] = (it.last().toInt() xor 1).toByte() }
+        opened(path).use { session ->
+            fs.write(path) { write(changed) }
+            val after = requireNotNull(fileStamp(path))
+            assertEquals(before.identity, after.identity)
+            assertEquals(before.size, after.size)
+            assertNotEquals(before.modifiedNanos, after.modifiedNanos)
+            session.markEdited()
+            val conflict = assertIs<LiteSave.Conflict>(session.save())
+            assertTrue(fs.exists(conflict.protectedCopy))
+            assertContentEquals(changed, bytes(path))
+        }
+    }
+
+    @Test fun v1RecordListsRestoresAndDiscards() {
+        val path = place(note)
+        val id = opened(path).use { it.documentId }
+        val token = privateDir / "recoveries" / Uuids.random()
+        fs.createDirectories(token)
+        val identity = requireNotNull(fileIdentity(path))
+        val hash = com.xnotes.format.BundleMigration.hash(path.asAssetFile())
+        fs.copy(path, token / "body.xnote")
+        fs.write(token / "record") {
+            writeUtf8("XNotesLite\n").writeInt(1)
+            fun field(s: String) { writeInt(s.length); writeUtf8(s) }
+            field(path.name); field(id)
+            writeLong(identity.device).writeLong(identity.inode)
+            field(hash); field(hash)
+        }
+        val record = store.pendingRecoveries().single()
+        assertIs<LiteOpen.Opened>(store.restore(record)).session.use {
+            assertTrue(it.dirty)
+            assertEquals(id, it.documentId)
+        }
+        store.discard(record)
+        assertTrue(store.pendingRecoveries().isEmpty())
+    }
 }
+
+internal expect fun <T> runOffThread(work: () -> T): T

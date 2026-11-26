@@ -506,29 +506,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     fun read(input: Source, imageDir: File? = null): InfiniteDocument = readDocument(input,imageDir,false).document
 
     /** Preserve ordinary tolerance while reporting whether this actual decode lost any items. */
-    fun readObserved(input:Source,imageDir:File):ObservedRead = readDocument(input,imageDir,false).let {
-        ObservedRead(it.document,it.complete)
-    }
+    fun readObserved(input: Source, imageDir: File) = readDocument(input, imageDir, false)
     class ObservedRead internal constructor(val document:InfiniteDocument,val complete:Boolean)
 
-    /** Every manifest item must survive this decode before a reference may become an editable source. */
-    fun readComplete(input:Source,imageDir:File):CompleteRead = readDocument(input,imageDir,true).let {
-        CompleteRead.capture(it.document,it.items)
-    }
-    class CompleteRead private constructor(val document:InfiniteDocument,items:List<CanvasItem>) {
-        private val items=items.toList()
-        private val map = document.map
-        private val mapState = map.state
-        private val collapsed = map.collapsed
-        fun matches(actual:InfiniteDocument)=actual===document && actual.map === map &&
-            map.state === mapState && map.collapsed == collapsed && actual.items.size==items.size &&
-            items.indices.all {actual.items[it]===items[it]}
-        companion object {
-            internal fun capture(document:InfiniteDocument,items:List<CanvasItem>)=CompleteRead(document,items)
-        }
-    }
-    private class DecodedDocument(val document:InfiniteDocument,val items:List<CanvasItem>,val complete:Boolean)
-    private fun readDocument(input:Source,imageDir:File?,requireCompleteItems:Boolean):DecodedDocument {
+    fun readComplete(input: Source, imageDir: File) = readDocument(input, imageDir, true).also { require(it.complete) }
+    private fun readDocument(input:Source,imageDir:File?,requireCompleteItems:Boolean):ObservedRead {
         val created=ArrayList<File>()
         try {
             var manifest: ParsedManifest? = null
@@ -620,7 +602,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 doc.map = it
             }
             doc.addAll(items)
-            return DecodedDocument(doc,doc.items.toList(),m.completeItems && dropped==0)
+            return ObservedRead(doc, m.completeItems && dropped == 0)
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
             created.forEach {runCatching {it.remove()}}

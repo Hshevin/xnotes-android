@@ -15,10 +15,6 @@ actual abstract class PdfStreamAdapters actual constructor() {
         BundlePdf.write(source,out.sink(),identity,pdf,external,cancelled)
 }
 
-actual abstract class SnapshotInputAdapters actual constructor() {
-    fun fromInput(input: InputStream, directory: File? = null, cancelled: () -> Boolean = { false }) =
-        BundleSnapshot.fromInput(input.source(), directory, cancelled)
-}
 
 internal actual fun encodeIdentity(identity: BundleIdentity) = identity.bytes()
 internal actual fun decodeIdentity(data: BufferedSource) = BundleIdentity.read(data.inputStream())
