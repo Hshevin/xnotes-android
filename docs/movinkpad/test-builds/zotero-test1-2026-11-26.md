@@ -1,8 +1,8 @@
 # Zotero 测试版 test1（2026-11-26）
 
 用户要求：自己打包一个测试版给我看看（Zotero 文献库功能）。
-状态：已打包；未安装，界面与真实 Zotero 账号、WebDAV 待用户在 MovinkPad Pro 14 上确认。
-本轮边界：只打包 `com.xnotes.movinkpad.branchtest.zotero`；未安装、未推送、未发布，正式版未动。
+状态：已安装到 MovinkPad Pro 14（Android 15，新安装，code 1），启动正常、无崩溃；Zotero 页面、真实账号与 WebDAV 待用户确认。
+本轮边界：打包并按用户要求安装 `com.xnotes.movinkpad.branchtest.zotero`；未推送、未发布，正式版与其他测试版未动。
 
 ## 构建
 
