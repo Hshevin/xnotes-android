@@ -385,3 +385,7 @@
 ## 2026-11-27 导图节点整框书写与实时裁切
 
 - 用户要求「推送吧」：将本地 `master` 推送到 `origin/master`，包括本轮 `0b53a9a7`（节点整个框可书写、书写中实时裁切；JVM 3,940 项通过、仪器测试源码编译通过）、此前已在本地 `master` 上的 `d0f11302`（0.9.9beta3 版本准备）与本条记录。不新建远端分支，不打包、不安装、不发布 GitHub Release；前缓冲实时裁切待真机确认。
+
+## 2026-11-27 iPad 移植合入主线与 test17 安装
+
+- 用户同意 iPad 存储验收后把 `ipados` 合入本地 `master`（`76dac7d0`），并要求合并后打包安卓版、安装到平板测试：打包 `com.xnotes.movinkpad.branchtest.master` code 17 并安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。
