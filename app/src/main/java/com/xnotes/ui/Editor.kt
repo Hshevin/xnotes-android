@@ -7517,19 +7517,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /**
-     * A Zotero PDF becomes a note in the `Zotero` folder at the top of [treeUri] (made when missing):
-     * [download] writes the PDF into a private temp, which is dropped afterwards. Returns the note's
-     * URI and document UUID, or null when nothing was made. [download]'s exceptions pass through. IO.
+     * A Zotero PDF becomes a note in `Zotero/<folders…>` at the top of [treeUri]. [download] first
+     * writes the PDF into a private temp (dropped afterwards), so a failed download leaves no folders
+     * behind; then each folder is found (ignoring case, as many providers do) or made. A folder that
+     * cannot be made leaves the note in the deepest one that could. Returns the note's URI and
+     * document UUID, or null when nothing was made. [download]'s exceptions pass through. IO.
      */
-    fun importZoteroPdf(treeUri: String, rawName: String, download: (java.io.OutputStream) -> Unit): Pair<String, String>? {
-        val tree = android.net.Uri.parse(treeUri)
-        val root = browseRootDocId(treeUri)
-        val folder = findChildDocId(tree, root, ZOTERO_FOLDER, dir = true)
-            ?: (if (createFolder(treeUri, root, ZOTERO_FOLDER)) findChildDocId(tree, root, ZOTERO_FOLDER, dir = true) else null)
-            ?: return null
+    fun importZoteroPdf(treeUri: String, folders: List<String>, rawName: String, download: (java.io.OutputStream) -> Unit): Pair<String, String>? {
         val staged = java.io.File.createTempFile("zotero", ".tmp", pdfDir)
         try {
             java.io.FileOutputStream(staged).use(download)
+            val tree = android.net.Uri.parse(treeUri)
+            fun folderIn(parent: String, name: String): String? {
+                childRows(tree, parent).firstOrNull { (_, n, dir) -> dir && n == name }?.let { return it.first }
+                childRows(tree, parent).firstOrNull { (_, n, dir) -> dir && n.equals(name, ignoreCase = true) }?.let { return it.first }
+                return runCatching {
+                    android.provider.DocumentsContract.createDocument(
+                        appContext.contentResolver, android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, parent),
+                        android.provider.DocumentsContract.Document.MIME_TYPE_DIR, name,
+                    )?.let(android.provider.DocumentsContract::getDocumentId)
+                }.getOrNull()
+            }
+            var folder = folderIn(browseRootDocId(treeUri), ZOTERO_FOLDER) ?: return null
+            for (name in folders) folder = folderIn(folder, name) ?: break
             importCancelled.set(false)
             val uri = createPdfNoteFile(treeUri, folder, rawName, staged) ?: return null
             val id = notebookStorage.registry.idAt(uri) ?: return null

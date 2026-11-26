@@ -148,7 +148,7 @@
 
 - Zotero 文库是用户授权的可选联网功能：只在使用 Zotero 页面时请求。API 密钥只发往 `https://api.zotero.org`；文件跳转地址不带密钥且只跟随 https；WebDAV 凭据只发往用户填写的 https 地址，群组文库不用 WebDAV。
 - 密钥与 WebDAV 凭据加密保存在 `noBackupFilesDir`（`ZoteroConfigStore`），不进入笔记导出或日志。
-- 打开文献走现有 PDF 导入（`Editor.importZoteroPdf` → `createPdfNoteFile`），放在工作区顶层的 `Zotero` 文件夹。文献与笔记的对应按「文库 + 附件键 → 文档 UUID」保存在 `zotero-links.json`，经登记表找回当前位置；笔记在回收站或已删除时重新导入。不向 Zotero 写回任何内容。
+- 页面左侧是文库与分类树（宽度不足时收为抽屉），取代筛选框；进入时不改动应用主侧栏。打开文献走现有 PDF 导入（`Editor.importZoteroPdf` → `createPdfNoteFile`），先下载核对再建文件夹，放在工作区顶层 `Zotero/` 下按分类的路径（`zoteroFolderPath`：我的文库直接在 `Zotero/` 下，群组文库多一层群组名；从分类打开用该分类，否则用文献自己的分类、多个时取路径排序第一个；文件夹名不以点开头），由 `ZoteroFoldersTest` 检查。笔记只在创建时定位置，之后 Zotero 层级变化不移动已有笔记。文献与笔记的对应按「文库 + 附件键 → 文档 UUID」保存在 `zotero-links.json`，经登记表找回当前位置；笔记在回收站或已删除时重新导入。不向 Zotero 写回任何内容。
 - 下载有 md5 时必须核对；链接文件（linked file）不可下载并明确告知。后端契约由 `ZoteroClientTest`、`ZoteroStoreTest` 检查。详见 `docs/movinkpad/storage/zotero-library-2026-11-26.md`。
 
 ## AI

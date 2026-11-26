@@ -54,6 +54,10 @@ class ZoteroStoreTest {
         fun item(title: String) = ZoteroItem("K", "journalArticle", title, emptyList(), null, "", 0, null)
         assertEquals("A B C", zoteroNoteName(item("  A/B:\u0007C  "), "x"))
         assertEquals("x", zoteroNoteName(item("???"), "x"))
-        assertEquals(120, zoteroNoteName(item("y".repeat(300)), "x").length)
+        assertEquals(ZOTERO_NOTE_NAME_BYTES, zoteroNoteName(item("y".repeat(300)), "x").length)
+        // A Chinese title stays inside the file system's 255-byte name limit, cut on a whole character.
+        val chinese = zoteroNoteName(item("论".repeat(200)), "x")
+        assertEquals(ZOTERO_NOTE_NAME_BYTES / 3, chinese.length)
+        assertEquals("a.b", zoteroNoteName(item("..a.b.."), "x"))
     }
 }

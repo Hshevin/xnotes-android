@@ -1,11 +1,15 @@
 package com.xnotes.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +42,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -48,6 +53,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -73,6 +80,7 @@ import com.xnotes.zotero.ZoteroLibrary
 import com.xnotes.zotero.ZoteroLink
 import com.xnotes.zotero.ZoteroLinkStore
 import com.xnotes.zotero.ZoteroWebDav
+import com.xnotes.zotero.zoteroFolderPath
 import com.xnotes.zotero.zoteroNoteName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -91,6 +99,11 @@ private object ZoteroLocal {
         links ?: ZoteroLinkStore(java.io.File(context.applicationContext.noBackupFilesDir, "zotero-links.json")).also { links = it }
     }
     fun store(context: Context) = ZoteroConfigStore(context.applicationContext)
+    /** What the pane remembers between visits: the selected library or collection, open branches, a hidden tree. */
+    fun ui(context: Context): android.content.SharedPreferences = context.applicationContext.getSharedPreferences("zotero-ui", Context.MODE_PRIVATE)
+    /** Each library's collections, fetched once per run; Refresh fetches them again. */
+    val trees = java.util.concurrent.ConcurrentHashMap<String, List<ZoteroCollection>>()
+    fun forget(context: Context) { ui(context).edit().clear().apply(); trees.clear() }
 }
 
 private fun zoteroMessage(context: Context, error: Throwable, group: Boolean = false): String = context.getString(
@@ -208,7 +221,7 @@ private fun ZoteroSetup(initial: ZoteroConfig?, onSaved: () -> Unit, onCancel: (
             confirmButton = {
                 TextButton(onClick = {
                     confirmDisconnect = false
-                    scope.launch { withContext(Dispatchers.IO) { runCatching { ZoteroLocal.store(context).clear() } }; onDisconnect?.invoke() }
+                    scope.launch { withContext(Dispatchers.IO) { runCatching { ZoteroLocal.store(context).clear() }; ZoteroLocal.forget(context) }; onDisconnect?.invoke() }
                 }) { Text(stringResource(R.string.zotero_disconnect)) }
             },
             dismissButton = { TextButton(onClick = { confirmDisconnect = false }) { Text(stringResource(R.string.cancel)) } },
@@ -281,17 +294,6 @@ private fun ZoteroSetup(initial: ZoteroConfig?, onSaved: () -> Unit, onCancel: (
     }
 }
 
-/** Collections in tree order with their depth. */
-private fun collectionTree(all: List<ZoteroCollection>): List<Pair<ZoteroCollection, Int>> {
-    val children = all.groupBy { c -> c.parentKey?.takeIf { p -> all.any { it.key == p } } }
-    val out = ArrayList<Pair<ZoteroCollection, Int>>()
-    fun walk(parent: String?, depth: Int) {
-        for (c in children[parent].orEmpty()) { out += c to depth; walk(c.key, depth + 1) }
-    }
-    walk(null, 0)
-    return out
-}
-
 @Composable
 private fun creatorsLine(item: ZoteroItem): String {
     val names = item.creators
@@ -306,6 +308,25 @@ private fun creatorsLine(item: ZoteroItem): String {
 
 private class ItemList(val items: List<ZoteroItem>, val nextStart: Int?)
 
+/** What the list shows: a whole library ([collection] null) or one collection of it. */
+private data class Spot(val library: String, val collection: String?) {
+    /** `u1` or `u1/KEY`; also the key of the tree node it selects. */
+    val id: String get() = if (collection == null) library else "$library/$collection"
+    companion object {
+        fun parse(id: String?): Spot? = id?.takeIf { it.isNotBlank() }?.split('/', limit = 2)?.let { Spot(it[0], it.getOrNull(1)) }
+    }
+}
+
+/** One visible row of the collection tree: a library (collection null), a collection, or a branch still loading. */
+private data class TreeRow(val library: ZoteroLibrary, val collection: ZoteroCollection?, val depth: Int, val hasChildren: Boolean, val open: Boolean, val loading: Boolean = false) {
+    val node: String get() = if (collection == null) library.key else "${library.key}/${collection.key}"
+}
+
+/** Width of the pane at which the collection tree sits beside the papers rather than in a drawer. */
+private val TREE_BESIDE_WIDTH = 720.dp
+private val TREE_WIDTH = 248.dp
+private val TREE_DRAWER_WIDTH = 300.dp
+
 @Composable
 private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (String) -> Unit) {
     val palette = LocalPalette.current
@@ -313,11 +334,19 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
     val scope = rememberCoroutineScope()
     val client = remember(config) { ZoteroClient(UrlConnectionZoteroHttp(), config.apiKey) }
     val links = remember { ZoteroLocal.links(context) }
+    val prefs = remember { ZoteroLocal.ui(context) }
     var reload by remember { mutableIntStateOf(0) }
     var libraries by remember { mutableStateOf<List<ZoteroLibrary>?>(null) }
-    var library by remember { mutableStateOf<ZoteroLibrary?>(null) }
-    var collections by remember { mutableStateOf<List<Pair<ZoteroCollection, Int>>>(emptyList()) }
-    var collection by remember { mutableStateOf<ZoteroCollection?>(null) }
+    val trees = remember { mutableStateMapOf<String, List<ZoteroCollection>>().apply { putAll(ZoteroLocal.trees) } }
+    val expanded = remember {
+        mutableStateMapOf<String, Boolean>().apply {
+            val saved = prefs.getStringSet("expanded", null)
+            (saved ?: setOf("u${config.userId}")).forEach { put(it, true) }
+        }
+    }
+    var spot by remember { mutableStateOf(Spot.parse(prefs.getString("selected", null)) ?: Spot("u${config.userId}", null)) }
+    var treeHidden by remember { mutableStateOf(prefs.getBoolean("treeHidden", false)) }
+    var drawerOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var list by remember { mutableStateOf<ItemList?>(null) }
     var loadingMore by remember { mutableStateOf(false) }
@@ -326,30 +355,59 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
     var opening by remember { mutableStateOf<ZoteroItem?>(null) }
     var openJob by remember { mutableStateOf<Job?>(null) }
     val openCancelled = remember { AtomicBoolean(false) }
-    var choosing by remember { mutableStateOf<Pair<ZoteroItem, List<ZoteroAttachment>>?>(null) }
+    var choosing by remember { mutableStateOf<Triple<ZoteroLibrary, ZoteroItem, List<ZoteroAttachment>>?>(null) }
+    var choosingFrom by remember { mutableStateOf<String?>(null) }
 
     suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
+    val library = libraries?.firstOrNull { it.key == spot.library }
+
+    fun select(next: Spot) {
+        spot = next
+        drawerOpen = false
+        prefs.edit().putString("selected", next.id).apply()
+    }
+    fun saveExpanded() = prefs.edit().putStringSet("expanded", expanded.filterValues { it }.keys.toSet()).apply()
+
+    /** [lib]'s collections, fetched when not yet known this run. */
+    suspend fun treeOf(lib: ZoteroLibrary): List<ZoteroCollection> {
+        trees[lib.key]?.let { return it }
+        val fetched = io { client.collections(lib) }
+        ZoteroLocal.trees[lib.key] = fetched
+        trees[lib.key] = fetched
+        return fetched
+    }
+    fun loadTree(lib: ZoteroLibrary) {
+        if (trees.containsKey(lib.key)) return
+        scope.launch {
+            try { treeOf(lib) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) { trees[lib.key] = emptyList(); editor.message = zoteroMessage(context, e) }
+        }
+    }
 
     LaunchedEffect(reload) {
         error = null
+        if (reload > 0) { ZoteroLocal.trees.clear(); trees.clear() }
         try {
             val libs = io { client.libraries(config.userId, config.username) }
             libraries = libs
-            if (library == null || libs.none { it.key == library?.key }) library = libs.first()
+            if (libs.none { it.key == spot.library }) select(Spot(libs.first().key, null))
+            for (lib in libs) if (expanded[lib.key] == true || lib.key == spot.library) loadTree(lib)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (e: Exception) { error = zoteroMessage(context, e) }
     }
-    LaunchedEffect(library, reload) {
-        val lib = library ?: return@LaunchedEffect
-        collections = runCatching { io { collectionTree(client.collections(lib)) } }.getOrElse { if (it is CancellationException) throw it; emptyList() }
-        if (collections.none { it.first.key == collection?.key }) collection = null
+    // A collection deleted in Zotero since it was last selected: fall back to its library.
+    val tree = trees[spot.library]
+    LaunchedEffect(tree, spot) {
+        val key = spot.collection ?: return@LaunchedEffect
+        if (tree != null && tree.none { it.key == key }) select(Spot(spot.library, null))
     }
-    LaunchedEffect(library, collection, query, reload) {
+    LaunchedEffect(library, spot, query, reload) {
         val lib = library ?: return@LaunchedEffect
         list = null
         if (query.isNotBlank()) delay(400)
         try {
-            val page = io { client.items(lib, collection?.key, query, start = 0) }
+            val page = io { client.items(lib, spot.collection, query, start = 0) }
             linked = io { links.linkedItems(lib.key) }
             list = ItemList(page.items, page.nextStart)
             error = null
@@ -363,9 +421,10 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
         val start = current.nextStart ?: return
         if (loadingMore) return
         loadingMore = true
+        val from = spot
         scope.launch {
             try {
-                val page = io { client.items(lib, collection?.key, query, start) }
+                val page = io { client.items(lib, from.collection, query, start) }
                 if (list === current) list = ItemList(current.items + page.items, page.nextStart)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) { editor.message = zoteroMessage(context, e) }
@@ -373,7 +432,8 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
         }
     }
 
-    fun openAttachment(lib: ZoteroLibrary, item: ZoteroItem, attachment: ZoteroAttachment) {
+    /** Opens [attachment]'s note, importing it into the folder of collection [openedFrom] (or of the item's own) first. */
+    fun openAttachment(lib: ZoteroLibrary, item: ZoteroItem, attachment: ZoteroAttachment, openedFrom: String?) {
         val root = editor.browseRoot ?: run { editor.message = context.getString(R.string.zotero_need_folder); return }
         opening = item
         openCancelled.set(false)
@@ -381,8 +441,11 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
             try {
                 val existing = io { links.find(lib.key, attachment.key)?.let { editor.zoteroNoteLocation(root, it.documentId) } }
                 if (existing != null) { openFile(existing); return@launch }
+                // Without the collections the note still opens, at the library's root.
+                val collections = try { treeOf(lib) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { emptyList() }
+                val folders = zoteroFolderPath(lib, collections, item, openedFrom)
                 val made = io {
-                    editor.importZoteroPdf(root, zoteroNoteName(item, context.getString(R.string.zotero_untitled))) { out ->
+                    editor.importZoteroPdf(root, folders, zoteroNoteName(item, context.getString(R.string.zotero_untitled))) { out ->
                         client.download(lib, attachment, if (lib.group) null else config.webdav, out) { openCancelled.get() }
                     }?.also { (_, id) -> links.put(ZoteroLink(lib.key, item.key, attachment.key, id, attachment.md5)) }
                 }
@@ -404,6 +467,7 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
         val lib = library ?: return
         if (opening != null) return
         if (editor.browseRoot == null) { editor.message = context.getString(R.string.zotero_need_folder); return }
+        val from = spot.collection
         opening = item
         openCancelled.set(false)
         openJob = scope.launch {
@@ -412,13 +476,20 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
                 val pdfs = io { client.pdfs(lib, item) }
                 when (pdfs.size) {
                     0 -> editor.message = context.getString(R.string.zotero_no_pdf)
-                    1 -> { handedOn = true; opening = null; openAttachment(lib, item, pdfs[0]) }
-                    else -> choosing = item to pdfs
+                    1 -> { handedOn = true; opening = null; openAttachment(lib, item, pdfs[0], from) }
+                    else -> { choosing = Triple(lib, item, pdfs); choosingFrom = from }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) { if (!openCancelled.get()) editor.message = zoteroMessage(context, e) }
             finally { if (!handedOn) { opening = null; openJob = null } }
         }
+    }
+
+    fun toggle(row: TreeRow) {
+        val open = !row.open
+        expanded[row.node] = open
+        saveExpanded()
+        if (open && row.collection == null) loadTree(row.library)
     }
 
     opening?.let { item ->
@@ -428,7 +499,7 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
             onCancel = { openCancelled.set(true); editor.cancelImportInProgress(); openJob?.cancel(); opening = null },
         )
     }
-    choosing?.let { (item, pdfs) ->
+    choosing?.let { (lib, item, pdfs) ->
         AlertDialog(
             onDismissRequest = { choosing = null },
             title = { Text(stringResource(R.string.zotero_choose_pdf)) },
@@ -437,7 +508,7 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
                     pdfs.forEach { pdf ->
                         Row(
                             Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
-                                .clickable { choosing = null; library?.let { openAttachment(it, item, pdf) } }
+                                .clickable { choosing = null; openAttachment(lib, item, pdf, choosingFrom) }
                                 .padding(horizontal = Space.s8),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -456,64 +527,167 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
         )
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s8), verticalAlignment = Alignment.CenterVertically) {
-            val libs = libraries.orEmpty()
-            if (libs.size > 1) {
-                var open by remember { mutableStateOf(false) }
-                Box {
-                    ChooserButton(library?.let { libraryName(it) } ?: "") { open = true }
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        libs.forEach { lib -> MenuItem(libraryName(lib), onClick = { open = false; if (lib.key != library?.key) { collection = null; library = lib } }) }
+    // The tree as visible rows: every library, and the collections under each open branch.
+    val rows = run {
+        val out = ArrayList<TreeRow>()
+        for (lib in libraries.orEmpty()) {
+            val all = trees[lib.key]
+            val libOpen = expanded[lib.key] == true
+            out += TreeRow(lib, null, 0, all == null || all.isNotEmpty(), libOpen)
+            if (!libOpen) continue
+            if (all == null) { out += TreeRow(lib, null, 1, false, false, loading = true); continue }
+            val keys = all.mapTo(HashSet()) { it.key }
+            val children = all.groupBy { c -> c.parentKey?.takeIf(keys::contains) }
+            fun walk(parent: String?, depth: Int, seen: Set<String>) {
+                for (c in children[parent].orEmpty()) {
+                    if (c.key in seen) continue
+                    val row = TreeRow(lib, c, depth, !children[c.key].isNullOrEmpty(), false)
+                    val open = expanded[row.node] == true
+                    out += row.copy(open = open)
+                    if (open) walk(c.key, depth + 1, seen + c.key)
+                }
+            }
+            walk(null, 1, emptySet())
+        }
+        out
+    }
+    val treeKeys = trees[spot.library].orEmpty().associateBy { it.key }
+    val crumbs = buildList {
+        add(library?.let { libraryName(it) }.orEmpty())
+        val chain = ArrayList<String>()
+        var at = spot.collection?.let(treeKeys::get)
+        val seen = HashSet<String>()
+        while (at != null && seen.add(at.key)) { chain += at.name; at = at.parentKey?.let(treeKeys::get) }
+        addAll(chain.asReversed())
+    }
+    val subcollections = spot.collection?.let { key -> trees[spot.library].orEmpty().filter { it.parentKey == key } }.orEmpty()
+
+    @Composable
+    fun treePane(modifier: Modifier, onHide: (() -> Unit)?) {
+        Column(modifier) {
+            Row(Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).padding(start = Space.s16), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.zotero_libraries), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.weight(1f))
+                if (onHide != null) Tooltip(stringResource(R.string.zotero_hide_collections)) {
+                    IconButton(onClick = onHide) {
+                        Icon(XnotesIcons.prev, stringResource(R.string.zotero_hide_collections), tint = palette.text.toComposeColor(), modifier = Modifier.size(20.dp))
                     }
                 }
             }
-            if (collections.isNotEmpty()) {
-                var open by remember { mutableStateOf(false) }
-                Box(Modifier.weight(1f, fill = false)) {
-                    ChooserButton(collection?.name ?: stringResource(R.string.zotero_all_items)) { open = true }
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        MenuItem(stringResource(R.string.zotero_all_items), onClick = { open = false; collection = null })
-                        collections.forEach { (c, depth) ->
-                            MenuItem(" ".repeat(depth) + c.name, onClick = { open = false; collection = c })
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(rows, key = { (if (it.loading) "loading:" else "") + it.node }) { row ->
+                    if (row.loading) {
+                        Text(stringResource(R.string.zotero_loading), color = palette.textDim.toComposeColor(), fontSize = TextSize.body,
+                            modifier = Modifier.padding(start = MinTouchTarget + Space.s12, top = Space.s12, bottom = Space.s12))
+                    } else {
+                        ZoteroTreeRow(row, selected = row.node == spot.id, onToggle = { toggle(row) }) {
+                            select(Spot(row.library.key, row.collection?.key))
+                            if (row.collection == null) loadTree(row.library)
                         }
                     }
                 }
             }
-            Spacer(Modifier.weight(1f))
-            ExplorerSearchField(query, { query = it }, expandedWidth = 280.dp)
-            Tooltip(stringResource(R.string.zotero_refresh)) {
-                IconButton(onClick = { reload++ }) {
-                    Icon(XnotesIcons.rotateRight, stringResource(R.string.zotero_refresh), tint = palette.text.toComposeColor(), modifier = Modifier.size(20.dp))
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val beside = maxWidth >= TREE_BESIDE_WIDTH
+        val treeShown = beside && !treeHidden
+        Row(Modifier.fillMaxSize()) {
+            if (treeShown) treePane(Modifier.width(TREE_WIDTH).fillMaxHeight()) {
+                treeHidden = true; prefs.edit().putBoolean("treeHidden", true).apply()
+            }
+            val shape = MaterialTheme.shapes.large
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .then(if (treeShown) Modifier.clip(shape).background(palette.menuBg.toComposeColor()).border(1.dp, palette.border.toComposeColor(), shape) else Modifier),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (treeShown) Modifier.padding(start = Space.s16) else Modifier).padding(end = Space.s4),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.s8),
+                ) {
+                    if (!treeShown) Tooltip(stringResource(R.string.zotero_show_collections)) {
+                        IconButton(onClick = {
+                            if (beside) { treeHidden = false; prefs.edit().putBoolean("treeHidden", false).apply() } else drawerOpen = true
+                        }) {
+                            Icon(XnotesIcons.library, stringResource(R.string.zotero_show_collections), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Text(
+                        crumbs.dropLast(1).joinToString("") { "$it › " },
+                        color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(crumbs.last(), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.weight(1f))
+                    ExplorerSearchField(query, { query = it }, expandedWidth = 260.dp)
+                    Tooltip(stringResource(R.string.zotero_refresh)) {
+                        IconButton(onClick = { reload++ }) {
+                            Icon(XnotesIcons.rotateRight, stringResource(R.string.zotero_refresh), tint = palette.text.toComposeColor(), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                HorizontalDivider(color = palette.border.toComposeColor())
+                val shown = list
+                when {
+                    error != null && shown == null -> Column(Modifier.fillMaxWidth().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s12)) {
+                        Text(error.orEmpty(), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge)
+                        OutlinedButton(onClick = { reload++ }, modifier = Modifier.heightIn(min = MinTouchTarget)) { Text(stringResource(R.string.zotero_retry), fontSize = TextSize.body) }
+                    }
+                    shown == null -> Text(stringResource(R.string.zotero_loading), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge, modifier = Modifier.padding(Space.s16))
+                    shown.items.isEmpty() -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s8)) {
+                        when {
+                            query.isNotBlank() -> {
+                                Text(stringResource(R.string.zotero_no_match), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
+                                if (spot.collection != null) OutlinedButton(onClick = { select(Spot(spot.library, null)) }, modifier = Modifier.heightIn(min = MinTouchTarget)) {
+                                    Text(stringResource(R.string.zotero_search_library, crumbs.first()), fontSize = TextSize.body)
+                                }
+                            }
+                            subcollections.isNotEmpty() -> {
+                                Text(stringResource(R.string.zotero_no_direct_items), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
+                                subcollections.forEach { c ->
+                                    Row(
+                                        Modifier.fillMaxWidth().heightIn(min = MinTouchTarget).clip(MaterialTheme.shapes.small)
+                                            .clickable { expanded["${spot.library}/${spot.collection}"] = true; saveExpanded(); select(Spot(spot.library, c.key)) }
+                                            .padding(horizontal = Space.s8),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Space.s8),
+                                    ) {
+                                        Icon(XnotesIcons.folder, null, tint = palette.text.toComposeColor(), modifier = Modifier.size(18.dp))
+                                        Text(c.name, color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                            else -> Text(stringResource(R.string.zotero_empty), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
+                        }
+                    }
+                    else -> {
+                        val state = rememberLazyListState()
+                        LaunchedEffect(spot, query) { state.scrollToItem(0) }
+                        val nearEnd by remember { derivedStateOf { state.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= state.layoutInfo.totalItemsCount - 5 } == true } }
+                        LaunchedEffect(nearEnd, shown) { if (nearEnd) loadMore() }
+                        LazyColumn(Modifier.fillMaxSize(), state = state) {
+                            items(shown.items, key = { it.key }) { item ->
+                                ZoteroRow(item, opened = item.key in linked) { openItem(item) }
+                                HorizontalDivider(color = palette.border.toComposeColor())
+                            }
+                            if (shown.nextStart != null) item {
+                                Text(stringResource(R.string.zotero_loading), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.padding(Space.s16))
+                            }
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(Space.s8))
-        val shown = list
-        when {
-            error != null && shown == null -> Column(Modifier.fillMaxWidth().padding(Space.s16), verticalArrangement = Arrangement.spacedBy(Space.s12)) {
-                Text(error.orEmpty(), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge)
-                OutlinedButton(onClick = { reload++ }, modifier = Modifier.heightIn(min = MinTouchTarget)) { Text(stringResource(R.string.zotero_retry), fontSize = TextSize.body) }
-            }
-            shown == null -> Text(stringResource(R.string.zotero_loading), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge, modifier = Modifier.padding(Space.s16))
-            shown.items.isEmpty() -> Text(
-                stringResource(if (query.isBlank()) R.string.zotero_empty else R.string.zotero_no_match),
-                color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge, modifier = Modifier.padding(Space.s16),
+        // Narrow panes: the same tree slides over the papers from the left.
+        if (!beside && drawerOpen) {
+            BackHandler { drawerOpen = false }
+            Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { drawerOpen = false })
+            treePane(
+                Modifier.width(TREE_DRAWER_WIDTH).fillMaxHeight().clip(MaterialTheme.shapes.large)
+                    .background(palette.menuBg.toComposeColor()).border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.large),
+                onHide = null,
             )
-            else -> {
-                val state = rememberLazyListState()
-                val nearEnd by remember { derivedStateOf { state.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= state.layoutInfo.totalItemsCount - 5 } == true } }
-                LaunchedEffect(nearEnd, shown) { if (nearEnd) loadMore() }
-                LazyColumn(Modifier.fillMaxSize(), state = state) {
-                    items(shown.items, key = { it.key }) { item ->
-                        ZoteroRow(item, opened = item.key in linked) { openItem(item) }
-                        HorizontalDivider(color = palette.border.toComposeColor())
-                    }
-                    if (shown.nextStart != null) item {
-                        Text(stringResource(R.string.zotero_loading), color = palette.textDim.toComposeColor(), fontSize = TextSize.body, modifier = Modifier.padding(Space.s16))
-                    }
-                }
-            }
         }
     }
 }
@@ -521,18 +695,34 @@ private fun ZoteroLibraryView(editor: Editor, config: ZoteroConfig, openFile: (S
 @Composable
 private fun libraryName(lib: ZoteroLibrary): String = if (lib.group) lib.name else stringResource(R.string.zotero_my_library)
 
+/** A tree row: the arrow opens or closes the branch, the name selects it; the selected row is a filled pill. */
 @Composable
-private fun ChooserButton(label: String, onClick: () -> Unit) {
+private fun ZoteroTreeRow(row: TreeRow, selected: Boolean, onToggle: () -> Unit, onSelect: () -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.medium
+    val shape = MaterialTheme.shapes.large
+    val foreground = (if (selected) palette.selectionForeground else palette.text).toComposeColor()
+    val name = row.collection?.name ?: libraryName(row.library)
     Row(
-        Modifier.heightIn(min = MinTouchTarget).clip(shape).border(1.dp, palette.border.toComposeColor(), shape)
-            .clickable(onClick = onClick).padding(horizontal = Space.s12),
+        Modifier.fillMaxWidth().padding(horizontal = Space.s6, vertical = Space.s2).height(MinTouchTarget).clip(shape)
+            .then(if (selected) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
+            .padding(start = Space.s12 * row.depth.coerceAtMost(5)),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s6),
     ) {
-        Text(label, color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 240.dp))
-        Icon(XnotesIcons.chevronDown, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+        if (row.hasChildren) {
+            val label = stringResource(if (row.open) R.string.folder_tree_collapse else R.string.folder_tree_expand, name)
+            IconButton(onClick = onToggle, modifier = Modifier.size(MinTouchTarget)) {
+                Icon(if (row.open) XnotesIcons.chevronDown else XnotesIcons.chevronRight, label, tint = foreground, modifier = Modifier.size(16.dp))
+            }
+        } else Spacer(Modifier.width(MinTouchTarget))
+        Row(
+            Modifier.weight(1f).fillMaxHeight().semantics { this.selected = selected }.clickable(onClick = onSelect).padding(end = Space.s12),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s8),
+        ) {
+            Icon(if (row.collection == null) XnotesIcons.library else XnotesIcons.folder, null, tint = foreground, modifier = Modifier.size(18.dp))
+            Text(name, color = foreground, fontSize = TextSize.bodyLarge, fontWeight = if (row.collection == null) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

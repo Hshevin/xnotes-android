@@ -84,7 +84,7 @@ class ZoteroClientTest {
 
     @Test fun itemsAskNewestTopLevelNonNotesAndParseFields() {
         val fake = Fake { ok("""[
-            {"key":"P1","meta":{"parsedDate":"2021-03-04","numChildren":2},"data":{"key":"P1","itemType":"journalArticle","title":"Deep ink","dateAdded":"2024-01-02T00:00:00Z",
+            {"key":"P1","meta":{"parsedDate":"2021-03-04","numChildren":2},"data":{"key":"P1","itemType":"journalArticle","title":"Deep ink","dateAdded":"2024-01-02T00:00:00Z","collections":["C1","C2"],
               "creators":[{"creatorType":"editor","lastName":"Ed"},{"creatorType":"author","firstName":"A","lastName":"Lovelace"},{"creatorType":"author","name":"Babbage Lab"}]}},
             {"key":"S1","meta":{},"data":{"key":"S1","itemType":"attachment","title":"","filename":"loose.pdf","contentType":"application/pdf","linkMode":"imported_file","md5":"ABCDEF","dateAdded":"2024-01-01T00:00:00Z"}}
         ]""", mapOf("Total-Results" to "60")) }
@@ -96,8 +96,10 @@ class ZoteroClientTest {
         val paper = page.items[0]
         assertEquals("Deep ink", paper.title); assertEquals(listOf("Lovelace", "Babbage Lab"), paper.creators)
         assertEquals("2021", paper.year); assertEquals(2, paper.childCount); assertNull(paper.attachment)
+        assertEquals(listOf("C1", "C2"), paper.collections)
         val loose = page.items[1]
         assertEquals("loose.pdf", loose.title); assertNull(loose.year)
+        assertEquals(emptyList<String>(), loose.collections)
         assertEquals("abcdef", loose.attachment!!.md5); assertTrue(loose.attachment!!.stored)
     }
 

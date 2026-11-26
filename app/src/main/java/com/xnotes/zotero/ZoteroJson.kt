@@ -49,5 +49,6 @@ internal fun parseZoteroItem(obj: JSONObject): ZoteroItem {
     val count = if (meta?.has("numChildren") == true) meta.integer("numChildren") else 0L
     if (count !in 0..Int.MAX_VALUE.toLong()) throw JSONException("Invalid numChildren")
     return ZoteroItem(key, type, title, authors.ifEmpty { creators }.mapNotNull { it.second },
-        year, data.optional<String>("dateAdded").orEmpty(), count.toInt(), attachment)
+        year, data.optional<String>("dateAdded").orEmpty(), count.toInt(), attachment,
+        data.optional<JSONArray>("collections")?.let { keys -> List(keys.length()) { keys.opt(it) as? String ?: throw JSONException("Invalid collections") } }.orEmpty())
 }

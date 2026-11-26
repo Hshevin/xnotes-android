@@ -1,7 +1,7 @@
 <resources>
     <string name="zotero_label">Zotero</string>
     <string name="zotero_settings">Zotero settings</string>
-    <string name="zotero_intro">Connect your Zotero library to open papers\' PDFs here and write on them. Opened papers are saved in a \"Zotero\" folder in your notes.</string>
+    <string name="zotero_intro">Connect your Zotero library to open papers\' PDFs here and write on them. Notes are saved in a \"Zotero\" folder in your notes, in the same collections as in Zotero.</string>
     <string name="zotero_connected_as">Connected as %1$s</string>
     <string name="zotero_key_steps">On zotero.org, create a private key with \"Allow library access\" checked, then paste it below.</string>
     <string name="zotero_open_keys_page">Create a key on zotero.org</string>
@@ -22,7 +22,6 @@
     <string name="zotero_need_webdav_user">Enter your WebDAV username.</string>
     <string name="zotero_need_folder">Choose a notes folder on Home first.</string>
     <string name="zotero_my_library">My Library</string>
-    <string name="zotero_all_items">All items</string>
     <string name="zotero_loading">Loading…</string>
     <string name="zotero_empty">No papers here yet.</string>
     <string name="zotero_no_match">No papers match your search.</string>
@@ -48,4 +47,9 @@
     <string name="zotero_refresh">Refresh</string>
     <string name="zotero_open_keys_failed">No browser could open the page. Visit %1$s instead.</string>
     <string name="zotero_err_file_missing_group">This PDF isn\'t in the group\'s online storage yet. Sync Zotero on the computer that added it, then try again.</string>
+    <string name="zotero_libraries">Libraries</string>
+    <string name="zotero_show_collections">Show collections</string>
+    <string name="zotero_hide_collections">Hide collections</string>
+    <string name="zotero_no_direct_items">No papers sit directly in this collection. They are in its subcollections:</string>
+    <string name="zotero_search_library">Search all of \"%1$s\"</string>
 </resources>

@@ -103,6 +103,8 @@ data class ZoteroItem(
     val childCount: Int,
     /** Set when the top-level item is itself an attachment (a standalone PDF). */
     val attachment: ZoteroAttachment?,
+    /** `data.collections`: keys of the collections the item sits in directly; empty when unfiled. */
+    val collections: List<String> = emptyList(),
 )
 
 data class ZoteroPage(val items: List<ZoteroItem>, val total: Int, val nextStart: Int?)
@@ -291,8 +293,3 @@ class ZoteroClient(private val http: ZoteroHttp, private val apiKey: String) {
     private fun fail(reason: ZoteroFailure): Nothing = throw ZoteroException(reason)
 }
 
-/** A note name for [item]: its title with `/\:*?"<>|` and control characters replaced by a space, runs of spaces collapsed, trimmed, at most 120 characters; [fallback] when nothing is left. */
-fun zoteroNoteName(item: ZoteroItem, fallback: String): String =
-    item.title.replace(unsafeNameChars, " ").trim().take(120).trimEnd().ifBlank { fallback }
-
-private val unsafeNameChars = Regex("""[/\\:*?"<>|\p{Cc} ]+""")

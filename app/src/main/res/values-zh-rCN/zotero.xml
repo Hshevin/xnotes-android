@@ -1,7 +1,7 @@
 <resources>
     <string name="zotero_label">Zotero</string>
     <string name="zotero_settings">Zotero 设置</string>
-    <string name="zotero_intro">连接 Zotero 文库后，点一篇文献就能在这里打开它的 PDF，直接手写批注。打开过的文献会保存在笔记的“Zotero”文件夹里。</string>
+    <string name="zotero_intro">连接 Zotero 文库后，点一篇文献就能在这里打开它的 PDF，直接手写批注。笔记会保存在笔记的“Zotero”文件夹里，按 Zotero 的分类层级存放。</string>
     <string name="zotero_connected_as">已连接：%1$s</string>
     <string name="zotero_key_steps">在 zotero.org 新建一个私人密钥，勾选 Allow library access（允许访问文库），保存后把密钥粘贴到下面。</string>
     <string name="zotero_open_keys_page">前往 zotero.org 新建密钥</string>
@@ -22,7 +22,6 @@
     <string name="zotero_need_webdav_user">请填写 WebDAV 用户名。</string>
     <string name="zotero_need_folder">请先在首页选择存放笔记的文件夹。</string>
     <string name="zotero_my_library">我的文库</string>
-    <string name="zotero_all_items">全部文献</string>
     <string name="zotero_loading">正在加载…</string>
     <string name="zotero_empty">这里还没有文献。</string>
     <string name="zotero_no_match">没有找到相关文献。</string>
@@ -48,4 +47,9 @@
     <string name="zotero_refresh">刷新</string>
     <string name="zotero_open_keys_failed">没有可以打开网页的浏览器，请手动访问 %1$s</string>
     <string name="zotero_err_file_missing_group">群组云端还没有这个 PDF。请在添加它的电脑上同步 Zotero 后再试。</string>
+    <string name="zotero_libraries">文库</string>
+    <string name="zotero_show_collections">显示分类</string>
+    <string name="zotero_hide_collections">收起分类栏</string>
+    <string name="zotero_no_direct_items">这个分类里没有直接存放的文献，文献都在下面的子分类里：</string>
+    <string name="zotero_search_library">在“%1$s”的全部文献中搜索</string>
 </resources>
