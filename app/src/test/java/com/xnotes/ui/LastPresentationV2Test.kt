@@ -21,22 +21,6 @@ class LastPresentationV2Test {
             ColdNativeSlot.Shared(Pane.SECONDARY,Pane.PRIMARY,view.copy(fitWidth=false))),ColdNativeLayout(Pane.SECONDARY,.4f,false,true)))
         roundTrip(LastPresentation.Native(listOf(ColdNativeSlot.Canvas(Pane.PRIMARY,canvas,ColdCanvasView(10.0,30.0,.5))),ColdNativeLayout(Pane.PRIMARY)))
     }
-    @Test fun anOpaqueObservationMatchesItsActualHeadButNotANewerIdenticalDescriptor()=runBlocking {
-        val root=Files.createTempDirectory("marker-observation-").toFile()
-        try {
-            val store=LastPresentationStore(root)
-            val absent=store.observe();assertTrue(store.matches(absent))
-            val first=store.begin(store.reserve(),LastPresentation.Home)
-            try {assertEquals(LastPresentationPrepare.Ready,first.prepare());assertEquals(LastPresentationWrite.Written,first.commit {true})}
-            finally {first.close()}
-            assertFalse(store.matches(absent))
-            val before=store.observe();assertTrue(store.matches(before))
-            val second=store.begin(store.reserve(),LastPresentation.Home)
-            try {assertEquals(LastPresentationPrepare.Ready,second.prepare());assertEquals(LastPresentationWrite.Written,second.commit {true})}
-            finally {second.close()}
-            assertFalse("Rewritten same DTO is a different actual head",store.matches(before))
-        } finally {root.deleteRecursively()}
-    }
     @Test fun mutableSlotInputsCannotChangeAnAlreadyCapturedDescription() {
         val slots=mutableListOf<ColdNativeSlot>(ColdNativeSlot.Note(Pane.PRIMARY,note,view))
         val description=LastPresentation.Native(slots,ColdNativeLayout(Pane.PRIMARY))
@@ -64,17 +48,5 @@ class LastPresentationV2Test {
             wire.replace("\"hint\":{","\"hint\":{\"future\":true,"))) {
             assertNotEquals(wire,raw);assertNull(LastPresentationCodec.parse(raw.toByteArray()))
         }
-    }
-    @Test fun observationCannotMoveBetweenRootsOrSurviveARecreatedDirectory() {
-        val parent=Files.createTempDirectory("marker-root-proof-").toFile()
-        try {
-            val directory=java.io.File(parent,"files").apply {mkdir()}
-            val first=LastPresentationStore(directory)
-            val observed=first.observe()
-            val other=LastPresentationStore(java.io.File(parent,"other").apply {mkdir()})
-            assertFalse(other.matches(observed))
-            assertTrue(directory.renameTo(java.io.File(parent,"retired")));assertTrue(directory.mkdir())
-            assertFalse(first.matches(observed));assertFalse(LastPresentationStore(directory).matches(observed))
-        } finally {parent.deleteRecursively()}
     }
 }

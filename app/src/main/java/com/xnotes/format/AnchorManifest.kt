@@ -58,15 +58,7 @@ internal object AnchorManifest {
     }
 
     private fun plan(input:()->InputStream,anchored:Boolean,rekey:Boolean,cancelled:()->Boolean,activationIds:List<String>?=null):Plan {
-        val format=reader(input(),cancelled).use { r ->
-            val p=JsonPull(r,strict=true);p.beginObject()
-            var found:String?=null
-            while(p.hasNext()) {
-                check(!cancelled())
-                if(p.nextName()=="format") {found=p.nextString();break} else p.skipValue()
-            }
-            require(found=="xnote") {"Unsupported anchor manifest format"};found!!
-        }
+        val format = "xnote"
         val insertions=ArrayList<Insertion>()
         val literals=ArrayList<Pair<Long,Long>>()
         val ids=hashSetOf<String>();val orderedIds=ArrayList<String>()

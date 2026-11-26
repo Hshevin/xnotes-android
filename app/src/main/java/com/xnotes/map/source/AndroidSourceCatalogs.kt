@@ -5,20 +5,20 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.system.ErrnoException
 import android.system.OsConstants
-import com.xnotes.core.util.DocumentKind
-import com.xnotes.format.BundleCopyPlan
-import com.xnotes.format.BundleEntries
-import com.xnotes.format.BundleHeader
-import com.xnotes.format.BundleReferenceInfo
-import com.xnotes.format.BundleSnapshot
+import com.xnotes.format.AnchorManifest
+import com.xnotes.format.AnchorMetadata
+import com.xnotes.format.BundleIdentity
+import com.xnotes.format.CanvasCodec
 import com.xnotes.format.JsonPull
+import com.xnotes.format.ZipTail
 import com.xnotes.storage.NotebookStorage
+import com.xnotes.storage.zipFilePath
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
-import java.io.InputStreamReader
-import java.nio.file.Files
+import java.nio.channels.FileChannel
+import java.util.zip.ZipInputStream
 import java.nio.file.NoSuchFileException
 import java.util.zip.ZipFile
 
@@ -27,8 +27,7 @@ import java.util.zip.ZipFile
  * ids, repairs, migrates or registers anything, and keeps no file open after [read] returns.
  *
  * - [locations]: the registry's available locations for the id, in its order.
- * - [read]: the file's bundle header and page anchors (as `NativeSourceSnapshot.ReferenceCatalog`
- *   gives them): NOTE with ordered page ids, NOTE with null ids when the note has none yet, CANVAS
+ * - [read]: the file's bundle header and page anchors: NOTE with ordered page ids, NOTE with null ids when the note has none yet, CANVAS
  *   with null; anything else OTHER. A file that is not there → null; unreadable or corrupt → throws.
  *
  * Called off the main thread.
@@ -47,9 +46,18 @@ class AndroidSourceCatalogs(context: Context) : SourceCatalogs {
             "file" -> File(requireNotNull(uri.path))
             else -> throw IOException("Unsupported source URI")
         }
-        val input = try { Files.newInputStream(file.toPath()) } catch (_: NoSuchFileException) { return null }
-        return catalog(input, file.name)
+        val channel = try { FileChannel.open(file.toPath()) } catch (_: NoSuchFileException) { return null }
+        channel.use { readDirectory(it, file.name)?.let { result -> return result } }
+        return readZipFile(file, file.name)
     }
+
+    private fun readZipFile(file: File, name: String): SourceCatalog =
+        ZipFile(file).use { zip ->
+            val id = zip.getEntry(BundleIdentity.ENTRY)?.let { zip.getInputStream(it).use(BundleIdentity::read) }
+            val marker = zip.getEntry(AnchorMetadata.ENTRY)?.let { zip.getInputStream(it).use(AnchorMetadata::read) }
+            val manifest = requireNotNull(zip.getEntry(MANIFEST))
+            zip.getInputStream(manifest).use { catalog(name, requireNotNull(id), marker, it) }
+        }
 
     private fun readContent(uri: Uri): SourceCatalog? {
         val provider = app.contentResolver.acquireUnstableContentProviderClient(uri)
@@ -71,55 +79,93 @@ class AndroidSourceCatalogs(context: Context) : SourceCatalogs {
                 val name = provider.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                     ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
                     ?: uri.lastPathSegment.orEmpty().substringAfterLast('/')
-                catalog(asset.createInputStream(), name)
+                asset.createInputStream().use { input ->
+                    if (asset.startOffset == 0L && asset.parcelFileDescriptor.statSize >= 0 &&
+                        (asset.declaredLength < 0 || asset.declaredLength == asset.parcelFileDescriptor.statSize)) {
+                        return readDirectory(input.channel, name) ?: try {
+                            readZipFile(asset.parcelFileDescriptor.zipFilePath(), name)
+                        } catch (_: SecurityException) {
+                            input.channel.position(0)
+                            readSequential(input, name)
+                        } catch (_: FileNotFoundException) {
+                            input.channel.position(0)
+                            readSequential(input, name)
+                        }
+                    }
+                    readSequential(input, name)
+                }
             }
         }
     }
 
-    // A private snapshot also handles pipes and sliced assets. Closing it releases the stream's copy.
-    private fun catalog(input: InputStream, name: String): SourceCatalog {
-        return BundleSnapshot.fromInput(input, app.cacheDir).use { snapshot ->
-            val file = snapshot.file
-            val header = BundleHeader.read(file)
-            val id = requireNotNull(header.identity).documentId
-            if (header.anchors == null && !hasNativeFormat(file)) {
-                BundleEntries.digests(file)
-                SourceCatalog(id, SourceCatalog.Kind.OTHER, name, null)
-            } else {
-                val info = BundleReferenceInfo.inspectStrict(file)
-                val kind = when (info.kind) {
-                    DocumentKind.NOTE -> SourceCatalog.Kind.NOTE
-                    DocumentKind.CANVAS -> SourceCatalog.Kind.CANVAS
-                    else -> error("Native bundle lost its format")
-                }
-                val pages = info.orderedPageIds.takeIf { kind == SourceCatalog.Kind.NOTE && info.header.anchors != null }
-                SourceCatalog(id, kind, name, pages)
-            }
+    private fun readDirectory(channel: FileChannel, name: String): SourceCatalog? {
+        val directory = ZipTail.read(channel, allowComment = true) ?: return null
+        fun entry(key: String): ZipTail.Entry? {
+            val matches = directory.entries.filter { it.name == key }
+            require(matches.size <= 1) { "Duplicate $key" }
+            return matches.singleOrNull()
         }
+        val identity = requireNotNull(ZipTail.readEntry(channel, requireNotNull(entry(BundleIdentity.ENTRY)), BundleIdentity::read))
+        val marker = entry(AnchorMetadata.ENTRY)?.let { requireNotNull(ZipTail.readEntry(channel, it, AnchorMetadata::read)) }
+        return requireNotNull(ZipTail.readEntry(channel, requireNotNull(entry(MANIFEST))) { catalog(name, identity, marker, it) })
     }
 
-    // The native inspector rejects unknown formats. Identify those separately so that a malformed
-    // note can't fall back to OTHER. Known formats get their full validation in inspectStrict.
-    private fun hasNativeFormat(file: File): Boolean = ZipFile(file).use { zip ->
-        val manifest = requireNotNull(zip.getEntry(BundleCopyPlan.MANIFEST))
-        InputStreamReader(zip.getInputStream(manifest), Charsets.UTF_8.newDecoder()).use { reader ->
-            val json = JsonPull(reader, strict = true, tokenLimit = Int.MAX_VALUE)
-            val fields = mutableSetOf<String>()
-            json.beginObject()
-            while (json.hasNext()) {
-                val key = json.nextName()
-                require(fields.add(key))
-                if (key == "format") {
-                    val format = json.nextString()
-                    require(format.isNotBlank())
-                    if (BundleReferenceInfo.kindOf(format) != null) return true
-                } else {
-                    json.skipValue()
+    // A pipe can deliver the anchor marker after the manifest. Retain only the manifest in that case.
+    private fun readSequential(input: InputStream, name: String): SourceCatalog {
+        var identity: BundleIdentity? = null
+        var marker: AnchorMetadata? = null
+        var manifest: File? = null
+        try {
+            ZipInputStream(input.buffered()).use { zip ->
+                while (true) {
+                    when ((zip.nextEntry ?: break).name) {
+                        BundleIdentity.ENTRY -> { require(identity == null); identity = BundleIdentity.read(zip) }
+                        AnchorMetadata.ENTRY -> { require(marker == null); marker = AnchorMetadata.read(zip) }
+                        MANIFEST -> {
+                            require(manifest == null)
+                            val file = File.createTempFile("source-manifest-", ".json", app.cacheDir)
+                            manifest = file
+                            file.outputStream().use { out ->
+                                val buffer = ByteArray(65536)
+                                var count = 0L
+                                while (true) {
+                                    val n = zip.read(buffer)
+                                    if (n < 0) break
+                                    count += n
+                                    require(count <= AnchorManifest.MAX_BYTES)
+                                    out.write(buffer, 0, n)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            json.endObject()
-            require("format" in fields && json.peek() == JsonPull.Token.END_DOCUMENT)
-            false
-        }
+            return requireNotNull(manifest).inputStream().use { catalog(name, requireNotNull(identity), marker, it) }
+        } finally { manifest?.delete() }
     }
+
+    private fun catalog(name: String, identity: BundleIdentity, marker: AnchorMetadata?, input: InputStream): SourceCatalog {
+        if (marker != null) {
+            require(marker.documentId == identity.documentId)
+            val pages = AnchorManifest.inspect({ input }, anchored = true).orderedPageIds
+            return SourceCatalog(identity.documentId, SourceCatalog.Kind.NOTE, name, pages)
+        }
+        val json = JsonPull(AnchorManifest.reader(input), strict = true, tokenLimit = Int.MAX_VALUE)
+        json.beginObject()
+        while (json.hasNext()) {
+            if (json.nextName() == "format") {
+                val format = json.nextString()
+                val kind = when {
+                    format == "xnote" -> SourceCatalog.Kind.NOTE
+                    CanvasCodec.isCanvasFormat(format) -> SourceCatalog.Kind.CANVAS
+                    else -> SourceCatalog.Kind.OTHER
+                }
+                return SourceCatalog(identity.documentId, kind, name, null)
+            }
+            json.skipValue()
+        }
+        throw IOException("Missing manifest format")
+    }
+
+    private companion object { const val MANIFEST = "manifest.json" }
 }

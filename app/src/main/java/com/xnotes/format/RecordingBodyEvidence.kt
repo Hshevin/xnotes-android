@@ -8,19 +8,32 @@ import java.util.zip.ZipFile
 
 /** Audio associations read from one immutable encoded body, never from a live model. */
 internal class RecordingBodyEvidence private constructor(
-    val kind:DocumentKind,val documentId:String,val bodySha256:String,val recordings:Map<Int,String>,
+    val kind:DocumentKind,val documentId:String,val recordings:Map<Int,String>,
 ) {
     companion object {
+        /** Called before adopting a freshly decoded model. Only extracted recording payloads need reading. */
+        fun decoded(note: com.xnotes.core.model.Document?, canvas: com.xnotes.core.infinite.InfiniteDocument?,
+                    checkActive: () -> Unit = {}): RecordingBodyEvidence? {
+            val items = note?.pages?.asSequence()?.flatMap { it.items.asSequence() }
+                ?: requireNotNull(canvas).items.asSequence()
+            val hashes = mutableMapOf<Int, String>()
+            for (item in items.filterIsInstance<com.xnotes.core.model.AudioItem>()) {
+                checkActive()
+                if (item.rid <= 0 || item.rid in hashes) return null
+                hashes[item.rid] = BundleMigration.hash(item.audio.file) { checkActive(); false }
+            }
+            val id = (note?.identity ?: requireNotNull(canvas).identity).documentId
+            return RecordingBodyEvidence(if (note == null) DocumentKind.CANVAS else DocumentKind.NOTE, id, hashes)
+        }
+
         fun inspect(file:File,checkActive:()->Unit={}):RecordingBodyEvidence {
             val cancelled={checkActive();false}
-            val before=BundleMigration.hash(file,cancelled)
             val identity=requireNotNull(BundleIdentity.read(file)) {"Recording body has no durable identity"}
-            val payloads=BundleEntries.digests(file,cancelled)
             val audio=linkedMapOf<Int,String>()
             var format:String?=null
             ZipFile(file).use {zip->
                 val manifest=requireNotNull(zip.getEntry("manifest.json"))
-                zip.getInputStream(manifest).use {input->InputStreamReader(BundleEntries.cancellable(input,cancelled),Charsets.UTF_8).use {reader->
+                zip.getInputStream(manifest).use {input->InputStreamReader(cancellableInput(input,cancelled),Charsets.UTF_8).use {reader->
                     val p=JsonPull(reader,strict=true,tokenLimit=Int.MAX_VALUE)
                     fun items() {
                         p.beginArray()
@@ -40,7 +53,7 @@ internal class RecordingBodyEvidence private constructor(
                             if(kind=="audio") {
                                 val number=requireNotNull(rid).also {require(it>0 && it !in audio) {"Ambiguous recording ID"}}
                                 val name=requireNotNull(asset).also {require(it.startsWith("assets/audio-") && !it.contains(".."))}
-                                audio[number]=requireNotNull(payloads[name]) {"Missing recording payload"}
+                                audio[number]=zip.getInputStream(requireNotNull(zip.getEntry(name)) { "Missing recording payload" }).use { BundleMigration.digest(it, cancelled) }
                             }
                         }
                         p.endArray()
@@ -66,9 +79,9 @@ internal class RecordingBodyEvidence private constructor(
                     p.endObject();require(p.peek()==JsonPull.Token.END_DOCUMENT)
                 }}
             }
-            val kind = BundleReferenceInfo.kindOf(format) ?: error("Invalid recording body kind")
-            checkActive();require(BundleMigration.hash(file,cancelled)==before) {"Recording body changed during inspection"}
-            return RecordingBodyEvidence(kind,identity.documentId,before,Collections.unmodifiableMap(audio))
+            val kind = when { format == "xnote" -> DocumentKind.NOTE; CanvasCodec.isCanvasFormat(format) -> DocumentKind.CANVAS; else -> error("Invalid recording body kind") }
+            checkActive()
+            return RecordingBodyEvidence(kind,identity.documentId,Collections.unmodifiableMap(audio))
         }
     }
 }

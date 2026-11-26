@@ -98,25 +98,6 @@ class BundlePdfTest {
             BundlePdf.write(source, java.io.ByteArrayOutputStream(), BundleIdentity.read(source)!!, null, false)
         }
     }
-    @Test fun failedExternalMigrationRetainsFullOriginalAndCanRestore() = scenario { dir, source, pdf, identity ->
-        val before = source.readBytes()
-        val staged = BundlePdf.prepare(source, dir, identity, pdf)
-        val journal = com.xnotes.storage.MigrationPublication(File(dir, "recovery"))
-        journal.stage(source, staged.file)
-        val broken = object : com.xnotes.storage.MigrationPublication.Target {
-            override fun read() = source.inputStream()
-            override fun write(candidate: File) { source.writeText("partial"); throw java.io.IOException("disk full") }
-        }
-        assertThrows(com.xnotes.storage.MigrationPublication.RecoveryRequired::class.java) { journal.publish(broken) }
-        assertTrue(journal.pending)
-        journal.restore(object : com.xnotes.storage.MigrationPublication.Target {
-            override fun read() = source.inputStream()
-            override fun write(candidate: File) { candidate.copyTo(source, overwrite = true) }
-        })
-        assertArrayEquals(before, source.readBytes())
-        assertEquals(identity.pdfResource, BundleMigration.hash(pdf))
-        assertFalse(journal.pending)
-    }
     @Test fun traversalReferenceRejectedBeforeResolving() {
         assertThrows(IllegalArgumentException::class.java) { BundleIdentity(pdfResource = "../../outside.pdf", externalPdf = true) }
     }

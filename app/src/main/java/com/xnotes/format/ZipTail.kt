@@ -4,6 +4,7 @@ import java.io.BufferedInputStream
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.io.FilterInputStream
 import java.nio.channels.Channels
 import java.nio.channels.FileChannel
 import java.util.zip.Inflater
@@ -64,7 +65,7 @@ internal object ZipTail {
     }
 
     /** Read [ch]'s central directory, or null when this is not a zip worth patching. */
-    fun read(ch: FileChannel): Directory? {
+    fun read(ch: FileChannel, allowComment: Boolean = false): Directory? {
         val size = ch.size()
         if (size < EOCD_LEN) return null
         // The end record sits last, after a comment of up to 64K that this never writes.
@@ -72,7 +73,7 @@ internal object ZipTail {
         val tail = map(ch, size - span, span) ?: return null
         var at = -1
         for (i in span - EOCD_LEN downTo 0) {
-            if (tail.getInt(i) == EOCD_SIG) {
+            if (tail.getInt(i) == EOCD_SIG && i + EOCD_LEN + (tail.getShort(i + 20).toInt() and 0xffff) == span) {
                 at = i
                 break
             }
@@ -83,7 +84,7 @@ internal object ZipTail {
         val cdOffset = tail.getInt(at + 16).toLong() and MAX_U32
         val commentLen = tail.getShort(at + 20).toInt() and 0xFFFF
         if (count == 0xFFFF || cdSize == MAX_U32 || cdOffset == MAX_U32) return null // zip64
-        if (commentLen != 0 || cdOffset + cdSize > size) return null
+        if (!allowComment && commentLen != 0 || cdOffset + cdSize != size - commentLen - EOCD_LEN || cdSize > Int.MAX_VALUE) return null
         val cd = map(ch, cdOffset, cdSize.toInt()) ?: return null
         val entries = ArrayList<Entry>(count)
         var p = 0
@@ -114,11 +115,37 @@ internal object ZipTail {
     /** Hand [reader] entry [name] of [ch], inflated when it was deflated, seeking straight to it; null when there is no such entry. */
     fun <T> readEntry(ch: FileChannel, name: String, reader: (InputStream) -> T): T? {
         val entry = read(ch)?.entries?.firstOrNull { it.name == name } ?: return null
+        return readEntry(ch, entry, reader)
+    }
+
+    fun <T> readEntry(ch: FileChannel, entry: Entry, reader: (InputStream) -> T): T? {
         val head = ByteBuffer.allocate(LOCAL_HEADER).order(ByteOrder.LITTLE_ENDIAN)
         while (head.hasRemaining()) if (ch.read(head, entry.localOffset + head.position()) < 0) return null
         if (head.getInt(0) != LOCAL_SIG) return null
         val start = entry.localOffset + LOCAL_HEADER + (head.getShort(26).toInt() and 0xFFFF) + (head.getShort(28).toInt() and 0xFFFF)
-        val raw = BufferedInputStream(Channels.newInputStream(ch.position(start)), 64 * 1024)
+        val compressed = ByteBuffer.wrap(entry.record).order(ByteOrder.LITTLE_ENDIAN).getInt(20).toLong() and MAX_U32
+        require(start + compressed <= ch.size())
+        val slice = object : FilterInputStream(Channels.newInputStream(ch.position(start))) {
+            private var remaining = compressed
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                if (length == 0) return 0
+                if (remaining == 0L) return -1
+                val n = super.read(bytes, offset, minOf(length.toLong(), remaining).toInt())
+                if (n < 0) throw java.io.EOFException()
+                remaining -= n
+                return n
+            }
+            override fun read(): Int {
+                if (remaining == 0L) return -1
+                val n = super.read()
+                if (n < 0) throw java.io.EOFException()
+                remaining--
+                return n
+            }
+            override fun close() {} // The caller owns the channel.
+        }
+        val raw = BufferedInputStream(slice, 64 * 1024)
+        require(entry.method == ZipEntry.STORED || entry.method == ZipEntry.DEFLATED)
         if (entry.method != ZipEntry.DEFLATED) return reader(raw)
         val inflater = Inflater(true)
         try {

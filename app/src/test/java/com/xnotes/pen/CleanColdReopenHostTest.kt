@@ -12,7 +12,6 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.stroke.Sample
 import com.xnotes.format.MapBundleFixture
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.requiresNativeClosePrompt
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.ui.*
@@ -36,7 +35,6 @@ class CleanColdReopenHostTest {
         Editor::class.java.getDeclaredField(name).apply { isAccessible = true }.get(editor)
 
     private fun slotDir(editor: Editor) = field(editor, "sessionDir") as File
-    private fun sessionOwner(editor: Editor) = field(editor, "sessionOwner") as LegacySessionQueue.Owner
 
     private fun runWorkspaceScenario(block: suspend (EditorPageCopyFixture, String) -> Unit) {
         initializeParkingEglHandles()
@@ -75,7 +73,6 @@ class CleanColdReopenHostTest {
                                 Handler(Looper.getMainLooper()).post { waiter.resumeWith(Result.success(Unit)) }
                             }
                         }
-                        for (pane in panes) sessionOwner(pane).awaitAccepted()
                         SplitRecentWriter.forFilesDir(f.context.filesDir).awaitAccepted()
                     }
                     singleton.set(null, previous)
@@ -108,7 +105,6 @@ class CleanColdReopenHostTest {
                 auto.cancel(); auto.coroutineContext[Job]?.join()
             }
         }
-        for (pane in panes) sessionOwner(pane).awaitAccepted()
         withContext(Dispatchers.Main) { f.editor = Editor(f.context) }
     }
 
@@ -322,7 +318,8 @@ class CleanColdReopenHostTest {
             val coordinator = ColdPresentationCoordinator(f.editor, bootstrap)
             try {
                 assertFalse(coordinator.bootstrap())
-                assertEquals(ColdPresentationProblem.UNAVAILABLE, bootstrap.problem)
+                assertNull(bootstrap.problem)
+                assertSame(LastPresentation.Home, bootstrap.presentation)
                 assertFalse(f.editor.noteOpen)
             } finally {
                 coordinator.close()
@@ -338,7 +335,8 @@ class CleanColdReopenHostTest {
             val coordinator = ColdPresentationCoordinator(f.editor, bootstrap)
             try {
                 assertFalse(coordinator.bootstrap())
-                assertEquals(ColdPresentationProblem.UNAVAILABLE, bootstrap.problem)
+                assertNull(bootstrap.problem)
+                assertSame(LastPresentation.Home, bootstrap.presentation)
                 assertFalse(f.editor.noteOpen)
             } finally {
                 coordinator.close()
@@ -422,33 +420,7 @@ class CleanColdReopenHostTest {
         assertEquals(0, f.writes.get())
     }
 
-    @Test fun cleanReopenRefusesToBypassAnUnknownNativeSessionHead() = runWorkspaceScenario { f, _ ->
-        withContext(Dispatchers.IO) { f.seed() }
-        withContext(Dispatchers.Main) {
-            f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
-            checkpointAndClose(f.editor)
-        }
-        val head = File(slotDir(f.editor), "head.json").apply { writeText("""{"future":true}""") }
-        val headBytes = head.readBytes()
-
-        restartEditor(f)
-
-        withContext(Dispatchers.Main) {
-            val bootstrap = ColdPresentationBootstrap()
-            val coordinator = ColdPresentationCoordinator(f.editor, bootstrap)
-            try {
-                assertFalse(coordinator.bootstrap())
-                assertEquals(ColdPresentationProblem.UNAVAILABLE, bootstrap.problem)
-                assertFalse(f.editor.noteOpen)
-            } finally {
-                coordinator.close()
-            }
-        }
-        assertArrayEquals(headBytes, head.readBytes())
-        assertEquals(0, f.writes.get())
-    }
-
-    @Test fun newerDirtyBackupTakesPrecedenceOverPreviouslyPublishedCleanMarker() = runWorkspaceScenario { f, _ ->
+    @Test fun cleanMarkerReopensTheOriginalEvenIfASessionBodyExists() = runWorkspaceScenario { f, _ ->
         withContext(Dispatchers.IO) { f.seed() }
         withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri, f.sourceDisplayName)
@@ -465,9 +437,9 @@ class CleanColdReopenHostTest {
             val coordinator = ColdPresentationCoordinator(f.editor, ColdPresentationBootstrap())
             try {
                 assertTrue(coordinator.bootstrap())
-                assertTrue(f.editor.requiresIndependentSave)
-                assertNull(f.editor.autosaveUri)
-                assertEquals(1, f.editor.state.document.pages.first().items.filterIsInstance<Stroke>().size)
+                assertFalse(f.editor.requiresIndependentSave)
+                assertEquals(f.sourceUri,f.editor.autosaveUri)
+                assertTrue(f.editor.state.document.pages.first().items.filterIsInstance<Stroke>().isEmpty())
                 f.editor.flushAutosaveAll()
                 f.editor.awaitAutosaveWrites()
             } finally { coordinator.close() }
@@ -495,10 +467,11 @@ class CleanColdReopenHostTest {
                 assertFalse(first.verify())
                 assertFalse(first.claimForAdoption())
             } finally { first.close() }
-            val second = requireNotNull(f.editor.prepareColdNativePresentation(marker) { true })
+            var current = true
+            val second = requireNotNull(f.editor.prepareColdNativePresentation(marker) { current })
             try {
                 assertTrue(second.verify())
-                File(slotDir(f.editor), "head.json").writeText("{\"future\":true}")
+                current = false
                 assertFalse(second.claimForAdoption())
                 assertFalse(f.editor.noteOpen)
             } finally { second.close() }

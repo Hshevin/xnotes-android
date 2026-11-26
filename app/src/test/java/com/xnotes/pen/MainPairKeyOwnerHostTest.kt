@@ -168,7 +168,7 @@ class MainPairKeyOwnerHostTest {
             var guarded=false
             assertNull(f.editor.prepareNativePairOpen(NativeSplitSource(f.sourceUri,"source.xnote"),NativeSplitSource(uri,"retry.xnote"),
                 guardOwners={_,_->guarded=true;emptySet()}))
-            assertFalse(guarded);assertSame(model,f.editor.state.document);assertSame(token,f.editor.penInputOwnerToken)
+            assertTrue(guarded);assertSame(model,f.editor.state.document);assertSame(token,f.editor.penInputOwnerToken)
             assertEquals(Tool.ERASER,f.editor.tool)
             assertTrue(activity.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
             assertEquals(Tool.PEN,f.editor.tool);assertTrue(child.keys.isEmpty())

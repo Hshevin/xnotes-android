@@ -48,7 +48,7 @@ class BundleHeaderTest {
         val legacy=fixture(dir,withIdentity=false,withMarker=false)
         FileInputStream(legacy).use {val h=BundleHeader.read(it.channel)!!;assertNull(h.identity);assertNull(h.anchors)}
         val commented=fixture(dir,comment=true)
-        FileInputStream(commented).use {assertNull(BundleHeader.read(it.channel))}
+        FileInputStream(commented).use {assertEquals(id,BundleHeader.read(it.channel)?.identity)}
         assertEquals(id,BundleHeader.read(commented).identity)
         val orphan=fixture(dir,withIdentity=false)
         try {BundleHeader.read(orphan);fail("marker cannot supply a guessed identity")} catch(_:IllegalArgumentException) {}

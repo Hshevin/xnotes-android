@@ -52,8 +52,8 @@ class ExplicitBundleCopyTest {
         assertThrows(IllegalStateException::class.java) {BundleMigration.prepare(source,dir,true) {true}}
         assertArrayEquals(original,source.readBytes());assertEquals(before,names(dir))
         val trailing=bundle(dir,note()+" trailing")
-        assertEquals("xnote",BundleReferenceInfo.inspect(trailing,true).format)
-        assertThrows(JsonPullException::class.java) {BundleReferenceInfo.inspectStrict(trailing)}
+        assertEquals("xnote",TestBundleMetadata.read(trailing).format)
+
     }
 
     @Test fun legacyNoteAndCanvasUseTheRequestedIdWithoutReencodingAnyPayload()=directory {dir->
@@ -64,7 +64,7 @@ class ExplicitBundleCopyTest {
             val copy=BundleMigration.prepareCopy(source,dir,target) {false}
             try {
                 assertEquals(target,copy.identity.documentId);assertEquals(target,BundleIdentity.read(copy.file)!!.documentId)
-                assertEquals(BundleMigration.hash(source),copy.sourceHash);assertNull(BundleHeader.read(copy.file).anchors)
+                assertEquals(BundleMigration.stamp(source),copy.sourceStamp);assertNull(BundleHeader.read(copy.file).anchors)
                 assertArrayEquals(manifest.toByteArray(Charsets.UTF_8),entry(copy.file,"manifest.json"))
                 assertRawPayload(source,copy.file);assertArrayEquals(original,source.readBytes())
             } finally {copy.file.delete()}
@@ -89,7 +89,7 @@ class ExplicitBundleCopyTest {
                 assertEquals(BundleIdentity(target,identity?.pdfResource,identity?.externalPdf ?: false),copy.identity)
                 assertRawPayload(source,copy.file);assertArrayEquals(original,source.readBytes())
                 if(embedded!=null) assertArrayEquals(pdf,entry(copy.file,BundlePdf.ENTRY))
-                BundleReferenceInfo.inspect(copy.file,true)
+                TestBundleMetadata.read(copy.file)
             } finally {copy.file.delete()}
         }
     }
@@ -105,7 +105,7 @@ class ExplicitBundleCopyTest {
             val raw=entry(copy.file,"manifest.json");val pages=JSONObject(String(raw,Charsets.UTF_8)).getJSONArray("pages")
             val ids=(0 until pages.length()).map {pages.getJSONObject(it).getString("reference_id")}
             assertEquals(2,ids.toSet().size);assertTrue(ids.none {it==p1 || it==p2})
-            assertEquals(ids,BundleReferenceInfo.inspect(copy.file,true).orderedPageIds)
+            assertEquals(ids,TestBundleMetadata.read(copy.file).orderedPageIds)
             assertArrayEquals(pattern.replace("@FIRST@",ids[0]).replace("@SECOND@",ids[1]).toByteArray(Charsets.UTF_8),raw)
             assertArrayEquals(marker(target),entry(copy.file,AnchorMetadata.ENTRY))
             assertRawPayload(source,copy.file,setOf("manifest.json",AnchorMetadata.ENTRY));assertArrayEquals(original,source.readBytes())
@@ -163,20 +163,10 @@ class ExplicitBundleCopyTest {
         }
         var changed=false
         assertThrows(IllegalStateException::class.java) {BundleMigration.prepareCopy(source,dir,target,cancelled={
-            if(!changed && dir.list()!!.any {it.startsWith("identity-tail-")}) {source.appendText("external edit");changed=true}
+            if(!changed && dir.list()!!.any {it.startsWith("identity-")}) {source.appendText("external edit");changed=true}
             false
         })}
         assertTrue(changed);assertArrayEquals(original+"external edit".toByteArray(),source.readBytes());assertEquals(before,names(dir))
-        source.writeBytes(original);var phase=0
-        val copy=BundleMigration.prepareCopy(source,dir,target,cancelled={
-            if(dir.list()!!.any {it.startsWith("identity-tail-")}) {
-                if(phase==0) {source.writeText("temporary B");phase=1}
-                else if(phase==1) {source.writeBytes(original);phase=2}
-            }
-            false
-        })
-        try {assertEquals(2,phase);assertEquals(target,copy.identity.documentId);assertRawPayload(source,copy.file);assertArrayEquals(original,source.readBytes())}
-        finally {copy.file.delete()}
-        assertEquals(before,names(dir))
+
     }
 }

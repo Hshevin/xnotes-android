@@ -53,11 +53,20 @@ internal class RecordingRecoveryStore(val directory:File,
     }
     private fun metadata(id:String):File?=directory.listFiles {f->f.isFile && f.name.endsWith(".json")}.orEmpty()
         .firstOrNull {runCatching {read(it).id==id}.getOrDefault(false)}
-    @Synchronized fun needsBodyEvidence(ownerToken:Any):Boolean = bindings.any {(id,owner)->
-        owner===ownerToken && metadata(id)?.let {runCatching {read(it).phase==Phase.Applying}.getOrDefault(false)}==true
-    }
-    @Synchronized fun needsDurableEvidence(documentId:String):Boolean = directory.listFiles {f->f.isFile && f.name.endsWith(".json")}.orEmpty()
-        .any {file->runCatching {read(file).let {it.phase==Phase.Applying && it.targetId==documentId}}.getOrDefault(false)}
+    private var applyingDocuments: Map<String, String>? = null
+    private fun applying(): Map<String, String> = applyingDocuments ?: directory.listFiles { file ->
+        file.isFile && file.name.endsWith(".json")
+    }.orEmpty().mapNotNull { file ->
+        runCatching { read(file) }.getOrNull()?.takeIf { it.phase == Phase.Applying }?.let { record ->
+            record.targetId?.let { record.id to it }
+        }
+    }.toMap().also { applyingDocuments = it }
+
+    @Synchronized fun needsBodyEvidence(ownerToken: Any) =
+        bindings.any { (id, owner) -> owner === ownerToken && id in applying() }
+
+    @Synchronized fun needsDurableEvidence(documentId: String) = applying().containsValue(documentId)
+
     @Synchronized fun references(file:File):Boolean {
         if(file.parentFile.canonicalFile!=directory.canonicalFile) return false
         return directory.listFiles {f->f.isFile && f.name.endsWith(".json")}.orEmpty()
@@ -68,7 +77,7 @@ internal class RecordingRecoveryStore(val directory:File,
         .put("version",2).put("id",r.id).put("file",r.file).put("key",r.key).put("name",r.name).put("rid",r.rid)
         .put("kind",r.kind?.name ?: JSONObject.NULL).put("documentId",r.documentId ?: JSONObject.NULL)
         .put("phase",r.phase.name).put("targetKind",r.targetKind?.name ?: JSONObject.NULL).put("targetId",r.targetId ?: JSONObject.NULL)
-        .put("targetRid",r.targetRid).put("variants",org.json.JSONArray(r.variants.toList())))
+        .put("targetRid",r.targetRid).put("variants",org.json.JSONArray(r.variants.toList()))).also { if (it) applyingDocuments = null }
     @Synchronized fun list(live:File?=null):List<Candidate> {
         directory.mkdirs();val result=mutableListOf<Candidate>();val referenced=hashSetOf<String>()
         val liveKey=live?.canonicalPath
@@ -155,13 +164,13 @@ internal class RecordingRecoveryStore(val directory:File,
         if(source!=null && !anotherReference(actual.record?.id,source.name) && source.exists() && !source.delete()) return false
         val side=actual.metadata
         if(side!=null && side.exists() && !side.delete()) return false
-        bindings.remove(candidate.id);return true
+        bindings.remove(candidate.id);applyingDocuments = null;return true
     }
     /** Explicit live-recording discard keeps the bytes briefly for its existing Undo action. */
     @Synchronized fun discardMetadata(candidate:Candidate):Boolean {
         val actual=list().firstOrNull {it.id==candidate.id} ?: return false
         val side=actual.metadata ?: return true
         if(side.exists() && !side.delete()) return false
-        bindings.remove(candidate.id);return true
+        bindings.remove(candidate.id);applyingDocuments = null;return true
     }
 }

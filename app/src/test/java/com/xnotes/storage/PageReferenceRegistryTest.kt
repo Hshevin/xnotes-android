@@ -132,7 +132,7 @@ class PageReferenceRegistryTest {
         DocumentRegistry(context).use {r->
             assertNull(r.expectationAt("content://example/document/new-place"))
             val error=assertThrows(ReferenceContractViolation::class.java) {
-                ReferenceContract.verifyObserved(r.expectationAt("content://example/document/new-place"),r.expectationForId(id),header)
+                r.registerObserved(header, "xnote", "moved", "content://example/document/new-place")
             }
             assertEquals(StorageMsg.REFERENCE_PAGE_METADATA_MISSING,error.reason)
         }

@@ -6,8 +6,6 @@ import com.xnotes.format.DocumentCodec
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.io.FilterOutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
@@ -27,11 +25,11 @@ enum class LegacySessionWrite { SAVED,NEEDS_BODY,FAILED }
  */
 class SessionStore(private val dir: File, private val codec: DocumentCodec, private val pdfDir: File, private val imageDir: File) {
 
+    init { LegacySessionBodyCandidates.cleanup(dir) }
     private val docFile = File(dir, "document.xnote")
     private val metaFile = File(dir, "session.json")
     private val meta = JsonStore(metaFile)
 
-    init {runCatching {LegacySessionBodyCandidates.cleanup(dir)}}
 
     /** Captured separately from the body, so a view-only refresh never needs a live model. */
     data class Metadata(
@@ -74,26 +72,27 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
     }
 
     /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
-    internal fun prepareMutation(document:Document?,metadata:Metadata):PreparedLegacySessionMutation=
-        PreparedLegacySessionMutation.prepareNote(dir,codec,document,metadata)
 
-    /** A null body only refreshes metadata; the caller must supply a fixed body after NEEDS_BODY. */
-    fun saveChecked(document:Document?,metadata:Metadata):LegacySessionWrite=
-        publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareNote(dir,codec,document,metadata,clearCanvas=false)}.legacyWrite()
+    fun saveChecked(document: Document?, metadata: Metadata): LegacySessionWrite = try {
+        LegacySessionBodyCandidates.cleanup(dir)
+        if (document != null) writeSessionBody(docFile) { codec.write(document, it, embedPdf = !document.identity.externalPdf) }
+        if (!docFile.isFile) LegacySessionWrite.NEEDS_BODY else {
+            val json = JSONObject().put("dirty", metadata.dirty).put("zoom", metadata.zoom)
+                .put("scrollX", metadata.scrollX).put("scrollY", metadata.scrollY).put("zoomLocked", metadata.zoomLocked)
+            metadata.path?.let { json.put("path", it) }
+            metadata.displayName?.let { json.put("displayName", it) }
+            if (meta.writeChecked(ViewOverridesJson.write(json, metadata.viewOverrides))) LegacySessionWrite.SAVED else LegacySessionWrite.FAILED
+        }
+    } catch (_: Exception) { LegacySessionWrite.FAILED }
 
-    /** Discard any saved session (document + sidecar), so the next launch restores nothing.
-     *  Used when the app is left with no note open, so a closed note isn't kept on disk. */
-    fun clear() {
-        clearChecked()
-    }
-
-    /** Keep the sidecar when the body cannot be removed, so a failed clear does not detach it. */
-    fun clearChecked():Boolean=publishLegacyMutation(dir) {PreparedLegacySessionMutation.prepareNoteClear(dir)} is LegacyMutationResult.Published
+    fun deleteBody() { Files.deleteIfExists(docFile.toPath()) }
+    fun clear() { clearChecked() }
+    fun clearChecked(): Boolean = runCatching { deleteBody(); Files.deleteIfExists(metaFile.toPath()); true }.getOrDefault(false)
 
     /** Load the saved session, or null when there is none or it can't be read. */
     fun load(): Snapshot? {
         if (!docFile.exists()) return null
-        val doc = runCatching { FileInputStream(docFile).use { codec.read(it, pdfDir, imageDir) } }.getOrNull() ?: return null
+        val doc = runCatching { FileInputStream(docFile).use { codec.readSession(it, pdfDir, imageDir) } }.getOrNull() ?: return null
         val m = meta.read()
         doc.path = m.optString("path", "").ifEmpty { null }
         doc.displayName = m.optString("displayName", "").ifEmpty { null }
@@ -109,7 +108,16 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
     }
 }
 
-/** Shared by every legacy store instance, including aliases of the same private directory. */
+internal fun writeSessionBody(file: File, encode: (java.io.OutputStream) -> Unit) {
+    file.parentFile?.mkdirs()
+    val candidate = LegacySessionBodyCandidates.create(file.parentFile!!, file.nameWithoutExtension + "-", "." + file.extension + ".tmp")
+    val tmp = candidate.file
+    try {
+        tmp.outputStream().use(encode)
+        Files.move(tmp.toPath(), file.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+    } finally { candidate.close() }
+}
+
 internal object LegacySessionBodyCandidates {
     private val gate=Any()
     private val active=hashSetOf<String>()

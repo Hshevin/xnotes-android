@@ -25,7 +25,9 @@ class PageLinkSaveHostTest {
             f.addStroke(110.0,recordHistory=true);f.stopDebounce()
             f.editor.saveToThen(f.targetUri) {ok->f.stopDebounce();saved.complete(ok)}
             try {started.await();f.addStroke(990.0,recordHistory=true);f.stopDebounce()} finally {f.release.countDown()}
-            assertTrue(saved.await());assertTrue(model.dirty)
+            val savedResult = saved.await()
+            assertTrue("Same-target save failed: ${f.editor.message}",savedResult)
+            assertTrue("Ink added during the save must remain dirty",model.dirty)
             val firstSave=f.target.inputStream().use {f.codec.read(it)}
             assertEquals(1,firstSave.pages.first().items.filterIsInstance<Stroke>().size)
             assertEquals(PageIdEnableResult.ENABLED,f.editor.enablePageIds())

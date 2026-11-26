@@ -4,7 +4,6 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
 import com.xnotes.ui.*
@@ -21,10 +20,8 @@ import org.robolectric.annotation.Config
 @Config(manifest=Config.NONE,sdk=[35])
 class SharedColdViewHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
-    private fun owner(editor:Editor)=field(editor,"sessionOwner") as LegacySessionQueue.Owner
 
     private suspend fun openShared(f:EditorPageCopyFixture,storedLock:Boolean=false,describedLock:Boolean?=null) {
-        owner(f.editor).awaitAccepted()
         val document=Document.blank().apply {dirty=false}
         withContext(Dispatchers.IO) {
             val store=SessionStore(field(f.editor,"sessionDir") as File,f.codec,
@@ -55,7 +52,6 @@ class SharedColdViewHostTest {
                 scope.cancel();scope.coroutineContext[Job]?.join()
             }
         }
-        for(pane in panes) owner(pane).awaitAccepted()
         withContext(Dispatchers.Main) {f.editor=Editor(f.context)}
     }
 

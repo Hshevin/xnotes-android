@@ -16,7 +16,6 @@ import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.format.CanvasCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.requiresNativeClosePrompt
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.ui.*
@@ -50,7 +49,6 @@ class SaveSlimHostTest {
         Editor::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(editor)
     }
     private fun slotDir(editor: Editor) = field(editor, "sessionDir") as File
-    private fun sessionOwner(editor: Editor) = field(editor, "sessionOwner") as LegacySessionQueue.Owner
     private fun canvasCodec() = CanvasCodec(AndroidImageCodec(), AndroidTextMeasurer())
     private fun stats(editor: Editor) = editor.saveStats
     private fun recoveryError(f: EditorPageCopyFixture) = f.context.getString(com.xnotes.R.string.err_save_recovery_session)
@@ -100,7 +98,6 @@ class SaveSlimHostTest {
                                 Handler(Looper.getMainLooper()).post { waiter.resumeWith(Result.success(Unit)) }
                             }
                         }
-                        for (pane in panes) sessionOwner(pane).awaitAccepted()
                         SplitRecentWriter.forFilesDir(f.context.filesDir).awaitAccepted()
                     }
                     singleton.set(null, previous)
@@ -136,7 +133,6 @@ class SaveSlimHostTest {
                 auto.cancel(); auto.coroutineContext[Job]?.join()
             }
         }
-        for (pane in panes) sessionOwner(pane).awaitAccepted()
         withContext(Dispatchers.Main) { f.editor = Editor(f.context) }
     }
 
@@ -329,12 +325,11 @@ class SaveSlimHostTest {
             f.editor.awaitAutosaveWrites()
             assertTrue("The save did not land", f.editor.infinite.document.dirty)
             assertTrue("A failed save must also wake the observer", f.editor.presentationVersion > before)
-            val result = f.editor.prepareNativePresentationCheckpointResult(emptySet()) { true }
-            assertTrue("After a failed save the backup must not keep waiting: $result", result is NativeCheckpointResult.Ready)
-            assertFalse(((result as NativeCheckpointResult.Ready).checkpoint.value.slots.single() as ColdNativeSlot.Canvas).reopenFromFile)
+            assertTrue(File(slotDir(f.editor), "canvas.xcanvas").isFile)
+            assertEquals(1, stats(f.editor).workingEncodes.get())
             assertTrue(checkpoint(f.editor))
+            assertFalse((marker(f).slots.single() as ColdNativeSlot.Canvas).reopenFromFile)
         }
-        assertEquals(1, stats(f.editor).workingEncodes.get())
         assertEquals(0, stats(f.editor).workingFromSource.get())
 
         f.failSourceWrites = false
@@ -399,7 +394,6 @@ class SaveSlimHostTest {
         withContext(Dispatchers.Main) {
             assertTrue(f.editor.openCanvasAsync(f.sourceUri, f.sourceDisplayName))
             addCanvasStroke(f.editor, 130.0); stopCanvasDebounce(f.editor)
-            sessionOwner(f.editor).awaitAccepted()
             assertTrue(File(slotDir(f.editor), "canvas.xcanvas").mkdirs())
             assertFalse(checkpoint(f.editor))
             assertEquals(recoveryError(f), f.editor.message)
@@ -443,12 +437,11 @@ class SaveSlimHostTest {
             withContext(Dispatchers.Main) {
                 assertTrue(coordinator.bootstrap())
                 f.editor.onPresentationIntent = { coordinator.retireIntent() }
-                f.editor.preparePresentationDeparture = { coordinator.prepareDeparture(it) }
             }
             block()
         } finally {
             withContext(NonCancellable + Dispatchers.Main) {
-                f.editor.onPresentationIntent = null; f.editor.preparePresentationDeparture = null
+                f.editor.onPresentationIntent = null
                 coordinator.close()
             }
         }
@@ -469,13 +462,12 @@ class SaveSlimHostTest {
                 f.editor.goHome()
             }
             awaitTrue("The note must close") { withContext(Dispatchers.Main) { !f.editor.noteOpen } }
-            sessionOwner(f.editor).awaitAccepted()
             withContext(Dispatchers.Main) { assertNull(f.editor.message) }
         }
         assertEquals("Leaving saves the file", 1, f.writes.get())
         assertEquals("Leaving must not wait for a working-copy checkpoint", 0, stats(f.editor).checkpointStarted.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertSame(LastPresentation.Home, (LastPresentationStore(f.context.filesDir).observe().read as LastPresentationRead.Ready).value)
+        assertSame(LastPresentationRead.Absent, LastPresentationStore(f.context.filesDir).observe().read)
         assertFalse(File(slotDir(f.editor), "document.xnote").exists())
         val saved = withContext(Dispatchers.IO) { f.source.inputStream().use { f.codec.read(it) } }
         assertEquals(1, saved.pages.first().items.filterIsInstance<Stroke>().size)
@@ -490,12 +482,11 @@ class SaveSlimHostTest {
                 f.editor.goHome()
             }
             awaitTrue("The canvas must close") { withContext(Dispatchers.Main) { !f.editor.noteOpen } }
-            sessionOwner(f.editor).awaitAccepted()
         }
         assertEquals(1, f.writes.get())
         assertEquals(0, stats(f.editor).checkpointStarted.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
-        assertSame(LastPresentation.Home, (LastPresentationStore(f.context.filesDir).observe().read as LastPresentationRead.Ready).value)
+        assertSame(LastPresentationRead.Absent, LastPresentationStore(f.context.filesDir).observe().read)
         assertFalse(File(slotDir(f.editor), "canvas.xcanvas").exists())
         val saved = withContext(Dispatchers.IO) { f.source.inputStream().use { canvasCodec().read(it, File(f.root, "img").apply { mkdirs() }) } }
         assertEquals(1, saved.items.filterIsInstance<Stroke>().size)
@@ -511,7 +502,6 @@ class SaveSlimHostTest {
         // Let the 1.2 s autosave debounce elapse on Robolectric's virtual clock, with no Activity pause.
         advanceMainClockMs = 1300L
         awaitTrue("The autosave must land") { f.writes.get() == 1 && withContext(Dispatchers.Main) { !f.editor.state.document.dirty } }
-        sessionOwner(f.editor).awaitAccepted()
         assertEquals(0, stats(f.editor).checkpointStarted.get())
         assertEquals(0, stats(f.editor).workingEncodes.get())
         assertFalse(File(slotDir(f.editor), "document.xnote").exists())
@@ -529,7 +519,6 @@ class SaveSlimHostTest {
         }
         val body = File(slotDir(f.editor), "canvas.xcanvas")
         awaitTrue("A failed save must be protected by a working copy before any pause") { body.isFile }
-        sessionOwner(f.editor).awaitAccepted()
         assertEquals("No pause, no checkpoint", 0, stats(f.editor).checkpointStarted.get())
         val copy = withContext(Dispatchers.IO) { body.inputStream().use { canvasCodec().read(it, File(f.root, "img").apply { mkdirs() }) } }
         assertEquals(1, copy.items.filterIsInstance<Stroke>().size)

@@ -461,8 +461,6 @@ private fun EditorScreen(
     val coldBootstrap=editorActivity?.presentationBootstrap
     val recentWriter=remember(context.applicationContext) {com.xnotes.ui.SplitRecentWriter.forFilesDir(context.filesDir)}
     val recentState by recentWriter.state.collectAsState()
-    val recoveryPreview=remember(editor) {com.xnotes.ui.RecoveryPreviewController(context.applicationContext)}
-    DisposableEffect(recoveryPreview) {onDispose {recoveryPreview.dispose()}}
     val snackbar = remember { SnackbarHostState() }
     // The LaTeX renderer resolves its fonts through the composition, so this is the
     // only place it can be built; the flow reaches it through MathRendering after.
@@ -505,9 +503,6 @@ private fun EditorScreen(
     val latestPresentationFrame by rememberUpdatedState(com.xnotes.ui.ColdPresentationCoordinator.Frame(
         paneHomes.keys.toSet(),mainMenu))
     val presentationIntent=remember(coldPresentation) {{coldPresentation?.retireIntent();Unit}}
-    val presentationDeparture:suspend (()->Boolean)->com.xnotes.ui.PreparedHomeGate?=remember(coldPresentation) {
-        {current->coldPresentation?.prepareDeparture(current)}
-    }
     val restoredPresentation:(com.xnotes.ui.LastPresentation)->Unit=remember(coldPresentation) {{restored->
         paneHomes=(restored as? com.xnotes.ui.LastPresentation.Native)?.slots
             ?.filterIsInstance<com.xnotes.ui.ColdNativeSlot.Home>()?.associate {it.pane to null}.orEmpty()
@@ -518,15 +513,13 @@ private fun EditorScreen(
         mainMenu=restored===com.xnotes.ui.LastPresentation.Home
     }}
     SideEffect {coldPresentation?.bindFrame {latestPresentationFrame}}
-    DisposableEffect(editor,coldPresentation,presentationIntent,presentationDeparture) {
+    DisposableEffect(editor,coldPresentation,presentationIntent) {
         if(coldPresentation!=null) {
             editor.onPresentationIntent=presentationIntent
-            editor.preparePresentationDeparture=presentationDeparture
         }
         coldPresentation?.onRestored=restoredPresentation
         onDispose {
             if(editor.onPresentationIntent===presentationIntent) editor.onPresentationIntent=null
-            if(editor.preparePresentationDeparture===presentationDeparture) editor.preparePresentationDeparture=null
             if(coldPresentation?.onRestored===restoredPresentation) coldPresentation.onRestored=null
         }
     }
@@ -564,20 +557,9 @@ private fun EditorScreen(
                     if (pane.storageMissingPdf != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
                         working = true; scope.launch { pane.openInkWithoutPdf(); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_open_ink_only)) }
-                    val activation = pane.storagePageActivation
-                    if (activation != null) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
-                        working = true
-                        scope.launch { try { pane.finishPageActivationRecovery(activation) } finally { working = false } }
-                    }) { androidx.compose.material3.Text(stringResource(R.string.map2_continue_page_ids)) }
-                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
-                        working = true; scope.launch { pane.recoverStorageProblem(restore = true); working = false }
-                    }) { androidx.compose.material3.Text(stringResource(R.string.recovery_restore_backup)) }
                     if (pane.storageDuplicate) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
-                        working = true; scope.launch { pane.recoverStorageProblem(copy = true); working = false }
+                        working = true; scope.launch { pane.assignDuplicateCopy(); working = false }
                     }) { androidx.compose.material3.Text(stringResource(R.string.recovery_make_copy_independent)) }
-                    if (pane.storageCanRecover) androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = {
-                        working = true; scope.launch { pane.recoverStorageProblem(); working = false }
-                    }) { androidx.compose.material3.Text(stringResource(R.string.recovery_keep_current)) }
                 }
             },
             dismissButton = { androidx.compose.material3.TextButton(enabled = !working && !relinking, onClick = { pane.storageProblemUri = null }) { androidx.compose.material3.Text(stringResource(R.string.recovery_later)) } },
@@ -1076,12 +1058,8 @@ private fun EditorScreen(
             coldPresentation?.retireIntent()
             val current=captureNativeHost()
             val parking=editor.awaitMapSourceParking() ?: return null
-            fun ready()=current() && parking.current()
-            val provider=editor.preparePresentationDeparture
-            val gate=provider?.invoke(::ready)
-            if(provider!=null && gate==null) return null
-            try {if(!target.openSharedView(other,beforeAdopt={gate?.commit(::ready)!=false})) return null}
-            finally {gate?.close()}
+            fun ready()=current() && parking()
+            if (!target.openSharedView(other, beforeAdopt = ::ready)) return null
         } else {
             val name = displayNameOf(resolver, Uri.parse(uriStr))
             if (com.xnotes.core.util.DocumentKind.ofName(name ?: "") == com.xnotes.core.util.DocumentKind.CANVAS) {
@@ -1107,16 +1085,13 @@ private fun EditorScreen(
         coldPresentation?.retireIntent()
         fun close() {scope.launch {
             val prepared=editor.prepareDetachPane(pane,setOfNotNull(discard),current,allowCanvasHome=true) ?: return@launch
-            val provider=editor.preparePresentationDeparture
-            val gate=provider?.invoke {prepared.current()}
-            if(provider!=null && gate==null) return@launch
-            try {
-                if(prepared.commit(beforeAdopt={gate?.commit {prepared.current()}!=false})==null) return@launch
+            run {
+                if(prepared.commit(beforeAdopt={prepared.current()})==null) return@launch
                 paneHomes=com.xnotes.ui.closePaneHomeState(paneHomes,pane.pane,retained?.pane)
                 if(retained!=null) editor.splitReversed=!editor.splitReversed
                 homeFocus=paneHomes.keys.firstOrNull()
                 if(com.xnotes.ui.Pane.SECONDARY !in paneHomes) editor.releaseClosedSecondary()
-            } finally {gate?.close()}
+            }
         }}
         if(pane.isSharedView) close() else guarded(pane,onDiscard={discard=it}) {close()}
     }
@@ -1127,18 +1102,14 @@ private fun EditorScreen(
         coldPresentation?.retireIntent()
         scope.launch {
             val proof=editor.awaitMapSourceParking() ?: return@launch
-            fun ready()=current() && proof.current()
-            val provider=editor.preparePresentationDeparture
-            val gate=provider?.invoke(::ready)
-            if(provider!=null && gate==null) return@launch
-            try {
+            fun ready()=current() && proof()
+            run {
                 if(!ready()) return@launch
-                if(gate?.commit(::ready)==false) return@launch
                 mapSourceOpener.userOpenedElsewhere()
                 paneHomeViews=paneHomeViews+(pane.pane to view)
                 paneHomes=paneHomes+(pane.pane to pane.visibleDocumentUri);homeFocus=pane.pane
                 onShown()
-            } finally {gate?.close()}
+            }
         }
     }
 
@@ -1167,18 +1138,14 @@ private fun EditorScreen(
         coldPresentation?.retireIntent()
         scope.launch {
             var candidate: com.xnotes.ui.PreparedNativeSplitOpen? = null
-            var gate: com.xnotes.ui.PreparedHomeGate? = null
             var adopted = false
             try {
                 val prepared = prepare(::current) {owners,ready -> guardPairOwners(owners,operation) {current() && ready()}} ?: return@launch
                 candidate = prepared
                 fun ready() = current() && prepared.current()
                 if (!ready()) return@launch
-                val provider = editor.preparePresentationDeparture
-                gate = provider?.invoke(::ready)
-                if (provider != null && gate == null) return@launch
                 val keys = editorActivity?.prepareNativeKeyHandoffs(prepared.keyHandoffs)
-                if (!prepared.commit {gate?.commit(::ready) != false}) return@launch
+                if (!prepared.commit(::ready)) return@launch
                 adopted = true
                 mapSourceOpener.userOpenedElsewhere()
                 keys?.invoke()
@@ -1186,7 +1153,7 @@ private fun EditorScreen(
                 paneHomes=emptyMap();paneHomeViews=emptyMap();homeFocus=null;mainMenu=false
                 nativeFocusGeneration++
             } finally {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {try {candidate?.close()} finally {gate?.close()}}
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {candidate?.close()}
                 if(pairOperation===operation) {
                     pairOperation=null
                     if(!adopted && editor.message==null) editor.message=resources.getString(R.string.native_split_open_failed)
@@ -1252,27 +1219,6 @@ private fun EditorScreen(
     fun stemOf(uriStr: String): String =
         com.xnotes.core.util.Paths.stem(displayNameOf(resolver, Uri.parse(uriStr)) ?: "Note")
 
-    val homeTools=androidx.compose.runtime.saveable.rememberSaveable(saver=com.xnotes.ui.HomeToolOwners.Saver) {com.xnotes.ui.HomeToolOwners()}
-    val homeToolOrder=remember {listOf(com.xnotes.ui.BackstageView.RECOVERY)}
-    fun homeShown(home:String)=if(home==com.xnotes.ui.HomeToolOwners.MAIN)
-        mainMenu || paneHomes.isEmpty() && !editor.noteOpen && !editor.canvasOpen
-        else !mainMenu && paneHomes.keys.any {it.name==home}
-    fun toolVisible(tool:com.xnotes.ui.BackstageView)=when(tool) {
-        com.xnotes.ui.BackstageView.RECOVERY->recoveryPreview.state!=null
-        else->false
-    }
-    fun toolAt(target:Editor?):com.xnotes.ui.BackstageView? {
-        val home=com.xnotes.ui.HomeToolOwners.key(target)
-        return if(!homeShown(home)) null else homeToolOrder.firstOrNull {toolVisible(it) && homeTools.owner(it)==home}
-    }
-    fun releaseTool(tool:com.xnotes.ui.BackstageView) {when(tool) {
-        com.xnotes.ui.BackstageView.RECOVERY->recoveryPreview.closePreview()
-        else->Unit
-    }}
-    val coveredTools=listOf(com.xnotes.ui.BackstageView.RECOVERY).filter {tool->
-        toolVisible(tool) && homeTools.owner(tool)?.let {!homeShown(it)}==true
-    }
-    LaunchedEffect(coveredTools) {coveredTools.forEach(::releaseTool)}
     // Keep the explorer source with its picker request; opening a destination is a storage decision.
     fun launchStoredCopy(source: String) {
         if (createPicker.busy) {
@@ -1522,25 +1468,10 @@ private fun EditorScreen(
     // A DOCKED keyboard lifts only the open panes (the bottom format bar rides right above it) and
     // the snackbar; Home stays put and the keyboard slides over it. A floating keyboard reports no
     // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
-    com.xnotes.ui.RecoveryPreviewPickerHost(recoveryPreview) {
-    // Recovery opened outside any Home (the cold-start problem bar) keeps its dialog.
-    if(homeTools.owner(com.xnotes.ui.BackstageView.RECOVERY)==null) com.xnotes.ui.RecoveryPreviewDialog(recoveryPreview)
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
-    var coldActionBusy by remember {mutableStateOf(false)}
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
         bottomBar={Column {
-            coldBootstrap?.problem?.let {problem->
-                com.xnotes.ui.ColdPresentationProblemBar(problem,coldActionBusy,
-                    onRetry={scope.launch {
-                        coldActionBusy=true
-                        try {coldPresentation?.bootstrap(retry=true)} finally {coldActionBusy=false}
-                    }},onRecovery={homeTools.forget(com.xnotes.ui.BackstageView.RECOVERY);recoveryPreview.open(editor)},onReset={scope.launch {
-                        coldActionBusy=true
-                        try {if(coldPresentation?.resetLayout()!=true) editor.message=context.getString(R.string.last_presentation_reset_failed)}
-                        finally {coldActionBusy=false}
-                    }})
-            }
             if(mapSourceOpener.canGoBack) androidx.compose.material3.Surface {
             Row(Modifier.fillMaxWidth().padding(horizontal=Space.s8),verticalAlignment=Alignment.CenterVertically,
                 horizontalArrangement=Arrangement.spacedBy(Space.s8)) {
@@ -1558,29 +1489,16 @@ private fun EditorScreen(
             // BASE LAYER: backstage is the root of the stack — always present underneath.
             val home: @Composable (Editor?) -> Unit = { target ->
                 androidx.compose.runtime.key(target?.pane) {
-                val tool=toolAt(target)
                 com.xnotes.ui.Backstage(
                 editor = target ?: editor,
-                view = tool ?: if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
+                view = if (target == null) backstageView else paneHomeViews[target.pane] ?: com.xnotes.ui.BackstageView.HOME,
                 onSelectView = {
-                    if (tool != null && it != tool) releaseTool(tool)
-                    if (it.tool) Unit
-                    else if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it)
+                    if (target == null) backstageView = it else paneHomeViews=paneHomeViews+(target.pane to it)
                 },
                 allowSplits = target == null,
                 allowNativePairs = true,
                 canRestoreSplit = recentState.loaded && (recentState.read as? com.xnotes.ui.SplitArrangementRead.Ready)?.request is com.xnotes.ui.SplitOpenRequest.Native,
                 initialDocument = target?.let { paneHomes[it.pane] },
-                onPreviewRecovery = {
-                    homeTools.claim(com.xnotes.ui.BackstageView.RECOVERY,target)
-                    recoveryPreview.open(target ?: editor)
-                },
-                toolPane = tool?.let { shown -> { sidebarOpen, showSidebar ->
-                    androidx.compose.runtime.key(shown) {
-                        com.xnotes.ui.HomeToolLease { releaseTool(shown) }
-                        com.xnotes.ui.RecoveryPreviewPane(recoveryPreview, sidebarOpen, showSidebar)
-                    }
-                } },
                 backEnabled = target == null || homeFocus == target.pane,
                 onExitApp = { if (target == null) (context as? android.app.Activity)?.finish() else closePaneHome(target) },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
@@ -1690,16 +1608,13 @@ private fun EditorScreen(
                         coldPresentation?.retireIntent()
                         scope.launch {
                             val proof=editor.awaitMapSourceParking() ?: return@launch
-                            fun ready()=current() && proof.current()
-                            val provider=editor.preparePresentationDeparture
-                            val gate=provider?.invoke(::ready)
-                            if(provider!=null && gate==null) return@launch
-                            try {
-                                if(!ready() || gate?.commit(::ready)==false) return@launch
+                            fun ready()=current() && proof()
+                            run {
+                                if(!ready()) return@launch
                                 mapSourceOpener.userOpenedElsewhere()
                                 editor.persistPresentationSettings();parkedDocuments=documentsNow;mainMenu=true
                                 backstageView=com.xnotes.ui.BackstageView.HOME
-                            } finally {gate?.close()}
+                            }
                         }
                     }
                 },
@@ -1847,7 +1762,6 @@ private fun EditorScreen(
             } }
 
         }
-    }
     }
     if (showShareChooser) {
         val shareUri = pendingShareUri

@@ -48,7 +48,7 @@ class MapSourcePureParkingHostTest {
             val models=panes.map {it.state.document};val histories=panes.map {it.history}
             val undos=histories.map {it.nextUndo};val revisions=models.map {it.bodyRevision}
             val owners=panes.map {it.documentOwner}
-            val proof=requireNotNull(f.editor.awaitMapSourceParking());assertTrue(proof.current())
+            val proof=requireNotNull(f.editor.awaitMapSourceParking());assertTrue(proof())
             for(i in panes.indices) {
                 assertSame(models[i],panes[i].state.document);assertSame(histories[i],panes[i].history)
                 assertSame(undos[i],panes[i].history.nextUndo);assertSame(owners[i],panes[i].documentOwner)
@@ -110,7 +110,7 @@ class MapSourcePureParkingHostTest {
             }
             val proof=withTimeout(5000) {waiting.await()};assertNotNull(proof)
             withContext(Dispatchers.Main) {
-                assertTrue(proof!!.current());assertFalse(f.editor.flowText.active)
+                assertTrue(proof!!.invoke());assertFalse(f.editor.flowText.active)
                 assertSame(undo,f.editor.history.nextUndo);assertEquals(revision,model.bodyRevision)
             }
         }
@@ -139,7 +139,7 @@ class MapSourcePureParkingHostTest {
             }
             val proof=withTimeout(5000) {waiting.await()};assertNotNull(proof)
             withContext(Dispatchers.Main) {
-                assertTrue(proof!!.current());assertEquals(geometry,table.snapshot())
+                assertTrue(proof!!.invoke());assertEquals(geometry,table.snapshot())
                 assertSame(undo,f.editor.history.nextUndo);assertEquals(revision,f.editor.state.document.bodyRevision)
             }
         }
@@ -153,20 +153,20 @@ class MapSourcePureParkingHostTest {
         assertTrue(selected.isNotEmpty())
         coroutineScope {
             val before=withContext(Dispatchers.Main) {
-                assertEquals(selected,f.editor.controller.selectedItems());assertTrue(proof.current())
+                assertEquals(selected,f.editor.controller.selectedItems());assertTrue(proof())
                 f.editor.controller.restyleSelection(null,10.0,preview=true)
                 Triple(f.editor.state.document.bodyRevision,f.editor.history.nextUndo,selected.filterIsInstance<Stroke>().map {it.config})
             }
             val waiting=async(Dispatchers.Main) {f.editor.awaitMapSourceParking()}
             parkingDispatch();assertFalse(waiting.isCompleted)
             withContext(Dispatchers.Main) {
-                assertFalse(proof.current());assertTrue(f.editor.controller.hasPendingContentTransaction)
+                assertFalse(proof());assertTrue(f.editor.controller.hasPendingContentTransaction)
                 assertEquals(selected,f.editor.controller.selectedItems());assertEquals(before.first,f.editor.state.document.bodyRevision)
                 assertSame(before.second,f.editor.history.nextUndo);assertEquals(before.third,selected.filterIsInstance<Stroke>().map {it.config})
                 f.editor.controller.finishSelectionPreviews();stopDebounce(f.editor)
             }
             val next=withTimeout(5000) {waiting.await()};assertNotNull(next)
-            withContext(Dispatchers.Main) {assertTrue(next!!.current());assertEquals(selected,f.editor.controller.selectedItems())}
+            withContext(Dispatchers.Main) {assertTrue(next!!.invoke());assertEquals(selected,f.editor.controller.selectedItems())}
         }
         assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get())
     }

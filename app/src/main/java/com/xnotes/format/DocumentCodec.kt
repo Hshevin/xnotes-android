@@ -812,31 +812,16 @@ class DocumentCodec(
     /** Observe actual page/item survival without changing the ordinary tolerant reader. */
     internal fun readObserved(input:InputStream,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
         pdfStore:((InputStream)->File)?=null):ObservedRead {
-        var complete:CompleteRead?=null
-        val document=readDocument(input,pdfDir,imageDir,timing,pdfStore,false,onRead={doc,survived->
-            if(survived) complete=CompleteRead.capture(doc)
-        })
+        var complete = false
+        val document = readDocument(input, pdfDir, imageDir, timing, pdfStore, false,
+            onRead = { _, survived -> complete = survived })
         return ObservedRead(document,complete)
     }
-    internal fun readComplete(input:InputStream,pdfDir:File,imageDir:File,timing:ReadTiming?=null,
-        pdfStore:((InputStream)->File)?=null,preserveInkSamples:Boolean=false):CompleteRead {
-        var complete:CompleteRead?=null
-        readDocument(input,pdfDir,imageDir,timing,pdfStore,false,requireCompleteItems=true,simplifyOnLoad=!preserveInkSamples,onRead={doc,survived->
-            if(survived) complete=CompleteRead.capture(doc)
-        })
-        return requireNotNull(complete)
-    }
-    internal class ObservedRead(val document:Document,val complete:CompleteRead?)
-    /** Drawing-item provenance plus explicit XML parse failures; not a proof of every future XML extension. */
-    internal class CompleteRead private constructor(val document:Document) {
-        private val pages=document.pages.toList()
-        private val items=pages.map {it.items.toList()}
-        internal fun matches(actual:Document)=actual===document && actual.pages.size==pages.size && pages.indices.all {index->
-            actual.pages[index]===pages[index] && pages[index].items.size==items[index].size &&
-                items[index].indices.all {pages[index].items[it]===items[index][it]}
-        }
-        companion object {internal fun capture(document:Document)=CompleteRead(document)}
-    }
+    internal class ObservedRead(val document: Document, val complete: Boolean)
+
+    /** Working copies already hold the editor's samples. Loading them must not simplify those samples again. */
+    internal fun readSession(input: InputStream, pdfDir: File, imageDir: File): Document =
+        readDocument(input, pdfDir, imageDir, null, null, false, requireCompleteItems = true, simplifyOnLoad = false)
 
     /** Explicit recovery copy: validate the source first, then mint independent identities without cloning sample arrays. */
     fun readInkCopy(input:InputStream,imageDir:File?=null):Document = readDocument(input,null,imageDir,null,null,true)
