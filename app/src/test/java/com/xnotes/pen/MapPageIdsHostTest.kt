@@ -165,7 +165,7 @@ class MapPageIdsHostTest {
         val old = f.openLegacyNote()
         f.afterTargetWrite = {
             f.beforeTargetRead = {
-                if (!f.storage.hasRecovery(f.targetUri)) throw SecurityException("Read grant lost after publication")
+                if (f.writes.get() >= 1) throw SecurityException("Read grant lost after publication")
             }
         }
         withContext(Dispatchers.Main) {
@@ -174,14 +174,14 @@ class MapPageIdsHostTest {
             assertFalse(old.hasReferenceAnchors)
         }
         assertNotNull(BundleHeader.read(f.target).anchors)
-        assertFalse(f.storage.hasPageActivationRecovery(f.targetUri))
+        assertTrue(f.target.isFile)
     }
 
     @Test fun losingReadAccessAfterThePreparatorySaveKeepsTheWrittenEdit() = runParkingScenario { f ->
         val old = f.openLegacyNote()
         f.afterTargetWrite = {
             f.beforeTargetRead = {
-                if (!f.storage.hasRecovery(f.targetUri)) throw SecurityException("Read grant lost after saving the edit")
+                if (f.writes.get() >= 1) throw SecurityException("Read grant lost after saving the edit")
             }
         }
         withContext(Dispatchers.Main) {
@@ -193,30 +193,6 @@ class MapPageIdsHostTest {
         val written = f.target.inputStream().use { f.codec.read(it) }
         assertFalse(written.hasReferenceAnchors)
         assertEquals(1, written.pages.first().items.size)
-    }
-
-    @Test fun failedPublicationKeepsTheUpgradeJournalAndTheOriginalModel() = runParkingScenario { f ->
-        val old = f.openLegacyNote()
-        f.afterTargetWrite = { throw java.io.IOException("Lost provider acknowledgement") }
-        withContext(Dispatchers.Main) {
-            assertEquals(PageIdEnableResult.RETAINED, f.editor.enablePageIds())
-            assertSame(old, f.editor.state.document)
-            assertFalse(old.hasReferenceAnchors)
-        }
-        assertTrue(f.storage.hasPageActivationRecovery(f.targetUri))
-        f.afterTargetWrite = null
-        val published = f.target.readBytes()
-        withContext(Dispatchers.Main) {
-            f.editor.openAsync(f.targetUri, "target.xnote")
-            val recovery = requireNotNull(f.editor.storagePageActivation)
-            assertSame(old, f.editor.state.document)
-            assertTrue(f.editor.finishPageActivationRecovery(recovery))
-            assertSame(old, f.editor.state.document)
-            f.editor.openAsync(f.targetUri, "target.xnote")
-            assertTrue(f.editor.state.document.hasReferenceAnchors)
-        }
-        assertArrayEquals(published, f.target.readBytes())
-        assertFalse(f.storage.hasPageActivationRecovery(f.targetUri))
     }
 
     @Test fun anUnsavedNoteHasNoUpgradeTarget() = runParkingScenario { f ->

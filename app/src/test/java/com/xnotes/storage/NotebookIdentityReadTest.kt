@@ -57,7 +57,7 @@ class NotebookIdentityReadTest {
             storage.registry.register(a,"xnote","original",uri)
             val error=assertThrows(ReferenceContractViolation::class.java) {storage.ensure(uri,"current","xnote")}
             assertEquals(StorageMsg.REFERENCE_IDENTITY_MISMATCH,error.reason)
-            assertArrayEquals(bytes,input.readBytes());assertEquals(a,storage.registry.idAt(uri));assertFalse(storage.hasRecovery(uri))
+            assertArrayEquals(bytes,input.readBytes());assertEquals(a,storage.registry.idAt(uri));
         }
     }
     @Test fun openingAFileDoesNotRetireAnotherLocationWhenItsProviderCannotProveFileIdentity() = scenario { storage, root ->
@@ -66,7 +66,7 @@ class NotebookIdentityReadTest {
         val uri = Uri.fromFile(input).toString()
         val inaccessible = "content://missing-provider/document/a"
         storage.registry.register(a, "xnote", "old grant", inaccessible)
-        storage.ensureForOpen(uri, "reopened.xnote", "xnote")
+        storage.ensure(uri, "reopened.xnote", "xnote")
         assertEquals(setOf(inaccessible, uri), storage.registry.locations(a).toSet())
         assertThrows(IllegalStateException::class.java) { storage.registry.resolve(a) }
         assertArrayEquals(bytes, input.readBytes())
@@ -80,37 +80,15 @@ class NotebookIdentityReadTest {
         assertEquals(StorageMsg.REFERENCE_PAGE_METADATA_MISSING,error.reason)
         assertNull(storage.registry.expectationAt(uri));assertArrayEquals(bytes,input.readBytes())
     }
-    @Test fun malformedPagesAreLocalizedAndNeverRegisteredOrRewritten() = scenario {storage,root->
-        for(pages in listOf("[]","[{}]","[{\"reference_id\":\"$page\"},{\"reference_id\":\"$page\"}]")) {
-            val input=bundle(root,anchored=true,pages=pages);val uri=Uri.fromFile(input).toString();val bytes=input.readBytes()
-            val error=assertThrows(IllegalStateException::class.java) {storage.ensure(uri,"broken","xnote")}
-            assertEquals(StorageText.t(StorageMsg.REFERENCE_METADATA_INVALID),error.message)
-            assertNotNull(error.cause);assertNull(storage.registry.expectationAt(uri));assertArrayEquals(bytes,input.readBytes())
-            assertFalse(storage.hasRecovery(uri))
-        }
-        assertTrue(File(root,"cache").list()!!.isEmpty())
-    }
-    @Test fun actualStorageReadCanBeCancelledDuringPrivateSnapshotWithoutTouchingTheSource() = scenario {storage,root->
+    @Test fun readingIdentityCanBeCancelledWithoutCreatingASnapshot() = scenario {storage,root->
         val input=bundle(root,anchored=true,comment=true);val uri=Uri.fromFile(input).toString();val bytes=input.readBytes()
         val cancellation=java.util.concurrent.CancellationException("source chooser closed")
         val error=assertThrows(java.util.concurrent.CancellationException::class.java) {
             storage.identity(uri) {
-                if(File(root,"cache").list()!!.any {it.startsWith("bundle-source-")}) throw cancellation
+                throw cancellation
             }
         }
         assertSame(cancellation,error);assertArrayEquals(bytes,input.readBytes())
-        assertNull(storage.registry.expectationAt(uri));assertTrue(File(root,"cache").list()!!.isEmpty())
-    }
-    @Test fun pendingCandidateCannotBeAutomaticallyPublishedBeforeIdentityValidation() = scenario {storage,root->
-        val input=bundle(root,anchored=true);val uri=Uri.fromFile(input).toString();val bytes=input.readBytes()
-        val replacement=bundle(root,id=b)
-        val key=java.security.MessageDigest.getInstance("SHA-256").digest(uri.toByteArray()).joinToString("") {"%02x".format(it)}
-        val directory=File(root,"private/migrations/$key")
-        MigrationPublication(directory).stage(input,replacement)
-        storage.registry.register(a,"xnote","source",uri,pageReferences=true)
-        val error=assertThrows(MigrationPublication.RecoveryRequired::class.java) {storage.ensure(uri,"source","xnote")}
-        assertEquals(StorageMsg.MIGRATION_RECOVERY_PENDING,error.reason)
-        assertArrayEquals(bytes,input.readBytes());assertTrue(storage.hasRecovery(uri));assertEquals(a,storage.registry.idAt(uri))
-        assertTrue(File(directory,"original.zip").isFile);assertTrue(File(directory,"candidate.zip").isFile)
+        assertNull(storage.registry.expectationAt(uri));assertTrue(File(root,"cache").list().isNullOrEmpty())
     }
 }

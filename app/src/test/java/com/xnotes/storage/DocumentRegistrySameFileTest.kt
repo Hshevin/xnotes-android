@@ -26,9 +26,7 @@ class DocumentRegistrySameFileTest {
 
     @Test fun pickerThenTreeKeepsOneTreeRowAndPreservesLocationProtection(): Unit = registry(true).use { db ->
         db.register(id, "xcanvas", "created", picker)
-        val before = db.identityObservation(id)
         db.register(id, "xcanvas", "listed", tree)
-        assertFalse(before.current())
         assertEquals(listOf(tree), db.knownLocations())
         assertEquals(tree, db.resolve(id))
         assertFalse(db.hasCompetingLocation(id, picker))
@@ -41,9 +39,7 @@ class DocumentRegistrySameFileTest {
     @Test fun treeThenPickerKeepsTheTreeAndRepeatedObservationsAreStable() = registry(true).use { db ->
         db.register(id, "xcanvas", "listed", tree)
         db.register(id, "xcanvas", "opened", picker)
-        val ticket = db.identityObservation(id)
         db.register(id, "xcanvas", "reopened", picker)
-        assertTrue(ticket.current())
         assertEquals(listOf(tree), db.knownLocations())
         assertEquals(tree, db.resolve(id))
     }
@@ -104,15 +100,11 @@ class DocumentRegistrySameFileTest {
             old.writableDatabase.version = 3
         }
         registry(true).use { db ->
-            val ticket = db.identityObservation(id)
-            val otherTicket = db.identityObservation(other)
             assertEquals(4, db.readableDatabase.version)
             assertEquals(4, db.knownLocations().size)
             assertThrows(IllegalStateException::class.java) { db.resolve(id) }
             assertEquals(setOf(copy, tree, elsewhere), db.knownLocations().toSet())
             assertEquals(ReferenceExpectation(other, true), db.expectationAt(elsewhere))
-            assertFalse(ticket.current())
-            assertTrue(otherTicket.current())
             assertEquals(listOf(elsewhere), db.locations(other))
         }
     }

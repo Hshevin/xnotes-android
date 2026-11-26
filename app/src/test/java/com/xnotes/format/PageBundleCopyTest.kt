@@ -110,28 +110,6 @@ class PageBundleCopyTest {
         })}
         assertTrue(changed);assertTrue(source.readText().endsWith("external edit"));assertEquals(setOf(source.name),dir.list()!!.toSet())
     }
-    @Test fun sourceAtoBtoAWhileCopyingCannotMixPayloadFromOutsideTheSnapshot() = directory {dir->
-        val source=make(dir);val original=source.readBytes();var phase=0
-        val staged=BundleMigration.prepare(source,dir,copy=true,cancelled={
-            if(dir.list()!!.any {it.startsWith("identity-tail-")}) {
-                if(phase==0) {source.writeText("temporary replacement B");phase=1}
-                else if(phase==1) {source.writeBytes(original);phase=2}
-            }
-            false
-        })
-        try {assertEquals(2,phase);assertIndependentCopy(source,staged.file);assertArrayEquals(original,source.readBytes())}
-        finally {staged.file.delete()}
-        assertEquals(setOf(source.name),dir.list()!!.toSet())
-    }
-    @Test fun capturedStreamSnapshotStaysConsistentWhenTheExternalFileChangesAfterCapture() = directory {dir->
-        val source=make(dir);val original=source.readBytes();val output=File(dir,"copy.xnote")
-        BundleSnapshot.fromInput(source.inputStream(),dir).use {snapshot->
-            source.writeText("a different external file")
-            output.outputStream().use {BundlePdf.write(snapshot,it,BundleIdentity(),null,false)}
-            assertIndependentCopy(File(dir,"captured.zip").apply {writeBytes(original)},output)
-            assertEquals("a different external file",source.readText())
-        }
-    }
     @Test fun fileExportDetectsExternalChangeAndCancellationWithoutDeletingBorrowedPdf() = directory {dir->
         val pdf=File(dir,"original.pdf").apply {writeText("immutable PDF")}
         val identity=BundleIdentity(owner,BundleMigration.hash(pdf),true);val source=make(dir,identity)
@@ -153,7 +131,7 @@ class PageBundleCopyTest {
             override fun read(b:ByteArray,off:Int,len:Int)=super.read(b,off,len).also {if(it>0) read+=it}
         }
         input.use {
-            assertThrows(IllegalStateException::class.java) {BundleCopyPlan.validateLegacyFormat(it,cancelled={read>=32768})}
+            assertThrows(IllegalStateException::class.java) {bundleFormat(it,cancelled={read>=32768})}
         }
         assertTrue("must stop inside the prefix, not after consuming it",read<bytes.size/2)
     }
@@ -169,7 +147,7 @@ class PageBundleCopyTest {
         }
         assertEquals("original PDF A",a.readText());assertEquals("replacement PDF B",b.readText())
     }
-    @Test fun copiesAndPortableExportsRejectOrphanLocalManifestsBeforeWriting() = directory {dir->
+    @Test fun copiesAndPortableExportsUseTheCentralDirectoryAndRemoveOrphanEntries() = directory {dir->
         val source=make(dir,comment=false);val extra=File(dir,"extra.zip")
         ZipOutputStream(extra.outputStream()).use {z->
             z.putNextEntry(ZipEntry("manifest.json"));z.write(pattern.replace("@P1@",p2).replace("@P2@",p1).toByteArray());z.closeEntry()
@@ -179,9 +157,10 @@ class PageBundleCopyTest {
             check(ZipTail.splice(dest.channel,old.offset,old.entries.filter {it.name!="manifest.json"},tail.channel,addition)>=0)
         }}
         val before=source.readBytes();val files=dir.list()!!.toSet();val out=ByteArrayOutputStream()
-        assertThrows(IllegalArgumentException::class.java) {BundleMigration.prepare(source,dir,copy=true)}
-        assertThrows(IllegalArgumentException::class.java) {BundlePdf.write(source,out,BundleIdentity(owner),null,false)}
-        assertEquals(0,out.size());assertArrayEquals(before,source.readBytes());assertEquals(files,dir.list()!!.toSet())
+        val copied = BundleMigration.prepare(source,dir,copy=true)
+        assertIndependentCopy(source,copied.file);copied.file.delete()
+        BundlePdf.write(source,out,BundleIdentity(owner),null,false)
+        assertTrue(out.size()>0);assertArrayEquals(before,source.readBytes());assertEquals(files,dir.list()!!.toSet())
     }
 
 }

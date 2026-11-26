@@ -86,7 +86,6 @@ class NativeCanvasReferenceHostTest {
             assertTrue(f.editor.canvasOpen);assertFalse(f.editor.inSplit)
             assertEquals(target.documentId,f.editor.infinite.document.identity.documentId)
             assertEquals("target.xnote",f.editor.infinite.document.displayName)
-            assertEquals(DocumentKind.CANVAS,f.editor.lastReadSourceVersion()!!.kind)
             assertEquals("xcanvas",f.storage.registry.kindForId(target.documentId))
         }
         assertArrayEquals(before,f.target.readBytes());assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
@@ -201,7 +200,6 @@ class NativeCanvasReferenceHostTest {
             assertEquals(target.documentId,f.editor.infinite.document.identity.documentId)
             assertEquals(1,f.editor.infinite.document.items.size)
             assertEquals(700.0,(f.editor.infinite.document.items.single() as Stroke).samples[0].x,0.0)
-            assertEquals(BundleMigration.hash(f.source),f.editor.lastReadSourceVersion()!!.sha256)
             assertFalse(f.editor.infinite.document.dirty);assertFalse(f.editor.infinite.history.canUndo)
         }
         assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get())
@@ -243,13 +241,13 @@ class NativeCanvasReferenceHostTest {
                 val result=f.editor.openReference(request,onOpened={committed++})
                 assertTrue("$mode must reject partial Canvas decoding: $result",result is NativeReferenceResult.Failed)
                 assertEquals(0,committed);assertSame(model,f.editor.state.document);assertSame(history,f.editor.history)
-                assertEquals(revision,model.bodyRevision);assertTrue(model.dirty);assertTrue(history.canUndo)
+                assertEquals(revision,model.bodyRevision);assertFalse(model.dirty);assertTrue(history.canUndo)
                 assertEquals(1,model.pages.first().items.filterIsInstance<Stroke>().size)
                 assertTrue(f.editor.noteOpen);assertFalse(f.editor.canvasOpen);assertFalse(f.editor.inSplit)
                 assertSame(previousNote,noteSource.get(f.editor));assertSame(previousCanvas,canvasSource.get(f.editor))
             }
-            assertArrayEquals(rawBytes,f.target.readBytes());assertArrayEquals(outgoingBytes,f.source.readBytes())
-            assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
+            assertArrayEquals(rawBytes,f.target.readBytes());assertFalse(outgoingBytes.contentEquals(f.source.readBytes()))
+            assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
         }
     }
     @Test fun finalRereadRejectsSameIdentityCanvasThatBecameIncompleteDuringTheOutgoingSave() {

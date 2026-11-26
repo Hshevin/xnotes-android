@@ -518,27 +518,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     /** Preserve ordinary tolerance while reporting whether this actual decode lost any items. */
     internal fun readObserved(input:InputStream,imageDir:File):ObservedRead = readDocument(input,imageDir,false).let {
-        ObservedRead(it.document,if(it.complete) CompleteRead.capture(it.document,it.items) else null)
+        ObservedRead(it.document,it.complete)
     }
-    internal class ObservedRead(val document:InfiniteDocument,val complete:CompleteRead?)
+    internal class ObservedRead(val document:InfiniteDocument,val complete:Boolean)
 
-    /** Every manifest item must survive this decode before a reference may become an editable source. */
-    internal fun readComplete(input:InputStream,imageDir:File):CompleteRead = readDocument(input,imageDir,true).let {
-        CompleteRead.capture(it.document,it.items)
-    }
-    internal class CompleteRead private constructor(val document:InfiniteDocument,items:List<CanvasItem>) {
-        private val items=items.toList()
-        private val map = document.map
-        private val mapState = map.state
-        private val collapsed = map.collapsed
-        internal fun matches(actual:InfiniteDocument)=actual===document && actual.map === map &&
-            map.state === mapState && map.collapsed == collapsed && actual.items.size==items.size &&
-            items.indices.all {actual.items[it]===items[it]}
-        companion object {
-            internal fun capture(document:InfiniteDocument,items:List<CanvasItem>)=CompleteRead(document,items)
-        }
-    }
-    private class DecodedDocument(val document:InfiniteDocument,val items:List<CanvasItem>,val complete:Boolean)
+    private class DecodedDocument(val document:InfiniteDocument,val complete:Boolean)
     private fun readDocument(input:InputStream,imageDir:File?,requireCompleteItems:Boolean):DecodedDocument {
         val created=ArrayList<File>()
         try {
@@ -630,7 +614,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 doc.map = it
             }
             doc.addAll(items)
-            return DecodedDocument(doc,items,m.completeItems && dropped==0)
+            return DecodedDocument(doc,m.completeItems && dropped==0)
         } catch(error:Throwable) {
             // Only files allocated by this call are ours; shared/borrowed PDFs never enter this list.
             created.forEach {runCatching {it.delete()}}

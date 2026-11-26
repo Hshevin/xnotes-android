@@ -101,8 +101,8 @@ class AnchorCopyManifestTest {
         assertThrows(IllegalStateException::class.java) {
             AnchorManifest.inspectCopy({object:ByteArrayInputStream(bytes) {
                 override fun close() {closed++;super.close()}
-            }},cancelled={closed>=2})
+            }},cancelled={closed>=1})
         }
-        assertEquals(2,closed)
+        assertEquals(1,closed)
     }
 }

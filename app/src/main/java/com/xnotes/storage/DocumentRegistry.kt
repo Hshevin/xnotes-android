@@ -48,46 +48,21 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
     private fun createPageContracts(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE page_reference_contracts(document_id TEXT PRIMARY KEY NOT NULL)")
     }
-    private class MutationFrame {
-        val structuralIdentities=mutableSetOf<String>()
-        val notifications=mutableListOf<AutoCloseable>()
-    }
-    private val mutationFrame=ThreadLocal<MutationFrame?>()
     private fun <T> transaction(block: (SQLiteDatabase) -> T): T {
-        val db=writableDatabase
-        val outer=mutationFrame.get()==null
-        val frame=mutationFrame.get() ?: MutationFrame()
-        // Wrapper nesting shares the owner frame. An externally begun SQLite transaction has
-        // no observable commit hook here, so do not accept writes which could strand its token.
-        check(!outer || !db.inTransaction()) {"Registry writes require a registry-owned transaction"}
+        val db = writableDatabase
         db.beginTransaction()
-        if(outer) mutationFrame.set(frame)
-        try {val result=block(db);db.setTransactionSuccessful();return result}
-        finally {
-            try {db.endTransaction()}
-            finally {if(outer) {
-                mutationFrame.remove()
-                // Do not announce END before a surrounding SQLite transaction has actually ended.
-                if(!db.inTransaction()) frame.notifications.asReversed().forEach {it.close()}
-            }}
-        }
+        try {
+            val result = block(db)
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
     }
     internal fun reservedOriginalId(id:String):Boolean = readableDatabase.rawQuery(
         "SELECT 1 FROM original_pdf_documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
-    /** Pure-memory continuation check; capture before reading the actual identity structure. */
-    internal fun identityObservation(id:String):DocumentRegistryIdentityEpoch.Ticket {
-        require(UUID.fromString(id).toString()==id)
-        return DocumentRegistryIdentityEpoch.forDatabase(databaseName).observe(id)
-    }
     private data class IdentityPosition(val id:String,val uri:String,val available:Int)
     private fun identityPosition(db:SQLiteDatabase,key:String):IdentityPosition? = db.rawQuery(
         "SELECT document_id,uri,available FROM locations WHERE location_key=?",arrayOf(key),
     ).use {c->if(c.moveToFirst()) IdentityPosition(c.getString(0),c.getString(1),c.getInt(2)) else null}
-    private fun beginIdentityChanges(ids:Set<String>) {
-        val frame=checkNotNull(mutationFrame.get())
-        val fresh=ids.filterTo(linkedSetOf()) {frame.structuralIdentities.add(it)}
-        if(fresh.isNotEmpty()) frame.notifications+=DocumentRegistryIdentityEpoch.forDatabase(databaseName).begin(fresh)
-    }
     fun register(id: String, kind: String, name: String, uri: String, pageReferences:Boolean=false) = transaction { db ->
         register(db,id,kind,name,uri,pageReferences)
     }
@@ -114,9 +89,6 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         val kept = (aliases.filter { it == uri || locationKey(it) != key || probe.sameFile(it, uri) == true } + uri)
             .minWith(locationPreference)
         val keptKey = locationKey(kept)
-        val known=db.rawQuery("SELECT 1 FROM documents WHERE id=?",arrayOf(id)).use {it.moveToFirst()}
-        val pages=if(pageReferences) db.rawQuery("SELECT 1 FROM page_reference_contracts WHERE document_id=?",arrayOf(id)).use {it.moveToFirst()} else true
-        if (!known || !pages) beginIdentityChanges(setOf(id))
         db.execSQL("INSERT OR IGNORE INTO documents(id,kind,name) VALUES(?,?,?)", arrayOf(id, kind, name))
         db.execSQL("UPDATE documents SET name=? WHERE id=?", arrayOf(name,id))
         if(pageReferences) db.execSQL("INSERT OR IGNORE INTO page_reference_contracts(document_id) VALUES(?)",arrayOf(id))
@@ -126,7 +98,6 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         }
         val previous = identityPosition(db, keptKey)
         if (previous != IdentityPosition(id, kept, 1)) {
-            beginIdentityChanges(setOfNotNull(id, previous?.id, aliasId(db, keptKey)))
             db.execSQL("INSERT OR REPLACE INTO locations(uri,location_key,document_id,available) VALUES(?,?,?,1)", arrayOf(kept,keptKey,id))
             db.delete("location_alias_expectations", "location_key=?", arrayOf(keptKey))
         }
@@ -146,7 +117,6 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         val previous = identityPosition(db, key)
         val expectation = aliasId(db, key)
         if (previous == null && expectation == id) return
-        beginIdentityChanges(setOfNotNull(id, previous?.id, expectation))
         db.delete("locations", "location_key=?", arrayOf(key))
         db.execSQL("INSERT OR REPLACE INTO location_alias_expectations(location_key,uri,document_id) VALUES(?,?,?)", arrayOf(key, uri, id))
     }
@@ -176,7 +146,10 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         if(kind !in setOf("xnote","xcanvas")) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
         val known=db.rawQuery("SELECT kind FROM documents WHERE id=?",arrayOf(id)).use {if(it.moveToFirst()) it.getString(0) else null}
         if(known!=null && known!=kind) throw ReferenceContractViolation(StorageMsg.REFERENCE_WRITE_CONTEXT_INVALID)
-        ReferenceContract.verifyObserved(expectationAt(uri),expectationForId(id),header)
+        for (expected in listOfNotNull(expectationAt(uri), expectationForId(id))) {
+            if (expected.documentId != id) throw ReferenceContractViolation(StorageMsg.REFERENCE_IDENTITY_MISMATCH)
+            if (expected.requiresPages && header.anchors == null) throw ReferenceContractViolation(StorageMsg.REFERENCE_PAGE_METADATA_MISSING)
+        }
         register(db,id,kind,name,uri,header.anchors!=null,uniqueSource)
     }
     /** One query freezes the location expectation and its monotonic contract together. */
@@ -247,10 +220,7 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         val oldKey = locationKey(old)
         val newKey = locationKey(new)
         val source=identityPosition(db,oldKey)
-        val destination=if(oldKey!=newKey) identityPosition(db,newKey) else null
         // Called only after a successful filesystem move. A reused destination may have a stale row.
-        if(source!=null && (oldKey!=newKey || source.uri!=new || source.available!=1))
-            beginIdentityChanges(setOfNotNull(source.id, destination?.id, aliasId(db, newKey)))
         if (source != null && oldKey != newKey) {
             db.execSQL("DELETE FROM locations WHERE location_key=?", arrayOf(newKey))
         }
@@ -258,8 +228,7 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
         if (source != null) db.delete("location_alias_expectations", "location_key=?", arrayOf(newKey))
     }
     fun markUnavailable(uri: String) = transaction {db->
-        val key=locationKey(uri);val position=identityPosition(db,key)
-        if(position!=null && position.available!=0) beginIdentityChanges(setOf(position.id))
+        val key=locationKey(uri)
         db.execSQL("UPDATE locations SET available=0 WHERE location_key=?",arrayOf(key))
     }
     fun referenceIds(owner: String): Set<String> = readableDatabase.rawQuery("SELECT resource_id FROM resource_refs WHERE owner=?",arrayOf(owner)).use { c -> buildSet { while(c.moveToNext()) add(c.getString(0)) } }
@@ -312,3 +281,9 @@ class DocumentRegistry internal constructor(context: Context, private val probe:
     }
     data class Resource(val id: String, val name: String, val path: String, val size: Long, val digest: String, val version: Int = 1, val owned: Boolean = true)
 }
+
+data class ReferenceExpectation(val documentId:String,val requiresPages:Boolean) {
+    init {require(UUID.fromString(documentId).toString()==documentId)}
+}
+
+internal class ReferenceContractViolation(val reason:StorageMsg,cause:Throwable?=null):IllegalStateException(StorageText.t(reason),cause)

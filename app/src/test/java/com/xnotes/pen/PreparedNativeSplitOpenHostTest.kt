@@ -295,7 +295,7 @@ class PreparedNativeSplitOpenHostTest {
                         .put("primaryPath",f.targetUri).put("secondPath",DocumentsContract.buildDocumentUri(f.authority,"missing").toString()).toString())
                     assertFalse(f.editor.openSplitFile(android.net.Uri.fromFile(file).toString()))
                 } else assertNull(f.editor.prepareNativePairOpen(NativeSplitSource(f.targetUri),NativeSplitSource(retry(f)),guardOwners={_,_->guards++;emptySet()}))
-                assertEquals(0,guards);assertSame(model,f.editor.state.document);assertTrue(f.editor.noteOpen);assertNull(f.editor.missingDocument)
+                assertEquals(if(saved) 0 else 1,guards);assertSame(model,f.editor.state.document);assertTrue(f.editor.noteOpen);assertNull(f.editor.missingDocument)
                 assertFalse(f.editor.secondary?.noteOpen==true)
             }
             assertEquals(0,f.writes.get());assertEquals(0,f.deletes.get())

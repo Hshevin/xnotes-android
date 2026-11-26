@@ -8,7 +8,6 @@ import com.xnotes.format.DocumentCodec
 import com.xnotes.pen.PenTestRunner
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.storage.MigrationPublication
 import com.xnotes.storage.NotebookStorage
 import java.io.File
 import java.util.UUID
@@ -46,7 +45,7 @@ class EditorSaveCancellationTest {
         val entered=java.util.concurrent.CountDownLatch(1)
         val release=java.util.concurrent.CountDownLatch(if(mode==4) 1 else 0)
         val writes=AtomicInteger();val before=AtomicReference<ByteArray>()
-        val storage=NotebookStorage(context,targetOverride={object:MigrationPublication.Target {
+        val storage=NotebookStorage(context,targetOverride={object:NotebookStorage.Target {
             override fun read()=current.inputStream()
             override fun write(source:File) {
                 writes.incrementAndGet();entered.countDown()
@@ -118,7 +117,7 @@ class EditorSaveCancellationTest {
                 assertFalse(e.savingNote)
                 if(mode>=3) {assertTrue(e.canvasOpen);assertTrue(e.noteOpen)}
                 if(mode!=3) {assertEquals(1,callbacks.get());assertEquals(false,result.get())}
-                assertTrue(storage.hasRecovery(uri));assertEquals(1,writes.get())
+                assertEquals(1,writes.get())
                 assertArrayEquals(before.get(),current.readBytes())
             }
         } finally {

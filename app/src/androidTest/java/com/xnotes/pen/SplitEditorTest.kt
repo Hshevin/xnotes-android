@@ -141,7 +141,6 @@ class SplitEditorTest {
                                 for(pane in (panes+owners).distinct()) {
                                     for(field in listOf("noteWriteJob","canvasWriteJob"))
                                         (Editor::class.java.getDeclaredField(field).apply {isAccessible=true}.get(pane) as? kotlinx.coroutines.Job)?.join()
-                                    (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(pane) as com.xnotes.platform.LegacySessionQueue.Owner).awaitAccepted()
                                     (Editor::class.java.getDeclaredField("sessionWriteJob").apply {isAccessible=true}.get(pane) as? kotlinx.coroutines.Job)?.join()
                                     val scope=Editor::class.java.getDeclaredField("autosaveScope").apply {isAccessible=true}.get(pane) as kotlinx.coroutines.CoroutineScope
                                     scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()

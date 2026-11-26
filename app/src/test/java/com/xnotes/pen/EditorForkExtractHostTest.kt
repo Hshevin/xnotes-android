@@ -11,10 +11,8 @@ import android.provider.DocumentsContract
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.enableReferenceAnchors
 import com.xnotes.core.model.fixedWriteSnapshot
-import com.xnotes.format.BundleReferenceInfo
-import com.xnotes.platform.LegacySessionQueue
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.storage.NotebookStorage
-import com.xnotes.storage.RecoveryCopyResult
 import com.xnotes.ui.Editor
 import java.io.File
 import java.util.UUID
@@ -62,7 +60,6 @@ class EditorForkExtractHostTest {
                         auto.cancel();auto.coroutineContext[Job]?.join()
                         suspendCancellableCoroutine<Unit> {waiter->Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}}
                     }
-                    (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(f.editor) as LegacySessionQueue.Owner).awaitAccepted()
                 }
                 singleton.set(null,previous);withContext(Dispatchers.IO) {f.storage.registry.close()}
             }}
@@ -87,7 +84,7 @@ class EditorForkExtractHostTest {
         while(!withContext(Dispatchers.Main) {condition()}) delay(1)
     }
     @Test fun aRealStampForkAdoptsItsScopeKeepsLateInkDirtyAndUndoRestoresRetiredPagesOnlyWithNewIds()=scenario {f->coroutineScope {
-        val live=openFolderSource(f);val source=f.source.readBytes();val a=BundleReferenceInfo.inspectStrict(f.source)
+        val live=openFolderSource(f);val source=f.source.readBytes();val a=TestBundleMetadata.read(f.source)
         val originalPages=live.pages.toList();val history=withContext(Dispatchers.Main) {f.editor.history}
         withContext(Dispatchers.Main) {
             f.editor.deletePages(listOf(1));f.stopDebounce();f.addStroke(110.0,recordHistory=true)
@@ -98,7 +95,7 @@ class EditorForkExtractHostTest {
         val flush=async(Dispatchers.Main) {f.editor.flushSplitDocument()}
         entered.await()
         // The publication has already copied the fixed C0 body to B; C1 belongs only to the owner.
-        val b=BundleReferenceInfo.inspectStrict(f.target)
+        val b=TestBundleMetadata.read(f.target)
         withContext(Dispatchers.Main) {f.addStroke(990.0,recordHistory=true);f.stopDebounce()}
         f.release.countDown();assertFalse("C1 is still dirty after the completed fixed fork",flush.await())
         val bUri=DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree(f)),f.targetId).toString()
@@ -113,7 +110,7 @@ class EditorForkExtractHostTest {
         }
         f.afterTargetWrite=null
         assertTrue(withContext(Dispatchers.Main) {f.editor.flushSplitDocument()})
-        val complete=BundleReferenceInfo.inspectStrict(f.target)
+        val complete=TestBundleMetadata.read(f.target)
         assertEquals(b.header.identity,complete.header.identity);assertEquals(2,complete.pageIds.size)
         assertTrue(complete.pageIds.intersect(a.pageIds).isEmpty());assertArrayEquals(source,f.source.readBytes())
         withContext(Dispatchers.Main) {
@@ -123,7 +120,7 @@ class EditorForkExtractHostTest {
         }
     }}
     @Test fun rejectedForkAdoptionDoesNotForwardTheNextPublicFlushIntoThatUnadoptedFile()=scenario {f->coroutineScope {
-        val live=openFolderSource(f);val source=f.source.readBytes();val a=BundleReferenceInfo.inspectStrict(f.source)
+        val live=openFolderSource(f);val source=f.source.readBytes();val a=TestBundleMetadata.read(f.source)
         val oldPath=live.path;val oldScope=live.pageReferenceScope;val oldIdentity=live.identity
         withContext(Dispatchers.Main) {f.addStroke(110.0,recordHistory=true);f.stopDebounce()}
         assertTrue(f.source.setLastModified(f.source.lastModified()+10000L))
@@ -131,7 +128,7 @@ class EditorForkExtractHostTest {
         f.afterTargetWrite={entered.complete(Unit);check(f.release.await(10,TimeUnit.SECONDS))}
         val flush=async(Dispatchers.Main) {f.editor.flushSplitDocument()}
         entered.await()
-        val b=f.target.readBytes();val bInfo=BundleReferenceInfo.inspectStrict(f.target)
+        val b=f.target.readBytes();val bInfo=TestBundleMetadata.read(f.target)
         // Public model path changes model an external owner URI action while B is being published.
         val alias=DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree(f)),f.sourceId).toString()
         withContext(Dispatchers.Main) {live.path=alias}
@@ -143,7 +140,7 @@ class EditorForkExtractHostTest {
         f.afterTargetWrite=null;f.createdDocumentId="root/retry"
         assertTrue("A new flush must fork afresh instead of following an unadopted B",withContext(Dispatchers.Main) {f.editor.flushSplitDocument()})
         assertEquals(2,f.creates.get());assertEquals(2,f.writes.get());assertArrayEquals(b,f.target.readBytes())
-        val c=BundleReferenceInfo.inspectStrict(f.retry)
+        val c=TestBundleMetadata.read(f.retry)
         assertNotEquals(bInfo.header.identity,c.header.identity);assertTrue(c.pageIds.intersect(a.pageIds).isEmpty())
         assertTrue(c.pageIds.intersect(bInfo.pageIds).isEmpty());assertArrayEquals(source,f.source.readBytes())
         withContext(Dispatchers.Main) {assertEquals(c.header.identity,live.identity);assertEquals(c.orderedPageIds,live.pages.map {it.referenceIdentity.id})}
@@ -156,7 +153,7 @@ class EditorForkExtractHostTest {
         entered.await()
         withContext(Dispatchers.Main) {f.addStroke(990.0,recordHistory=true);f.stopDebounce()}
         f.release.countDown();awaitMain {f.editor.message==f.context.getString(com.xnotes.R.string.extract_copy_kept_source_changed)}
-        val copied=BundleReferenceInfo.inspectStrict(f.target)
+        val copied=TestBundleMetadata.read(f.target)
         assertEquals(1,copied.pageIds.size);assertTrue(copied.pageIds.intersect(ids.filterNotNull().toSet()).isEmpty())
         val disk=f.target.inputStream().use {f.codec.read(it)}
         assertTrue(disk.pages.single().items.isEmpty());assertArrayEquals(source,f.source.readBytes());assertEquals(0,f.deletes.get())
@@ -171,13 +168,12 @@ class EditorForkExtractHostTest {
         val entered=CompletableDeferred<Unit>()
         f.afterTargetWrite={entered.complete(Unit);check(f.release.await(10,TimeUnit.SECONDS))}
         withContext(Dispatchers.Main) {f.editor.extractPages(listOf(0),"cancelled page",move=true)}
-        entered.await();val written=f.target.readBytes();val actual=BundleReferenceInfo.inspectStrict(f.target)
+        entered.await();val written=f.target.readBytes();val actual=TestBundleMetadata.read(f.target)
         withContext(Dispatchers.Main) {f.editor.cancelImportInProgress()}
         f.release.countDown();awaitMain {!f.editor.importing && f.editor.busyWith==null}
         assertTrue(f.target.isFile);assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get())
         assertEquals(1,actual.pageIds.size);assertTrue(actual.pageIds.intersect(ids.filterNotNull().toSet()).isEmpty())
         val uri=DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree(f)),f.targetId).toString()
-        if(f.storage.hasRecovery(uri)) assertTrue(withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(uri,"cancelled page.xnote")} is RecoveryCopyResult.Saved)
         assertEquals(1,f.writes.get());assertArrayEquals(written,f.target.readBytes());assertArrayEquals(source,f.source.readBytes())
         withContext(Dispatchers.Main) {
             assertSame(live,f.editor.state.document);assertEquals(pages.size,live.pages.size)
@@ -206,10 +202,10 @@ class EditorForkExtractHostTest {
             live.fixedWriteSnapshot()
         }
         withContext(Dispatchers.IO) {f.source.outputStream().use {f.codec.write(fixed,it)}}
-        val before=BundleReferenceInfo.inspectStrict(f.source)
+        val before=TestBundleMetadata.read(f.source)
         withContext(Dispatchers.Main) {f.addStroke(100.0,recordHistory=true);f.stopDebounce()}
         assertTrue(withContext(Dispatchers.Main) {f.editor.flushSplitDocument()})
-        val saved=BundleReferenceInfo.inspectStrict(f.source)
+        val saved=TestBundleMetadata.read(f.source)
         assertEquals(before.header.identity,saved.header.identity);assertEquals(before.orderedPageIds,saved.orderedPageIds)
         val actual=f.source.inputStream().use {f.codec.read(it)}
         assertEquals(listOf(100.0),actual.pages.single().items.filterIsInstance<com.xnotes.core.model.Stroke>().map {it.samples.first().x})
@@ -222,12 +218,12 @@ class EditorForkExtractHostTest {
         withContext(Dispatchers.IO) {f.seed(f.retry)}
         val other=DocumentsContract.buildDocumentUri(f.authority,"root/retry").toString()
         val source=f.source.readBytes();val second=f.retry.readBytes()
-        val a=BundleReferenceInfo.inspectStrict(f.source);val b=BundleReferenceInfo.inspectStrict(f.retry)
+        val a=TestBundleMetadata.read(f.source);val b=TestBundleMetadata.read(f.retry)
         val identity=live.identity;val pages=live.pages.toList();val history=withContext(Dispatchers.Main) {f.editor.history}
         val done=CompletableDeferred<Editor.MadeFile?>()
         withContext(Dispatchers.Main) {f.editor.mergeNotes(listOf(f.sourceUri,other),"combined") {done.complete(it)}}
         assertNotNull("A merge of two valid anchored inputs must publish successfully",done.await())
-        val merged=BundleReferenceInfo.inspectStrict(f.target)
+        val merged=TestBundleMetadata.read(f.target)
         assertNotEquals(a.header.identity!!.documentId,merged.header.identity!!.documentId)
         assertNotEquals(b.header.identity!!.documentId,merged.header.identity!!.documentId)
         assertEquals(4,merged.orderedPageIds.size);assertEquals(4,merged.pageIds.size)
@@ -249,13 +245,12 @@ class EditorForkExtractHostTest {
         val entered=CompletableDeferred<Unit>();val done=CompletableDeferred<Editor.MadeFile?>()
         f.afterTargetWrite={entered.complete(Unit);check(f.release.await(10,TimeUnit.SECONDS))}
         withContext(Dispatchers.Main) {f.editor.mergeNotes(listOf(f.sourceUri,other),"cancelled merge") {done.complete(it)}}
-        entered.await();val written=f.target.readBytes();val actual=BundleReferenceInfo.inspectStrict(f.target)
+        entered.await();val written=f.target.readBytes();val actual=TestBundleMetadata.read(f.target)
         withContext(Dispatchers.Main) {f.editor.cancelImportInProgress()}
         f.release.countDown();assertNull(done.await())
         assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get())
         val uri=DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree(f)),f.targetId).toString()
-        if(f.storage.hasRecovery(uri)) assertTrue(withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(uri,"cancelled merge.xnote")} is RecoveryCopyResult.Saved)
-        assertEquals(actual.header.identity,BundleReferenceInfo.inspectStrict(f.target).header.identity)
+        assertEquals(actual.header.identity,TestBundleMetadata.read(f.target).header.identity)
         assertArrayEquals(written,f.target.readBytes());assertEquals(1,f.writes.get())
         assertArrayEquals(source,f.source.readBytes());assertArrayEquals(second,f.retry.readBytes())
         withContext(Dispatchers.Main) {assertSame(live,f.editor.state.document);assertEquals(f.sourceUri,live.path)}

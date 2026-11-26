@@ -4,7 +4,6 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.format.CanvasCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.ui.Editor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,7 +60,6 @@ class NativePresentationIdentityHostTest {
             assertFalse(f.editor.matchesNativePresentationIdentity(ticket))
             // Slot retirement is synchronous; the accepted recovery clear must finish before a new adoption.
             (Editor::class.java.getDeclaredField("sessionWriteJob").apply {isAccessible=true}.get(peer) as? Job)?.join()
-            (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(peer) as LegacySessionQueue.Owner).awaitAccepted()
             assertTrue(peer.openSharedView(f.editor));assertSame(model,peer.state.document)
             assertFalse(f.editor.matchesNativePresentationIdentity(ticket))
         }

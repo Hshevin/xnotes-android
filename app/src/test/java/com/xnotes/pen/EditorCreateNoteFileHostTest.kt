@@ -10,13 +10,11 @@ import android.os.Looper
 import android.provider.DocumentsContract
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.PageStyle
-import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.format.CanvasCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.storage.NotebookStorage
-import com.xnotes.storage.RecoveryCopyResult
 import com.xnotes.ui.Editor
 import java.io.File
 import java.time.Duration
@@ -65,7 +63,6 @@ class EditorCreateNoteFileHostTest {
                         auto.cancel();auto.coroutineContext[Job]?.join()
                         suspendCancellableCoroutine<Unit> {waiter->Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}}
                     }
-                    (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(f.editor) as LegacySessionQueue.Owner).awaitAccepted()
                 }
                 singleton.set(null,previous);withContext(Dispatchers.IO) {f.storage.registry.close()}
             }}
@@ -117,7 +114,7 @@ class EditorCreateNoteFileHostTest {
         val made=withContext(Dispatchers.IO) {f.editor.createNoteFile(tree(f),"root","new cover note",setup(cover=true))}
         assertEquals(1,f.creates.get());assertNotNull("Actual empty-target publication must succeed",made)
         assertEquals("target",DocumentsContract.getDocumentId(Uri.parse(made!!)))
-        val actual=withContext(Dispatchers.IO) {BundleReferenceInfo.inspectStrict(f.target)}
+        val actual=withContext(Dispatchers.IO) {TestBundleMetadata.read(f.target)}
         val disk=withContext(Dispatchers.IO) {f.target.inputStream().use {f.codec.read(it)}}
         assertNotEquals(identity.documentId,actual.header.identity!!.documentId)
         assertEquals(actual.header.identity,disk.identity);assertEquals(Document.DEFAULT_NEW_PAGES+1,disk.pages.size)
@@ -126,30 +123,10 @@ class EditorCreateNoteFileHostTest {
             assertEquals(disk.pages.size,actual.orderedPageIds.size);assertEquals(disk.pages.size,actual.pageIds.size)
         }
         assertEquals(actual.header.identity!!.documentId,f.storage.registry.idAt(made))
-        assertFalse(f.storage.hasRecovery(made));assertEquals(0,f.deletes.get());assertArrayEquals(source,f.source.readBytes())
+        assertEquals(0,f.deletes.get());assertArrayEquals(source,f.source.readBytes())
         withContext(Dispatchers.Main) {
             assertSame(live,f.editor.state.document);assertEquals(identity,live.identity);assertEquals(f.sourceUri,live.path)
             assertTrue(live.dirty);assertSame(history,f.editor.history);assertSame(command,history.nextUndo)
-        }
-    }
-    @Test fun aWrittenNewNoteSurvivesRegistrationFailureAndExplicitCompletionUsesTheSameCandidate()=scenario {f->
-        val live=openDirtySource(f);val source=f.source.readBytes();val identity=live.identity
-        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("CREATE TRIGGER fail_new_note BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'new-note registration failed'); END")}
-        val made=withContext(Dispatchers.IO) {f.editor.createNoteFile(tree(f),"root","new durable note",setup())}
-        assertEquals(1,f.creates.get());assertNull("Registration failure is not success",made)
-        assertTrue("A written candidate must not be deleted",f.target.isFile)
-        assertEquals(0,f.deletes.get())
-        val uri=DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree(f)),"target").toString()
-        assertTrue("Write-after-failure must retain the exact publication stage",f.storage.hasRecovery(uri))
-        val written=f.target.readBytes();val actual=BundleReferenceInfo.inspectStrict(f.target)
-        assertNotEquals(identity.documentId,actual.header.identity!!.documentId);assertEquals(1,f.writes.get())
-        assertArrayEquals(source,f.source.readBytes())
-        withContext(Dispatchers.IO) {f.storage.registry.writableDatabase.execSQL("DROP TRIGGER fail_new_note")}
-        val completed=withContext(Dispatchers.Main) {f.editor.completeRecoveryCopy(uri,"new durable note.xnote")}
-        assertTrue(completed is RecoveryCopyResult.Saved);assertFalse(f.storage.hasRecovery(uri))
-        assertEquals(1,f.writes.get());assertArrayEquals(written,f.target.readBytes());assertEquals(0,f.deletes.get())
-        withContext(Dispatchers.Main) {
-            assertSame(live,f.editor.state.document);assertEquals(identity,live.identity);assertEquals(f.sourceUri,live.path);assertTrue(live.dirty)
         }
     }
     @Test fun everyPublicBlankAndMarkdownEntryRejectsNonemptyOriginalAndUnreadableProviderTargetsBeforeAnyWrite() {
@@ -179,10 +156,10 @@ class EditorCreateNoteFileHostTest {
             assertEquals("$entry must execute the real createDocument",1,f.creates.get())
             assertNotNull("$entry could not publish to a genuinely empty target",made)
             assertEquals("target",DocumentsContract.getDocumentId(Uri.parse(made!!)))
-                val actual=withContext(Dispatchers.IO) {BundleReferenceInfo.inspectStrict(f.target)}
+                val actual=withContext(Dispatchers.IO) {TestBundleMetadata.read(f.target)}
                 assertNotEquals(identity.documentId,actual.header.identity!!.documentId)
                 assertEquals(actual.header.identity!!.documentId,f.storage.registry.idAt(made))
-                assertFalse(f.storage.hasRecovery(made));assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get())
+                assertEquals(1,f.writes.get());assertEquals(0,f.writeOpens.get())
                 if(entry==Entry.CANVAS) {
                     assertEquals("xcanvas",actual.format);assertNull(actual.header.anchors);assertTrue(actual.orderedPageIds.isEmpty())
                     val canvas=withContext(Dispatchers.IO) {f.target.inputStream().use {CanvasCodec(AndroidImageCodec(),AndroidTextMeasurer()).read(it)}}
@@ -202,7 +179,7 @@ class EditorCreateNoteFileHostTest {
                 assertSame(live,f.editor.state.document);assertEquals(identity,live.identity);assertEquals(f.sourceUri,live.path)
                 assertTrue(live.dirty);assertSame(history,f.editor.history);assertSame(command,history.nextUndo)
                 assertEquals(view,Triple(f.editor.state.zoom,f.editor.state.scrollX,f.editor.state.scrollY))
-                assertEquals(identity.documentId,f.editor.lastReadSourceVersion()?.documentId)
+                assertEquals(identity.documentId,f.editor.state.document.identity.documentId)
             }
         }
     }

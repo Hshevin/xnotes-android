@@ -375,10 +375,10 @@ internal object MapJson {
      * snapshot, then let the copy plan stream the original entries and verify their digests. */
     fun validateForCopy(zip: ZipFile, cancelled: () -> Boolean) {
         val map = zip.getInputStream(zip.getEntry(ENTRY)).use {
-            CanvasCodec.readMapEntry(BundleEntries.cancellable(it, cancelled))
+            CanvasCodec.readMapEntry(cancellableInput(it, cancelled))
         }
-        val layers = zip.getInputStream(zip.getEntry(BundleCopyPlan.MANIFEST)).use { input ->
-            val reader = InputStreamReader(BundleEntries.cancellable(input, cancelled), Charsets.UTF_8.newDecoder())
+        val layers = zip.getInputStream(zip.getEntry("manifest.json")).use { input ->
+            val reader = InputStreamReader(cancellableInput(input, cancelled), Charsets.UTF_8.newDecoder())
             val p = JsonPull(reader, strict = true, tokenLimit = Int.MAX_VALUE)
             var layers = DrawingLayers()
             p.fields { key -> if (key == "layers") layers = LayerJson.read(p) else p.skipValue() }

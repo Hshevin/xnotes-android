@@ -181,7 +181,7 @@ class CanvasMapCodecTest {
 
     @Test fun legacyFormatValidationAcceptsCanvasesWithMaps() {
         val manifest = entries(bytesOf(docWith(richState()))).getValue("manifest.json")
-        BundleCopyPlan.validateLegacyFormat(ByteArrayInputStream(manifest))
+        bundleFormat(ByteArrayInputStream(manifest))
     }
 
     // ---- round trip ----

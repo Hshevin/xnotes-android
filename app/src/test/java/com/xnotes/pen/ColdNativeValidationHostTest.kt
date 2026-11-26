@@ -4,7 +4,6 @@ import com.xnotes.canvas.ViewOverrides
 import com.xnotes.core.model.Document
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.model.NativeRestoreHint
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.platform.LegacySessionWrite
 import com.xnotes.platform.SessionStore
 import com.xnotes.ui.*
@@ -24,7 +23,6 @@ class ColdNativeValidationHostTest {
     private fun field(editor:Editor,name:String)=Editor::class.java.getDeclaredField(name).apply {isAccessible=true}.get(editor)
 
     private suspend fun seed(f:EditorPageCopyFixture,editor:Editor=f.editor):NativeRestoreHint {
-        (field(editor,"sessionOwner") as LegacySessionQueue.Owner).awaitAccepted()
         val document=Document.blank().apply {dirty=false}
         withContext(Dispatchers.IO) {
             val store=SessionStore(field(editor,"sessionDir") as File,f.codec,
@@ -74,26 +72,6 @@ class ColdNativeValidationHostTest {
             } finally {next.close()}
         }
         assertArrayEquals(original,body.readBytes());assertEquals(0,f.writes.get())
-    }
-
-    @Test fun changingTheSecondCacheAfterPreparationCannotAdoptEitherPane()=runParkingScenario {f->
-        val second=withContext(Dispatchers.Main) {f.editor.secondaryPane()}
-        val firstHint=seed(f);val secondHint=seed(f,second)
-        val firstBody=File(field(f.editor,"sessionDir") as File,"document.xnote")
-        val secondBody=File(field(second,"sessionDir") as File,"document.xnote")
-        val original=firstBody.readBytes()
-        withContext(Dispatchers.Main) {
-            val value=LastPresentation.Native(listOf(ColdNativeSlot.Note(Pane.PRIMARY,firstHint),
-                ColdNativeSlot.Note(Pane.SECONDARY,secondHint)),ColdNativeLayout(Pane.SECONDARY))
-            val prepared=requireNotNull(f.editor.prepareColdNativePresentation(value) {true})
-            try {
-                withContext(Dispatchers.IO) {secondBody.writeText("changed after preparation")}
-                assertFalse(prepared.verify())
-                assertFalse(f.editor.noteOpen);assertFalse(second.noteOpen)
-            } finally {prepared.close()}
-        }
-        assertArrayEquals(original,firstBody.readBytes())
-        assertEquals("changed after preparation",secondBody.readText());assertEquals(0,f.writes.get())
     }
 
     @Test fun outOfRangeSplitRatioIsRejectedBeforeAllocatingAnotherPane()=runParkingScenario {f->

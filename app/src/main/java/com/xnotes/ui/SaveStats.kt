@@ -3,12 +3,6 @@ package com.xnotes.ui
 import android.util.Log
 import java.util.concurrent.atomic.AtomicInteger
 
-internal object CheckpointPacing {
-    const val VIEW_SETTLE_MS=180L
-    const val CONTENT_SETTLE_MS=1500L
-    fun settleMs(contentChanged:Boolean)=if(contentChanged) CONTENT_SETTLE_MS else VIEW_SETTLE_MS
-}
-
 internal sealed interface NativeCheckpointResult {
     class Ready(val checkpoint:Editor.PreparedNativePresentationCheckpoint):NativeCheckpointResult
     data object Deferred:NativeCheckpointResult

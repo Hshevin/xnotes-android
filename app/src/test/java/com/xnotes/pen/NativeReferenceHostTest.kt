@@ -14,8 +14,7 @@ import com.xnotes.format.AnchorMetadata
 import com.xnotes.format.BundleIdentity
 import com.xnotes.format.BundleMigration
 import com.xnotes.format.BundlePdf
-import com.xnotes.format.BundleReferenceInfo
-import com.xnotes.platform.LegacySessionQueue
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.storage.NativeReferenceIssue
 import com.xnotes.storage.NativeReferenceTarget
 import com.xnotes.ui.Editor
@@ -59,7 +58,6 @@ class NativeReferenceHostTest {
                 val jobs=withContext(Dispatchers.Main) {listOf("noteWriteJob","canvasWriteJob","sessionWriteJob").mapNotNull {
                     Editor::class.java.getDeclaredField(it).apply {isAccessible=true}.get(pane) as? Job}}
                 jobs.forEach {it.join()}
-                (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(pane) as LegacySessionQueue.Owner).awaitAccepted()
             }
         }
     }
@@ -164,7 +162,7 @@ class NativeReferenceHostTest {
     @Test fun storedMissingOrForeignIdentityAndBadPageContractsNeverMigrateOrDiscardTheOutgoingDirtyModel() {
         for(mode in listOf("missingIdentity","foreignIdentity","missingMarker","duplicatePage")) runParkingScenario {f->
             withContext(Dispatchers.IO) {f.seed();f.seed(f.target)}
-            val info=BundleReferenceInfo.inspectStrict(f.target);val target=NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1])
+            val info=TestBundleMetadata.read(f.target);val target=NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1])
             when(mode) {
                 "missingIdentity"->rewrite(f.target) {name,bytes->if(name==BundleIdentity.ENTRY) null else bytes}
                 "foreignIdentity"->f.seed(f.target)
@@ -185,7 +183,7 @@ class NativeReferenceHostTest {
                 assertSame(primary,f.editor.state.document);assertTrue(primary.dirty);assertTrue(f.editor.history.canUndo);assertTrue(f.editor.noteOpen)
             }
             assertArrayEquals(original,f.target.readBytes());assertEquals(0,f.writes.get());assertEquals(0,f.writeOpens.get());assertEquals(0,f.deletes.get())
-            assertFalse(f.storage.hasRecovery(f.targetUri))
+
         }
     }
 
@@ -195,7 +193,7 @@ class NativeReferenceHostTest {
                 f.seed();f.seed(f.target)
                 f.storage.registry.registerObserved(com.xnotes.format.BundleHeader.read(f.target),"xnote","remembered-source.xnote",f.targetUri)
             }
-            val info=BundleReferenceInfo.inspectStrict(f.target)
+            val info=TestBundleMetadata.read(f.target)
             val target=NativeReferenceTarget(requireNotNull(info.header.identity).documentId,info.orderedPageIds[1])
             f.targetDisplayName=if(named) "Actual readable source.xnote" else ""
             val expected=if(named) f.targetDisplayName else "remembered-source.xnote"
@@ -213,7 +211,7 @@ class NativeReferenceHostTest {
     @Test fun storedLateReadsRejectAChangedIdentityAndActuallyAdoptAValidReorderedPageById() {
         for(foreign in listOf(true,false)) runParkingScenario {f->
             withContext(Dispatchers.IO) {f.seed();f.seed(f.target)}
-            val original=BundleReferenceInfo.inspectStrict(f.target);val target=NativeReferenceTarget(original.header.identity!!.documentId,original.orderedPageIds[1])
+            val original=TestBundleMetadata.read(f.target);val target=NativeReferenceTarget(original.header.identity!!.documentId,original.orderedPageIds[1])
             val old=withContext(Dispatchers.Main) {f.editor.openAsync(f.sourceUri,"source.xnote");f.editor.view.layout(0,0,1000,1000);f.editor.state.document}
             val request=withContext(Dispatchers.Main) {ready(f.editor.prepareReference(target,selectedUri=f.targetUri))}
             val entered=CompletableDeferred<Unit>();val reads=AtomicInteger()
@@ -236,7 +234,6 @@ class NativeReferenceHostTest {
                         assertEquals(target.documentId,f.editor.visibleDocumentId)
                         assertEquals(target.pageId,f.editor.state.document.pages.first().referenceIdentity.id)
                         assertEquals(0,f.editor.state.currentPageIndex())
-                        assertEquals(BundleMigration.hash(f.target),f.editor.lastReadSourceVersion()?.sha256)
                     }
                 }
             }
@@ -244,31 +241,32 @@ class NativeReferenceHostTest {
         }
     }
 
-    @Test fun anIdentifiedEmbeddedPdfV1SourceOpensWithoutCompactionAndItsStrictEditedSaveKeepsThePdfBytes()=runParkingScenario {f->
+    @Test fun openingAnEmbeddedPdfSourceCompactsItAndEditedSavesKeepItsOriginal()=runParkingScenario {f->
         val bytes=minimalPdf();val input=File(f.root,"original.pdf").apply {writeBytes(bytes)}
         withContext(Dispatchers.IO) {
             f.seed()
             val portable=Document(mutableListOf(Page(500.0,500.0),Page(500.0,500.0)),pdfFile=input).apply {enableReferenceAnchors()}
             f.target.outputStream().use {f.codec.write(portable.fixedWriteSnapshot(),it,embedPdf=true)}
         }
-        val original=f.target.readBytes();val info=BundleReferenceInfo.inspectStrict(f.target)
+        val original=f.target.readBytes();val info=TestBundleMetadata.read(f.target)
         val identity=requireNotNull(info.header.identity)
         assertFalse(identity.externalPdf)
         val target=NativeReferenceTarget(identity.documentId,info.orderedPageIds[1])
         withContext(Dispatchers.Main) {
             f.editor.openAsync(f.sourceUri,"source.xnote")
             val request=ready(f.editor.prepareReference(target,selectedUri=f.targetUri))
-            opened(f.editor.openReference(request));assertArrayEquals(original,f.target.readBytes())
-            assertEquals(0,f.writes.get());assertEquals(info.header.identity,f.editor.state.document.identity)
+            opened(f.editor.openReference(request));assertFalse(original.contentEquals(f.target.readBytes()))
+            assertEquals(1,f.writes.get());assertEquals(identity.documentId,f.editor.state.document.identity.documentId)
             add(f.editor,110.0)
             assertTrue("A strict embedded-v1 source must save without silently changing its packaging contract",f.editor.flushSplitDocument())
-            assertFalse(f.editor.state.document.dirty);assertEquals(info.header.identity,f.editor.state.document.identity)
+            assertFalse(f.editor.state.document.dirty);assertEquals(identity.documentId,f.editor.state.document.identity.documentId)
         }
-        val saved=BundleReferenceInfo.inspectStrict(f.target)
-        assertEquals(info.header.identity,saved.header.identity);assertEquals(info.embeddedPdfHash,saved.embeddedPdfHash)
+        val saved=TestBundleMetadata.read(f.target)
+        assertEquals(identity.documentId,saved.header.identity!!.documentId);assertEquals(info.embeddedPdfHash,saved.originalPdfHash)
         assertEquals(info.orderedPageIds,saved.orderedPageIds)
-        ZipFile(f.target).use {zip->assertArrayEquals(bytes,zip.getInputStream(zip.getEntry(BundlePdf.ENTRY)).readBytes())}
-        assertArrayEquals(bytes,input.readBytes());assertEquals(1,f.writes.get());assertEquals(0,f.deletes.get())
+        assertNull(saved.embeddedPdfHash)
+        assertArrayEquals(bytes,f.storage.pdfResources.resolve(requireNotNull(saved.originalPdfHash)).readBytes())
+        assertArrayEquals(bytes,input.readBytes());assertEquals(2,f.writes.get());assertEquals(0,f.deletes.get())
         // This exercises byte/lease/save contracts, not PDFium painting or target-GPU rendering.
     }
     @Test fun aDetachedSourceWaitsForItsSameSizeActualHostAndStartsItsMarkerLifetimeThere()=runParkingScenario {f->

@@ -32,8 +32,8 @@ class BundleHeaderManifestLimitTest {
                 at++
             }
             assertTrue(found);source.writeBytes(bytes)
-            // A lying central size must not bypass the actual decompressed byte limit either.
-            assertThrows(IllegalArgumentException::class.java) {BundleHeader.read(source)}
+            // The header reads metadata only. The manifest reader enforces its expansion limit.
+            assertEquals(identity, BundleHeader.read(source).identity)
             assertArrayEquals(bytes,source.readBytes())
         } finally {dir.deleteRecursively()}
     }

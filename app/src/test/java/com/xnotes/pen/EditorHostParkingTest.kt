@@ -12,7 +12,6 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.tools.Tool
-import com.xnotes.platform.LegacySessionQueue
 import com.xnotes.storage.NotebookStorage
 import com.xnotes.ui.Editor
 import java.io.File
@@ -58,7 +57,6 @@ internal fun runParkingScenario(advanceClock:Boolean=false,block:suspend (Editor
                     }
                     suspendCancellableCoroutine<Unit> {waiter->Handler(Looper.getMainLooper()).post {waiter.resumeWith(Result.success(Unit))}}
                 }
-                for(pane in panes) (Editor::class.java.getDeclaredField("sessionOwner").apply {isAccessible=true}.get(pane) as LegacySessionQueue.Owner).awaitAccepted()
                 com.xnotes.ui.SplitRecentWriter.forFilesDir(f.context.filesDir).awaitAccepted()
             }
             singleton.set(null,previous);withContext(Dispatchers.IO) {f.storage.registry.close()}
@@ -119,7 +117,7 @@ class EditorHostParkingTest {
             withContext(Dispatchers.Main) {parkingPen(other,MotionEvent.ACTION_UP,Pt(170.0,150.0))}
             val proof=withTimeout(5000L) {waiting.await()};assertNotNull(proof)
             withContext(Dispatchers.Main) {
-                assertTrue(proof!!.current());assertSame(models.first,f.editor.state.document);assertSame(models.second,other.state.document)
+                assertTrue(proof!!.invoke());assertSame(models.first,f.editor.state.document);assertSame(models.second,other.state.document)
                 assertTrue(models.first.dirty);assertTrue(models.second.dirty)
                 assertEquals(1,models.first.pages.first().items.filterIsInstance<Stroke>().size)
                 assertEquals(1,models.second.pages.first().items.filterIsInstance<Stroke>().size)
@@ -162,19 +160,19 @@ class EditorHostParkingTest {
     @Test fun aParkingProofRejectsLateInputLayoutBodyModelAndAcceptedWriteChanges()=runParkingScenario {f->
         openParkingPanes(f)
         withContext(Dispatchers.Main) {
-            val input=requireNotNull(f.editor.awaitHostParking());assertTrue(input.current())
-            parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0));assertFalse(input.current())
+            val input=requireNotNull(f.editor.awaitHostParking());assertTrue(input())
+            parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0));assertFalse(input())
             parkingPen(f.editor,MotionEvent.ACTION_CANCEL,Pt(100.0,100.0))
             val layout=requireNotNull(f.editor.awaitHostParking())
-            f.editor.view.layout(0,0,1200,1000);assertFalse(layout.current())
-            val body=requireNotNull(f.editor.awaitHostParking());f.addStroke(220.0);assertFalse(body.current())
-            val dirty=requireNotNull(f.editor.awaitHostParking());assertTrue(dirty.current())
+            f.editor.view.layout(0,0,1200,1000);assertFalse(layout())
+            val body=requireNotNull(f.editor.awaitHostParking());f.addStroke(220.0);assertFalse(body())
+            val dirty=requireNotNull(f.editor.awaitHostParking());assertTrue(dirty())
             val done=CompletableDeferred<Boolean>();f.editor.saveToThen(f.sourceUri) {done.complete(it)}
-            assertFalse("A newly accepted encoder invalidates the old proof",dirty.current());assertTrue(done.await());assertFalse(dirty.current())
+            assertFalse("A newly accepted encoder invalidates the old proof",dirty());assertTrue(done.await());assertFalse(dirty())
             val model=requireNotNull(f.editor.awaitHostParking());val before=f.editor.state.document
             f.editor.newNote()
             withTimeout(5000L) {while(f.editor.state.document===before) {delay(1L)}}
-            assertFalse(model.current())
+            assertFalse(model())
         }
     }
 
@@ -185,7 +183,7 @@ class EditorHostParkingTest {
             parkingPen(f.editor,MotionEvent.ACTION_DOWN,Pt(100.0,100.0));parkingPen(f.editor,MotionEvent.ACTION_UP,Pt(100.0,100.0))
             f.editor.typeInOpenBox("unconfirmed native text")
             assertNotNull(f.editor.controller.activeTextItem())
-            val proof=requireNotNull(f.editor.awaitHostParking());assertTrue(proof.current())
+            val proof=requireNotNull(f.editor.awaitHostParking());assertTrue(proof())
             assertEquals("unconfirmed native text",f.editor.state.document.pages.first().items.filterIsInstance<TextItem>().single().text)
             assertTrue(f.editor.state.document.dirty);assertTrue(f.editor.history.canUndo)
         }

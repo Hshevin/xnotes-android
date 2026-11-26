@@ -7,7 +7,7 @@ import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.util.DocumentKind
-import com.xnotes.format.BundleReferenceInfo
+import com.xnotes.format.TestBundleMetadata
 import com.xnotes.format.CanvasCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
@@ -43,7 +43,7 @@ class CanvasHomeSplitSlotHostTest {
     }
     private suspend fun prepare(f:EditorPageCopyFixture):NativeReferenceRequest {
         val target=withContext(Dispatchers.IO) {
-            val info=BundleReferenceInfo.inspectStrict(f.source)
+            val info=TestBundleMetadata.read(f.source)
             NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1],requiredKind=DocumentKind.NOTE)
         }
         return withContext(Dispatchers.Main) {
@@ -62,7 +62,7 @@ class CanvasHomeSplitSlotHostTest {
     @Test fun onlyTheExplicitHomePermitLetsANoteReplaceTheActualCanvasOwner()=runParkingScenario {f->
         open(f)
         val target=withContext(Dispatchers.IO) {
-            val info=BundleReferenceInfo.inspectStrict(f.source)
+            val info=TestBundleMetadata.read(f.source)
             NativeReferenceTarget(info.header.identity!!.documentId,info.orderedPageIds[1])
         }
         withContext(Dispatchers.Main) {

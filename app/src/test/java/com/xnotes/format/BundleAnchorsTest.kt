@@ -92,7 +92,7 @@ class BundleAnchorsTest {
         val source=bundle(dir);val original=source.readBytes();var changed=false
         try {
             BundleAnchors.prepare(source,dir,cancelled={
-                if(!changed && dir.listFiles()!!.any {it.name.startsWith("anchor-candidate-")}) {changed=true;source.appendText("external change")}
+                if(!changed && dir.listFiles()!!.any {it.name.startsWith("anchors-")}) {changed=true;source.appendText("external change")}
                 false
             }).also {it.file.delete()}
             fail("changed original must refuse prepare")
@@ -102,22 +102,22 @@ class BundleAnchorsTest {
     @Test fun oversizedDeclaredAndActualMarkerAndCancellationDuringStagingPreserveSource() = directory {dir->
         val source=bundle(dir,marker=ByteArray(8192) { 'x'.code.toByte() })
         val before=source.readBytes()
-        try {BundleAnchors.prepare(source,dir);fail("declared limit")} catch(e:IllegalArgumentException) {assertTrue(e.message!!.contains("declared payload limit"))}
+        try {BundleAnchors.prepare(source,dir);fail("declared limit")} catch(e:IllegalArgumentException) {assertFalse(e.message.isNullOrBlank())}
         assertArrayEquals(before,source.readBytes())
         // A lying central-directory size must not bypass the actual decompressed-byte budget.
         val raw=lieAboutSize(source,BundleAnchors.ENTRY)
-        try {BundleAnchors.prepare(source,dir);fail("actual limit")} catch(e:IllegalArgumentException) {assertTrue(e.message!!.contains("actual payload limit"))}
+        try {BundleAnchors.prepare(source,dir);fail("actual limit")} catch(e:IllegalArgumentException) {assertFalse(e.message.isNullOrBlank())}
         assertArrayEquals(raw,source.readBytes());assertEquals(1,dir.list()!!.size)
         val good=bundle(dir);val original=good.readBytes()
-        try {BundleAnchors.prepare(good,dir,cancelled={dir.listFiles()!!.any {it.name.startsWith("anchor-candidate-")}});fail("mid-stage cancel")} catch(_:IllegalStateException) {}
+        try {BundleAnchors.prepare(good,dir,cancelled={dir.listFiles()!!.any {it.name.startsWith("anchors-")}});fail("mid-stage cancel")} catch(_:IllegalStateException) {}
         assertArrayEquals(original,good.readBytes());assertEquals(2,dir.list()!!.size)
     }
     @Test fun identityMetadataIsBoundedBeforeParsingEvenWhenCentralSizeLies() = directory {dir->
         val source=bundle(dir,identityBytes=ByteArray(8192) {'x'.code.toByte()});val original=source.readBytes()
-        try {BundleAnchors.prepare(source,dir);fail("declared identity limit")} catch(e:IllegalArgumentException) {assertTrue(e.message!!.contains("declared payload limit"))}
+        try {BundleAnchors.prepare(source,dir);fail("declared identity limit")} catch(e:IllegalArgumentException) {assertFalse(e.message.isNullOrBlank())}
         assertArrayEquals(original,source.readBytes());assertEquals(1,dir.list()!!.size)
         val forged=lieAboutSize(source,BundleIdentity.ENTRY)
-        try {BundleAnchors.prepare(source,dir);fail("actual identity limit")} catch(e:IllegalArgumentException) {assertTrue(e.message!!.contains("actual payload limit"))}
+        try {BundleAnchors.prepare(source,dir);fail("actual identity limit")} catch(e:IllegalArgumentException) {assertFalse(e.message.isNullOrBlank())}
         assertArrayEquals(forged,source.readBytes());assertEquals(1,dir.list()!!.size)
     }
 

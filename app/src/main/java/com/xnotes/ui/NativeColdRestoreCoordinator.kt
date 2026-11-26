@@ -35,7 +35,7 @@ internal class NativeColdRestoreCoordinator(private val host:Host) {
 
     suspend fun prepare(value:LastPresentation.Native,stillCurrent:()->Boolean):PreparedColdNativePresentation? {
         // The persisted contract, checked before any pane is allocated or private cache is read.
-        if(!stillCurrent() || !LastPresentationContract.accepts(value)) return null
+        if(!stillCurrent() || !PresentationValidation.accepts(value)) return null
         host.ensurePanes(value.slots)
         val initial=host.captureInitialProof()
         val participants=ArrayList<Participant>()
@@ -71,9 +71,13 @@ internal class PreparedColdNativePresentation internal constructor(
     private var claimed=false
     private var adopted=false
     private var closed=false
-    suspend fun verify():Boolean=!closed && !claimed && current() && participants.all {it.verify()} && current()
+    private var verified = false
+    suspend fun verify(): Boolean {
+        verified = !closed && !claimed && current() && participants.all { it.verify() } && current()
+        return verified
+    }
     fun claimForAdoption():Boolean {
-        if(closed || claimed || !current() || !participants.all {it.claim()}) return false
+        if(!verified || closed || claimed || !current() || !participants.all {it.claim()}) return false
         claimed=true;return true
     }
     fun applyAdoption() {
