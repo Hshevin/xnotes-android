@@ -2967,6 +2967,34 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if (state.document.bodyStartPage == null) automaticFirstNumber else 1)
         }
 
+    val showBodyPageNumbers: Boolean
+        get() {
+            prefsVersion
+            return settings.prefs.showBodyPageNumbers
+        }
+
+    fun setShowBodyPageNumbers(body: Boolean) {
+        if (settings.prefs.showBodyPageNumbers == body) return
+        val p = settings.prefs.copy(showBodyPageNumbers = body)
+        settings = settings.copy(prefs = p)
+        prefsVersion++
+        sibling?.let { other ->
+            other.settings = other.settings.copy(prefs = other.preferences.copy(showBodyPageNumbers = body))
+            other.prefsVersion++
+        }
+        settingsRepo.save(settings)
+    }
+
+    fun pageDisplayLabel(index: Int): String {
+        val numbering = pageNumbering
+        return numbering.displayLabel(index, showBodyPageNumbers && numbering.hasBodyOffset)
+    }
+
+    fun pageDisplayTotal(index: Int): String {
+        val numbering = pageNumbering
+        return numbering.displayTotal(index, showBodyPageNumbers && numbering.hasBodyOffset)
+    }
+
     fun setBodyStartPage(index: Int?): Boolean {
         if (index != null && index !in 0 until pageCount) return false
         state.document.bodyStartPage = index
@@ -3873,6 +3901,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val marginChanged = p.sideMargin != settings.prefs.sideMargin
         settings = settings.copy(prefs = p)
         for (editor in listOfNotNull(this, sibling)) {
+            if (editor !== this) editor.settings = editor.settings.copy(prefs = p)
             editor.fullscreen = p.startFullscreen ?: !editor.deviceHasDisplayCutout
             editor.applyPagePrefsToState(p)
             editor.republishFlow(invalidate = true)

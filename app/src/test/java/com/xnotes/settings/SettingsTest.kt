@@ -116,6 +116,7 @@ class SettingsTest {
                 defaultPageOrientation = Orientation.LANDSCAPE,
                 pageColor = Rgba(20, 20, 20),
                 hidePageBorders = true,
+                showBodyPageNumbers = true,
             ),
         )
         val back = Settings.fromJson(original.toJson())
@@ -131,6 +132,8 @@ class SettingsTest {
         assertEquals(Orientation.LANDSCAPE, back.prefs.defaultPageOrientation)
         assertEquals(Rgba(20, 20, 20, 255), back.prefs.pageColor)
         assertTrue(back.prefs.hidePageBorders)
+        assertTrue(back.prefs.showBodyPageNumbers)
+        assertFalse(Preferences.fromJson(JSONObject()).showBodyPageNumbers)
     }
 
     @Test fun theSpeedPensSmoothingAndTopSpeedRoundTrip() {

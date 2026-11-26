@@ -549,7 +549,7 @@ private fun PageThumb(
                 .clickable { if (selecting) editor.togglePageSelection(index) else editor.goToPage(index) }
                 .then(if (reading) Modifier else Modifier.semantics { onLongClick { editor.togglePageSelection(index); true } }),
         ) {
-            bitmap?.let { Image(it, contentDescription = stringResource(R.string.page_n, index + 1), modifier = Modifier.fillMaxSize()) }
+            bitmap?.let { Image(it, contentDescription = stringResource(R.string.page_label, editor.pageDisplayLabel(index)), modifier = Modifier.fillMaxSize()) }
 
             if (selected) {
                 Box(Modifier.matchParentSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
@@ -578,8 +578,10 @@ private fun PageThumb(
             }
         }
         val captionColor = (if (current || selected) palette.accent else palette.textDim).toComposeColor()
+        val numbering = editor.pageNumbering
+        val thumbLabel = if (editor.showBodyPageNumbers && numbering.hasBodyOffset) numbering.label(index) else "%02d".format(index + 1)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s6)) {
-            Text("%02d".format(index + 1), color = captionColor, fontSize = TextSize.micro)
+            Text(thumbLabel, color = captionColor, fontSize = TextSize.micro)
             if (page.cover) Text(stringResource(R.string.cover), color = captionColor, fontSize = TextSize.micro)
         }
     }
@@ -1048,7 +1050,7 @@ private fun TocLine(editor: Editor, row: TocRow, target: Int, marked: Boolean, f
         )
         if (target >= 0) {
             Text(
-                "${target + 1}",
+                editor.pageDisplayLabel(target),
                 color = (if (marked) palette.selectionForeground else palette.textDim).toComposeColor(),
                 fontSize = TextSize.label,
                 style = tabular(),
@@ -1108,7 +1110,7 @@ private fun BookmarksTab(editor: Editor) {
     }
 
     if (showAdd) {
-        val defaultLabel = stringResource(R.string.page_n, editor.pageIndex + 1)
+        val defaultLabel = stringResource(R.string.page_label, editor.pageDisplayLabel(editor.pageIndex))
         var label by remember { mutableStateOf(defaultLabel) }
         val add = { editor.addBookmark(label.ifBlank { defaultLabel }); showAdd = false }
         SheetDialog(
@@ -1141,7 +1143,7 @@ private fun BookmarkRow(editor: Editor, mark: com.xnotes.core.model.Bookmark, he
             modifier = Modifier.weight(1f),
         )
         Text(
-            "${mark.page + 1}",
+            editor.pageDisplayLabel(mark.page),
             color = if (here) accent else palette.textDim.toComposeColor(),
             fontSize = TextSize.label,
             style = tabular(),

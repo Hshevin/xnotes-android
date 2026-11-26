@@ -7,6 +7,16 @@ class PageNumbering(private val count: Int, start: Int, private val firstNumber:
 
     fun label(index: Int): String = if (index < start) roman(index + 1) else (index.toLong() - start + firstNumber).toString()
 
+    fun displayLabel(index: Int, byBody: Boolean): String =
+        if (byBody) label(index) else (index + 1).toString()
+
+    fun displayTotal(index: Int, byBody: Boolean): String = when {
+        count <= 0 -> "0"
+        !byBody -> count.toString()
+        index < start -> roman(start)
+        else -> label(count - 1)
+    }
+
     fun isBodyFirst(index: Int): Boolean = count > 0 && index == start && label(index) == "1"
 
     fun resolveAbsolute(raw: String): Int? =

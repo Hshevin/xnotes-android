@@ -1,7 +1,13 @@
 <resources>
     <string name="number_absolute">Absolute page</string>
     <string name="number_body">Body page</string>
+    <string name="number_short_absolute">Absolute</string>
+    <string name="number_short_body">Body</string>
+    <string name="number_display_mode">Page numbers</string>
     <string name="number_body_badge">Body %1$s</string>
+    <string name="number_abs_badge">Abs %1$d / %2$d</string>
+    <string name="page_of_label">of %1$s</string>
+    <string name="page_label">Page %1$s</string>
     <string name="number_jump_target">Page number</string>
     <string name="number_input_placeholder">Enter page</string>
     <string name="number_input_placeholder_roman">e.g. 1 or iv</string>

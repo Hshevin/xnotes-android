@@ -332,6 +332,15 @@ fun PreferencesPane(
             CheckRow(stringResource(R.string.pref_hide_page_borders), prefs.hidePageBorders) {
                 update(prefs.copy(hidePageBorders = it))
             }
+            FieldLabel(stringResource(R.string.number_display_mode))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
+                Chip(stringResource(R.string.number_absolute), !prefs.showBodyPageNumbers) {
+                    update(prefs.copy(showBodyPageNumbers = false))
+                }
+                Chip(stringResource(R.string.number_body), prefs.showBodyPageNumbers) {
+                    update(prefs.copy(showBodyPageNumbers = true))
+                }
+            }
             FieldLabel(stringResource(R.string.pref_side_margin_px, prefs.sideMargin.toInt()))
             Slider(
                 value = prefs.sideMargin.toFloat(),

@@ -59,6 +59,8 @@ data class Preferences(
     val sideMargin: Double = 16.0,
     /** Whether the hairline outline around every page is left undrawn. */
     val hidePageBorders: Boolean = false,
+    /** Whether page indicators, thumbnails, outline and search show body page labels instead of absolute page numbers when a document has a body offset. */
+    val showBodyPageNumbers: Boolean = false,
     /** User zoom floor: when enabled, no zoom path goes below [minZoomPercent]%. */
     val minZoomEnabled: Boolean = false,
     val minZoomPercent: Int = 50,
@@ -145,6 +147,7 @@ data class Preferences(
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
+        .put("show_body_page_numbers", showBodyPageNumbers)
         .put("min_zoom_enabled", minZoomEnabled)
         .put("min_zoom_percent", minZoomPercent)
         .put("max_zoom_enabled", maxZoomEnabled)
@@ -287,6 +290,7 @@ data class Preferences(
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),
+                showBodyPageNumbers = o.optBoolean("show_body_page_numbers", false),
                 minZoomEnabled = o.optBoolean("min_zoom_enabled", false),
                 minZoomPercent = o.optInt("min_zoom_percent", 50).coerceIn(ZOOM_LIMIT_MIN_PCT, ZOOM_LIMIT_MAX_PCT),
                 maxZoomEnabled = o.optBoolean("max_zoom_enabled", false),

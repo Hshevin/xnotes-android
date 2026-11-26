@@ -371,9 +371,15 @@ private fun BoxScope.BottomIsland(
     val last = (count - 1).coerceAtLeast(0)
     val scrubbing = chrome.scrubPage >= 0
     val index = if (scrubbing) chrome.scrubPage else editor.pageIndex.coerceIn(0, last)
+    val numbering = editor.pageNumbering
+    val showBody = editor.showBodyPageNumbers && numbering.hasBodyOffset
+    val shownLabel = if (count > 0) numbering.displayLabel(index, showBody) else "0"
+    val shownTotal = if (count > 0) numbering.displayTotal(index, showBody) else "0"
     var text by remember { mutableStateOf("") }
     fun jump() {
-        text.toIntOrNull()?.let { editor.goToPage((it - 1).coerceIn(0, last)) }
+        val target = if (showBody) numbering.resolve(text)
+            else text.trim().toIntOrNull()?.let { (it - 1).coerceIn(0, last) }
+        target?.let(editor::goToPage)
         chrome.typing = false
     }
     // While the number is a field it has the keyboard, so its digits and Delete are its own.
@@ -391,10 +397,10 @@ private fun BoxScope.BottomIsland(
         Island(Modifier.align(Alignment.BottomCenter).padding(ISLAND_MARGIN).widthIn(max = BOTTOM_MAX).fillMaxWidth().then(modifier)) {
             ToolbarIcon(XnotesIcons.prev, stringResource(R.string.previous_page), enabled = index > 0, shortcut = Keys.PREV_PAGE) { editor.prevPage() }
             if (typing) {
-                PageField(text, { text = it }, count, ::jump) { chrome.typing = false }
+                PageField(text, { text = it }, shownTotal, allowRoman = showBody && numbering.start > 0, onGo = ::jump) { chrome.typing = false }
             } else {
-                PageNumber(index, count) {
-                    text = "${editor.pageIndex + 1}"
+                PageNumber(shownLabel, shownTotal) {
+                    text = if (count > 0) numbering.displayLabel(editor.pageIndex, showBody) else ""
                     chrome.typing = true
                 }
             }
@@ -419,7 +425,7 @@ private fun BoxScope.BottomIsland(
 
 /** "88 of 186"; a tap turns it into a field to type a page into. */
 @Composable
-private fun PageNumber(index: Int, count: Int, onClick: () -> Unit) {
+private fun PageNumber(label: String, total: String, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val figures = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
     Row(
@@ -432,18 +438,18 @@ private fun PageNumber(index: Int, count: Int, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("${index + 1}", color = palette.text.toComposeColor(), fontSize = TextSize.title, fontWeight = FontWeight.Medium, style = figures)
+        Text(label, color = palette.text.toComposeColor(), fontSize = TextSize.title, fontWeight = FontWeight.Medium, style = figures)
         Spacer(Modifier.width(Space.s6))
-        Text(stringResource(R.string.page_of_count, count), color = palette.textDim.toComposeColor(), fontSize = TextSize.body)
+        Text(stringResource(R.string.page_of_label, total), color = palette.textDim.toComposeColor(), fontSize = TextSize.body)
     }
 }
 
 /** The page number as a field, sized to the note's longest page number. */
 @Composable
-private fun PageField(text: String, onText: (String) -> Unit, count: Int, onGo: () -> Unit, onBlur: () -> Unit) {
+private fun PageField(text: String, onText: (String) -> Unit, total: String, allowRoman: Boolean, onGo: () -> Unit, onBlur: () -> Unit) {
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.small
-    val digits = count.toString().length.coerceAtLeast(2)
+    val chars = maxOf(total.length, text.length, if (allowRoman) 4 else 2)
     Row(
         Modifier.widthIn(min = NUMBER_W).height(LocalBar.current.button),
         horizontalArrangement = Arrangement.Center,
@@ -461,9 +467,9 @@ private fun PageField(text: String, onText: (String) -> Unit, count: Int, onGo: 
             NativeField(
                 value = text,
                 onText = onText,
-                modifier = Modifier.width((digits * 9 + 4).dp),
-                numeric = true,
-                maxLen = digits,
+                modifier = Modifier.width((chars * 9 + 4).dp),
+                numeric = !allowRoman,
+                maxLen = if (allowRoman) 12 else total.length.coerceAtLeast(2),
                 endAlign = true,
                 autoFocus = true,
                 textSp = 15f,
@@ -472,7 +478,7 @@ private fun PageField(text: String, onText: (String) -> Unit, count: Int, onGo: 
             )
         }
         Spacer(Modifier.width(Space.s6))
-        Text(stringResource(R.string.page_of_count, count), color = palette.textDim.toComposeColor(), fontSize = TextSize.body)
+        Text(stringResource(R.string.page_of_label, total), color = palette.textDim.toComposeColor(), fontSize = TextSize.body)
     }
 }
 
@@ -622,7 +628,7 @@ private fun BoxScope.ScrubCard(editor: Editor, scrubPage: Int, marks: List<Pair<
             ) {
                 PageThumbnail(editor, page)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.page_n, page + 1), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.page_label, editor.pageDisplayLabel(page)), color = palette.text.toComposeColor(), fontSize = TextSize.bodyLarge, fontWeight = FontWeight.Medium)
                     sectionAt(marks, page)?.let { section ->
                         Text(
                             section,

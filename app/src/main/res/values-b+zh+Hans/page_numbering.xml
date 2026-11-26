@@ -1,7 +1,13 @@
 <resources>
     <string name="number_absolute">绝对页码</string>
     <string name="number_body">正文页码</string>
+    <string name="number_short_absolute">绝对</string>
+    <string name="number_short_body">正文</string>
+    <string name="number_display_mode">页码显示</string>
     <string name="number_body_badge">正文 %1$s</string>
+    <string name="number_abs_badge">绝对 %1$d / %2$d</string>
+    <string name="page_of_label">/ %1$s</string>
+    <string name="page_label">第 %1$s 页</string>
     <string name="number_jump_target">目标页码</string>
     <string name="number_input_placeholder">输入页码</string>
     <string name="number_input_placeholder_roman">如 1 或 iv</string>

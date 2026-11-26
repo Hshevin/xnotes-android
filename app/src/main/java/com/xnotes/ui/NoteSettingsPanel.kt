@@ -224,12 +224,18 @@ private fun PageCard(editor: Editor, onJump: () -> Unit) {
     val palette = LocalPalette.current
     val numbering = editor.pageNumbering
     val absNum = editor.pageIndex + 1
-    val bodyLabel = if (editor.pageCount > 0) numbering.label(editor.pageIndex) else "$absNum"
+    val hasOffset = numbering.hasBodyOffset
+    val showBody = editor.showBodyPageNumbers && hasOffset
+    val primaryLabel = if (editor.pageCount > 0) numbering.displayLabel(editor.pageIndex, showBody) else "$absNum"
+    val totalLabel = if (editor.pageCount > 0) numbering.displayTotal(editor.pageIndex, showBody) else "${editor.pageCount}"
     PanelCard {
         val keys = keyboardAttached()
         PanelCaption(stringResource(R.string.caption_page)) {
-            if (bodyLabel != "$absNum") {
-                CaptionValue(stringResource(R.string.number_body_badge, bodyLabel))
+            if (hasOffset && editor.pageCount > 0) {
+                CaptionValue(
+                    if (showBody) stringResource(R.string.number_abs_badge, absNum, editor.pageCount)
+                    else stringResource(R.string.number_body_badge, numbering.label(editor.pageIndex)),
+                )
             } else if (keys) {
                 CaptionHint("${Keys.PREV_PAGE} · ${Keys.NEXT_PAGE}")
             }
@@ -248,9 +254,9 @@ private fun PageCard(editor: Editor, onJump: () -> Unit) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$absNum", color = palette.text.toComposeColor(), fontSize = TextSize.headline, fontWeight = FontWeight.Medium)
+                Text(primaryLabel, color = palette.text.toComposeColor(), fontSize = TextSize.headline, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(Space.s8))
-                Text(stringResource(R.string.page_of_count, editor.pageCount), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
+                Text(stringResource(R.string.page_of_label, totalLabel), color = palette.textDim.toComposeColor(), fontSize = TextSize.bodyLarge)
             }
             RoundButton(XnotesIcons.next, stringResource(R.string.next_page), enabled = editor.pageIndex < editor.pageCount - 1) { editor.nextPage() }
         }
@@ -263,7 +269,7 @@ private fun PageCard(editor: Editor, onJump: () -> Unit) {
  * Go to page + body numbering sub-page inside the settings panel.
  *
  * Keeps jumping primary (with live destination mapping when body numbering differs from absolute)
- * and puts body-start numbering into its own clean card below without a nested popup.
+ * and puts display preference and body-start numbering into its own clean card below.
  */
 @Composable
 private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Unit) {
@@ -271,14 +277,15 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
     val numbering = editor.pageNumbering
     val pageCount = editor.pageCount
     val hasOffset = numbering.hasBodyOffset
-    var byBody by remember { mutableStateOf(hasOffset) }
+    val showBodyPref = editor.showBodyPageNumbers
+    var byBody by remember { mutableStateOf(hasOffset && showBodyPref) }
     var jumpText by remember { mutableStateOf("") }
     var jumpSync by remember { mutableIntStateOf(0) }
     var startText by remember { mutableStateOf("${numbering.start + 1}") }
     var startSync by remember { mutableIntStateOf(0) }
     var startInvalid by remember { mutableStateOf(false) }
 
-    LaunchedEffect(hasOffset) {
+    LaunchedEffect(hasOffset, showBodyPref) {
         if (!hasOffset) {
             if (byBody) {
                 byBody = false
@@ -286,7 +293,7 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
                 jumpSync++
             }
         } else if (jumpText.isBlank()) {
-            byBody = true
+            byBody = showBodyPref
         }
     }
     LaunchedEffect(numbering.start) {
@@ -394,27 +401,29 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
         }
     }
 
-    if (!editor.readOnly && pageCount > 0) {
+    if ((!editor.readOnly || hasOffset) && pageCount > 0) {
         val isManual = editor.state.document.bodyStartPage != null
         Spacer(Modifier.height(Space.s16))
         PanelCaption(stringResource(R.string.number_body_section)) {
-            if (isManual) {
-                Row(
-                    Modifier
-                        .clip(MaterialTheme.shapes.extraSmall)
-                        .clickable(role = Role.Button) { applyStart(null) }
-                        .padding(horizontal = Space.s6),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        stringResource(R.string.number_auto),
-                        color = palette.accent.toComposeColor(),
-                        fontSize = TextSize.label,
-                        fontWeight = FontWeight.Medium,
-                    )
+            if (!editor.readOnly) {
+                if (isManual) {
+                    Row(
+                        Modifier
+                            .clip(MaterialTheme.shapes.extraSmall)
+                            .clickable(role = Role.Button) { applyStart(null) }
+                            .padding(horizontal = Space.s6),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.number_auto),
+                            color = palette.accent.toComposeColor(),
+                            fontSize = TextSize.label,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                } else {
+                    CaptionHint(stringResource(R.string.number_mode_auto))
                 }
-            } else {
-                CaptionHint(stringResource(R.string.number_mode_auto))
             }
         }
 
@@ -433,107 +442,132 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    stringResource(R.string.number_start),
+                    stringResource(R.string.number_display_mode),
                     color = palette.text.toComposeColor(),
                     fontSize = TextSize.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
+                Box(Modifier.width(156.dp)) {
+                    PanelSegmented(
+                        listOf(stringResource(R.string.number_short_absolute), stringResource(R.string.number_short_body)),
+                        selected = if (showBodyPref) 1 else 0,
+                        onSelect = { idx -> editor.setShowBodyPageNumbers(idx == 1) },
+                        height = 32.dp,
+                    )
+                }
+            }
+            if (!editor.readOnly) {
+                CardDivider()
                 Row(
                     Modifier
-                        .height(44.dp)
-                        .clip(stepperShape)
-                        .background(palette.bg.toComposeColor())
-                        .border(1.dp, (if (startInvalid) palette.accent else palette.border).toComposeColor(), stepperShape),
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .padding(start = Space.s16, end = Space.s12),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
+                    Text(
+                        stringResource(R.string.number_start),
+                        color = palette.text.toComposeColor(),
+                        fontSize = TextSize.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Row(
                         Modifier
-                            .width(44.dp)
-                            .fillMaxHeight()
-                            .clickable(enabled = canDec, role = Role.Button) { applyStart(numbering.start - 1) },
-                        contentAlignment = Alignment.Center,
+                            .height(44.dp)
+                            .clip(stepperShape)
+                            .background(palette.bg.toComposeColor())
+                            .border(1.dp, (if (startInvalid) palette.accent else palette.border).toComposeColor(), stepperShape),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            XnotesIcons.minus,
-                            null,
-                            tint = (if (canDec) palette.text else palette.disabled).toComposeColor(),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
-                    Box(Modifier.width(52.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                        key(startSync) {
-                            NativeField(
-                                value = startText,
-                                onText = { raw ->
-                                    startText = raw
-                                    val cleaned = raw.trim()
-                                    if (cleaned.isEmpty()) {
-                                        startInvalid = false
-                                    } else {
-                                        val parsed = cleaned.toIntOrNull()
-                                        if (parsed != null && parsed in 1..pageCount) {
+                        Box(
+                            Modifier
+                                .width(44.dp)
+                                .fillMaxHeight()
+                                .clickable(enabled = canDec, role = Role.Button) { applyStart(numbering.start - 1) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                XnotesIcons.minus,
+                                null,
+                                tint = (if (canDec) palette.text else palette.disabled).toComposeColor(),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+                        Box(Modifier.width(52.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                            key(startSync) {
+                                NativeField(
+                                    value = startText,
+                                    onText = { raw ->
+                                        startText = raw
+                                        val cleaned = raw.trim()
+                                        if (cleaned.isEmpty()) {
                                             startInvalid = false
-                                            if (parsed - 1 != numbering.start || !numbering.isBodyFirst(parsed - 1)) {
-                                                editor.setBodyStartPage(parsed - 1)
-                                            }
                                         } else {
-                                            startInvalid = true
+                                            val parsed = cleaned.toIntOrNull()
+                                            if (parsed != null && parsed in 1..pageCount) {
+                                                startInvalid = false
+                                                if (parsed - 1 != numbering.start || !numbering.isBodyFirst(parsed - 1)) {
+                                                    editor.setBodyStartPage(parsed - 1)
+                                                }
+                                            } else {
+                                                startInvalid = true
+                                            }
                                         }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                numeric = true,
-                                maxLen = 6,
-                                centered = true,
-                                textSp = 14f,
-                                onBlur = {
-                                    startText = "${editor.pageNumbering.start + 1}"
-                                    startInvalid = false
-                                },
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    numeric = true,
+                                    maxLen = 6,
+                                    centered = true,
+                                    textSp = 14f,
+                                    onBlur = {
+                                        startText = "${editor.pageNumbering.start + 1}"
+                                        startInvalid = false
+                                    },
+                                )
+                            }
+                        }
+                        Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+                        Box(
+                            Modifier
+                                .width(44.dp)
+                                .fillMaxHeight()
+                                .clickable(enabled = canInc, role = Role.Button) { applyStart(numbering.start + 1) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                XnotesIcons.plus,
+                                null,
+                                tint = (if (canInc) palette.text else palette.disabled).toComposeColor(),
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                     }
-                    Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
-                    Box(
-                        Modifier
-                            .width(44.dp)
-                            .fillMaxHeight()
-                            .clickable(enabled = canInc, role = Role.Button) { applyStart(numbering.start + 1) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            XnotesIcons.plus,
-                            null,
-                            tint = (if (canInc) palette.text else palette.disabled).toComposeColor(),
-                            modifier = Modifier.size(16.dp),
+                }
+                CardDivider()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .clickable(enabled = !currentIsBodyFirst, role = Role.Button) { applyStart(editor.pageIndex) }
+                        .padding(horizontal = Space.s16),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(if (currentIsBodyFirst) R.string.number_current_is_start else R.string.number_use_current),
+                        color = (if (currentIsBodyFirst) palette.textDim else palette.text).toComposeColor(),
+                        fontSize = TextSize.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (currentIsBodyFirst) {
+                        Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                    } else {
+                        Text(
+                            stringResource(R.string.number_current_page_badge, editor.pageIndex + 1),
+                            color = palette.textDim.toComposeColor(),
+                            fontSize = TextSize.label,
                         )
                     }
-                }
-            }
-            CardDivider()
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clickable(enabled = !currentIsBodyFirst, role = Role.Button) { applyStart(editor.pageIndex) }
-                    .padding(horizontal = Space.s16),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(if (currentIsBodyFirst) R.string.number_current_is_start else R.string.number_use_current),
-                    color = (if (currentIsBodyFirst) palette.textDim else palette.text).toComposeColor(),
-                    fontSize = TextSize.bodyLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                if (currentIsBodyFirst) {
-                    Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
-                } else {
-                    Text(
-                        stringResource(R.string.number_current_page_badge, editor.pageIndex + 1),
-                        color = palette.textDim.toComposeColor(),
-                        fontSize = TextSize.label,
-                    )
                 }
             }
         }

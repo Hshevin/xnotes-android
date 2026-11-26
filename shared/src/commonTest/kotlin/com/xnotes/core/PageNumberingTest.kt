@@ -64,5 +64,14 @@ class PageNumberingTest {
         val singlePage = PageNumbering(1, 0)
         assertEquals("1", singlePage.absoluteRange())
         assertEquals("1", singlePage.bodyRange())
+
+        assertEquals("15", withFront.displayLabel(14, byBody = false))
+        assertEquals("46", withFront.displayTotal(14, byBody = false))
+        assertEquals("11", withFront.displayLabel(14, byBody = true))
+        assertEquals("42", withFront.displayTotal(14, byBody = true))
+        assertEquals("iii", withFront.displayLabel(2, byBody = true))
+        assertEquals("iv", withFront.displayTotal(2, byBody = true))
+        assertEquals("55", pdfOffset.displayLabel(4, byBody = true))
+        assertEquals("60", pdfOffset.displayTotal(4, byBody = true))
     }
 }

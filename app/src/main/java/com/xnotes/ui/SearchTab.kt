@@ -278,7 +278,7 @@ private fun MatchList(editor: Editor, results: SearchResults, onPick: () -> Unit
                     editor.showSearchHit(row)
                 }
                 else -> Text(
-                    stringResource(R.string.page_n, (row as Int) + 1),
+                    stringResource(R.string.page_label, editor.pageDisplayLabel(row as Int)),
                     color = palette.textDim.toComposeColor(),
                     fontSize = TextSize.caption,
                     modifier = Modifier.padding(start = Space.s12, end = Space.s12, top = Space.s12, bottom = Space.s2),
