@@ -389,3 +389,4 @@
 ## 2026-11-27 iPad 移植合入主线与 test17 安装
 
 - 用户同意 iPad 存储验收后把 `ipados` 合入本地 `master`（`76dac7d0`），并要求合并后打包安卓版、安装到平板测试：打包 `com.xnotes.movinkpad.branchtest.master` code 17 并安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。
+- 用户试用 test17 后回复「应该没问题，你推送吧」：将本地 `master`（含 iPad 移植合并、test17 记录与本条）推送到 `origin/master`。不推送 `ipados` 等其他分支，不发布 GitHub Release。
