@@ -334,11 +334,14 @@ fun PreferencesPane(
             }
             FieldLabel(stringResource(R.string.number_display_mode))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s8)) {
-                Chip(stringResource(R.string.number_absolute), !prefs.showBodyPageNumbers) {
-                    update(prefs.copy(showBodyPageNumbers = false))
-                }
-                Chip(stringResource(R.string.number_body), prefs.showBodyPageNumbers) {
-                    update(prefs.copy(showBodyPageNumbers = true))
+                com.xnotes.core.model.PageNumberMode.entries.forEach { mode ->
+                    val isBody = mode == com.xnotes.core.model.PageNumberMode.BODY
+                    Chip(
+                        stringResource(if (isBody) R.string.number_body else R.string.number_absolute),
+                        prefs.showBodyPageNumbers == isBody,
+                    ) {
+                        update(prefs.copy(showBodyPageNumbers = isBody))
+                    }
                 }
             }
             FieldLabel(stringResource(R.string.pref_side_margin_px, prefs.sideMargin.toInt()))

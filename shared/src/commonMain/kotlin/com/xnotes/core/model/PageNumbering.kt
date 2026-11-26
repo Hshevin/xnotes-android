@@ -1,5 +1,8 @@
 package com.xnotes.core.model
 
+/** Canonical left-to-right option order shared by all absolute/body page-number controls. */
+enum class PageNumberMode { ABSOLUTE, BODY }
+
 /** Physical indices remain zero based; labels never change document page order. */
 class PageNumbering(private val count: Int, start: Int, private val firstNumber: Int = 1) {
     val start = start.takeIf { it in 0 until count } ?: 0

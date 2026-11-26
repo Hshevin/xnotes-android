@@ -73,5 +73,9 @@ class PageNumberingTest {
         assertEquals("iv", withFront.displayTotal(2, byBody = true))
         assertEquals("55", pdfOffset.displayLabel(4, byBody = true))
         assertEquals("60", pdfOffset.displayTotal(4, byBody = true))
+        assertEquals(
+            listOf(com.xnotes.core.model.PageNumberMode.ABSOLUTE, com.xnotes.core.model.PageNumberMode.BODY),
+            com.xnotes.core.model.PageNumberMode.entries,
+        )
     }
 }

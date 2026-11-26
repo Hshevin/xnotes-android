@@ -324,12 +324,13 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
     PanelHeader(stringResource(R.string.title_go_to_page), onBack)
 
     PanelCard {
+        val modes = com.xnotes.core.model.PageNumberMode.entries
         if (hasOffset) {
             PanelSegmented(
-                listOf(stringResource(R.string.number_body), stringResource(R.string.number_absolute)),
-                selected = if (activeByBody) 0 else 1,
+                modes.map { stringResource(if (it == com.xnotes.core.model.PageNumberMode.ABSOLUTE) R.string.number_absolute else R.string.number_body) },
+                selected = modes.indexOf(if (activeByBody) com.xnotes.core.model.PageNumberMode.BODY else com.xnotes.core.model.PageNumberMode.ABSOLUTE),
                 onSelect = { idx ->
-                    val nextBody = idx == 0
+                    val nextBody = modes[idx] == com.xnotes.core.model.PageNumberMode.BODY
                     if (nextBody != byBody) {
                         byBody = nextBody
                         jumpText = ""
@@ -404,28 +405,27 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
     if ((!editor.readOnly || hasOffset) && pageCount > 0) {
         val isManual = editor.state.document.bodyStartPage != null
         Spacer(Modifier.height(Space.s16))
-        PanelCaption(stringResource(R.string.number_body_section)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.s4),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.number_body_section),
+                color = palette.textDim.toComposeColor(),
+                fontSize = TextSize.label,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
             if (!editor.readOnly) {
                 if (isManual) {
-                    Row(
-                        Modifier
-                            .clip(MaterialTheme.shapes.extraSmall)
-                            .clickable(role = Role.Button) { applyStart(null) }
-                            .padding(horizontal = Space.s6),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            stringResource(R.string.number_auto),
-                            color = palette.accent.toComposeColor(),
-                            fontSize = TextSize.label,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
+                    PanelChip(stringResource(R.string.number_auto)) { applyStart(null) }
                 } else {
                     CaptionHint(stringResource(R.string.number_mode_auto))
                 }
             }
         }
+        Spacer(Modifier.height(Space.s6))
 
         val startOneBased = numbering.start + 1
         val canDec = startOneBased > 1
@@ -448,10 +448,11 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
                     modifier = Modifier.weight(1f),
                 )
                 Box(Modifier.width(156.dp)) {
+                    val modes = com.xnotes.core.model.PageNumberMode.entries
                     PanelSegmented(
-                        listOf(stringResource(R.string.number_short_absolute), stringResource(R.string.number_short_body)),
-                        selected = if (showBodyPref) 1 else 0,
-                        onSelect = { idx -> editor.setShowBodyPageNumbers(idx == 1) },
+                        modes.map { stringResource(if (it == com.xnotes.core.model.PageNumberMode.ABSOLUTE) R.string.number_short_absolute else R.string.number_short_body) },
+                        selected = modes.indexOf(if (showBodyPref) com.xnotes.core.model.PageNumberMode.BODY else com.xnotes.core.model.PageNumberMode.ABSOLUTE),
+                        onSelect = { idx -> editor.setShowBodyPageNumbers(modes[idx] == com.xnotes.core.model.PageNumberMode.BODY) },
                         height = 32.dp,
                     )
                 }
@@ -545,28 +546,48 @@ private fun PageJumpPage(editor: Editor, onBack: () -> Unit, onJumped: () -> Uni
                     }
                 }
                 CardDivider()
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clickable(enabled = !currentIsBodyFirst, role = Role.Button) { applyStart(editor.pageIndex) }
-                        .padding(horizontal = Space.s16),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        stringResource(if (currentIsBodyFirst) R.string.number_current_is_start else R.string.number_use_current),
-                        color = (if (currentIsBodyFirst) palette.textDim else palette.text).toComposeColor(),
-                        fontSize = TextSize.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
+                Box(Modifier.fillMaxWidth().padding(horizontal = Space.s12, vertical = Space.s12)) {
                     if (currentIsBodyFirst) {
-                        Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(MinTouchTarget)
+                                .clip(stepperShape)
+                                .background(palette.bg.toComposeColor())
+                                .border(1.dp, palette.border.toComposeColor(), stepperShape)
+                                .padding(horizontal = Space.s12),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(Space.s6))
+                            Text(
+                                stringResource(R.string.number_current_is_start),
+                                color = palette.textDim.toComposeColor(),
+                                fontSize = TextSize.body,
+                                maxLines = 1,
+                            )
+                        }
                     } else {
-                        Text(
-                            stringResource(R.string.number_current_page_badge, editor.pageIndex + 1),
-                            color = palette.textDim.toComposeColor(),
-                            fontSize = TextSize.label,
-                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(MinTouchTarget)
+                                .clip(stepperShape)
+                                .background(panelColors().raised)
+                                .border(1.dp, palette.border.toComposeColor(), stepperShape)
+                                .clickable(role = Role.Button) { applyStart(editor.pageIndex) }
+                                .padding(horizontal = Space.s12),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                stringResource(R.string.number_use_current_page, editor.pageIndex + 1),
+                                color = palette.text.toComposeColor(),
+                                fontSize = TextSize.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
             }

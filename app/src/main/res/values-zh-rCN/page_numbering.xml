@@ -18,9 +18,8 @@
     <string name="number_mode_auto">自动</string>
     <string name="number_auto">恢复自动</string>
     <string name="number_start">正文起始页</string>
-    <string name="number_use_current">设当前页为正文第 1 页</string>
+    <string name="number_use_current_page">将当前页（第 %1$d 页）设为正文第 1 页</string>
     <string name="number_current_is_start">当前页已是正文第 1 页</string>
-    <string name="number_current_page_badge">第 %1$d 页</string>
     <string name="number_start_invalid">请输入 1–%1$d 之间的页码</string>
     <string name="number_hint_default">设置起始页后，正文前的页面会以罗马数字（i、ii、iii…）编号。</string>
     <string name="number_hint_front_one_body_one">第 1 页为 i，第 2 页为 %1$s。</string>

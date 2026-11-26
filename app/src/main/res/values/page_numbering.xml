@@ -18,9 +18,8 @@
     <string name="number_mode_auto">Auto</string>
     <string name="number_auto">Restore auto</string>
     <string name="number_start">Body starts at</string>
-    <string name="number_use_current">Set current page as body 1</string>
+    <string name="number_use_current_page">Set current page (%1$d) as body 1</string>
     <string name="number_current_is_start">Current page is body 1</string>
-    <string name="number_current_page_badge">Page %1$d</string>
     <string name="number_start_invalid">Enter a page between 1 and %1$d</string>
     <string name="number_hint_default">Pages before the body start are numbered with Roman numerals (i, ii, iii…).</string>
     <string name="number_hint_front_one_body_one">Page 1 is i; page 2 is %1$s.</string>
