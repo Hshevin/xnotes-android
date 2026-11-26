@@ -100,7 +100,8 @@ data class NodeStyle(
 
 /**
  * The handwriting area under a node's title. [width] × [height] is the area's size; [strokes] are in
- * area-local coordinates (0,0 = the area's top-left). [NONE] means the node has no ink area.
+ * area-local coordinates (0,0 = the area's top-left); ink written over the title or in the node's
+ * padding lies outside `[0, width] × [0, height]`, cut at the node's box. [NONE] means the node has no ink area.
  */
 data class NodeInk(val width: Double, val height: Double, val strokes: List<Stroke>) {
     val isEmpty: Boolean get() = strokes.isEmpty() && width == 0.0 && height == 0.0

@@ -201,22 +201,21 @@ class MapController(
 
     /**
      * The edges a pen stroke starting at [p] is cut along while it is drawn, in canvas coordinates,
-     * matching what [MapEditor.addInk] keeps: the node's ink area, or for a resized node that has
-     * none yet only its sides (the first stroke still sets the area's height). Empty when the
-     * stroke does not write into a node or nothing bounds it yet.
+     * matching what [MapEditor.addInk] keeps: the node's whole box once it has an ink area; before
+     * the first stroke only the box's left and top (and right for a resized node), since that
+     * stroke still sizes the area. Empty when the stroke does not write into a node.
      */
     fun inkCuts(p: Pt): List<CutEdge> {
         val id = inkTarget(p) ?: return emptyList()
         val node = shownState.nodes[id] ?: return emptyList()
         val box = shown.rectOf(id) ?: return emptyList()
-        val frame = metrics.frame(node, id !in shownState.parent, box.topLeft)
-        val area = frame.ink
-        val left = CutEdge(area?.left ?: (box.left + NodeMetrics.PAD_X), 0.0, -1.0, 0.0)
-        val right = CutEdge(area?.right ?: (box.right - NodeMetrics.PAD_X), 0.0, 1.0, 0.0)
+        val left = CutEdge(box.left, 0.0, -1.0, 0.0)
+        val top = CutEdge(0.0, box.top, 0.0, -1.0)
+        val right = CutEdge(box.right, 0.0, 1.0, 0.0)
         return when {
-            area != null -> listOf(left, right, CutEdge(0.0, area.top, 0.0, -1.0), CutEdge(0.0, area.bottom, 0.0, 1.0))
-            node.width != null -> listOf(left, right)
-            else -> emptyList()
+            !node.ink.isEmpty -> listOf(left, right, top, CutEdge(0.0, box.bottom, 0.0, 1.0))
+            node.width != null -> listOf(left, right, top)
+            else -> listOf(left, top)
         }
     }
 

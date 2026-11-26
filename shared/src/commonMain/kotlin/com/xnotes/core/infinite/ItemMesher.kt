@@ -189,7 +189,9 @@ object ItemMesher {
      *
      * Only for ink the runs can be laid over each other freely, which is opaque and un-neon ink
      * ([Stroke.wetCacheable]); anything else is meshed whole by [mesh]. [dashPhase] is the arc the
-     * runs before this one spent, so the dashed pen's rhythm carries across the join.
+     * runs before this one spent, so the dashed pen's rhythm carries across the join. Each run is
+     * cut by [Stroke.cuts] like the whole stroke, so ink written into a mind map node never shows
+     * past it, front buffer included.
      */
     fun meshRun(
         stroke: Stroke,
@@ -208,7 +210,7 @@ object ItemMesher {
             )
         } else {
             StrokeTessellator.tessellate(ribbon, from, count, tolerance)
-        }
+        }.let { MeshClip.clip(it, stroke.cuts) }
         if (mesh.isEmpty) return null
         return MeshPart(mesh, stroke.renderColor, passFor(stroke))
     }

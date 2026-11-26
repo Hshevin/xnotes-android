@@ -37,6 +37,12 @@ data class NodeFrame(
  * - Resized: width = max(min width, [MapNode.width], title + 2·[PAD_X]); the stored ink.width does
  *   not widen it.
  *
+ * Ink may be written anywhere in the box, over the title and padding too, so the box always holds
+ * all of it: with r the union of the strokes' (cut) bounds in area-local coordinates, the width is
+ * at least `PAD_X + r.right`, the area starts no higher than `−r.top` below the box top (a title
+ * that later wraps to fewer lines leaves a gap rather than ink above the box), and the box reaches
+ * at least `r.bottom` below the area top.
+ *
  * The chip row does not widen the node: its box spans the node's inner width, and chips that do
  * not fit collapse into a "+N" chip (a UI concern).
  */
@@ -51,22 +57,36 @@ class NodeMetrics(private val titles: TitleMeasure) : NodeMeasure {
     fun frame(node: MapNode, isRoot: Boolean, at: Pt): NodeFrame {
         val minWidth = if (isRoot) ROOT_MIN_W else MIN_W
         val wrapWidth = titleWrap(node, isRoot)
+        val reach = inkReach(node)
         val x = at.x + PAD_X
         var y = PAD_Y
         val title = if (node.title.isNotEmpty() || node.ink.isEmpty) {
             val size = titles.measure(node.title, node.style.textSize, node.style.bold, wrapWidth)
             Rect(x, at.y + y, size.w, size.h).also { y += size.h }
         } else null
-        val width = maxOf(minWidth, node.width ?: (node.ink.width + 2 * PAD_X), (title?.w ?: 0.0) + 2 * PAD_X)
+        val width = maxOf(
+            minWidth, node.width ?: (node.ink.width + 2 * PAD_X), (title?.w ?: 0.0) + 2 * PAD_X,
+            (reach?.right ?: 0.0) + PAD_X,
+        )
+        var inkBottom = 0.0
         val ink = if (!node.ink.isEmpty) {
             if (title != null) y += GAP
+            if (reach != null) y = maxOf(y, -reach.top)
+            inkBottom = y + (reach?.bottom ?: 0.0)
             Rect(x, at.y + y, width - 2 * PAD_X, node.ink.height).also { y += it.h }
         } else null
         val sources = if (node.sources.isNotEmpty()) {
             y += GAP
             Rect(x, at.y + y, width - 2 * PAD_X, CHIP_H).also { y += CHIP_H }
         } else null
-        return NodeFrame(Rect(at.x, at.y, width, y + PAD_Y), title, ink, sources)
+        return NodeFrame(Rect(at.x, at.y, width, maxOf(y + PAD_Y, inkBottom)), title, ink, sources)
+    }
+
+    /** The union of [node]'s strokes' bounds, area-local; null with none. */
+    private fun inkReach(node: MapNode): Rect? {
+        var out: Rect? = null
+        for (stroke in node.ink.strokes) stroke.bounds().let { b -> out = out?.union(b) ?: b }
+        return out
     }
 
     /** The width [node]'s title wraps at: its inner width once resized, [MAX_TITLE_W] otherwise. */
@@ -77,32 +97,27 @@ class NodeMetrics(private val titles: TitleMeasure) : NodeMeasure {
      * [node] resized so its box comes as close to [target] as its content allows. Pure; strokes are
      * kept as the very same instances and never moved or re-encoded.
      *
-     * - Width: [MapNode.width] = max(target.w, min width, inkRight + 2·[PAD_X]) where inkRight is the
-     *   largest `bounds().right` of the node's strokes (0 with none), so drawn ink is never cut by
-     *   shrinking. The title then wraps at the new inner width.
+     * - Width: [MapNode.width] = max(target.w, min width, r.right + [PAD_X]) where r is the union of
+     *   the strokes' (cut) bounds (right 0 with none), so drawn ink is never cut by shrinking. The
+     *   title then wraps at the new inner width.
      * - Height: the ink area's height is whatever makes the box [target].h tall at that width, but
-     *   at least the largest stroke `bounds().bottom` (0 with none). The box is never shorter than
-     *   the title and source row need.
+     *   at least r.bottom less the space the box keeps below the area (0 with none). The box is
+     *   never shorter than the title and source row need.
      * - A node without strokes whose ink area would come out lower than [RESIZE_MIN_INK_H] gets no
      *   ink area ([NodeInk.NONE]); otherwise the area is `NodeInk(inner width, height, strokes)`.
      */
     fun resized(node: MapNode, isRoot: Boolean, target: Size): MapNode {
         if (!target.w.isFinite() || !target.h.isFinite()) return node
         val strokes = node.ink.strokes
-        var right = 0.0
-        var bottom = 0.0
-        for (stroke in strokes) {
-            val bounds = stroke.bounds()
-            right = maxOf(right, bounds.right)
-            bottom = maxOf(bottom, bounds.bottom)
-        }
-        val width = maxOf(target.w, if (isRoot) ROOT_MIN_W else MIN_W, right + 2 * PAD_X)
-        // Measure with an area present, so an empty title consumes no line or gap.
-        val withArea = node.copy(width = width, ink = NodeInk(width - 2 * PAD_X, 0.0, strokes))
-        val frame = frame(withArea, isRoot, Pt(0.0, 0.0))
-        val height = maxOf(bottom, target.h - frame.rect.h)
+        val reach = inkReach(node)
+        val width = maxOf(target.w, if (isRoot) ROOT_MIN_W else MIN_W, (reach?.right ?: 0.0) + PAD_X)
+        // Measured with an empty area, so an empty title consumes no line or gap.
+        val bare = frame(node.copy(width = width, ink = NodeInk(width - 2 * PAD_X, 0.0, emptyList())), isRoot, Pt(0.0, 0.0))
+        val area = checkNotNull(bare.ink)
+        val below = bare.rect.bottom - area.bottom
+        val height = maxOf(target.h - bare.rect.h, (reach?.bottom ?: 0.0) - below, 0.0)
         val ink = if (strokes.isEmpty() && height < RESIZE_MIN_INK_H) NodeInk.NONE
-            else NodeInk(checkNotNull(frame.ink).w, height, strokes)
+            else NodeInk(area.w, height, strokes)
         return node.copy(width = width, ink = ink)
     }
 
