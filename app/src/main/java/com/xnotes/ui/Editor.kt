@@ -1526,6 +1526,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // callbacks without scheduling a second write, especially after an explicit discard.
         noteDebounceJob?.cancel()
         autosaveUri = null
+        savedAssets = null
         flowText.endSession()
         controller.resetGestureState()
         tablePreviews.clear()
@@ -4273,6 +4274,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     if (note != null) {
                         val dirtyBeforeOpen = note.dirty
                         replaceDocument(note)
+                        if (fromFile) savedAssets = decoded?.savedAssets
                         note.dirty = dirtyBeforeOpen
                         dirty = dirtyBeforeOpen
                         if (!fromFile) unverifiedSessionOrigin = UnverifiedSessionOrigin(note)
@@ -5295,6 +5297,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         target.resetPenButtons()
                         try {target.replaceDocument(model)} finally {if(target.state.document===model) {
                             candidate.adopted = true
+                            target.savedAssets = prepared.savedAssets
                             target.incompleteNoteModel = java.lang.ref.WeakReference(model.takeUnless { prepared.complete })
                             target.acknowledgeRecordingRead(prepared.evidence)
                         }}
@@ -5371,7 +5374,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** One request covers preparation, saving the old owners and synchronous adoption. */
     private data class DecodedFile(val note: Document?, val canvas: com.xnotes.core.infinite.InfiniteDocument?,
-        val complete: Boolean, val byteSize: Long, val assets: java.io.File, val evidence: com.xnotes.format.RecordingBodyEvidence?)
+        val complete: Boolean, val byteSize: Long, val assets: java.io.File, val evidence: com.xnotes.format.RecordingBodyEvidence?,
+        val savedAssets: SavedAssets? = null)
 
     private fun decodeFile(uri: String, name: String?, kind: DocumentKind, expectedId: String?,
         timing: DocumentCodec.ReadTiming, checkActive: () -> Unit): DecodedFile {
@@ -5403,10 +5407,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             require(id == (note?.identity ?: canvas?.identity)?.documentId)
             if (needsEvidence && complete) evidence = com.xnotes.format.RecordingBodyEvidence.decoded(note, canvas, checkActive)
-            note?.let {savedAssets = storedAssets(uri, it);it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
+            val knownAssets = note?.let { storedAssets(uri, it) }
+            note?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
             canvas?.let {it.created=settleCreated(uri,it.created);it.path=uri;it.displayName=name;it.dirty=false}
             checkActive()
-            return DecodedFile(note, canvas, complete, byteSize, directory, evidence)
+            return DecodedFile(note, canvas, complete, byteSize, directory, evidence, knownAssets)
         } catch (error: Throwable) {
             directory.deleteRecursively()
             throw error
@@ -5488,6 +5493,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val doc=requireNotNull(note)
                 try {replaceDocument(doc)} finally {
                     if(state.document===doc) {
+                        savedAssets = decoded.savedAssets
                         incompleteNoteModel = java.lang.ref.WeakReference(doc.takeUnless { complete })
                         adopted=true;adoptedModel=doc
                     }
@@ -8692,6 +8698,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         saveViewState() // remember the outgoing folder note's view before switching away
         noteDebounceJob?.cancel()
         autosaveUri = null
+        savedAssets = null
         flowText.endSession()
         // File readouts belong to the outgoing note; a file-backed open re-sets them after the swap.
         state.lastOpenCompacted = doc.compactedOnLoad

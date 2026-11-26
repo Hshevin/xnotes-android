@@ -94,4 +94,47 @@ class DirectBundleStorageHostTest {
         file.writeBytes(byteArrayOf())
         assertThrows(IllegalStateException::class.java) { store.resolve(id) }
     }
+
+    @Test fun splitPairOpenSplicesBothPanesWithoutRewritingAssets() = runParkingScenario { f ->
+        val audioA = File(f.root, "left.aac").apply { writeBytes(ByteArray(2 * 1024 * 1024) { it.toByte() }) }
+        val audioB = File(f.root, "right.aac").apply { writeBytes(ByteArray(2 * 1024 * 1024) { (it xor 0x5A).toByte() }) }
+        val bounds = Rect(0.0, 0.0, 100.0, 50.0)
+        val firstNote = Document(mutableListOf(Page(500.0, 500.0))).apply {
+            enableReferenceAnchors()
+            pages.single().items += AudioItem(AudioData(audioA, "aac", 1000, ByteArray(0)), bounds, "Left", 1, AndroidTextMeasurer())
+        }
+        val secondNote = Document(mutableListOf(Page(500.0, 500.0))).apply {
+            enableReferenceAnchors()
+            pages.single().items += AudioItem(AudioData(audioB, "aac", 1000, ByteArray(0)), bounds, "Right", 1, AndroidTextMeasurer())
+        }
+        val retryUri = android.provider.DocumentsContract.buildDocumentUri(f.authority, "retry").toString()
+        f.target.outputStream().use { f.codec.write(firstNote, it) }
+        f.retry.outputStream().use { f.codec.write(secondNote, it) }
+        withContext(Dispatchers.Main) {
+            val cap = requireNotNull(f.editor.prepareNativePairOpen(
+                com.xnotes.ui.NativeSplitSource(f.targetUri, "left.xnote"),
+                com.xnotes.ui.NativeSplitSource(retryUri, "right.xnote"),
+            ))
+            try {
+                assertTrue(cap.commit())
+            } finally {
+                cap.close()
+            }
+            for (pane in listOf(cap.first, cap.second)) {
+                val page = pane.state.document.pages.single()
+                val stroke = com.xnotes.core.model.Stroke(
+                    com.xnotes.core.tools.Tool.PEN,
+                    com.xnotes.core.tools.ToolDefaults.configFor(com.xnotes.core.tools.Tool.PEN),
+                    listOf(com.xnotes.core.stroke.Sample(60.0, 60.0, 0.5), com.xnotes.core.stroke.Sample(120.0, 120.0, 0.7)),
+                )
+                page.items += stroke
+                pane.history.push(com.xnotes.core.history.AddItem(page, stroke))
+                pane.state.document.dirty = true
+                assertTrue(pane.flushSplitDocument())
+                assertEquals(0L, pane.state.lastSaveAssetsMs)
+            }
+            assertEquals("Both split panes splice only their tails", 0, f.writes.get())
+            assertEquals(2, f.writeOpens.get())
+        }
+    }
 }

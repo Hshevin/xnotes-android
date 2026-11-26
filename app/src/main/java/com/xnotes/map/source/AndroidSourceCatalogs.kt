@@ -82,7 +82,15 @@ class AndroidSourceCatalogs(context: Context) : SourceCatalogs {
                 asset.createInputStream().use { input ->
                     if (asset.startOffset == 0L && asset.parcelFileDescriptor.statSize >= 0 &&
                         (asset.declaredLength < 0 || asset.declaredLength == asset.parcelFileDescriptor.statSize)) {
-                        return readDirectory(input.channel, name) ?: readZipFile(asset.parcelFileDescriptor.zipFilePath(), name)
+                        return readDirectory(input.channel, name) ?: try {
+                            readZipFile(asset.parcelFileDescriptor.zipFilePath(), name)
+                        } catch (_: SecurityException) {
+                            input.channel.position(0)
+                            readSequential(input, name)
+                        } catch (_: FileNotFoundException) {
+                            input.channel.position(0)
+                            readSequential(input, name)
+                        }
                     }
                     readSequential(input, name)
                 }

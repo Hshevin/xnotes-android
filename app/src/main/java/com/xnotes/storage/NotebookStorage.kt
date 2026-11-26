@@ -56,7 +56,15 @@ class NotebookStorage internal constructor(private val context:Context,
             val descriptor = try { context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") }
                 catch (_: UnsupportedOperationException) { null }
             if (descriptor != null) ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
-                if (descriptor.statSize >= 0) return directory(input.channel) ?: standardDirectory(descriptor.zipFilePath())
+                if (descriptor.statSize >= 0) return directory(input.channel) ?: try {
+                    standardDirectory(descriptor.zipFilePath())
+                } catch (_: SecurityException) {
+                    input.channel.position(0)
+                    sequentialMetadata(input, identityOnly, checkActive)
+                } catch (_: java.io.FileNotFoundException) {
+                    input.channel.position(0)
+                    sequentialMetadata(input, identityOnly, checkActive)
+                }
                 return sequentialMetadata(input, identityOnly, checkActive)
             }
         }
