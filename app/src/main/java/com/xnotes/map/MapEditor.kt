@@ -3,6 +3,8 @@ package com.xnotes.map
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.history.Command
 import com.xnotes.core.history.History
+import com.xnotes.core.model.CutEdge
+import com.xnotes.core.model.CutEdges
 import com.xnotes.core.model.Stroke
 import java.util.UUID
 
@@ -204,21 +206,34 @@ class MapEditor(
         val ink = node.ink
         val withArea = if (ink.isEmpty) node.copy(ink = NodeInk(INK_MIN_W, INK_MIN_H, emptyList())) else node
         val frame = metrics.frame(withArea, id !in model.state.parent, at)
-        val origin = checkNotNull(frame.ink).topLeft
+        val area = checkNotNull(frame.ink)
         val local = stroke.inkCopy()
-        local.translate(-origin.x, -origin.y)
-        val bounds = local.bounds()
-        val dx = maxOf(0.0, -bounds.left)
-        val dy = maxOf(0.0, -bounds.top)
-        val strokes = if (dx == 0.0 && dy == 0.0) ink.strokes else {
-            local.translate(dx, dy)
-            ink.strokes.map { it.inkCopy().apply { translate(dx, dy) } }
+        local.translate(-area.left, -area.top)
+
+        if (!ink.isEmpty) {
+            local.cutToSpan(area.w, sideways = true)
+            local.cutToSpan(area.h, sideways = false)
+            if (!local.showsInk()) return@editNode node
+            // The area keeps at least the width the ink was cut at, so a title shortened later cannot narrow it under the ink.
+            return@editNode node.copy(ink = ink.copy(width = maxOf(ink.width, area.w), strokes = ink.strokes + local))
         }
-        node.copy(ink = NodeInk(
-            maxOf(ink.width + dx, bounds.right + dx + INK_MARGIN, INK_MIN_W),
-            maxOf(ink.height + dy, bounds.bottom + dy + INK_MARGIN, INK_MIN_H),
-            strokes + local,
-        ))
+
+        if (node.width != null) local.cutToSpan(area.w, sideways = true)
+        val bounds = local.bounds()
+        val dx = if (node.width == null) maxOf(0.0, -bounds.left) else 0.0
+        val dy = maxOf(0.0, -bounds.top)
+        if (dx != 0.0 || dy != 0.0) local.translate(dx, dy)
+        val width = if (node.width == null) maxOf(bounds.right + dx + INK_MARGIN, INK_MIN_W) else area.w
+        val height = maxOf(bounds.bottom + dy + INK_MARGIN, INK_MIN_H)
+        val cutWidth = if (node.width == null) maxOf(width, area.w) else width
+        if (node.width == null) local.cutToSpan(cutWidth, sideways = true)
+        local.cutToSpan(height, sideways = false)
+        node.copy(ink = NodeInk(cutWidth, height, listOf(local)))
+    }
+
+    private fun Stroke.cutToSpan(length: Double, sideways: Boolean) {
+        cuts = CutEdges.with(cuts, CutEdge.along(0.0, sideways, keepAfter = true, near = 0.0))
+        cuts = CutEdges.with(cuts, CutEdge.along(length, sideways, keepAfter = false, near = 0.0))
     }
 
     private fun Stroke.inkCopy(): Stroke = copyForWrite().also {
@@ -245,7 +260,9 @@ class MapEditor(
      * Resize [id]'s box toward [target] (canvas units) in one command, as [NodeMetrics.resized]
      * decides. False when [id] does not exist or nothing would change.
      */
-    fun resize(id: NodeId, target: Size): Boolean = TODO("backend")
+    fun resize(id: NodeId, target: Size): Boolean = editNode(id) { node ->
+        metrics.resized(node, id !in model.state.parent, target)
+    }
 
     // ---- sources ----
 

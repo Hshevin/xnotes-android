@@ -65,7 +65,6 @@ import androidx.compose.ui.window.PopupProperties
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.map.LayoutKind
-import com.xnotes.map.NodeMetrics
 import com.xnotes.map.NodeShape
 import com.xnotes.map.RelationArrow
 import com.xnotes.map.ui.MapController
@@ -96,7 +95,7 @@ fun MapTitleField(editor: InfiniteEditor) {
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
         val z = f.zoom.toFloat()
         val minW = with(density) { f.width.toFloat().coerceAtLeast(f.textPx.toFloat()).toDp() }
-        val maxW = with(density) { NodeMetrics.MAX_TITLE_W.toFloat().toDp() }
+        val maxW = with(density) { f.wrap.toFloat().toDp() }
         val fontSp = with(density) { f.textPx.toFloat().toSp() }
         Layout(content = {
             BasicTextField(

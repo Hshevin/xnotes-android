@@ -65,6 +65,9 @@ interface CanvasMapInput {
 
     /** A tap on empty canvas that nothing else used; true when the map used it. */
     fun tapBlank(at: Pt, tool: Tool): Boolean
+
+    /** The edges a stroke drawn with [tool] from [at] is cut along while it is drawn: a mind map node's bounds, or none. */
+    fun inkCuts(at: Pt, tool: Tool): List<com.xnotes.core.model.CutEdge> = emptyList()
 }
 
 /**
@@ -1057,6 +1060,8 @@ class InfiniteInteraction(
         strokeStartTimeMs = e.eventTime
         val p = viewport.viewportToContent(rulerController.magnetize(Pt(vx, vy), devicePxPerDp()))
         stroke.addSample(Sample(p.x, p.y, pressureOf(e, 0)))
+        // Writing into a mind map node never shows past the node, not even before the pen lifts.
+        mapInput?.inkCuts(p, drawTool)?.let { if (it.isNotEmpty()) stroke.cuts = it }
         steadier = Stabilizer.forStroke(config.stabilize && !straight, config.stabilizeTrail, config.stabilizeCrossover, speedScale)
         steadier?.start(p.x, p.y, 0.0)
         liveStroke = stroke
