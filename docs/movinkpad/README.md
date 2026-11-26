@@ -158,6 +158,7 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-22 [系统选择器与工作目录的同文件位置](storage/same-file-locations-2026-11-22.md)
 - 2026-11-22 [保存步骤简化：只让文件保存编码](storage/save-slim-2026-11-22.md)
 - 2026-11-23 [恢复记录只在离开应用时写入](storage/pause-only-recovery-2026-11-23.md)
+- 2026-11-26 [Zotero 文献库：浏览并打开为批注笔记](storage/zotero-library-2026-11-26.md)
 
 ## 显示与渲染（`rendering/`）
 

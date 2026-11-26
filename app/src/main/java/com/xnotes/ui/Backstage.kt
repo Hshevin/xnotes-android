@@ -164,7 +164,7 @@ import com.xnotes.ui.theme.Space
 import com.xnotes.ui.theme.TextSize
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { AI, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, RECOVERY;
+enum class BackstageView { AI, ZOTERO, HOME, SPLIT, PREFERENCES, ABOUT, TRASH, RECOVERY;
     /** A sidebar tool whose pane belongs to a host-owned presentation: the host decides when it shows and releases it. */
     val tool: Boolean get() = this == RECOVERY
 }
@@ -577,6 +577,7 @@ private fun BackstageSidebar(modifier: Modifier, nav: SidebarNav, folderTree: @C
                 folderTree()
                 if (nav.allowSplits) Command(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 Command(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                Command(XnotesIcons.library, stringResource(R.string.zotero_label), selected = nav.view == BackstageView.ZOTERO) { nav.onSelectView(BackstageView.ZOTERO) }
                 Command(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> Command(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.colors.isNotEmpty()) {
@@ -632,6 +633,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 RailItem(XnotesIcons.home, stringResource(R.string.home), selected = nav.homeSelected) { nav.onHome() }
                 if (nav.allowSplits) RailItem(XnotesIcons.split, stringResource(R.string.split_workspace), selected = nav.view == BackstageView.SPLIT) { nav.onSelectView(BackstageView.SPLIT) }
                 RailItem(XnotesIcons.ai, stringResource(R.string.ai_label), selected = nav.view == BackstageView.AI) { nav.onSelectView(BackstageView.AI) }
+                RailItem(XnotesIcons.library, stringResource(R.string.zotero_label), selected = nav.view == BackstageView.ZOTERO) { nav.onSelectView(BackstageView.ZOTERO) }
                 RailItem(XnotesIcons.restore, stringResource(R.string.recovery_materials), selected = nav.view == BackstageView.RECOVERY) { nav.onPreviewRecovery() }
                 nav.recent?.let { on -> RailItem(XnotesIcons.clock, stringResource(R.string.recent), selected = on) { nav.onRecent() } }
                 if (nav.pins.isNotEmpty()) Spacer(Modifier.height(Space.s8))
@@ -749,6 +751,7 @@ private fun BackstageMain(
                     }
                 }
                 BackstageView.AI -> AiHistoryPane(sidebarOpen, onShowSidebar, calls.openFile)
+                BackstageView.ZOTERO -> ZoteroPane(editor, sidebarOpen, onShowSidebar, calls.openFile)
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()

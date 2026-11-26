@@ -143,6 +143,13 @@
 
 旧导图时期的实施细节与原主题链接归档于 `docs/movinkpad/process/agent-contract-details-2026-11-10.md`（历史记录）；实施进度写入任务记录，不写入本文件。
 
+## Zotero
+
+- Zotero 文库是用户授权的可选联网功能：只在使用 Zotero 页面时请求。API 密钥只发往 `https://api.zotero.org`；文件跳转地址不带密钥且只跟随 https；WebDAV 凭据只发往用户填写的 https 地址，群组文库不用 WebDAV。
+- 密钥与 WebDAV 凭据加密保存在 `noBackupFilesDir`（`ZoteroConfigStore`），不进入笔记导出或日志。
+- 打开文献走现有 PDF 导入（`Editor.importZoteroPdf` → `createPdfNoteFile`），放在工作区顶层的 `Zotero` 文件夹。文献与笔记的对应按「文库 + 附件键 → 文档 UUID」保存在 `zotero-links.json`，经登记表找回当前位置；笔记在回收站或已删除时重新导入。不向 Zotero 写回任何内容。
+- 下载有 md5 时必须核对；链接文件（linked file）不可下载并明确告知。后端契约由 `ZoteroClientTest`、`ZoteroStoreTest` 检查。详见 `docs/movinkpad/storage/zotero-library-2026-11-26.md`。
+
 ## AI
 
 ### 网络与密钥

@@ -243,6 +243,8 @@ private const val PINS_FILE = "pins.json"
 
 /** Inside the top folder's sidecar: deleted items, each in a folder of its own with a [TRASH_INFO] beside it. */
 private const val TRASH_DIR = "trash"
+/** The folder at the top of the workspace that Zotero papers are imported into. */
+private const val ZOTERO_FOLDER = "Zotero"
 private const val TRASH_INFO = "trash.json"
 
 /** Inside the top folder's sidecar: the template library, made on the first import. */
@@ -7512,6 +7514,38 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
             return createNoteFile(treeUri,parentDocId,name,doc,checkActive={if(importCancelled.get()) throw DocumentCodec.WriteCancelled()})
         } finally {source.close()}
+    }
+
+    /**
+     * A Zotero PDF becomes a note in the `Zotero` folder at the top of [treeUri] (made when missing):
+     * [download] writes the PDF into a private temp, which is dropped afterwards. Returns the note's
+     * URI and document UUID, or null when nothing was made. [download]'s exceptions pass through. IO.
+     */
+    fun importZoteroPdf(treeUri: String, rawName: String, download: (java.io.OutputStream) -> Unit): Pair<String, String>? {
+        val tree = android.net.Uri.parse(treeUri)
+        val root = browseRootDocId(treeUri)
+        val folder = findChildDocId(tree, root, ZOTERO_FOLDER, dir = true)
+            ?: (if (createFolder(treeUri, root, ZOTERO_FOLDER)) findChildDocId(tree, root, ZOTERO_FOLDER, dir = true) else null)
+            ?: return null
+        val staged = java.io.File.createTempFile("zotero", ".tmp", pdfDir)
+        try {
+            java.io.FileOutputStream(staged).use(download)
+            importCancelled.set(false)
+            val uri = createPdfNoteFile(treeUri, folder, rawName, staged) ?: return null
+            val id = notebookStorage.registry.idAt(uri) ?: return null
+            return uri to id
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Where note [documentId] lives now under [treeUri]; null when it is gone, duplicated, or only in Trash. IO. */
+    fun zoteroNoteLocation(treeUri: String, documentId: String): String? {
+        val uri = runCatching { notebookStorage.registry.resolve(documentId) }.getOrNull() ?: return null
+        if (!isUnderTree(uri, treeUri)) return null
+        val relative = runCatching { android.provider.DocumentsContract.getDocumentId(android.net.Uri.parse(uri)) }.getOrNull() ?: return null
+        if (relative.split('/', ':').any { it == SIDECAR_DIR }) return null
+        return uri.takeIf { queryDisplayName(android.net.Uri.parse(it)) != null }
     }
 
     /**
