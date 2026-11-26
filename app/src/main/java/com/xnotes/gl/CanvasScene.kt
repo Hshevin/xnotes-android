@@ -157,6 +157,13 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     /** Next unseen depth, for an item that arrives before its order message. */
     private var nextZ = 0
 
+    /**
+     * Depths the last order gave items that had no record yet. A stroke the front buffer is still
+     * showing reaches the scene after the order that placed it, and must take that place rather
+     * than [nextZ], which is above everything, mind map nodes over it included.
+     */
+    private val orderedAhead = HashMap<CanvasItem, Int>()
+
     /** Bumped by any change to the records, so the cached halo layer knows it is stale. */
     private var revision = 0
 
@@ -1191,7 +1198,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             previousSource?.let(::removeImageSource)
             return
         }
-        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image, edit.sync, edit.layer)
+        val z = previousZ ?: orderedAhead.remove(edit.item) ?: nextZ++
+        val record = Record(edit.item, parts, edit.bounds, z, edit.image, edit.sync, edit.layer)
         records[edit.item] = record
         val source = edit.image?.source
         if (previousSource !== source) {
@@ -1287,7 +1295,12 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     private fun applyOrder(items: List<CanvasItem>) {
         revision++
-        for (i in items.indices) records[items[i]]?.z = i
+        orderedAhead.clear()
+        for (i in items.indices) {
+            val record = records[items[i]]
+            if (record != null) record.z = i else orderedAhead[items[i]] = i
+        }
+        nextZ = maxOf(nextZ, items.size)
     }
 
     private fun applyReset(binding: Any?) {
@@ -1296,6 +1309,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         imageSources.clear()
         imageSourcesChanged = true
         nextZ = 0
+        orderedAhead.clear()
         lifted.clear()
         records.clear()
         buckets.clear()

@@ -60,6 +60,25 @@ class CanvasSceneHiddenLayersTest {
         assertEquals(vertices, f.store.usedVertices)
     }
 
+    /** A stroke the front buffer held reaches the scene after its order: it takes its ordered place, under a mind map node over it. */
+    @Test fun anItemThatArrivesAfterItsOrderTakesItsOrderedPlace() = withScene { f ->
+        val ink = strokeAt(20.0, "base")
+        val node = strokeAt(30.0, "base")
+        val held = strokeAt(40.0, "base")
+        f.put(ink)
+        f.put(node)
+        f.scene.setOrder(listOf(ink, held, node))
+        f.drain()
+        f.put(held)
+        f.drain()
+        assertEquals(listOf<CanvasItem>(ink, held, node), f.visibleItems())
+        // One that no order has placed still goes on top.
+        val fresh = strokeAt(50.0, "base")
+        f.put(fresh)
+        f.drain()
+        assertEquals(listOf<CanvasItem>(ink, held, node, fresh), f.visibleItems())
+    }
+
     @Test fun anItemWithoutALayerIsNeverHidden() = withScene { f ->
         val fading = strokeAt(20.0, null)
         f.put(fading)
