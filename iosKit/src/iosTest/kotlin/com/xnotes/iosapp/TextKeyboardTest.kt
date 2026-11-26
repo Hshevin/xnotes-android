@@ -41,7 +41,7 @@ class TextKeyboardTest {
             }
             val store = LiteStore(fs, docs, root / "Private", CgImageCodec, CgTextMeasurer)
             fun open() = assertIs<LiteOpen.Opened>(store.open(path)).session
-            val editor = InkEditor(open()) {}
+            val editor = InkEditor(open(), SaveWorker.Inline) {}
             val images = editor.session.note?.let { PageImages(it, false) }
             val surface = TextSurface(editor, space, images) { false }
             try {

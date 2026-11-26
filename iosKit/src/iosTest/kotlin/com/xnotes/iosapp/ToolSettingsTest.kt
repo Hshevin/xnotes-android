@@ -68,7 +68,7 @@ class ToolSettingsTest {
         val path = root / "Documents" / "ink.xnote"
         fs.write(path) { DocumentCodec(CgImageCodec, CgTextMeasurer).write(Document(mutableListOf(Page(100.0, 100.0))), this) }
         val opened = assertIs<LiteOpen.Opened>(LiteStore(fs, root / "Documents", root / "Private", CgImageCodec, CgTextMeasurer).open(path))
-        val model = InkEditor(opened.session) {}.also { editor = it }
+        val model = InkEditor(opened.session, SaveWorker.Inline) {}.also { editor = it }
         model.dark = true
         val before = model.tools.colorIndex to model.tools.width(Tool.PEN)
         try {

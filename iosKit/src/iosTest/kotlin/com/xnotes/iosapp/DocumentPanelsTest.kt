@@ -22,7 +22,7 @@ class DocumentPanelsTest {
     @Test fun pageOwnershipHistoryAndIndependentCopiesSurviveReopen() {
         val session = assertIs<LiteOpen.Opened>(store.create(docs, "Pages", LiteKind.NOTE)).session
         session.use {
-            val editor = InkEditor(session) {}; val panels = editor.panels
+            val editor = InkEditor(session, SaveWorker.Inline) {}; val panels = editor.panels
             val note = session.note!!; val original = note.pages.first()
             panels.edit { panels.layers.create("Ink") }
             panels.add(false); val blank = note.pages[1]
@@ -43,7 +43,7 @@ class DocumentPanelsTest {
         for (kind in LiteKind.entries) {
             val session = assertIs<LiteOpen.Opened>(store.create(docs, "Ink", kind)).session
             session.use {
-                val editor = InkEditor(session) {}; val panels = editor.panels; val layers = panels.layers
+                val editor = InkEditor(session, SaveWorker.Inline) {}; val panels = editor.panels; val layers = panels.layers
                 val space = object : PageSpace {
                     override val zoom = 1.0
                     override fun pageAt(content: Pt) = 0
@@ -74,7 +74,7 @@ class DocumentPanelsTest {
 
     @Test fun movingDefaultLayerKeepsItsTreeAndDeletingItIsOneUndo() {
         assertIs<LiteOpen.Opened>(store.create(docs, "Map", LiteKind.CANVAS)).session.use { session ->
-            val editor = InkEditor(session) {}; val panels = editor.panels; val layers = panels.layers
+            val editor = InkEditor(session, SaveWorker.Inline) {}; val panels = editor.panels; val layers = panels.layers
             val map = session.canvas!!.map; val id = NodeId(Uuids.random()); val base = DrawingLayers.DEFAULT
             val initial = MapState(nodes = mapOf(id to MapNode(id, "Tree")), roots = listOf(id),
                 rootOrigin = mapOf(id to Pt.ZERO), layout = mapOf(id to LayoutKind.RIGHT))

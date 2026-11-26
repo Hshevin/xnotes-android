@@ -35,7 +35,7 @@ class EditorIntegrationTest {
         val docs = (root / "Documents").also(fs::createDirectories)
         try {
             val store = LiteStore(fs, docs, root / "Private", CgImageCodec, CgTextMeasurer)
-            val editor = InkEditor(assertIs<LiteOpen.Opened>(store.create(docs, "Integration", kind)).session) {}
+            val editor = InkEditor(assertIs<LiteOpen.Opened>(store.create(docs, "Integration", kind)).session, SaveWorker.Inline) {}
             try { test(editor) } finally { editor.releaseOwner() }
         } finally { fs.deleteRecursively(root) }
     }

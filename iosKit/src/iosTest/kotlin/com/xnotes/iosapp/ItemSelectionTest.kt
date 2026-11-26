@@ -36,7 +36,7 @@ class ItemSelectionTest {
             else DocumentCodec(CgImageCodec, CgTextMeasurer).write(Document(mutableListOf(Page(600.0, 600.0, mutableListOf(stroke())), Page(600.0, 600.0))), this)
         }
         val store = LiteStore(fs, documents, root / "Private", CgImageCodec, CgTextMeasurer)
-        editor = InkEditor(assertIs<LiteOpen.Opened>(store.open(file)).session) {}
+        editor = InkEditor(assertIs<LiteOpen.Opened>(store.open(file)).session, SaveWorker.Inline) {}
         val space = object : InkSpace {
             override val origin = Pt.ZERO
             override val zoom = 1.0

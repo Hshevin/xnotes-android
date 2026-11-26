@@ -130,10 +130,43 @@ class NodeMetricsTest {
         val stroke = pen(10.0 to 10.0, 150.0 to 100.0)
         val b = stroke.bounds()
         val n = metrics.resized(node("Hi", NodeInk(268.0, 148.0, listOf(stroke)), width = 300.0), isRoot = false, target = Size(10.0, 10.0))
-        assertEquals(b.right + 32.0, n.width!!, 1e-9)
-        assertEquals(b.bottom, n.ink.height, 1e-9)
+        assertEquals("ink may reach into the right padding", b.right + 16.0, n.width!!, 1e-9)
+        assertEquals("and into the bottom padding", b.bottom - NodeMetrics.PAD_Y, n.ink.height, 1e-9)
+        assertInside(n, isRoot = false)
         kotlin.test.assertSame(stroke, n.ink.strokes.single())
         assertEquals(listOf(10.0, 150.0), stroke.samples.map { it.x })
+    }
+
+    @Test fun theBoxAlwaysHoldsInkWrittenOverTheTitle() {
+        // Over the title line: PAD_Y + 24 + GAP = 42 above the area.
+        val stroke = pen(10.0 to -36.0, 60.0 to -20.0)
+        val n = node("Hi", NodeInk(168.0, 80.0, listOf(stroke)), width = 200.0)
+        val titled = metrics.frame(n, isRoot = false, at = at)
+        assertEquals(42.0, titled.ink!!.top - titled.rect.top, 1e-9)
+        // The title is cleared, so no title line shows: the area stays low enough that the ink is still inside.
+        val bare = n.copy(title = "")
+        val f = metrics.frame(bare, isRoot = false, at = at)
+        assertNull(f.title)
+        assertEquals(-stroke.bounds().top, f.ink!!.top - f.rect.top, 1e-9)
+        assertInside(bare, isRoot = false)
+    }
+
+    @Test fun theBoxHoldsInkWrittenOverTheSourceRowAfterTheSourcesGo() {
+        val stroke = pen(10.0 to 70.0, 60.0 to 110.0)
+        val n = node("Hi", NodeInk(168.0, 80.0, listOf(stroke)), sources = 1, width = 200.0)
+        assertInside(n.copy(sources = emptyList()), isRoot = false)
+    }
+
+    private fun assertInside(n: MapNode, isRoot: Boolean) {
+        val f = metrics.frame(n, isRoot, at)
+        val area = f.ink!!
+        for (s in n.ink.strokes) {
+            val b = s.bounds().translate(area.left, area.top)
+            val eps = 1e-6
+            kotlin.test.assertTrue(
+                b.left >= f.rect.left - eps && b.top >= f.rect.top - eps && b.right <= f.rect.right + eps && b.bottom <= f.rect.bottom + eps,
+                "$b inside ${f.rect}")
+        }
     }
 
     @Test fun resizingKeepsTheSourceRowInsideTheBox() {

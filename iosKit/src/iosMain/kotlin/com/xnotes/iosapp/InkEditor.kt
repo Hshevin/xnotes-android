@@ -16,7 +16,11 @@ import com.xnotes.storage.lite.*
 import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSUserDefaults
 
-internal class InkEditor(val session: LiteSession, private val leave: () -> Unit) {
+internal class InkEditor(
+    val session: LiteSession,
+    private val worker: SaveWorker = SaveWorker.Background,
+    private val leave: () -> Unit,
+) {
     private val history = History()
     private val gestures = PencilGestures(Tool.PEN.id)
     var tool by mutableStateOf(Tool.PEN); private set
@@ -30,6 +34,8 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     var finger by mutableStateOf(NSUserDefaults.standardUserDefaults.boolForKey("fingerDrawing")); private set
     var warning by mutableStateOf<String?>(null); private set
     var canLeaveProtected by mutableStateOf(false); private set
+    /** A write is running off the main thread; editing carries on and the next save waits for it. */
+    var saving by mutableStateOf(false); private set
     private var pendingBack = false
     private var pendingBackground = false
     var invalidate: (() -> Unit)? = null
@@ -59,8 +65,9 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     private var surfaces = 0
     private var released = false
     fun attachSurface() { check(!released); surfaces++ }
-    fun releaseSurface() { surfaces--; if (surfaces == 0 && released) session.close() }
-    fun releaseOwner() { cancelPointer?.invoke(); selection?.clear(); textSurface?.close(); released = true; if (surfaces == 0) session.close() }
+    fun releaseSurface() { surfaces--; closeIfDone() }
+    fun releaseOwner() { cancelPointer?.invoke(); selection?.clear(); textSurface?.close(); released = true; closeIfDone() }
+    private fun closeIfDone() { if (surfaces == 0 && released && !saving) session.close() }
 
     fun select(next: Tool) {
         if (next != tool) { cancelPointer?.invoke(); if (!active) leaveTool() }
@@ -119,9 +126,29 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
     }
 
     private fun saveStable(back: Boolean, background: Boolean) {
+        if (saving) { pendingBack = pendingBack || back; pendingBackground = pendingBackground || background; return }
         pendingBack = false; pendingBackground = false
-        val result = try { session.save() } catch (_: Exception) { null }
-        val backgroundCopy = if (background && session.dirty && session.writeRecovery()) session.registeredRecoveryCopy else null
+        val job = session.beginSave() ?: return finishSave(LiteSave.Saved, back, background)
+        saving = true
+        worker.launch({ try { job.run() } catch (_: Exception) { null } }) { result ->
+            saving = false
+            finishSave(result, back, background)
+        }
+    }
+
+    private fun finishSave(result: LiteSave?, back: Boolean, background: Boolean) {
+        // Edits made while the file was being written stay unsaved; going to the background keeps them in a private copy.
+        val recovery = if (background && !released && session.dirty) session.beginRecovery() else null
+        if (recovery == null) return report(result, back, recovered = false)
+        saving = true
+        worker.launch({ recovery.run() }) { recovered ->
+            saving = false
+            report(result, back, recovered)
+        }
+    }
+
+    private fun report(result: LiteSave?, back: Boolean, recovered: Boolean) {
+        val backgroundCopy = if (recovered) session.registeredRecoveryCopy else null
         val location = backgroundCopy ?: when (result) {
             is LiteSave.Failed -> result.protectedCopy
             is LiteSave.Conflict -> result.protectedCopy
@@ -135,7 +162,9 @@ internal class InkEditor(val session: LiteSession, private val leave: () -> Unit
             !canLeaveProtected -> text("save_unverified") + " " + displayPath
             else -> text(if (result is LiteSave.Conflict) "save_conflict" else "save_failed") + " " + displayPath
         }
-        if (back && result == LiteSave.Saved) leave()
+        if (released) return closeIfDone()
+        if (back && result == LiteSave.Saved && !session.dirty) return leave()
+        if (pendingBack || pendingBackground || (back && result == LiteSave.Saved)) save(pendingBack || back, pendingBackground)
     }
 
     fun leaveProtected() { if (!active && canLeaveProtected) leave() }

@@ -218,4 +218,18 @@ class WetRunMeshTest {
         assertEquals(4000 - 1, covered)
         assertTrue(abs(runs.first().first) == 0)
     }
+
+    /** Ink written into a mind map node is cut while it is drawn, not only once the pen lifts. */
+    @Test fun runsOfACutStrokeShowOnlyInsideItsCuts() {
+        for (tool in listOf(Tool.PEN, Tool.DASHED)) {
+            val stroke = liveStroke(tool, 300)
+            stroke.cuts = listOf(com.xnotes.core.model.CutEdge(300.0, 0.0, 1.0, 0.0), com.xnotes.core.model.CutEdge(0.0, 140.0, 0.0, 1.0))
+            val meshes = meshRuns(stroke, stroke.wetRibbon!!, step = 11)
+            assertTrue(meshes.isNotEmpty())
+            for (mesh in meshes) for (v in 0 until mesh.vertexCount) {
+                assertTrue("$tool x ${mesh.positions[2 * v]}", mesh.positions[2 * v] <= 300.0 + 1e-6)
+                assertTrue("$tool y ${mesh.positions[2 * v + 1]}", mesh.positions[2 * v + 1] <= 140.0 + 1e-6)
+            }
+        }
+    }
 }

@@ -42,7 +42,7 @@ class InkEditorTest {
         fs.createDirectories(documents)
         store = LiteStore(fs, documents, root / "Private", CgImageCodec, CgTextMeasurer)
         fs.write(path) { DocumentCodec(CgImageCodec, CgTextMeasurer).write(Document(mutableListOf(Page(100.0, 100.0), Page(100.0, 100.0))), this) }
-        editor = InkEditor(opened()) { left = true }
+        editor = InkEditor(opened(), SaveWorker.Inline) { left = true }
     }
 
     @AfterTest fun cleanup() { if (::editor.isInitialized) editor.releaseOwner(); fs.deleteRecursively(root) }
@@ -103,5 +103,44 @@ class InkEditorTest {
         assertTrue(fs.metadata(copy).isRegularFile); assertTrue(editor.warning!!.endsWith(copy.name))
         assertTrue(editor.canLeaveProtected); assertTrue(editor.session.dirty)
         assertContentEquals(bytes, fs.read(path) { readByteArray() })
+    }
+
+    private class HeldWorker : SaveWorker {
+        val queued = mutableListOf<() -> Unit>()
+        override fun <T> launch(work: () -> T, done: (T) -> Unit) { queued += { done(work()) } }
+        fun runNext() = queued.removeAt(0)()
+    }
+
+    private fun heldEditor() = HeldWorker().also { held ->
+        editor.releaseOwner()
+        editor = InkEditor(opened(), held) { left = true }
+    }
+
+    @Test fun editsDuringAWriteStayUnsavedAndBackWaitsForThem() {
+        val held = heldEditor()
+        begin(10.0).finish(listOf(sample(20.0)), false)
+        editor.save()
+        assertTrue(editor.saving)
+        begin(40.0).finish(listOf(sample(50.0)), false)
+        editor.save(back = true)
+        assertEquals(1, held.queued.size)
+        held.runNext()
+        assertFalse(left); assertTrue(editor.session.dirty); assertNull(editor.warning)
+        opened().use { assertEquals(listOf(1, 0), it.note!!.pages.map { page -> page.items.size }) }
+        assertTrue(editor.saving)
+        held.runNext()
+        assertTrue(left); assertFalse(editor.session.dirty); assertFalse(editor.saving)
+        opened().use { assertEquals(listOf(2, 0), it.note!!.pages.map { page -> page.items.size }) }
+    }
+
+    @Test fun closingDuringAWriteClosesTheDocumentAfterIt() {
+        val held = heldEditor()
+        begin(10.0).finish(listOf(sample(20.0)), false)
+        editor.save()
+        editor.releaseOwner()
+        editor.session.markEdited()
+        held.runNext()
+        assertFailsWith<IllegalStateException> { editor.session.markEdited() }
+        assertTrue(held.queued.isEmpty())
     }
 }

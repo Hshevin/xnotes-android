@@ -270,18 +270,27 @@ class MapControllerTest {
         assertEquals(start, x.rect(r))
     }
 
-    @Test fun aPenStrokeInANodeIsCutAtItsInkArea() {
+    @Test fun aPenStrokeInANodeIsCutAtItsWholeBox() {
         val r = root()
-        assertTrue(c.inkCuts(x.center(r)).isEmpty())
+        val keeps = com.xnotes.core.model.CutEdges::keeps
+        // No area yet: the first stroke sizes it, so only the left and top edges hold.
+        val bare = x.rect(r)
+        val first = c.inkCuts(x.center(r))
+        assertEquals(2, first.size)
+        assertFalse(keeps(first, bare.left - 1.0, bare.centerY, 0.0))
+        assertFalse(keeps(first, bare.centerX, bare.top - 1.0, 0.0))
+        assertTrue(keeps(first, bare.right + 100.0, bare.bottom + 100.0, 0.0))
         e.resize(r, com.xnotes.map.Size(300.0, 220.0))
         c.refresh()
         val box = x.rect(r)
-        val cuts = c.inkCuts(Pt(box.centerX, box.bottom - 20.0))
+        val cuts = c.inkCuts(Pt(box.centerX, box.top + 5.0))
         assertEquals(4, cuts.size)
-        val area = x.f.metrics.frame(x.state.nodes.getValue(r), true, box.topLeft).ink!!
-        assertTrue(com.xnotes.core.model.CutEdges.keeps(cuts, area.centerX, area.centerY))
-        assertFalse(com.xnotes.core.model.CutEdges.keeps(cuts, area.right + 1.0, area.centerY))
-        assertFalse(com.xnotes.core.model.CutEdges.keeps(cuts, area.centerX, area.top - 1.0))
+        // The title line and the padding are writable too.
+        assertTrue(keeps(cuts, box.left + 1.0, box.top + 1.0, 0.0))
+        assertTrue(keeps(cuts, box.right - 1.0, box.bottom - 1.0, 0.0))
+        assertFalse(keeps(cuts, box.right + 1.0, box.centerY, 0.0))
+        assertFalse(keeps(cuts, box.centerX, box.top - 1.0, 0.0))
+        assertFalse(keeps(cuts, box.centerX, box.bottom + 1.0, 0.0))
         assertTrue(c.inkCuts(Pt(5000.0, 5000.0)).isEmpty())
     }
 

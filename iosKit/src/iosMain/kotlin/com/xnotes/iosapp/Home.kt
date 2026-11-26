@@ -86,7 +86,7 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
         try {
             if (owned == null) withContext(Dispatchers.Default) { owned = if (recovery != null) store.restore(recovery) else store.open(path) }
             result = owned
-            editor = (owned as? LiteOpen.Opened)?.let { InkEditor(it.session, back) }
+            editor = (owned as? LiteOpen.Opened)?.let { InkEditor(it.session) { back() } }
             awaitCancellation()
         } finally { editor?.releaseOwner() ?: (owned as? LiteOpen.Opened)?.session?.close() }
     }
@@ -101,10 +101,10 @@ private fun Viewer(path: Path, recovery: LiteRecovery?, created: CreatedDocument
             }
             onDispose { center.removeObserver(token) }
         }
-        LaunchedEffect(model, model.revision, model.active) {
-            if (model.session.dirty && !model.active) {
+        LaunchedEffect(model, model.revision, model.active, model.saving) {
+            if (model.session.dirty && !model.active && !model.saving) {
                 delay(3000)
-                if (!model.active && model.session.dirty && model.warning == null) model.save()
+                if (!model.active && !model.saving && model.session.dirty && model.warning == null) model.save()
             }
         }
     }

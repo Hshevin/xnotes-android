@@ -24,7 +24,7 @@ class EditingViewportTest {
         val docs = (root / "Documents").also(KFiles.system::createDirectories)
         try {
             val store = LiteStore(KFiles.system, docs, root / "Private", CgImageCodec, CgTextMeasurer)
-            val editor = InkEditor(assertIs<LiteOpen.Opened>(store.create(docs, "Viewport", kind)).session) {}
+            val editor = InkEditor(assertIs<LiteOpen.Opened>(store.create(docs, "Viewport", kind)).session, SaveWorker.Inline) {}
             try { editor.select(Tool.TEXT); test(editor) } finally { editor.releaseOwner() }
         } finally { KFiles.system.deleteRecursively(root) }
     }
