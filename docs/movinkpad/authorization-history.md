@@ -359,3 +359,7 @@
 
 - 用户要求「直接拆掉吧，你指定计划，然后交给gpt6.2astra去做就好」：将 `t3/remove-transaction-storage`（`478c1457`：拆除重型事务存储、版本见证与恢复预览，恢复单遍流式打开、`PdfResources` 零重复全量哈希与分页笔记 `ZipTail` 原地尾部快存）快进合入本地 `master`，并提交主代理复核修正与文档（`987e2480`）。全量 Debug JVM／Robolectric 测试 379 套件 3,879 项通过、仪器测试源码编译通过；保留本地 `t3/remove-transaction-storage` 分支，真机待验。见 [记录](storage/direct-storage-2026-11-26.md)。
 - 用户随后要求「推送到远端」：将本地 `master`（含此前未推送的 `0.9.9beta2` 本地打包记录 `97b07d01`、`e1245252`，以及本轮 `478c1457`、`987e2480` 与本条记录）推送到 `origin/master`；不新建远端分支，不打包 APK、不安装、不发布 GitHub Release。
+
+## 2026-11-26 导图节点手动调整大小
+
+- 用户要求「推送到远端并合并进主分支」：将 `t3/mind-map-node-resize-bounds`（接口与测试、实现两个提交，已接到最新 `master` 上，JVM 3,907 项通过、仪器测试编译通过）快进合并入 `master`，推送 `origin/master` 与同名远端分支。不打包、不安装、不发布 GitHub Release；书写中的实时裁切与拖角手感待真机确认。
