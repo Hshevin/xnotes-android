@@ -183,15 +183,39 @@ class MapEditorTest {
         assertEquals(stored.samples.size, pen(30.0 to 60.0, 400.0 to 300.0).samples.size)
     }
 
-    @Test fun firstStrokeLeftOfOrAboveTheAreaShiftsIntoIt() {
+    @Test fun firstStrokeOverTheTitleAndPaddingStaysWhereItWasDrawn() {
         val r = rootForInk()
-        e.addInk(r, pen(0.0 to 30.0, 20.0 to 70.0))
+        assertTrue(e.addInk(r, pen(0.0 to 0.0, 20.0 to 70.0)))
         val stored = f.state.nodes.getValue(r).ink.strokes.single()
-        assertEquals(0.0, stored.bounds().left, 1e-6)
-        assertEquals(0.0, stored.bounds().top, 1e-6)
+        assertEquals("nothing shifts", listOf(-16.0, 4.0), stored.samples.map { it.x })
+        assertEquals(listOf(-42.0, 28.0), stored.samples.map { it.y })
+        assertEquals("cut at the box's left edge", -16.0, stored.bounds().left, 1e-6)
+        assertEquals("cut at the box's top edge", -42.0, stored.bounds().top, 1e-6)
+        assertInkInsideBox(r)
     }
 
-    @Test fun laterStrokesAreCutAtTheAreaAndNeverGrowOrShiftIt() {
+    @Test fun laterStrokesMayWriteOverTheTitle() {
+        val r = rootForInk()
+        e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
+        assertTrue(e.addInk(r, pen(20.0 to 14.0, 40.0 to 20.0)))
+        assertEquals(2, f.state.nodes.getValue(r).ink.strokes.size)
+        assertInkInsideBox(r)
+    }
+
+    /** Every stroke of [id] shows only inside its box. */
+    private fun assertInkInsideBox(id: NodeId) {
+        val node = f.state.nodes.getValue(id)
+        val frame = f.metrics.frame(node, id !in f.state.parent, Pt(0.0, 0.0))
+        val area = frame.ink!!
+        val eps = 1e-6
+        for (s in node.ink.strokes) {
+            val b = s.bounds().translate(area.left, area.top)
+            assertTrue("$b inside ${frame.rect}", b.left >= frame.rect.left - eps && b.top >= frame.rect.top - eps &&
+                b.right <= frame.rect.right + eps && b.bottom <= frame.rect.bottom + eps)
+        }
+    }
+
+    @Test fun laterStrokesAreCutAtTheBoxAndNeverGrowOrShiftIt() {
         val r = rootForInk()
         e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
         val before = f.state.nodes.getValue(r).ink
@@ -208,21 +232,20 @@ class MapEditorTest {
         assertEquals(input.samples.map { it.pressure }, cut.samples.map { it.pressure })
         assertTrue(cut.cuts.isNotEmpty())
         val b = cut.bounds()
-        val eps = 1e-6
-        assertTrue("cut at the left edge: $b", b.left >= -eps)
-        assertTrue("cut at the top edge: $b", b.top >= -eps)
-        assertTrue("cut at the right edge: $b", b.right <= ink.width + eps)
-        assertTrue("cut at the bottom edge: $b", b.bottom <= ink.height + eps)
+        assertEquals("cut at the box's left edge", -16.0, b.left, 1e-6)
+        assertEquals("cut at the box's right edge", ink.width + 16.0, b.right, 1e-6)
+        assertEquals("cut at the box's bottom edge", ink.height + NodeMetrics.PAD_Y, b.bottom, 1e-6)
+        assertInkInsideBox(r)
         assertTrue("the input stroke is not cut", input.cuts.isEmpty())
     }
 
-    @Test fun aStrokeThatShowsNothingInsideTheAreaIsNotWritten() {
+    @Test fun aStrokeThatShowsNothingInsideTheBoxIsNotWritten() {
         val r = rootForInk()
         e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
         val before = f.state
         val undo = f.undoCount()
-        // on the title line, above the area's top edge at y = 42
-        assertFalse(e.addInk(r, pen(20.0 to 14.0, 40.0 to 20.0)))
+        // the box is 192 × 132; this is right of and below it
+        assertFalse(e.addInk(r, pen(300.0 to 200.0, 340.0 to 220.0)))
         assertSame(before, f.state)
         assertEquals(undo, f.undoCount())
     }
@@ -236,7 +259,7 @@ class MapEditorTest {
         val ink = f.state.nodes.getValue(r).ink
         assertEquals(area.width, ink.width, 1e-9)
         assertEquals(area.height, ink.height, 1e-9)
-        assertTrue(ink.strokes.single().bounds().right <= ink.width + 1e-6)
+        assertInkInsideBox(r)
     }
 
     @Test fun shorteningATitleNeverNarrowsTheAreaUnderInkWrittenBesideIt() {
@@ -247,11 +270,11 @@ class MapEditorTest {
         e.setTitle(r, "Hi")
         val node = f.state.nodes.getValue(r)
         val area = f.metrics.frame(node, true, Pt(0.0, 0.0)).ink!!
-        for (s in node.ink.strokes) assertTrue("${s.bounds()} inside ${area.w}", s.bounds().right <= area.w + 1e-6)
+        assertInkInsideBox(r)
         assertEquals(300.0, area.w, 1e-9)
     }
 
-    @Test fun firstStrokeInAResizedNodeKeepsItsWidthAndIsCutSideways() {
+    @Test fun firstStrokeInAResizedNodeKeepsItsWidthAndIsCutAtItsSides() {
         val r = rootForInk()
         assertTrue(e.resize(r, Size(200.0, 10.0)))
         assertEquals(NodeInk.NONE, f.state.nodes.getValue(r).ink)
@@ -263,8 +286,10 @@ class MapEditorTest {
         val stroke = node.ink.strokes.single()
         assertEquals("nothing shifts sideways", -16.0, stroke.samples.first().x, 1e-9)
         val b = stroke.bounds()
-        assertTrue(b.left >= -1e-6 && b.right <= 168.0 + 1e-6)
+        assertEquals("cut at the box's left edge", -16.0, b.left, 1e-6)
+        assertEquals("cut at the box's right edge", 184.0, b.right, 1e-6)
         assertEquals("the height still fits the stroke", b.bottom + MapEditor.INK_MARGIN, node.ink.height, 1e-6)
+        assertInkInsideBox(r)
     }
 
     @Test fun inkWritesUndoAsOneStepEach() {

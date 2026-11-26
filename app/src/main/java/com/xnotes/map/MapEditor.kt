@@ -1,6 +1,7 @@
 package com.xnotes.map
 
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.Command
 import com.xnotes.core.history.History
 import com.xnotes.core.model.CutEdge
@@ -177,63 +178,69 @@ class MapEditor(
     }
 
     /**
-     * Write [stroke], given in canvas coordinates, into [id]'s ink area in one command. Ink never
-     * shows past the area's edges.
+     * Write [stroke], given in canvas coordinates, into [id] in one command. The whole node box is
+     * writable, title and padding included; ink never shows past the box.
      *
-     * - The area's canvas origin is [NodeFrame.ink]'s top-left from [layout] and [metrics]; for a node
-     *   without an ink area it is where the area would start (below the title line, or at the content
-     *   top when no title line is shown), at `left + PAD_X`.
-     * - The stored stroke is an independent copy shifted into area-local coordinates; [stroke] itself
-     *   is not modified. Every raw sample keeps its pressure, time and other fields; only x and y move.
-     *   No sample is dropped: the area's four edges are added to the copy's
-     *   [com.xnotes.core.model.Stroke.cuts] ([com.xnotes.core.model.CutEdges.with]), so it is drawn,
-     *   hit and bounded only inside `[0, area w] × [0, area h]` (w = the frame's ink width, the node's
-     *   inner width). Strokes already in the area are never moved, cut again or replaced.
-     * - **A node that has an ink area** keeps its size: no shift, no growth. When nothing of the cut
-     *   copy shows ([com.xnotes.core.model.Stroke.showsInk] false) nothing changes and it returns false.
-     * - **The first stroke** (no ink area yet) sizes the area. Let b be the copy's local bounds; if
-     *   b.top < 0 the copy is shifted down by −b.top, and, for a node sized to its content
-     *   ([MapNode.width] null), right by max(0, −b.left). The area is then width = max(b.right +
-     *   [INK_MARGIN], [INK_MIN_W]) and height = max(b.bottom + [INK_MARGIN], [INK_MIN_H]), using the
-     *   shifted b. A resized node instead keeps its width: the area is its inner width wide, nothing
-     *   shifts sideways, the copy is first cut at the area's left and right edges, and b (for the
-     *   downward shift and the height) is that cut copy's bounds; then it gets all four edges.
+     * - Strokes are stored in area-local coordinates: the origin is [NodeFrame.ink]'s top-left from
+     *   [layout] and [metrics]; for a node without an ink area, where the area will start (below the
+     *   title line, or at the content top when no title line is shown), at `left + PAD_X`. Ink over
+     *   the title or in the padding has negative or out-of-area coordinates.
+     * - The stored stroke is an independent copy translated into those coordinates; [stroke] itself is
+     *   not modified. Every raw sample keeps its pressure, time and other fields; only x and y move.
+     *   Nothing is shifted and no sample is dropped: the copy is clipped by adding edges to its
+     *   [com.xnotes.core.model.Stroke.cuts] ([com.xnotes.core.model.CutEdges.with]). Strokes already
+     *   in the node are never moved, cut again or replaced.
+     * - **A node that has an ink area** keeps its size: the copy is cut at the box's four edges. When
+     *   nothing of it shows ([com.xnotes.core.model.Stroke.showsInk] false) nothing changes and it
+     *   returns false.
+     * - **The first stroke** (no ink area yet) sizes the area. The copy is cut at the current box's
+     *   left and top edges, and also its right edge when the node is resized ([MapNode.width] set).
+     *   With b the cut copy's bounds, the area is height = max(b.bottom + [INK_MARGIN], [INK_MIN_H])
+     *   and, for a node sized to its content, width = max(b.right + [INK_MARGIN], [INK_MIN_W], the
+     *   inner width the title gives); a resized node keeps its inner width. The copy is then also
+     *   cut at the new box's edges.
      *
      * Returns false when [id] does not exist.
      */
     fun addInk(id: NodeId, stroke: Stroke): Boolean = editNode(id) { node ->
         val at = layout().rectOf(id)?.topLeft ?: return@editNode node
+        val isRoot = id !in model.state.parent
         val ink = node.ink
-        val withArea = if (ink.isEmpty) node.copy(ink = NodeInk(INK_MIN_W, INK_MIN_H, emptyList())) else node
-        val frame = metrics.frame(withArea, id !in model.state.parent, at)
-        val area = checkNotNull(frame.ink)
         val local = stroke.inkCopy()
-        local.translate(-area.left, -area.top)
 
         if (!ink.isEmpty) {
-            local.cutToSpan(area.w, sideways = true)
-            local.cutToSpan(area.h, sideways = false)
+            val frame = metrics.frame(node, isRoot, at)
+            val area = checkNotNull(frame.ink)
+            local.translate(-area.left, -area.top)
+            local.cutTo(frame.rect.translate(-area.left, -area.top))
             if (!local.showsInk()) return@editNode node
             // The area keeps at least the width the ink was cut at, so a title shortened later cannot narrow it under the ink.
             return@editNode node.copy(ink = ink.copy(width = maxOf(ink.width, area.w), strokes = ink.strokes + local))
         }
 
-        if (node.width != null) local.cutToSpan(area.w, sideways = true)
-        val bounds = local.bounds()
-        val dx = if (node.width == null) maxOf(0.0, -bounds.left) else 0.0
-        val dy = maxOf(0.0, -bounds.top)
-        if (dx != 0.0 || dy != 0.0) local.translate(dx, dy)
-        val width = if (node.width == null) maxOf(bounds.right + dx + INK_MARGIN, INK_MIN_W) else area.w
-        val height = maxOf(bounds.bottom + dy + INK_MARGIN, INK_MIN_H)
-        val cutWidth = if (node.width == null) maxOf(width, area.w) else width
-        if (node.width == null) local.cutToSpan(cutWidth, sideways = true)
-        local.cutToSpan(height, sideways = false)
-        node.copy(ink = NodeInk(cutWidth, height, listOf(local)))
+        val shown = metrics.frame(node, isRoot, at).rect
+        val area = checkNotNull(metrics.frame(node.copy(ink = NodeInk(INK_MIN_W, INK_MIN_H, emptyList())), isRoot, at).ink)
+        local.translate(-area.left, -area.top)
+        val box = shown.translate(-area.left, -area.top)
+        local.cuts = CutEdges.with(local.cuts, CutEdge(box.left, 0.0, -1.0, 0.0))
+        local.cuts = CutEdges.with(local.cuts, CutEdge(0.0, box.top, 0.0, -1.0))
+        if (node.width != null) local.cuts = CutEdges.with(local.cuts, CutEdge(box.right, 0.0, 1.0, 0.0))
+        if (!local.showsInk()) return@editNode node
+        val b = local.bounds()
+        val width = if (node.width == null) maxOf(b.right + INK_MARGIN, INK_MIN_W, area.w) else area.w
+        val height = maxOf(b.bottom + INK_MARGIN, INK_MIN_H)
+        val sized = node.copy(ink = NodeInk(width, height, emptyList()))
+        val frame = metrics.frame(sized, isRoot, at)
+        local.cutTo(frame.rect.translate(-area.left, -area.top))
+        sized.copy(ink = NodeInk(width, height, listOf(local)))
     }
 
-    private fun Stroke.cutToSpan(length: Double, sideways: Boolean) {
-        cuts = CutEdges.with(cuts, CutEdge.along(0.0, sideways, keepAfter = true, near = 0.0))
-        cuts = CutEdges.with(cuts, CutEdge.along(length, sideways, keepAfter = false, near = 0.0))
+    /** Cut this stroke at [r]'s four edges. */
+    private fun Stroke.cutTo(r: Rect) {
+        for (edge in listOf(
+            CutEdge(r.left, 0.0, -1.0, 0.0), CutEdge(r.right, 0.0, 1.0, 0.0),
+            CutEdge(0.0, r.top, 0.0, -1.0), CutEdge(0.0, r.bottom, 0.0, 1.0),
+        )) cuts = CutEdges.with(cuts, edge)
     }
 
     private fun Stroke.inkCopy(): Stroke = copyForWrite().also {
