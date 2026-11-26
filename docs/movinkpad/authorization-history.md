@@ -399,3 +399,4 @@
 
 - 用户要求「推送远端并打包，我看看」并记录打包耗时：基于 `3226e723` 在隔离工作树打包主线测试版 `com.xnotes.movinkpad.branchtest.master`（code 18，Release 签名与 16 KiB 对齐核验通过），记录 `--profile` 耗时拆解，并将本地 `master`（含 `6b8f6d0c`、`3226e723` 与本轮构建记录）推送到 `origin/master`。未安装到设备，不改动正式版，不发布 GitHub Release。见 [构建记录](test-builds/master-test18-2026-11-27.md)。
 - 用户随后要求「安装到平板上」：将 test18（`com.xnotes.movinkpad.branchtest.master`，code 18）覆盖安装到 MovinkPad Pro 14（原 test17 / code 17，首次安装时间不变），正式版未动。本次仅本地记录，未再推送。
+- 用户指出页面跳转子页上下分段顺序相反且「设当前页为正文第 1 页」不够像按钮，修复（`55295c50`）后要求「打debug包装上去，名字也不要用xnote，改成xnote-test吧」：在隔离工作树构建 Debug ARM64 包 `com.xnotes.movinkpad.branchtest.master`（code 19，应用名 `xnote-test`，沿用历史签名与 16 KiB 对齐核验通过，构建耗时 50 秒），并覆盖安装到 MovinkPad Pro 14（原 test18 / code 18，首次安装时间不变），正式版未动。本次未推送、未发布。
