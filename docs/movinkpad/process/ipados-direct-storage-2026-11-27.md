@@ -1,7 +1,7 @@
 # iPad 存储改为直接读写，并合入主线（2026-11-27）
 
 用户要求：继续 iPad 迁移，先改存储。主线已拆掉事务存储（见 `docs/movinkpad/storage/direct-storage-2026-11-26.md`），iPad 分支要跟上，iPad 自己的存储也改成同样的轻量做法。
-状态：交 gpt-6.2-astra 实现；主代理接 iosKit 的后台保存并验收
+状态：直接存储已实现，Android JVM、iPad 模拟器测试与两端 Debug 构建通过；主代理待接入 iosKit 后台保存并验收交互。
 本轮边界：本地合并与本地提交；不推送、不安装真机、不合并到 `master`
 
 ## 现状问题
@@ -54,3 +54,26 @@ iPad 用 `shared/.../storage/lite/`（`LiteStore`、`LiteSession`、`LiteBundle`
 ## 主代理部分
 
 iosKit 自动保存、离开、进后台改用 `beginSave` + 后台执行；保存中的状态与冲突提示照旧；模拟器上用大 PDF 笔记走查打开与连续书写不卡。
+
+## 实现记录
+
+- 本轮合并父提交为 `d0f11302`，共处理 49 个冲突路径。格式编解码、ZIP 目录与偏移读写保留在 `:shared`，Android 文件描述符和 Java 流经 Android 适配层调用；Android 注册表、编辑器及恢复入口采用主线逻辑。合并时暂留旧 lite 读取器所依赖的类，直接存储接通后移除。此次合并也带入 Zotero、图层切换、导图节点缩放和版本变更。
+- `app/src/test` 的 393 个文件与合并父提交逐文件一致。iPad 分支原有的分页笔迹宿主测试移入同一 Android 单测任务的辅助源目录。共享测试保留 JVM 与 Kotlin/Native 两端可运行的断言。
+- 按用户确认同步两项 ZIP 断言。带注释的 ZIP 现在可从中央目录读取身份，原地拼接仍拒绝带注释的 ZIP。身份读取按中央目录检查 manifest 声明大小，大幅超限时直接拒绝；中央目录谎报较小的大小时，身份读取不展开正文。另以超限的实际解压内容调用 manifest 解析器，验证解析阶段仍会拒绝该输入。
+- iPad 直接从文稿文件读取身份与正文。内嵌 PDF 的键由文档 UUID、中央目录中 PDF 条目的 CRC32 与原始大小构成。缓存位于应用私有的 `Library/Caches/XNotes/embedded-pdf`，最多保留八份 PDF。首次提取边写边核对大小与 CRC；再次打开时核对缓存文件的身份、大小与纳秒修改时间，独立读取其他 ZIP 条目，跳过 PDF 负载。打开的会话持有硬链接，缓存淘汰后仍可继续使用该 PDF。
+- 文件版本戳由设备号、inode、大小和纳秒修改时间组成。笔记原有 STORED 资源的名称、顺序、文件和版本戳一致，且尾部起点至少 1 MiB 时，编码私有尾部 ZIP，通过 `ZipTail.splice` 拼接并同步。其他笔记、画布及拼接失败走同目录临时文件、同步与原子替换。新建与 PDF 导入继续用排他硬链接及重名编号发布，写后不读回整包。PDF 导入在测量和编码之间核对工作 PDF 的版本戳。
+- `LiteSession.beginSave(): LiteSaveJob?` 和 `LiteSession.beginRecovery(): LiteRecoveryJob?` 在模型所属线程捕获快照和修订号。干净会话返回 null，有任务的会话拒绝重叠捕获。每个任务只可执行一次，分别调用 `LiteSaveJob.run(): LiteSave` 和 `LiteRecoveryJob.run(): Boolean`。保存成功只确认捕获的修订号，后续编辑继续为脏。现有同步入口 `save(beforePublish: ((Path) -> Unit)? = null): LiteSave`、`writeRecovery(): Boolean` 继续可用。
+- 新恢复记录写 v2；v1 仍支持列出、恢复与丢弃。仅在恢复旧记录时使用旧摘要核对私有正文及原件，原件已变更时保留冲突保护。v2 的正常打开、保存、恢复写入均不计算整包哈希。
+
+### 验证结果
+
+- 合并提交 `0254ba71`，共享存储实现 `e1264a73`。
+- 使用 JDK 21。最终源码上四个套件共 9,354 项测试，失败、错误、跳过均为 0。新增覆盖包括缓存复用、至少 1 MiB 的 STORED 前缀原地保存、图片增删后的替换、同大小外部写入、两代恢复记录及后台任务完成后保留后续编辑。
+- `:app:assembleDebug` 通过，检查 APK 中的原生库仅有 ARM64。Xcode 的 XNotes scheme 在 iPad Pro 13 英寸（M5）模拟器 Debug 构建通过。iosKit 本轮只适配图层编辑接口以通过编译；UI 的后台保存调度、大 PDF 连续书写走查属主代理部分，真机手感待实测。
+
+| 套件 | 测试数 |
+| --- | ---: |
+| `:shared:testDebugUnitTest` | 2,733 |
+| `:app:testDebugUnitTest` | 4,025 |
+| `:shared:iosSimulatorArm64Test` | 2,553 |
+| `:iosKit:iosSimulatorArm64Test` | 43 |
