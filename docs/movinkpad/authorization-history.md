@@ -390,3 +390,7 @@
 
 - 用户同意 iPad 存储验收后把 `ipados` 合入本地 `master`（`76dac7d0`），并要求合并后打包安卓版、安装到平板测试：打包 `com.xnotes.movinkpad.branchtest.master` code 17 并安装到 MovinkPad Pro 14。不推送、不发布 GitHub Release。
 - 用户试用 test17 后回复「应该没问题，你推送吧」：将本地 `master`（含 iPad 移植合并、test17 记录与本条）推送到 `origin/master`。不推送 `ipados` 等其他分支，不发布 GitHub Release。
+
+## 2026-11-27 发布 0.9.9beta4
+
+- 用户要求「推送打包，安装到平板上并发布 beta4 release，release 文案让 neon 写一份先」：版本提高至 `0.9.9beta4`（versionCode 105，源码 `8ae3fe3b`），构建正式 ARM64 APK 并核验，覆盖安装到 MovinkPad Pro 14（原 0.9.9beta3），推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta4`（附 APK 与 SHA256SUMS.txt，说明由 Gemini 4 Neon 撰写）。见 [发布记录](releases/release-0.9.9beta4-2026-11-27.md)。

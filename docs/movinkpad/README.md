@@ -38,6 +38,7 @@
 - 2026-11-23 [主线正式覆盖更新 APK 100](releases/release100-2026-11-23.md)
 - 2026-11-23 [主线正式覆盖更新 APK 101](releases/release101-2026-11-23.md)
 - 2026-11-24 [0.9.9beta2 本地正式版](releases/release-0.9.9beta2-2026-11-24.md)
+- 2026-11-27 [0.9.9beta4 发布](releases/release-0.9.9beta4-2026-11-27.md)
 
 ## 测试版（`test-builds/`）
 

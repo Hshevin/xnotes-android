@@ -27,7 +27,7 @@
 
 从 [GitHub Releases](https://github.com/Hshevin/xnotes-android/releases) 下载 `XNotes-<版本号>-arm64.apk`，在平板上打开安装。新版本可以直接覆盖安装旧版本，笔记保留。
 
-- 最新版本：[0.9.9beta](https://github.com/Hshevin/xnotes-android/releases/tag/v0.9.9beta)。装上后不能再回装 0.9.8 及更早版本。
+- 最新版本：[0.9.9beta4](https://github.com/Hshevin/xnotes-android/releases/tag/v0.9.9beta4)。装上后不能再回装 0.9.8 及更早版本。
 - 备份或换设备时，请用应用里的分享／导出，不要只复制 `.xnote` 文件：PDF 原件保存在应用内部，导出时才会一起打包。
 - 旧版独立导图（`.xmap`）和导图混合分屏已不再支持，旧文件不会被删除或改写。
 

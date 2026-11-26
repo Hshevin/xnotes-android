@@ -1,0 +1,117 @@
+> Task :shared:preBuild UP-TO-DATE
+> Task :shared:preReleaseBuild UP-TO-DATE
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResValues FROM-CACHE
+> Task :shared:generateReleaseResValues FROM-CACHE
+> Task :shared:writeReleaseAarMetadata
+> Task :shared:generateReleaseResources FROM-CACHE
+> Task :shared:packageReleaseResources FROM-CACHE
+> Task :shared:extractReleaseSupportedLocales FROM-CACHE
+> Task :shared:extractDeepLinksRelease FROM-CACHE
+> Task :app:extractReleaseSupportedLocales
+> Task :shared:processReleaseManifest FROM-CACHE
+> Task :shared:parseReleaseLocalResources FROM-CACHE
+> Task :shared:generateReleaseRFile FROM-CACHE
+> Task :shared:kmpPartiallyResolvedDependenciesChecker
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared:generateEmojiAliases
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseLocaleConfig FROM-CACHE
+> Task :app:generateReleaseResources FROM-CACHE
+> Task :shared:compileReleaseKotlinAndroid FROM-CACHE
+> Task :shared:javaPreCompileRelease FROM-CACHE
+> Task :shared:compileReleaseJavaWithJavac NO-SOURCE
+> Task :shared:mergeReleaseShaders
+> Task :shared:compileReleaseShaders NO-SOURCE
+> Task :shared:generateReleaseAssets UP-TO-DATE
+> Task :shared:releaseAssetsCopyForAGP NO-SOURCE
+> Task :shared:mergeReleaseAssets
+> Task :shared:processReleaseJavaRes
+> Task :shared:mergeReleaseJniLibFolders
+> Task :shared:mergeReleaseNativeLibs NO-SOURCE
+> Task :shared:copyReleaseJniLibsProjectOnly
+> Task :shared:mergeReleaseGeneratedProguardFiles
+> Task :shared:exportReleaseConsumerProguardFiles
+> Task :shared:prepareReleaseArtProfile
+> Task :shared:extractProguardFiles
+> Task :shared:bundleLibRuntimeToJarRelease
+> Task :shared:bundleLibCompileToJarRelease
+> Task :shared:generateReleaseLintModel
+> Task :app:packageReleaseResources
+> Task :shared:createFullJarRelease
+> Task :shared:prepareLintJarForPublish
+> Task :shared:stripReleaseDebugSymbols NO-SOURCE
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :shared:copyReleaseJniLibsProjectAndLocalJars
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :shared:extractDeepLinksForAarRelease FROM-CACHE
+> Task :app:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileReleaseUnitTest FROM-CACHE
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseResources
+> Task :app:mergeReleaseAssets
+> Task :shared:extractReleaseAnnotations FROM-CACHE
+> Task :shared:mergeReleaseConsumerProguardFiles
+> Task :app:processReleaseUnitTestManifest
+> Task :shared:mergeReleaseJavaResource
+> Task :shared:syncReleaseLibJars FROM-CACHE
+> Task :shared:bundleReleaseLocalLintAar
+> Task :shared:writeReleaseLintModelMetadata
+> Task :shared:generateReleaseLintVitalModel
+> Task :app:configureCMakeRelWithDebInfo[arm64-v8a]
+> Task :app:buildCMakeRelWithDebInfo[arm64-v8a]
+> Task :shared:lintVitalAnalyzeRelease
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseNativeLibs
+> Task :app:mergeReleaseArtProfile SKIPPED
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:stripReleaseDebugSymbols
+> Task :app:compressReleaseAssets FROM-CACHE
+> Task :app:processReleaseResources
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:convertLinkedResourcesToBinaryRelease
+> Task :app:packageReleaseUnitTestForUnitTest
+> Task :app:generateReleaseUnitTestConfig
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:mergeReleaseNativeDebugMetadata
+> Task :app:compileReleaseKotlin
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:processReleaseJavaRes
+> Task :app:expandReleaseArtProfileWildcards SKIPPED
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:mergeReleaseJavaResource
+> Task :app:compileReleaseUnitTestKotlin
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:minifyReleaseWithR8
+> Task :app:testReleaseUnitTest
+> Task :app:compileReleaseArtProfile SKIPPED
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+BUILD SUCCESSFUL in 4m 5s
+EXIT=0
