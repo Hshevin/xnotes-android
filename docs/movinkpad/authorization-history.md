@@ -394,3 +394,7 @@
 ## 2026-11-27 发布 0.9.9beta4
 
 - 用户要求「推送打包，安装到平板上并发布 beta4 release，release 文案让 neon 写一份先」：版本提高至 `0.9.9beta4`（versionCode 105，源码 `8ae3fe3b`），构建正式 ARM64 APK 并核验，覆盖安装到 MovinkPad Pro 14（原 0.9.9beta3），推送 `origin/master`，发布 GitHub 预发布版 `v0.9.9beta4`（附 APK 与 SHA256SUMS.txt，说明由 Gemini 4 Neon 撰写）。见 [发布记录](releases/release-0.9.9beta4-2026-11-27.md)。
+
+## 2026-11-27 页面跳转与页码显示同步：推送与 test18 打包
+
+- 用户要求「推送远端并打包，我看看」并记录打包耗时：基于 `3226e723` 在隔离工作树打包主线测试版 `com.xnotes.movinkpad.branchtest.master`（code 18，Release 签名与 16 KiB 对齐核验通过），记录 `--profile` 耗时拆解，并将本地 `master`（含 `6b8f6d0c`、`3226e723` 与本轮构建记录）推送到 `origin/master`。未安装到设备，不改动正式版，不发布 GitHub Release。见 [构建记录](test-builds/master-test18-2026-11-27.md)。

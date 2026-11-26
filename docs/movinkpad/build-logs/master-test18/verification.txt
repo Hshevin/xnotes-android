@@ -1,0 +1,5 @@
+package: name='com.xnotes.movinkpad.branchtest.master' versionCode='18' versionName='0.9.9beta4' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+application-label:'XNotes'
+native-code: 'arm64-v8a'
+Signer #1 certificate SHA-256 digest: a0453b7be6c0c8239e8616208612c412cf501da8898c7a0450cc923c8e358451
+zipalign 16KB ok
