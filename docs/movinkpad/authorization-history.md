@@ -398,3 +398,4 @@
 ## 2026-11-27 页面跳转与页码显示同步：推送与 test18 打包
 
 - 用户要求「推送远端并打包，我看看」并记录打包耗时：基于 `3226e723` 在隔离工作树打包主线测试版 `com.xnotes.movinkpad.branchtest.master`（code 18，Release 签名与 16 KiB 对齐核验通过），记录 `--profile` 耗时拆解，并将本地 `master`（含 `6b8f6d0c`、`3226e723` 与本轮构建记录）推送到 `origin/master`。未安装到设备，不改动正式版，不发布 GitHub Release。见 [构建记录](test-builds/master-test18-2026-11-27.md)。
+- 用户随后要求「安装到平板上」：将 test18（`com.xnotes.movinkpad.branchtest.master`，code 18）覆盖安装到 MovinkPad Pro 14（原 test17 / code 17，首次安装时间不变），正式版未动。本次仅本地记录，未再推送。
