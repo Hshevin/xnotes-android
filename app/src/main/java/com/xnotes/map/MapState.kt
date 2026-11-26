@@ -145,13 +145,20 @@ data class SourceRef(
     val label: String,
 )
 
-/** One node's content. Its position lives in the tree ([MapState.rootOrigin], [MapState.offsets]), not here. */
+/**
+ * One node's content. Its position lives in the tree ([MapState.rootOrigin], [MapState.offsets]), not here.
+ *
+ * [width] is the node box's width the person set by resizing it, in canvas units; null sizes the
+ * box to its content (see [NodeMetrics]). Its height always follows the content, so a resized
+ * node's height is carried by its ink area's height ([NodeMetrics.resized]).
+ */
 data class MapNode(
     val id: NodeId,
     val title: String = "",
     val style: NodeStyle = NodeStyle.TOPIC,
     val ink: NodeInk = NodeInk.NONE,
     val sources: List<SourceRef> = emptyList(),
+    val width: Double? = null,
 )
 
 /** Arrowheads on a relation line, relative to its [Relation.from] → [Relation.to] direction. */
@@ -192,6 +199,7 @@ data class Relation(
  * - [rootOrigin] and [layout] have an entry for every root and for nothing else;
  * - [offsets] has entries only for children (never for roots) and never a zero offset;
  * - [layers] has entries only for roots;
+ * - every node's [MapNode.width] is null or a finite number above zero;
  * - relations connect two different nodes, and no two relations share the same unordered pair.
  */
 data class MapState(

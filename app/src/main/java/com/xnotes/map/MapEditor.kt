@@ -175,19 +175,27 @@ class MapEditor(
     }
 
     /**
-     * Write [stroke], given in canvas coordinates, into [id]'s ink area in one command.
+     * Write [stroke], given in canvas coordinates, into [id]'s ink area in one command. Ink never
+     * shows past the area's edges.
      *
      * - The area's canvas origin is [NodeFrame.ink]'s top-left from [layout] and [metrics]; for a node
      *   without an ink area it is where the area would start (below the title line, or at the content
      *   top when no title line is shown), at `left + PAD_X`.
      * - The stored stroke is an independent copy shifted into area-local coordinates; [stroke] itself
      *   is not modified. Every raw sample keeps its pressure, time and other fields; only x and y move.
-     * - Let b be the copy's local bounds. If b.left < 0 or b.top < 0, every stroke in the area (the
-     *   existing ones and the new one) is shifted by (max(0, −b.left), max(0, −b.top)) so nothing is
-     *   left of or above the area's origin.
-     * - The area then grows (never shrinks) to width = max(width + sx, b.right + [INK_MARGIN], [INK_MIN_W])
-     *   and height = max(height + sy, b.bottom + [INK_MARGIN], [INK_MIN_H]), using the shifted b and the
-     *   shift (sx, sy), so ink that was shifted keeps the same room on its far side.
+     *   No sample is dropped: the area's four edges are added to the copy's
+     *   [com.xnotes.core.model.Stroke.cuts] ([com.xnotes.core.model.CutEdges.with]), so it is drawn,
+     *   hit and bounded only inside `[0, area w] × [0, area h]` (w = the frame's ink width, the node's
+     *   inner width). Strokes already in the area are never moved, cut again or replaced.
+     * - **A node that has an ink area** keeps its size: no shift, no growth. When nothing of the cut
+     *   copy shows ([com.xnotes.core.model.Stroke.showsInk] false) nothing changes and it returns false.
+     * - **The first stroke** (no ink area yet) sizes the area. Let b be the copy's local bounds; if
+     *   b.top < 0 the copy is shifted down by −b.top, and, for a node sized to its content
+     *   ([MapNode.width] null), right by max(0, −b.left). The area is then width = max(b.right +
+     *   [INK_MARGIN], [INK_MIN_W]) and height = max(b.bottom + [INK_MARGIN], [INK_MIN_H]), using the
+     *   shifted b. A resized node instead keeps its width: the area is its inner width wide, nothing
+     *   shifts sideways, the copy is first cut at the area's left and right edges, and b (for the
+     *   downward shift and the height) is that cut copy's bounds; then it gets all four edges.
      *
      * Returns false when [id] does not exist.
      */
@@ -232,6 +240,12 @@ class MapEditor(
 
     /** Remove [id]'s ink area and all its strokes. False when it has none. */
     fun removeInkArea(id: NodeId): Boolean = editNode(id) { it.copy(ink = NodeInk.NONE) }
+
+    /**
+     * Resize [id]'s box toward [target] (canvas units) in one command, as [NodeMetrics.resized]
+     * decides. False when [id] does not exist or nothing would change.
+     */
+    fun resize(id: NodeId, target: Size): Boolean = TODO("backend")
 
     // ---- sources ----
 

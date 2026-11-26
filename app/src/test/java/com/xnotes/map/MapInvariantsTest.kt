@@ -62,4 +62,14 @@ class MapInvariantsTest {
         )))
         broken(good.copy(relations = mapOf(RelationId("q") to Relation(RelationId("w"), a, a1))))
     }
+
+    @Test fun aNodeWidthMustBeAPositiveNumber() {
+        fun withWidth(w: Double?) = good.copy(nodes = good.nodes + (a to good.nodes.getValue(a).copy(width = w)))
+        assertValid(withWidth(null))
+        assertValid(withWidth(240.0))
+        broken(withWidth(0.0))
+        broken(withWidth(-5.0))
+        broken(withWidth(Double.NaN))
+        broken(withWidth(Double.POSITIVE_INFINITY))
+    }
 }

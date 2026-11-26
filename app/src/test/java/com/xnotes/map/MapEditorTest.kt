@@ -171,46 +171,88 @@ class MapEditorTest {
         assertEquals(2, f.undoCount())
     }
 
-    @Test fun inkAreaGrowsToFitWithAMarginAndNeverShrinks() {
+    @Test fun firstStrokeSizesTheAreaToFitWithAMargin() {
         val r = rootForInk()
         e.addInk(r, pen(30.0 to 60.0, 400.0 to 300.0))
         val ink = f.state.nodes.getValue(r).ink
-        val b = ink.strokes.single().bounds()
+        val stored = ink.strokes.single()
+        val b = stored.bounds()
         assertEquals(b.right + MapEditor.INK_MARGIN, ink.width, 1e-9)
         assertEquals(b.bottom + MapEditor.INK_MARGIN, ink.height, 1e-9)
-        e.addInk(r, pen(30.0 to 60.0, 40.0 to 70.0))
-        val after = f.state.nodes.getValue(r).ink
-        assertEquals(ink.width, after.width, 1e-9)
-        assertEquals(ink.height, after.height, 1e-9)
-        assertEquals(2, after.strokes.size)
+        assertEquals("the first stroke shows whole", 2, stored.samples.size)
+        assertEquals(stored.samples.size, pen(30.0 to 60.0, 400.0 to 300.0).samples.size)
     }
 
-    @Test fun strokeLeftOfTheAreaShiftsAllInkRight() {
+    @Test fun firstStrokeLeftOfOrAboveTheAreaShiftsIntoIt() {
         val r = rootForInk()
-        e.addInk(r, pen(40.0 to 60.0, 60.0 to 70.0))
-        val first = f.state.nodes.getValue(r).ink.strokes.single()
-        val firstX = first.samples.map { it.x }
-        e.addInk(r, pen(0.0 to 60.0, 20.0 to 70.0))
-        val ink = f.state.nodes.getValue(r).ink
-        val shift = -(pen(0.0 to 60.0, 20.0 to 70.0).bounds().left - 16.0)
-        assertTrue(shift > 0)
-        assertEquals(firstX.map { it + shift }, ink.strokes[0].samples.map { it.x })
-        assertEquals(0.0, ink.strokes[1].bounds().left, 1e-6)
-        assertEquals(listOf(0.0, 20.0).map { it - 16.0 + shift }, ink.strokes[1].samples.map { it.x })
-        assertEquals("the earlier state's stroke is not shifted in place", listOf(24.0, 44.0), first.samples.map { it.x })
-        f.history.undo()
-        assertEquals(listOf(24.0, 44.0), f.state.nodes.getValue(r).ink.strokes.single().samples.map { it.x })
+        e.addInk(r, pen(0.0 to 30.0, 20.0 to 70.0))
+        val stored = f.state.nodes.getValue(r).ink.strokes.single()
+        assertEquals(0.0, stored.bounds().left, 1e-6)
+        assertEquals(0.0, stored.bounds().top, 1e-6)
     }
 
-    @Test fun shiftedInkKeepsItsRoomOnTheFarSide() {
+    @Test fun laterStrokesAreCutAtTheAreaAndNeverGrowOrShiftIt() {
         val r = rootForInk()
-        e.addInk(r, pen(30.0 to 60.0, 400.0 to 70.0))
-        val wide = f.state.nodes.getValue(r).ink
-        e.addInk(r, pen(0.0 to 60.0, 10.0 to 65.0))
+        e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
+        val before = f.state.nodes.getValue(r).ink
+        val first = before.strokes.single()
+        val input = pen(0.0 to 60.0, 60.0 to 80.0, 400.0 to 300.0)
+        assertTrue(e.addInk(r, input))
         val ink = f.state.nodes.getValue(r).ink
-        val shift = -(pen(0.0 to 60.0, 10.0 to 65.0).bounds().left - 16.0)
-        assertEquals(wide.width + shift, ink.width, 1e-9)
-        assertTrue(ink.strokes.all { it.bounds().right <= ink.width })
+        assertEquals(before.width, ink.width, 1e-9)
+        assertEquals(before.height, ink.height, 1e-9)
+        assertSame("earlier ink is untouched", first, ink.strokes[0])
+        val cut = ink.strokes[1]
+        assertEquals("no sample is dropped", listOf(-16.0, 44.0, 384.0), cut.samples.map { it.x })
+        assertEquals(listOf(18.0, 38.0, 258.0), cut.samples.map { it.y })
+        assertEquals(input.samples.map { it.pressure }, cut.samples.map { it.pressure })
+        assertTrue(cut.cuts.isNotEmpty())
+        val b = cut.bounds()
+        val eps = 1e-6
+        assertTrue("cut at the left edge: $b", b.left >= -eps)
+        assertTrue("cut at the top edge: $b", b.top >= -eps)
+        assertTrue("cut at the right edge: $b", b.right <= ink.width + eps)
+        assertTrue("cut at the bottom edge: $b", b.bottom <= ink.height + eps)
+        assertTrue("the input stroke is not cut", input.cuts.isEmpty())
+    }
+
+    @Test fun aStrokeThatShowsNothingInsideTheAreaIsNotWritten() {
+        val r = rootForInk()
+        e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
+        val before = f.state
+        val undo = f.undoCount()
+        // on the title line, above the area's top edge at y = 42
+        assertFalse(e.addInk(r, pen(20.0 to 14.0, 40.0 to 20.0)))
+        assertSame(before, f.state)
+        assertEquals(undo, f.undoCount())
+    }
+
+    @Test fun anAreaWithNoStrokesLeftStillCutsInsteadOfGrowing() {
+        val r = rootForInk()
+        e.addInk(r, pen(30.0 to 60.0, 80.0 to 90.0))
+        val area = f.state.nodes.getValue(r).ink
+        e.replaceInk(r, area.strokes, emptyList())
+        assertTrue(e.addInk(r, pen(30.0 to 60.0, 500.0 to 500.0)))
+        val ink = f.state.nodes.getValue(r).ink
+        assertEquals(area.width, ink.width, 1e-9)
+        assertEquals(area.height, ink.height, 1e-9)
+        assertTrue(ink.strokes.single().bounds().right <= ink.width + 1e-6)
+    }
+
+    @Test fun firstStrokeInAResizedNodeKeepsItsWidthAndIsCutSideways() {
+        val r = rootForInk()
+        assertTrue(e.resize(r, Size(200.0, 10.0)))
+        assertEquals(NodeInk.NONE, f.state.nodes.getValue(r).ink)
+        e.addInk(r, pen(0.0 to 60.0, 400.0 to 140.0))
+        val node = f.state.nodes.getValue(r)
+        val frame = f.metrics.frame(node, true, Pt(0.0, 0.0))
+        assertEquals(200.0, frame.rect.w, 1e-9)
+        assertEquals(168.0, frame.ink!!.w, 1e-9)
+        val stroke = node.ink.strokes.single()
+        assertEquals("nothing shifts sideways", -16.0, stroke.samples.first().x, 1e-9)
+        val b = stroke.bounds()
+        assertTrue(b.left >= -1e-6 && b.right <= 168.0 + 1e-6)
+        assertEquals("the height still fits the stroke", b.bottom + MapEditor.INK_MARGIN, node.ink.height, 1e-6)
     }
 
     @Test fun inkWritesUndoAsOneStepEach() {
@@ -245,6 +287,52 @@ class MapEditorTest {
 
     @Test fun inkIntoUnknownNodeIsRefused() {
         assertFalse(e.addInk(id("ghost"), pen(0.0 to 0.0, 1.0 to 1.0)))
+    }
+
+    // ---- resizing ----
+
+    @Test fun resizingIsOneUndoStep() {
+        val r = f.root("root")
+        val before = f.state
+        assertTrue(e.resize(r, Size(300.0, 200.0)))
+        val rect = e.layout().rectOf(r)!!
+        assertEquals(300.0, rect.w, 1e-9)
+        assertEquals(200.0, rect.h, 1e-9)
+        assertEquals(f.metrics.resized(before.nodes.getValue(r), true, Size(300.0, 200.0)), f.state.nodes.getValue(r))
+        assertValid(f.state)
+        f.history.undo()
+        assertEquals(before, f.state)
+        f.history.redo()
+        assertEquals(300.0, f.state.nodes.getValue(r).width!!, 1e-9)
+    }
+
+    @Test fun resizingToTheSameSizeChangesNothing() {
+        val r = f.root("root")
+        e.resize(r, Size(300.0, 200.0))
+        val n = f.undoCount()
+        assertFalse(e.resize(r, Size(300.0, 200.0)))
+        assertEquals(n, f.undoCount())
+    }
+
+    @Test fun resizingAnUnknownNodeIsRefused() {
+        assertFalse(e.resize(id("ghost"), Size(300.0, 200.0)))
+    }
+
+    @Test fun resizingAChildReflowsItsTree() {
+        val r = f.root("root")
+        val a = f.child(r, "a")
+        val b = f.child(r, "b")
+        val bTop = e.layout().rectOf(b)!!.top
+        e.resize(a, Size(200.0, 300.0))
+        assertTrue(e.layout().rectOf(b)!!.top > bTop)
+    }
+
+    @Test fun aResizedNodeKeepsItsSizeThroughCopyAndPaste() {
+        val r = f.root("root")
+        e.resize(r, Size(300.0, 200.0))
+        val frag = MapClipboard.copy(f.state, e.layout(), listOf(r))
+        val pasted = e.paste(frag, Pt(1000.0, 0.0), null).single()
+        assertEquals(Size(300.0, 200.0), e.layout().rectOf(pasted)!!.let { Size(it.w, it.h) })
     }
 
     // ---- sources ----
