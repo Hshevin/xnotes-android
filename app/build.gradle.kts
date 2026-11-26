@@ -23,7 +23,8 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.xnotes"
     sourceSets {
-        getByName("test").java.srcDir("src/sharedTest/java")
+        getByName("test").java.srcDirs("src/sharedTest/java", "src/testSupport/kotlin")
+        getByName("test").java.srcDirs("../shared/src/androidUnitTest/appIntegration")
         getByName("androidTest").java.srcDir("src/sharedTest/java")
     }
     compileSdk = 36
@@ -141,6 +142,7 @@ tasks.configureEach {
 }
 
 dependencies {
+    implementation(project(":shared"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -173,4 +175,13 @@ tasks.withType<Test>().configureEach {
     // Robolectric's SharedMemory close path accesses JDK FileDescriptor internals on JDK 21.
     // Limit this module opening to the host-test JVM; it does not affect Android builds.
     jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+}
+
+// The Android regression suite exercises internals that moved into the shared module.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (name.endsWith("UnitTestKotlin")) {
+        val variant = name.removePrefix("compile").removeSuffix("UnitTestKotlin")
+        friendPaths.from(project(":shared").layout.buildDirectory.file(
+            "intermediates/compile_library_classes_jar/${variant.lowercase()}/bundleLibCompileToJar$variant/classes.jar"))
+    }
 }

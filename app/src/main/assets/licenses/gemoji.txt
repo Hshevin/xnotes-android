@@ -2,7 +2,7 @@ gemoji emoji names (shortcodes)
 https://github.com/github/gemoji
 Revision: fadaeaf1f1a9be82b321316a6c5502e43138b2f6
 
-The :name: shortcodes in resources/com/xnotes/core/text/emoji.tsv are the
+The :name: shortcodes in shared/src/commonMain/data/emoji.tsv are the
 aliases from db/emoji.json, one alias and its emoji a line.
 
 MIT License

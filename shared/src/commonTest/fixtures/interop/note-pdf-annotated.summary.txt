@@ -1,0 +1,10 @@
+crc:assets/source.pdf=3122256144
+crc:manifest.json=3181010923
+crc:markups.xfdf=3357800373
+crc:xnotes-anchors.json=1699633013
+crc:xnotes-identity.json=2636740691
+documentId=12633c19-8823-481a-b949-000000000002
+entries=5
+inkDigest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+kind=note
+pageIds=12633c19-8823-481a-b949-000000000200

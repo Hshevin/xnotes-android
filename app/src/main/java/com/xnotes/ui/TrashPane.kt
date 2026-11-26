@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.settings.Preferences
-import com.xnotes.settings.ThumbShape
+import com.xnotes.explorer.ThumbShape
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor

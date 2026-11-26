@@ -1,4 +1,7 @@
 package com.xnotes.map.source
+import com.xnotes.format.inspect
+import com.xnotes.format.readEntry
+import com.xnotes.format.read
 
 import android.content.Context
 import android.net.Uri
@@ -150,7 +153,7 @@ class AndroidSourceCatalogs(context: Context) : SourceCatalogs {
             val pages = AnchorManifest.inspect({ input }, anchored = true).orderedPageIds
             return SourceCatalog(identity.documentId, SourceCatalog.Kind.NOTE, name, pages)
         }
-        val json = JsonPull(AnchorManifest.reader(input), strict = true, tokenLimit = Int.MAX_VALUE)
+        val json = JsonPull(com.xnotes.format.JsonChars(java.io.InputStreamReader(input,Charsets.UTF_8.newDecoder())::read), strict = true, tokenLimit = Int.MAX_VALUE)
         json.beginObject()
         while (json.hasNext()) {
             if (json.nextName() == "format") {

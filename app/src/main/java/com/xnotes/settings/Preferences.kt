@@ -1,5 +1,6 @@
 package com.xnotes.settings
 
+import com.xnotes.explorer.ExplorerLayout
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageSizeChoice

@@ -13,12 +13,12 @@ data class PenBinding(
     val double: String = "none",
 ) {
     companion object {
-        val tools = setOf("pen", "highlighter", "eraser", "pan", "select", "lasso", "screenshot")
+        val tools = PenActionIds.tools
         /** Tools that cannot be borrowed: releasing a hold would switch away and drop the capture and its menu. */
         val selectOnly = setOf("screenshot")
         fun holds(binding: PenBinding) = binding.mode == PenBindingMode.HOLD && binding.action in tools && binding.action !in selectOnly
         /** One-shot actions, the same ids the finger-tap gestures dispatch. */
-        val commands = setOf("undo", "redo", "toggle_previous", "toggle_eraser", "toggle_pan")
+        val commands = PenActionIds.commands
         val actions = tools + commands + "none"
         const val DEFAULT_DOUBLE_PRESS_MS = 300
         val DOUBLE_PRESS_RANGE = 150..800

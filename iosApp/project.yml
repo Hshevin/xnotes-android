@@ -1,0 +1,47 @@
+name: XNotes
+options:
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: en
+settings:
+  base:
+    ARCHS: arm64
+targets:
+  XNotes:
+    type: application
+    platform: iOS
+    sources:
+      - XNotes
+      - path: ../app/src/main/assets/templates
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xnotes.ipad
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+        INFOPLIST_FILE: XNotes/Info.plist
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: 1
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        FRAMEWORK_SEARCH_PATHS: '$(inherited) "$(SRCROOT)/../iosKit/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"'
+        OTHER_LDFLAGS: '$(inherited) -framework XNotesKit -lc++'
+    preBuildScripts:
+      - name: Build XNotesKit (Gradle)
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          if [ -n "${XNOTES_JDK_21:-}" ]; then
+            export JAVA_HOME="$XNOTES_JDK_21"
+          elif [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
+            export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+          else
+            JAVA_HOME="$(/usr/libexec/java_home -F -v 21)"
+            export JAVA_HOME
+          fi
+          cd "$SRCROOT/.."
+          ./gradlew :iosKit:embedAndSignAppleFrameworkForXcode
+    scheme: {}

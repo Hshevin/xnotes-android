@@ -204,6 +204,17 @@ AI 对话、供应商、联网、PDF 读取与模板生成。
 - 2026-11-10 [Release 98 之后主线审核与修复](process/review-fixes-release98-2026-11-10.md)
 - 2026-11-11 [原生恢复职责拆分](process/architecture-refactor-2026-11-11.md)
 - 2026-11-20 [上游合并与 MovinkPad 适配](process/upstream-merge-2026-11-20.md)
+- 2026-11-23 [iPadOS 移植方案](process/ipados-migration-plan-2026-11-23.md)
+- 2026-11-23 [iPadOS Apple Pencil 输入契约](process/ipados-pencil-input-contract-2026-11-23.md)
+- 2026-11-24 [iPadOS W1-A：共享核心与便携 I/O 验证](process/ipados-shared-core-2026-11-24.md)
+- 2026-11-24 [iPadOS 第二波契约](process/ipados-wave2-contracts-2026-11-24.md)
+- 2026-11-24 [iPadOS 第三波契约](process/ipados-wave3-contracts-2026-11-24.md)
+- 2026-11-24 [iPadOS 第四波契约](process/ipados-wave4-contracts-2026-11-24.md)
+- [iPadOS 工具栏图标（2026-11-24）](process/ipados-toolbar-icons-2026-11-24.md)
+- [iPadOS 首页对齐 Android（2026-11-24）](process/ipados-home-plan-2026-11-24.md)
+- [iPadOS 首页 H1 契约（2026-11-24）](process/ipados-home-h1-contracts-2026-11-24.md)
+- [iPadOS 首页 H2 契约（2026-11-24）](process/ipados-home-h2-contracts-2026-11-24.md)
+- [iPadOS 首页 H3 契约（2026-11-24）](process/ipados-home-h3-contracts-2026-11-24.md)
 
 ## 已归档（`archive/`）
 

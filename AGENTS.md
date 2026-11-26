@@ -18,6 +18,14 @@
 - Release 构建的 `buildDirectory` 放到 iCloud 同步目录之外，避免出现 `… 2.*` 重复文件（见 Release 记录）。
 - 分支测试使用独立工作树和构建目录。ARM64 交付与 x86_64 模拟器构建除输出目录外，还需用 `--project-cache-dir` 隔离 Gradle 项目状态，避免切换构建目录后 DEX 增量缓存残留旧路径。
 
+### iPadOS（`ipados` 分支）
+
+- 结构：`:shared`（KMP，Android + iosArm64 + iosSimulatorArm64）放 `core/`、`format/`、`storage/`、`map/` 的纯逻辑与便携 IO `com.xnotes.kio`；`:nativelibs` 为 iOS 的 PDFium 与 tree-sitter；`:iosKit` 导出 `XNotesKit` 框架并独占 Compose Multiplatform；`iosApp/` 是 Xcode 工程，Swift 只做入口。平台代码用 Kotlin/Native 写在 `iosMain`。不得在 `:app` 或 `:shared` 的 Android 目标引入 Compose Multiplatform 或升级 Android 依赖。
+- 本机默认 `java` 为 25，Gradle 必须用 `JAVA_HOME=/opt/homebrew/opt/openjdk@21`。iOS 测试不走 standalone 模式，需先打开 iPadOS 18+ 模拟器，再以 `-PiosTestDevice=<UDID>` 运行 `:shared:iosSimulatorArm64Test`。
+- 两端笔记文件完全互通：改动编解码须通过 `shared/src/commonTest/fixtures/interop/` 金样在 JVM 与 iOS 上的测试；金样由迁移前的 Android 编解码器生成，不得用新代码重新生成。
+- 安装身份：应用名 XNotes，Bundle ID `com.xnotes.ipad`，仅 iPad，最低 iPadOS 18；笔记在「文稿」目录（「文件」App 可见），私有资料在 `Library/`。免费 Apple ID 签名，不提交签名团队；真机安装与 Android 一样需用户每次明确要求。
+- 模拟器结果不代表 iPad GPU、Apple Pencil 手感与延迟；这些在 iPad Air（M2 及以后）+ Apple Pencil Pro 上单独验收。
+
 ## Git、打包与发布
 
 - 保留用户已有修改。功能阶段或修复完成并通过相关验证后，自动本地提交与本次任务相关的改动，无需再问；不夹带无关修改。

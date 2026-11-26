@@ -1,4 +1,6 @@
 package com.xnotes.storage
+import com.xnotes.format.readEntry
+import com.xnotes.format.read
 
 import android.content.Context
 import android.net.Uri

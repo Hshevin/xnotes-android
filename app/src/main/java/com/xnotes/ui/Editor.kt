@@ -1,5 +1,11 @@
 package com.xnotes.ui
+import com.xnotes.format.splice
+import com.xnotes.format.readEntry
+import com.xnotes.format.read
 
+import com.xnotes.storage.lite.LiteNoteSetup
+import com.xnotes.core.template.TemplateCatalog
+import com.xnotes.explorer.explorerComparator
 import com.xnotes.ui.theme.audioLook
 import com.xnotes.core.model.forExport
 import android.content.Context
@@ -124,12 +130,14 @@ import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.FileStamp
 import com.xnotes.core.util.NameTemplate
 import com.xnotes.format.DocumentCodec
+import com.xnotes.format.peek
 import com.xnotes.format.SvgColors
 import com.xnotes.format.XNoteFormatException
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidSurfaceFactory
 import com.xnotes.platform.AndroidTextMeasurer
-import com.xnotes.settings.ExplorerView
+import com.xnotes.explorer.ExplorerEntry
+import com.xnotes.explorer.ExplorerView
 import com.xnotes.settings.LiveSettings
 import com.xnotes.settings.SwatchRole
 import com.xnotes.settings.Preferences
@@ -181,15 +189,15 @@ data class ContextMenuTarget(
  * folder (where colour writes go), and [color] is the item's explorer colour code, if any.
  */
 data class BrowseEntry(
-    val name: String,
+    override val name: String,
     val documentUri: String,
-    val isDir: Boolean,
-    val size: Long = 0,
-    val modified: Long = 0,
-    val created: Long = 0,
+    override val isDir: Boolean,
+    override val size: Long = 0,
+    override val modified: Long = 0,
+    override val created: Long = 0,
     val parentDocId: String = "",
-    val color: Rgba? = null,
-) {
+    override val color: Rgba? = null,
+) : ExplorerEntry {
     internal val storedDocument: Boolean get() = !isDir && when (DocumentKind.ofName(name)) {
         DocumentKind.NOTE, DocumentKind.CANVAS, DocumentKind.PDF -> true
         else -> false
@@ -6354,7 +6362,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Sets the layout every folder without a view of its own opens in (Preferences' default layout). */
-    fun setDefaultLayout(layout: com.xnotes.settings.ExplorerLayout) {
+    fun setDefaultLayout(layout: com.xnotes.explorer.ExplorerLayout) {
         explorerView = explorerView.copy(layout = layout)
         settings = settings.copy(explorerView = explorerView)
         saveSettingsSoon()
@@ -6519,20 +6527,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Creates a `.xnote` under [parentDocId] as [setup] describes, a cover first when it has one; returns its URI, or null. IO. */
     fun createNoteFile(treeUri: String, parentDocId: String, rawName: String, setup: NewNoteSetup): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        val dpi = PageSize.DEFAULT_DPI
-        val w = PageSize.mmToPx(setup.widthMm, dpi)
-        val h = PageSize.mmToPx(setup.heightMm, dpi)
-        val doc = Document.blankPixels(Document.DEFAULT_NEW_PAGES, w, h, dpi).also { it.created = System.currentTimeMillis() }
-        doc.style = setup.style
-        TemplateLibrary.embed(doc, setup.style.template, imageDir)
-        (settings.newNoteFlow ?: factoryFlow).applyTo(doc.flow)
-        setup.cover?.let { style ->
-            // The cover's design runs to the paper's edge, whatever margins the pages get later.
-            val cover = Page(w, h, style = style, margins = PageMargins(0.0, 0.0, 0.0, 0.0)).also { it.cover = true }
-            TemplateLibrary.embed(doc, style.template, imageDir)
-            doc.pages.add(0, cover)
+        val doc = LiteNoteSetup(setup.widthMm, setup.heightMm, setup.style, setup.cover).newDocument { note, key ->
+            TemplateLibrary.embed(note, key, imageDir)
         }
-        doc.enableReferenceAnchors()
+        (settings.newNoteFlow ?: factoryFlow).applyTo(doc.flow)
         return createNoteFile(treeUri,parentDocId,name,doc)
     }
 
@@ -7872,7 +7870,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val withCreated = out.map {
             it.copy(created = createdStore.get(documentKey(it.documentUri)) ?: now, color = colors[it.name])
         }
-        val result = withCreated.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        val result = withCreated.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
         browseCache["$treeUri|$parentDocId"] = result
         return result
     }
@@ -8135,7 +8133,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if (e.isDir) stack.addLast(browseDocId(e.documentUri))
             }
         }
-        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
     }
 
     /** Carries a colour across a rename: moves key [oldName] -> [newName] in [parentDocId]'s sidecar. */
@@ -8239,7 +8237,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }
         }
-        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending) { it.created })
+        return out.sortedWith(explorerComparator(explorerView.sortKey, explorerView.descending))
     }
 
     // --- Trash (a hidden folder in the top folder's sidecar, so it travels with the notes) ---
@@ -11205,7 +11203,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         private set
 
     /** Run [work] off the main thread, then report it and refresh the pickers. */
-    private fun adoptTemplate(work: () -> TemplateLibrary.Entry) {
+    private fun adoptTemplate(work: () -> TemplateCatalog.Entry) {
         autosaveScope.launch {
             val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching(work) }
             result
@@ -11257,14 +11255,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** The templates of [kind] to offer: the library's, then any this note carries that the library lacks. */
-    fun templateChoices(kind: com.xnotes.core.template.TemplateKind = com.xnotes.core.template.TemplateKind.PAGE): List<TemplateLibrary.Entry> {
+    fun templateChoices(kind: com.xnotes.core.template.TemplateKind = com.xnotes.core.template.TemplateKind.PAGE): List<TemplateCatalog.Entry> {
         val lib = TemplateLibrary.all().filter { it.template.kind == kind }
         val known = TemplateLibrary.all().mapTo(HashSet()) { it.key }
         val doc = state.document
         val carried = (doc.templates.keys + doc.templatePackages.keys).mapNotNull { key ->
             if (key in known) return@mapNotNull null
             val t = TemplateLibrary.template(doc, key)?.takeIf { it.kind == kind } ?: return@mapNotNull null
-            TemplateLibrary.Entry(key, t, doc.templates[key].orEmpty(), TemplateLibrary.Source.NOTE, doc.templatePackages[key])
+            TemplateCatalog.Entry(key, t, doc.templates[key].orEmpty(), TemplateCatalog.Source.NOTE, doc.templatePackages[key])
         }
         return lib + carried.sortedBy { it.template.name.lowercase() }
     }
@@ -12357,9 +12355,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             NativeRestoreHint(model.identity.documentId,model.path,DocumentKind.NOTE)
         }
     }
-    private fun matchesRestoreIdentity(hint:NativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean =
-        hint.documentId==documentId && hint.kind==kind &&
-            (if(hint.path==null || path==null) hint.path==path else documentKey(hint.path)==documentKey(path))
+    private fun matchesRestoreIdentity(hint:NativeRestoreHint,documentId:String,path:String?,kind:DocumentKind):Boolean {
+        val original=hint.path
+        return hint.documentId==documentId && hint.kind==kind &&
+            (if(original==null || path==null) original==path else documentKey(original)==documentKey(path))
+    }
     internal fun matchesNativeRestoreHint(hint:NativeRestoreHint):Boolean {
         val actual=nativeRestoreHint() ?: return false
         return matchesRestoreIdentity(hint,actual.documentId,actual.path,actual.kind)

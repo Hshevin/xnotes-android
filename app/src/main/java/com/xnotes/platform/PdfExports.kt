@@ -15,9 +15,13 @@ import androidx.core.content.ContextCompat
 import com.xnotes.R
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.StagedCopy
+import com.xnotes.core.util.endHash
+import com.xnotes.core.util.of
 import com.xnotes.core.util.copyOver
 import com.xnotes.format.FileWindow
 import com.xnotes.format.XnotesPdf
+import com.xnotes.format.inspect
+import com.xnotes.format.embedded
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File

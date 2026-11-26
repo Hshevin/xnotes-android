@@ -1,0 +1,8 @@
+crc:assets/image-000.png=1896493875
+crc:manifest.json=3599744498
+crc:xnotes-identity.json=3218320545
+documentId=12633c19-8823-481a-b949-000000000004
+entries=3
+inkDigest=e1f65aae39fef039ea43de195b6ff720527594f8c11f4a96573cc15eeb9345a9
+kind=canvas
+pageIds=

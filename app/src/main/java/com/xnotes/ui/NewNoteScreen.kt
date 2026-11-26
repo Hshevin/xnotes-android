@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.core.template.TemplateCatalog
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -357,13 +358,13 @@ internal fun NewNoteScreen(
 
         // A tile shows its template as set here; the picked one is drawn afresh, so a slider drag never fills the cache.
         @Composable
-        fun PageThumb(e: TemplateLibrary.Entry, w: Dp, h: Dp) {
+        fun PageThumb(e: TemplateCatalog.Entry, w: Dp, h: Dp) {
             val picked = e.key == pageKey
             Thumb(e.template, e.key, if (picked) style.settings else pageTweaks[e.key] ?: TemplateSettings(), look.paper, w, h, keep = !picked, tile = true)
         }
 
         @Composable
-        fun CoverThumb(e: TemplateLibrary.Entry, w: Dp, h: Dp) {
+        fun CoverThumb(e: TemplateCatalog.Entry, w: Dp, h: Dp) {
             val picked = hasCover && e.key == coverKey
             val set = if (picked) coverStyle else coverTweaks[e.key]
             Thumb(e.template, e.key, set?.settings ?: TemplateSettings(), set?.pageColor ?: look.paper, w, h, keep = !picked, tile = true)
@@ -688,9 +689,9 @@ internal fun NewNoteScreen(
 
         fun LazyGridScope.gallery() {
             if (face == Face.PAGES) {
-                fun shown(e: TemplateLibrary.Entry) = tag == null || tag in e.template.tags
-                val listed = pages.filter { (it.source == TemplateLibrary.Source.BUILT_IN || it.source == TemplateLibrary.Source.BUNDLED) && shown(it) }
-                val imported = pages.filter { it.source == TemplateLibrary.Source.IMPORTED && shown(it) }
+                fun shown(e: TemplateCatalog.Entry) = tag == null || tag in e.template.tags
+                val listed = pages.filter { (it.source == TemplateCatalog.Source.BUILT_IN || it.source == TemplateCatalog.Source.BUNDLED) && shown(it) }
+                val imported = pages.filter { it.source == TemplateCatalog.Source.IMPORTED && shown(it) }
                 if (tag == null) item(key = "none") {
                     Tile(sNone, pageKey == PageTemplates.NONE, { pickPage(PageTemplates.NONE) }, null) { w, h -> Thumb(null, PageTemplates.NONE, TemplateSettings(), look.paper, w, h, keep = true) }
                 }
@@ -707,8 +708,8 @@ internal fun NewNoteScreen(
                     }
                 }
             } else {
-                val bundled = covers.filter { it.source != TemplateLibrary.Source.IMPORTED }
-                val imported = covers.filter { it.source == TemplateLibrary.Source.IMPORTED }
+                val bundled = covers.filter { it.source != TemplateCatalog.Source.IMPORTED }
+                val imported = covers.filter { it.source == TemplateCatalog.Source.IMPORTED }
                 // None is the note without a cover, drawn as the empty frame the note shows; picking a design turns one
                 // on. A cover being changed has no None here: the pages panel's Remove cover does that.
                 if (!coverOnly) item(key = "none") {
@@ -731,16 +732,16 @@ internal fun NewNoteScreen(
 
         /** Where the picked tile sits in [f]'s gallery as [gallery] lays it out with no tag chosen, or null. */
         fun pickedIndex(f: Face): Int? {
-            fun at(base: Int, list: List<TemplateLibrary.Entry>, key: String?) = list.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { base + it }
+            fun at(base: Int, list: List<TemplateCatalog.Entry>, key: String?) = list.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { base + it }
             if (f == Face.PAGES) {
                 if (pageKey == PageTemplates.NONE) return 0
-                val listed = pages.filter { it.source == TemplateLibrary.Source.BUILT_IN || it.source == TemplateLibrary.Source.BUNDLED }
-                val imported = pages.filter { it.source == TemplateLibrary.Source.IMPORTED }
+                val listed = pages.filter { it.source == TemplateCatalog.Source.BUILT_IN || it.source == TemplateCatalog.Source.BUNDLED }
+                val imported = pages.filter { it.source == TemplateCatalog.Source.IMPORTED }
                 // None, the listed ones, then Imported's heading.
                 return at(1, listed, pageKey) ?: at(2 + listed.size, imported, pageKey)
             }
-            val bundled = covers.filter { it.source != TemplateLibrary.Source.IMPORTED }
-            val imported = covers.filter { it.source == TemplateLibrary.Source.IMPORTED }
+            val bundled = covers.filter { it.source != TemplateCatalog.Source.IMPORTED }
+            val imported = covers.filter { it.source == TemplateCatalog.Source.IMPORTED }
             val first = if (coverOnly) 0 else 1
             if (!hasCover) return if (coverOnly) null else 0
             return at(first, bundled, coverKey) ?: at(first + bundled.size + 1, imported, coverKey)
